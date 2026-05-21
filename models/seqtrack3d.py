@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torchmetrics import Accuracy
 
 from datasets.misc_utils import get_tensor_corners_batch
-from datasets.misc_utils import create_corner_timestamps
+from datasets.misc_utils import create_corner_timestamps_from_deltas
 
 # import vis_tool as vt
 
@@ -135,7 +135,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         box_seq_corners = box_seq_corner.reshape(B,L*8,-1) # B*(L*8)*3 represents a total of L*8 points, each with 3 features
         
         # Appending timestamp features to the box corners
-        corner_stamps = create_corner_timestamps(B,HL,8).to(self.device)
+        delta_T = input_dict["delta_T"]
+        corner_stamps = create_corner_timestamps_from_deltas(delta_T, 8).to(
+            device=box_seq_corners.device, dtype=box_seq_corners.dtype)
         box_seq_corners = torch.cat((box_seq_corners,corner_stamps),dim=-1) # B*(L*8)*4 where 4 represents features for x, y, z, and timestamp
 
         solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds

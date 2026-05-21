@@ -171,4 +171,10 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         pc.translate(np.array(poserecord['translation']))
 
         pc = PointCloud(points=pc.points)
-        return {"pc": pc, "3d_bbox": bb, 'meta': anno}
+        return {
+            "pc": pc,
+            "3d_bbox": bb,
+            "meta": anno,
+            "timestamp": sample_data_lidar['timestamp'] * 1e-6,
+            "frame_id": sample_data_lidar['token'],
+        }

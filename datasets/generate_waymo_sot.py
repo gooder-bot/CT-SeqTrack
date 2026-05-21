@@ -28,6 +28,8 @@ def generate_waymo_data(root, cla, split):
 
     for idx, frame in tqdm(enumerate(waymo_infos_all), total=len(waymo_infos_all)):
         anno = lood_pickle(os.path.join(root, frame['anno_path']))
+        frame_timestamp = frame.get('timestamp_micros', frame.get('timestamp', idx))
+        frame_id = frame.get('frame_id', idx)
         
         for obj in anno['objects']:
             if TYPE_LIST[obj['label']] == cla:
@@ -36,7 +38,9 @@ def generate_waymo_data(root, cla, split):
                         {
                             'PC': frame['path'],
                             'Box': obj['box'],
-                            'Class': cla
+                            'Class': cla,
+                            'timestamp': frame_timestamp,
+                            'frame_id': frame_id,
                         }
                     ]
                 else:
@@ -44,7 +48,9 @@ def generate_waymo_data(root, cla, split):
                         {
                             'PC': frame['path'],
                             'Box': obj['box'],
-                            'Class': cla
+                            'Class': cla,
+                            'timestamp': frame_timestamp,
+                            'frame_id': frame_id,
                         }
                     ]
 

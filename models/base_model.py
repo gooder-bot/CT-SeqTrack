@@ -17,7 +17,7 @@ import numpy as np
 from nuscenes.utils import geometry_utils
 
 from datasets.misc_utils import get_history_frame_ids_and_masks,get_last_n_bounding_boxes
-from datasets.misc_utils import generate_timestamp_prev_list
+from datasets.misc_utils import build_time_fields
 
 import time
 
@@ -262,8 +262,23 @@ class MotionBaseModelMF(BaseModelMF):
                 seg_mask_prev[seg_mask_prev == 1] = 0.8
         seg_mask_this = np.full(seg_mask_prev_list[0].shape, fill_value=0.5)
 
-        timestamp_prev_list = generate_timestamp_prev_list(valid_mask,self.config.point_sample_size)
-        timestamp_this = np.full((self.config.point_sample_size, 1), fill_value=0.1)
+        default_time_step = getattr(self.config, 'default_time_step', getattr(self.config, 'time_step', 0.1))
+        pseudo_time_step = getattr(self.config, 'pseudo_time_step', 0.1)
+        use_real_time = getattr(self.config, 'use_real_time', True)
+        prev_timestamps = [frame.get('timestamp') for frame in prev_frames]
+        current_timestamp = this_frame.get('timestamp')
+        relative_timestamps, delta_t_list, local_timestamps, current_timestamp = build_time_fields(
+            prev_timestamps, current_timestamp,
+            frame_ids=prev_frame_ids,
+            current_frame_id=frame_id,
+            use_real_time=use_real_time,
+            default_step=default_time_step,
+            pseudo_step=pseudo_time_step)
+        timestamp_prev_list = [
+            np.full((self.config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
+            for timestamp in relative_timestamps
+        ]
+        timestamp_this = np.zeros((self.config.point_sample_size, 1), dtype=np.float32)
         prev_points_list = [
         np.concatenate([prev_points, timestamp_prev, seg_mask_prev[:, None]],
                        axis=-1)
@@ -288,10 +303,17 @@ class MotionBaseModelMF(BaseModelMF):
         ]
         ref_boxs_np = np.stack(ref_box_list, axis=0)
 
+        current_delta_t = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
+
         data_dict = {"points": torch.tensor(stack_points[None, :], device=self.device, dtype=torch.float32), 
                      "ref_boxs":torch.tensor(ref_boxs_np[None, :], device=self.device, dtype=torch.float32), 
                      "valid_mask":torch.tensor(valid_mask, device=self.device, dtype=torch.float32).unsqueeze(0), 
                      "bbox_size":torch.tensor(bbox_size[None, :],device=self.device, dtype=torch.float32),
+                     "timestamps": torch.tensor(local_timestamps[None, :], device=self.device, dtype=torch.float32),
+                     "delta_t": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "delta_T": torch.tensor(np.array(relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "current_timestamp": torch.tensor([current_timestamp], device=self.device, dtype=torch.float64),
+                     "current_delta_t": torch.tensor([current_delta_t], device=self.device, dtype=torch.float32),
                      }
 
         if getattr(self.config, 'box_aware', False):

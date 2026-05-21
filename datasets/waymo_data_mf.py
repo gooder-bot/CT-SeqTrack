@@ -167,7 +167,15 @@ class WaymoDataset(base_dataset.BaseDataset):
                 box2obj(bb, path + 'box_%d.obj' % pc_info['frame_id'])
             print(path + 'box_%d.obj' % pc_info['frame_id'])
 
-        return {"pc": pc, "3d_bbox": bb, 'meta': anno}
+        timestamp = anno.get('timestamp', pc_info.get('frame_id', 0))
+        frame_id = anno.get('frame_id', pc_info.get('frame_id', 0))
+        return {
+            "pc": pc,
+            "3d_bbox": bb,
+            "meta": anno,
+            "timestamp": timestamp,
+            "frame_id": frame_id,
+        }
 
     @staticmethod
     def veh_pos_to_transform(veh_pos):

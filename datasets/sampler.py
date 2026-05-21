@@ -10,8 +10,8 @@ import datasets.points_utils as points_utils
 
 from datasets.misc_utils import get_history_frame_ids_and_masks, \
     create_history_frame_dict, \
-    generate_timestamp_prev_list, \
-    generate_virtual_points
+    generate_virtual_points, \
+    build_time_fields
 
 
 def no_processing(data, *args):
@@ -206,6 +206,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_pcs  = [prev_frames[key]['pc'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     prev_boxs = [prev_frames[key]['3d_bbox'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     this_pc, this_box = this_frame['pc'], this_frame['3d_bbox']
+    sorted_prev_keys = sorted(prev_frames, key=lambda k: abs(int(k)))
+    prev_timestamps = [prev_frames[key].get('timestamp') for key in sorted_prev_keys]
+    current_timestamp = this_frame.get('timestamp')
+    default_time_step = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.1))
+    pseudo_time_step = getattr(config, 'pseudo_time_step', 0.1)
+    use_real_time = getattr(config, 'use_real_time', True)
+
+    prev_frame_ids = data.get('prev_frame_ids')
+    this_frame_id = data.get('this_frame_id')
 
     # Check the number of empty boxes
     for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
@@ -258,8 +267,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     seg_mask_this = np.full(seg_mask_prev_list[0].shape, fill_value=0.5)
 
 
-    timestamp_prev_list = generate_timestamp_prev_list(valid_mask,config.point_sample_size)
-    timestamp_this = np.full((config.point_sample_size, 1), fill_value=0.1)
+    relative_timestamps, delta_t_list, local_timestamps, current_timestamp = build_time_fields(
+        prev_timestamps, current_timestamp,
+        frame_ids=prev_frame_ids,
+        current_frame_id=this_frame_id,
+        use_real_time=use_real_time,
+        default_step=default_time_step,
+        pseudo_step=pseudo_time_step)
+    timestamp_prev_list = [
+        np.full((config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
+        for timestamp in relative_timestamps
+    ]
+    timestamp_this = np.zeros((config.point_sample_size, 1), dtype=np.float32)
 
     prev_points_list = [
         np.concatenate([prev_points, timestamp_prev, seg_mask_prev[:, None]],
@@ -314,6 +333,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         np.sqrt(np.sum((this_box.center - prev_box.center)**2))
         > config.motion_threshold for prev_box in prev_boxs
     ]
+    current_delta_t = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
+    velocity_label = (motion_label_list[0][:3] / max(current_delta_t, 1e-3)).astype('float32')
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -325,6 +346,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'bbox_size': this_box.wlh, 
         'seg_label': stack_seg_label.astype('int'), 
         'valid_mask': np.array(valid_mask).astype('int'), 
+        'timestamps': local_timestamps,
+        'delta_t': np.array(delta_t_list, dtype=np.float32),
+        'delta_T': np.array(relative_timestamps, dtype=np.float32),
+        'current_timestamp': np.float64(current_timestamp if current_timestamp is not None else 0.0),
+        'current_delta_t': np.float32(current_delta_t),
+        'velocity_label': velocity_label,
     }
 
     if getattr(config, 'box_aware', False):
@@ -488,7 +515,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 "prev_frames": prev_frames_dict,  
                 "this_frame": this_frame,   
                 "candidate_id": candidate_id,
-                "valid_mask":valid_mask,}
+                "valid_mask":valid_mask,
+                "prev_frame_ids": prev_frame_ids,
+                "this_frame_id": this_frame_id,}
             
             return self.processing(data, self.config,
                                    template_transform=self.transform,

@@ -55,16 +55,128 @@ def create_future_frame_dict(next_frames):
         future_frame_dict[str(key)] = frame
     return future_frame_dict
 
-def generate_timestamp_prev_list(valid_mask, point_sample_size):
+def normalize_timestamp(value):
+    if value is None:
+        return None
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if not np.isfinite(value):
+        return None
+
+    abs_value = abs(value)
+    if abs_value > 1e14:
+        return value * 1e-6
+    if abs_value > 1e11:
+        return value * 1e-3
+    return value
+
+
+def safe_float(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(value):
+        return None
+    return value
+
+
+def compute_history_timestamps(frame_timestamps, current_timestamp, default_step=0.1):
+    if frame_timestamps is None:
+        return [], []
+
+    current_timestamp = normalize_timestamp(current_timestamp)
+    frame_timestamps = [normalize_timestamp(ts) for ts in frame_timestamps]
+
+    relative_timestamps = []
+    if current_timestamp is None:
+        relative_timestamps = [-(idx + 1) * default_step for idx in range(len(frame_timestamps))]
+    else:
+        for idx, ts in enumerate(frame_timestamps):
+            if ts is None:
+                fallback = relative_timestamps[-1] - default_step if relative_timestamps else -default_step
+                relative_timestamps.append(fallback)
+                continue
+
+            relative_timestamp = ts - current_timestamp
+            if relative_timestamp >= 0:
+                relative_timestamp = relative_timestamps[-1] - default_step if relative_timestamps else -default_step
+            relative_timestamps.append(relative_timestamp)
+
+    delta_t = []
+    prev_relative_timestamp = 0.0
+    for relative_timestamp in relative_timestamps:
+        dt = prev_relative_timestamp - relative_timestamp
+        if dt <= 0:
+            dt = default_step
+        delta_t.append(dt)
+        prev_relative_timestamp = relative_timestamp
+    return relative_timestamps, delta_t
+
+
+def build_time_fields(frame_timestamps, current_timestamp, frame_ids=None, current_frame_id=None,
+                      use_real_time=True, default_step=0.1, pseudo_step=0.1):
+    frame_timestamps = list(frame_timestamps) if frame_timestamps is not None else []
+    frame_ids = list(frame_ids) if frame_ids is not None else None
+    current_frame_index = safe_float(current_frame_id)
+
+    if not use_real_time:
+        relative_timestamps, delta_t = compute_history_timestamps(
+            [None for _ in frame_timestamps], None, pseudo_step)
+        current_timestamp = current_frame_index * pseudo_step if current_frame_index is not None else 0.0
+        local_timestamps = np.array(relative_timestamps + [0.0], dtype=np.float32)
+        return relative_timestamps, delta_t, local_timestamps, float(current_timestamp)
+
+    current_timestamp = normalize_timestamp(current_timestamp)
+    if current_timestamp is None and current_frame_index is not None:
+        current_timestamp = current_frame_index * default_step
+
+    normalized_timestamps = [normalize_timestamp(ts) for ts in frame_timestamps]
+    if frame_ids is not None:
+        fallback_timestamps = []
+        for idx, (timestamp, frame_id) in enumerate(zip(normalized_timestamps, frame_ids)):
+            if timestamp is not None:
+                fallback_timestamps.append(timestamp)
+                continue
+
+            frame_index = safe_float(frame_id)
+            if current_timestamp is not None and current_frame_index is not None and frame_index is not None:
+                step_count = max(current_frame_index - frame_index, idx + 1)
+                fallback_timestamps.append(current_timestamp - step_count * default_step)
+            else:
+                fallback_timestamps.append(None)
+        normalized_timestamps = fallback_timestamps
+
+    relative_timestamps, delta_t = compute_history_timestamps(
+        normalized_timestamps, current_timestamp, default_step)
+    local_timestamps = np.array(relative_timestamps + [0.0], dtype=np.float32)
+    current_timestamp = current_timestamp if current_timestamp is not None else 0.0
+    return relative_timestamps, delta_t, local_timestamps, float(current_timestamp)
+
+
+def generate_timestamp_prev_list(valid_mask_or_timestamps, point_sample_size, current_timestamp=None):
+    values = list(valid_mask_or_timestamps)
+    if current_timestamp is not None or any(value is None for value in values):
+        relative_timestamps, _ = compute_history_timestamps(valid_mask_or_timestamps, current_timestamp)
+        return [
+            np.full((point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
+            for timestamp in relative_timestamps
+        ]
+
+    valid_mask = values
     timestamp_prev_list = []
     valid_time = 0
 
     for mask in valid_mask:
         if mask == 1:
             valid_time -= 0.1
-            timestamp_prev = np.full((point_sample_size, 1), fill_value=valid_time)
+            timestamp_prev = np.full((point_sample_size, 1), fill_value=valid_time, dtype=np.float32)
         else:
-            timestamp_prev = np.full((point_sample_size, 1), fill_value=valid_time)
+            timestamp_prev = np.full((point_sample_size, 1), fill_value=valid_time, dtype=np.float32)
         timestamp_prev_list.append(timestamp_prev)
     
     return timestamp_prev_list
@@ -219,6 +331,8 @@ def sample_box_batch(center, wlh, theta, wlh_factor=1.0):
 
 def create_corner_timestamps(B, H, corner_num=8):
     """
+    Deprecated fixed-step timestamp helper. Use create_corner_timestamps_from_deltas for CT-SeqTrack.
+
     Generate timestamps for B*N*3 corners: current frame at the end, historical frames at the beginning, e.g., -0.1, -0.2, -0.3, ... current frame +0.1.
     N should be equal to (number of historical frames + 1) * 8.
     The returned tensor can be directly concatenated to the original tensor.
@@ -232,6 +346,19 @@ def create_corner_timestamps(B, H, corner_num=8):
     # Set the timestamp of the current box to 0.1
     timestamps[:, -corner_num:] = 0.1
 
+    return timestamps
+
+def create_corner_timestamps_from_deltas(delta_T, corner_num=8):
+    if not torch.is_tensor(delta_T):
+        delta_T = torch.as_tensor(delta_T, dtype=torch.float32)
+
+    if delta_T.dim() == 1:
+        delta_T = delta_T.unsqueeze(0)
+
+    B, H = delta_T.shape
+    timestamps = torch.zeros((B, (H + 1) * corner_num, 1), dtype=delta_T.dtype, device=delta_T.device)
+    for i in range(H):
+        timestamps[:, i * corner_num:(i + 1) * corner_num] = delta_T[:, i].view(B, 1, 1)
     return timestamps
 
 

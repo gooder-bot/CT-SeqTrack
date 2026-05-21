@@ -22,6 +22,9 @@ use_augmentation: False
 hist_num: 3 # Number of historical frames
 empty_box_limit: 3 # Maximum allowed empty boxes in historical frames.
 limit_num_points_in_prev_box: 1 # A box is considered empty if it contains fewer than this number of points.
+use_real_time: True # Use real timestamps instead of fixed pseudo time.
+default_time_step: 0.1 # Waymo frames are approximately 10Hz.
+pseudo_time_step: 0.1 # Original SeqTrack3D fixed pseudo-time interval for ablation.
 
 
 box_aware: True
