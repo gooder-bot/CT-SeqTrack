@@ -118,7 +118,39 @@ class WaymoDataset(base_dataset.BaseDataset):
             seq_annos = self.tracklet_anno_list[seq_id]
             frames = [self._get_frame_from_anno(seq_annos[f_id]) for f_id in frame_ids]
 
-        return frames
+        return [self._sanitize_time_fields(frame) for frame in frames]
+
+    @staticmethod
+    def _is_real_waymo_timestamp(value):
+        if value is None:
+            return False
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not np.isfinite(value):
+            return False
+
+        # Real Waymo timestamps are Unix time in seconds/milliseconds/microseconds.
+        # Small values here are usually frame indices from older generated pickles.
+        return abs(value) > 1e8
+
+    @classmethod
+    def _extract_timestamp(cls, anno, pc_info):
+        for source, key in ((anno, 'timestamp'), (anno, 'timestamp_micros'),
+                            (pc_info, 'timestamp_micros'), (pc_info, 'timestamp')):
+            timestamp = source.get(key)
+            if cls._is_real_waymo_timestamp(timestamp):
+                return timestamp
+        return None
+
+    @classmethod
+    def _sanitize_time_fields(cls, frame):
+        timestamp = frame.get('timestamp')
+        if not cls._is_real_waymo_timestamp(timestamp):
+            frame = frame.copy()
+            frame['timestamp'] = None
+        return frame
 
     def _get_frame_from_anno(self, anno, track_id=None, check=False):
         '''
@@ -167,7 +199,7 @@ class WaymoDataset(base_dataset.BaseDataset):
                 box2obj(bb, path + 'box_%d.obj' % pc_info['frame_id'])
             print(path + 'box_%d.obj' % pc_info['frame_id'])
 
-        timestamp = anno.get('timestamp', pc_info.get('frame_id', 0))
+        timestamp = self._extract_timestamp(anno, pc_info)
         frame_id = anno.get('frame_id', pc_info.get('frame_id', 0))
         return {
             "pc": pc,
