@@ -1,20 +1,22 @@
 #data
-dataset: waymo_mf
-# path: Root directory of the prepared Waymo dataset
+dataset: nuscenes_mf
+# path: Root directory of the Nuscenes dataset (includes folders like v1.0-trainval and samples)
 path: /your/path
-category_name: Vehicle # [Vehicle, Pedestrian, Cyclist]
+version: v1.0-trainval
+# version: v1.0-mini
+category_name: Car #[Pedestrian ...]
 bb_scale: 1.25
 bb_offset: 2
 point_sample_size: 1024
 degrees: False
 coordinate_mode: velodyne
-up_axis: [ 0,0,1 ]
-
-preload_offset: 60
+up_axis: [0,0,1]
+preload_offset: 10
 data_limit_box: True
-train_split: train
-val_split: test
-test_split: test
+key_frame_only: True
+train_split: train_track
+val_split: val
+test_split: val
 train_type: train_motion_mf
 num_candidates: 4
 motion_threshold: 0.15
@@ -23,27 +25,27 @@ hist_num: 3 # Number of historical frames
 empty_box_limit: 3 # Maximum allowed empty boxes in historical frames.
 limit_num_points_in_prev_box: 1 # A box is considered empty if it contains fewer than this number of points.
 use_real_time: True # Use real timestamps instead of fixed pseudo time.
-default_time_step: 0.1 # Waymo frames are approximately 10Hz.
+default_time_step: 0.5 # nuScenes keyframes are approximately 2Hz.
 pseudo_time_step: 0.1 # Original SeqTrack3D fixed pseudo-time interval for ablation.
 time_encoding: raw # raw | mlp | fourier. Raw keeps the current scalar timestamp behavior.
-time_scale: 0.1 # Normalization scale for time encoding.
+time_scale: 0.5 # Normalization scale for time encoding.
 time_clip: 4.0 # Clamp signed log-scaled time to this range.
 time_fourier_bands: 4 # Number of Fourier frequency bands when time_encoding=fourier.
 time_hidden_dim: 16 # Hidden dimension when time_encoding=mlp.
-use_dynamics_encoder: False # Enable timestamp-conditioned dynamics branch for P3.
+use_dynamics_encoder: True # Required by P5 observability gate.
 dynamics_hidden_dim: 128
 dynamics_eps: 0.001
 velocity_weight: 0.05
 dynamics_use_acceleration: False
-use_observability_gate: False # Enable P5 observation/dynamics fusion gate. Requires use_dynamics_encoder=True.
+use_observability_gate: True
 obs_gate_hidden_dim: 64
 obs_gate_num_stats: 5
 obs_gate_entropy_weight: 0.0
 obs_gate_init_obs_bias: 1.0
 obs_gate_min_dyn_valid: 0.5
 obs_gate_log_stats: True
-obs_stats_detach_seg: True # Detach seg probabilities when building P5 observability statistics.
-use_twc: False # Enable P4 time-resampling consistency paired-view training.
+obs_stats_detach_seg: True
+use_twc: False # Keep P5 independent for the first ablation.
 twc_weight: 0.05
 twc_theta_weight: 0.5
 twc_view_a_offsets: [1, 2, 3]
@@ -55,25 +57,20 @@ twc_timestamp_eps: 0.000001
 twc_anchor_eps: 0.0001
 twc_delta_eps: 0.00001
 
-
-box_aware: True
-
-tiny: False # for debug only
-
 #model configuration
 net_model: seqtrack3d
+box_aware: True
 
 #loss configuration
 center_weight: 2
 angle_weight: 10.0
 seg_weight: 0.1
+bc_weight: 1
 
 ref_center_weight: 0.2
 ref_angle_weight: 1
 
-bc_weight: 1.0
 motion_cls_seg_weight: 0.1
-
 
 # testing config
 use_z: True
@@ -81,11 +78,11 @@ limit_box: False
 IoU_space: 3
 
 #training
-batch_size: 100
+batch_size: 2
 workers: 10
 epoch: 180
 from_epoch: 0
-lr: 0.0001 
+lr: 0.0001
 max_lr: 0.001 # for onecycle learning rate only
 optimizer: Adam
 lr_decay_step: 20

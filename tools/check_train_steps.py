@@ -152,6 +152,8 @@ def main():
     parser.add_argument("--pseudo-time", action="store_true")
     parser.add_argument("--twc", action="store_true",
                         help="Temporarily enable P4 paired-view TWC batch mode.")
+    parser.add_argument("--obs-gate", action="store_true",
+                        help="Temporarily enable P5 observability gate with dynamics branch.")
     parser.add_argument("--no-shuffle", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--memory-fraction", type=float, default=None)
@@ -180,6 +182,9 @@ def main():
     if args.twc:
         cfg.use_twc = True
         cfg.twc_candidate_zero_only = True
+    if args.obs_gate:
+        cfg.use_dynamics_encoder = True
+        cfg.use_observability_gate = True
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
     cfg.tag = args.tag
@@ -198,6 +203,7 @@ def main():
     print(f"batch_size: {cfg.batch_size}, workers: {cfg.workers}")
     print(f"use_real_time: {getattr(cfg, 'use_real_time', True)}")
     print(f"use_twc: {getattr(cfg, 'use_twc', False)}")
+    print(f"use_observability_gate: {getattr(cfg, 'use_observability_gate', False)}")
     if args.memory_fraction is not None:
         print(f"cuda memory fraction limit: {args.memory_fraction}")
 

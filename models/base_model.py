@@ -239,6 +239,7 @@ class MotionBaseModelMF(BaseModelMF):
         this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(this_pc, ref_boxs[0], ref_boxs[0],
                                                         scale=self.config.bb_scale,
                                                         offset=self.config.bb_offset)
+        num_points_in_search = this_frame_pc.nbr_points()
 
         # canonical_box = points_utils.transform_box(ref_boxs[0], ref_boxs[0])
         ref_boxs = [
@@ -314,6 +315,7 @@ class MotionBaseModelMF(BaseModelMF):
                      "delta_T": torch.tensor(np.array(relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "current_timestamp": torch.tensor([current_timestamp], device=self.device, dtype=torch.float64),
                      "current_delta_t": torch.tensor([current_delta_t], device=self.device, dtype=torch.float32),
+                     "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
                      }
 
         if getattr(self.config, 'box_aware', False):

@@ -52,7 +52,8 @@ def has_full_history(view, hist_num):
 def summarize_view(name, view):
     print(f"{name} prev_frame_ids: {first_row(view.get('prev_frame_ids', []))}")
     print(f"{name} history_offsets: {first_row(view.get('history_offsets', []))}")
-    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t", "current_timestamp", "valid_mask"):
+    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t",
+                "current_timestamp", "num_points_in_search", "valid_mask"):
         if key not in view:
             print(f"{name} {key}: <missing>")
             continue

@@ -64,7 +64,8 @@ def summarize_time_fields(batch):
         print("view_b:")
         summarize_time_fields(batch["view_b"])
         return
-    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t", "valid_mask"):
+    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t",
+                "num_points_in_search", "valid_mask"):
         if key not in batch:
             print(f"{key}: <missing>")
             continue
@@ -98,6 +99,8 @@ def main():
     parser.add_argument("--pseudo-time", action="store_true")
     parser.add_argument("--twc", action="store_true",
                         help="Temporarily enable P4 paired-view TWC batch mode.")
+    parser.add_argument("--obs-gate", action="store_true",
+                        help="Temporarily enable P5 observability gate with dynamics branch.")
     parser.add_argument("--no-loss", action="store_true")
     args = parser.parse_args()
 
@@ -111,6 +114,9 @@ def main():
     if args.twc:
         cfg.use_twc = True
         cfg.twc_candidate_zero_only = True
+    if args.obs_gate:
+        cfg.use_dynamics_encoder = True
+        cfg.use_observability_gate = True
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
 

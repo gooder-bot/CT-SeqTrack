@@ -246,6 +246,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(this_pc, ref_boxs[0], ref_boxs[0],
                                                     scale=config.bb_scale,
                                                     offset=config.bb_offset)
+    num_points_in_search = this_frame_pc.nbr_points()
 
     this_box    = points_utils.transform_box(this_box, ref_boxs[0]) 
     prev_boxs   = [points_utils.transform_box(prev_box, ref_boxs[0]) for prev_box in prev_boxs] 
@@ -352,6 +353,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'delta_T': np.array(relative_timestamps, dtype=np.float32),
         'current_timestamp': np.float64(current_timestamp if current_timestamp is not None else 0.0),
         'current_delta_t': np.float32(current_delta_t),
+        'num_points_in_search': np.float32(num_points_in_search),
         'velocity_label': velocity_label,
     }
     if prev_frame_ids is not None:

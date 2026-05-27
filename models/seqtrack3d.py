@@ -12,6 +12,7 @@ from torchmetrics import Accuracy
 from datasets.misc_utils import get_tensor_corners_batch
 from datasets.misc_utils import create_corner_timestamps_from_deltas
 from models.dynamics import DynamicsEncoder
+from models.observability import ObservabilityGate
 from models.time_encoding import TimeEncoding
 
 # import vis_tool as vt
@@ -25,6 +26,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
         self.use_dynamics_encoder = getattr(config, 'use_dynamics_encoder', False)
+        self.use_observability_gate = getattr(config, 'use_observability_gate', False)
+        if self.use_observability_gate and not self.use_dynamics_encoder:
+            raise ValueError("use_observability_gate=True requires use_dynamics_encoder=True.")
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
@@ -59,7 +63,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 hidden_dim=self.dynamics_hidden_dim,
                 eps=getattr(config, 'dynamics_eps', 1e-3),
             )
-            motion_feature_dim += self.dynamics_hidden_dim
+            if self.use_observability_gate:
+                self.observability_gate = ObservabilityGate(
+                    feature_dim=256,
+                    dynamics_dim=self.dynamics_hidden_dim,
+                    stats_dim=getattr(config, 'obs_gate_num_stats', 5),
+                    hidden_dim=getattr(config, 'obs_gate_hidden_dim', 64),
+                    init_obs_bias=getattr(config, 'obs_gate_init_obs_bias', 1.0),
+                    min_dyn_valid=getattr(config, 'obs_gate_min_dyn_valid', 0.5),
+                )
+            else:
+                motion_feature_dim += self.dynamics_hidden_dim
 
         self.motion_mlp = nn.Sequential(nn.Linear(motion_feature_dim, 128),
                                         nn.BatchNorm1d(128),
@@ -85,6 +99,54 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     @staticmethod
     def is_paired_batch(batch):
         return isinstance(batch, dict) and "view_a" in batch and "view_b" in batch
+
+    def build_observability_stats(self, input_dict, seg_logits, chunk_size):
+        B = seg_logits.shape[0]
+        device = seg_logits.device
+        dtype = seg_logits.dtype
+
+        if "num_points_in_search" in input_dict:
+            num_points = input_dict["num_points_in_search"]
+            if not torch.is_tensor(num_points):
+                num_points = torch.as_tensor(num_points, device=device, dtype=dtype)
+            num_points = num_points.to(device=device, dtype=dtype).reshape(B)
+        else:
+            num_points = seg_logits.new_full((B,), float(chunk_size))
+
+        current_logits = seg_logits[:, :, -chunk_size:]
+        fg_prob = torch.softmax(current_logits, dim=1)[:, 1, :]
+        if getattr(self.config, "obs_stats_detach_seg", True):
+            fg_prob = fg_prob.detach()
+        soft_fg_count = fg_prob.sum(dim=1)
+        mean_fg_score = fg_prob.mean(dim=1)
+
+        valid_history_ratio = input_dict["valid_mask"].to(device=device, dtype=dtype).mean(dim=1)
+        default_time_scale = getattr(self.config, 'default_time_step', getattr(self.config, 'time_step', 0.5))
+        time_scale = max(float(getattr(self.config, "time_scale", default_time_scale)), 1e-6)
+        if "current_delta_t" in input_dict:
+            current_delta_t = input_dict["current_delta_t"].to(device=device, dtype=dtype).reshape(B)
+        else:
+            current_delta_t = seg_logits.new_full((B,), float(default_time_scale))
+        current_delta_t_ratio = current_delta_t / time_scale
+
+        obs_stats = torch.stack((
+            torch.log1p(torch.clamp(num_points, min=0.0)),
+            torch.log1p(torch.clamp(soft_fg_count, min=0.0)),
+            mean_fg_score,
+            valid_history_ratio,
+            current_delta_t_ratio,
+        ), dim=1)
+        obs_stats = torch.nan_to_num(obs_stats, nan=0.0, posinf=0.0, neginf=0.0)
+
+        obs_aux = {
+            "obs_stats": obs_stats,
+            "obs_num_points_search": num_points,
+            "obs_soft_fg_count": soft_fg_count,
+            "obs_mean_fg_score": mean_fg_score,
+            "obs_valid_history_ratio": valid_history_ratio,
+            "obs_current_delta_t_ratio": current_delta_t_ratio,
+        }
+        return obs_stats, obs_aux
 
 
     def forward(self, input_dict):
@@ -132,6 +194,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         seg_out = self.seg_pointnet(x) 
         seg_logits = seg_out[:, :2, :]  # B,2,N
+        obs_stats, obs_aux = self.build_observability_stats(input_dict, seg_logits, chunk_size)
         pred_cls = torch.argmax(seg_logits, dim=1, keepdim=True)  # B,1,N
         mask_points = x[:, :4, :] * pred_cls 
 
@@ -147,9 +210,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_dynamics_encoder:
             z_dyn, velocity_pred, dynamics_valid = self.dynamics_encoder(
                 input_dict["ref_boxs"], input_dict["delta_t"], input_dict["valid_mask"])
-            motion_feature = torch.cat((point_feature, z_dyn), dim=1)
             output_dict["velocity_pred"] = velocity_pred
             output_dict["dynamics_valid"] = dynamics_valid
+            if self.use_observability_gate:
+                motion_feature, gate_aux = self.observability_gate(
+                    point_feature, z_dyn, obs_stats, dynamics_valid)
+                output_dict.update(gate_aux)
+            else:
+                motion_feature = torch.cat((point_feature, z_dyn), dim=1)
         motion_pred = self.motion_mlp(motion_feature)  # B,4
 
         if self.use_motion_cls:
@@ -203,6 +271,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             'valid_mask':input_dict["valid_mask"],
                             'updated_ref_boxs':updated_ref_boxs,
                             })
+        output_dict.update(obs_aux)
 
         return output_dict
 
@@ -399,6 +468,36 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_dict.update({
                 "loss_total": loss_total,
                 "loss_bc": loss_bc
+            })
+
+        if getattr(self.config, "obs_gate_log_stats", False):
+            obs_log_map = {
+                "obs_num_points_search_mean": "obs_num_points_search",
+                "obs_soft_fg_count_mean": "obs_soft_fg_count",
+                "obs_mean_fg_score": "obs_mean_fg_score",
+                "obs_valid_history_ratio": "obs_valid_history_ratio",
+                "obs_current_delta_t_ratio": "obs_current_delta_t_ratio",
+            }
+            for log_key, output_key in obs_log_map.items():
+                if output_key in output:
+                    loss_dict[log_key] = output[output_key].mean()
+
+        if "obs_alpha" in output:
+            obs_alpha = output["obs_alpha"]
+            obs_gate_entropy = output["obs_gate_entropy"].mean()
+            entropy_weight = getattr(self.config, "obs_gate_entropy_weight", 0.0)
+            if entropy_weight != 0.0:
+                loss_obs_gate_entropy = -obs_gate_entropy
+                loss_total += entropy_weight * loss_obs_gate_entropy
+                loss_dict["loss_total"] = loss_total
+                loss_dict["loss_obs_gate_entropy"] = loss_obs_gate_entropy
+
+            loss_dict.update({
+                "obs_alpha_obs_mean": obs_alpha[:, 0].mean(),
+                "obs_alpha_dyn_mean": obs_alpha[:, 1].mean(),
+                "obs_alpha_dyn_min": obs_alpha[:, 1].min(),
+                "obs_alpha_dyn_max": obs_alpha[:, 1].max(),
+                "obs_gate_entropy": obs_gate_entropy,
             })
 
         return loss_dict

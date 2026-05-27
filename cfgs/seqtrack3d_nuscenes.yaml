@@ -37,6 +37,14 @@ dynamics_hidden_dim: 128
 dynamics_eps: 0.001
 velocity_weight: 0.05
 dynamics_use_acceleration: False
+use_observability_gate: False # Enable P5 observation/dynamics fusion gate. Requires use_dynamics_encoder=True.
+obs_gate_hidden_dim: 64
+obs_gate_num_stats: 5
+obs_gate_entropy_weight: 0.0
+obs_gate_init_obs_bias: 1.0
+obs_gate_min_dyn_valid: 0.5
+obs_gate_log_stats: True
+obs_stats_detach_seg: True # Detach seg probabilities when building P5 observability statistics.
 use_twc: False # Enable P4 time-resampling consistency paired-view training.
 twc_weight: 0.05
 twc_theta_weight: 0.5
