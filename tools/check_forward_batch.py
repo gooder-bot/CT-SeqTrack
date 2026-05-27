@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset  # noqa: E402
+from models import get_model  # noqa: E402
 
 
 def load_config(path):
@@ -31,43 +32,57 @@ def to_numpy(value):
     return np.asarray(value)
 
 
-def summarize_batch(batch, cfg):
-    if isinstance(batch, dict) and "view_a" in batch and "view_b" in batch:
+def move_to_device(batch, device):
+    if torch.is_tensor(batch):
+        return batch.to(device)
+    if isinstance(batch, dict):
+        return {key: move_to_device(value, device) for key, value in batch.items()}
+    if isinstance(batch, list):
+        return [move_to_device(value, device) for value in batch]
+    if isinstance(batch, tuple):
+        return tuple(move_to_device(value, device) for value in batch)
+    return batch
+
+
+def is_paired_batch(batch):
+    return isinstance(batch, dict) and "view_a" in batch and "view_b" in batch
+
+
+def has_full_history(batch, hist_num):
+    if is_paired_batch(batch):
+        return has_full_history(batch["view_a"], hist_num) and has_full_history(batch["view_b"], hist_num)
+    valid_mask = to_numpy(batch["valid_mask"])
+    if valid_mask.ndim > 1:
+        return bool(valid_mask[0].sum() >= int(hist_num))
+    return bool(valid_mask.sum() >= int(hist_num))
+
+
+def summarize_time_fields(batch):
+    if is_paired_batch(batch):
         print("view_a:")
-        summarize_batch(batch["view_a"], cfg)
+        summarize_time_fields(batch["view_a"])
         print("view_b:")
-        summarize_batch(batch["view_b"], cfg)
+        summarize_time_fields(batch["view_b"])
         return
-
-    points = to_numpy(batch["points"])
-    if points.ndim == 2:
-        points = points[None, ...]
-
-    hist_num = int(cfg.hist_num)
-    point_sample_size = int(cfg.point_sample_size)
-    expected_frames = hist_num + 1
-    expected_points = expected_frames * point_sample_size
-
-    print("points shape:", points.shape)
-    print("expected points per sample:", expected_points)
-
-    sample_points = points[0]
-    for frame_idx in range(expected_frames):
-        start = frame_idx * point_sample_size
-        end = start + point_sample_size
-        frame_times = sample_points[start:end, 3]
-        unique_times = np.unique(np.round(frame_times, 6))
-        print(
-            f"frame {frame_idx}: time min={frame_times.min():.6f}, "
-            f"max={frame_times.max():.6f}, unique={unique_times[:8].tolist()}"
-        )
-
-    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t", "current_timestamp", "valid_mask"):
+    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t", "valid_mask"):
         if key not in batch:
             print(f"{key}: <missing>")
             continue
         value = to_numpy(batch[key])
         print(f"{key} shape={value.shape}: {value[0] if value.ndim > 0 else value}")
+
+
+def summarize_output(output):
+    if is_paired_batch(output):
+        print("output view_a:")
+        summarize_output(output["view_a"])
+        print("output view_b:")
+        summarize_output(output["view_b"])
+        return
+    for key, value in output.items():
+        if torch.is_tensor(value):
+            finite = bool(torch.isfinite(value).all().item())
+            print(f"{key}: shape={tuple(value.shape)}, finite={finite}")
 
 
 def main():
@@ -83,6 +98,7 @@ def main():
     parser.add_argument("--pseudo-time", action="store_true")
     parser.add_argument("--twc", action="store_true",
                         help="Temporarily enable P4 paired-view TWC batch mode.")
+    parser.add_argument("--no-loss", action="store_true")
     args = parser.parse_args()
 
     cfg = load_config(args.cfg)
@@ -113,20 +129,35 @@ def main():
     for batch_idx, candidate in enumerate(loader):
         if batch_idx < args.skip_batches:
             continue
-
         if args.require_full_history:
-            candidate_for_mask = candidate["view_a"] if "view_a" in candidate and "view_b" in candidate else candidate
-            valid_mask = to_numpy(candidate_for_mask["valid_mask"])
-            if valid_mask.ndim > 1 and valid_mask[0].sum() < int(cfg.hist_num):
+            if not has_full_history(candidate, cfg.hist_num):
                 continue
-
         batch = candidate
+        print(f"using batch_idx={batch_idx}")
         break
 
     if batch is None:
         raise RuntimeError("No batch matched the requested filters.")
 
-    summarize_batch(batch, cfg)
+    summarize_time_fields(batch)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("device:", device)
+    model = get_model(cfg.net_model)(cfg).to(device)
+    model.eval()
+    batch = move_to_device(batch, device)
+
+    with torch.no_grad():
+        output = model(batch)
+        summarize_output(output)
+        if not args.no_loss:
+            if device.type != "cuda":
+                print("loss: skipped because compute_loss currently creates CUDA tensors.")
+            else:
+                loss_dict = model.compute_loss(batch, output)
+                for key, value in loss_dict.items():
+                    finite = bool(torch.isfinite(value).all().item())
+                    print(f"{key}: {value.item():.6f}, finite={finite}")
 
 
 if __name__ == "__main__":

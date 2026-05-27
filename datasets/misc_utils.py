@@ -27,11 +27,22 @@ def generate_virtual_points(box, radius=0.1, num_points=10, ratio=1.0):
 
     return expand_corners
 
-def get_history_frame_ids_and_masks(this_frame_id, hist_num):
+def get_history_frame_ids_and_masks(this_frame_id, hist_num, offsets=None):
+    if offsets is None:
+        offsets = list(range(1, hist_num + 1))
+    else:
+        offsets = [int(offset) for offset in offsets]
+        if len(offsets) != int(hist_num):
+            raise ValueError(f"offsets length {len(offsets)} must match hist_num {hist_num}.")
+        if any(offset <= 0 for offset in offsets):
+            raise ValueError("history offsets must be positive frame gaps.")
+        if any(offsets[i] >= offsets[i + 1] for i in range(len(offsets) - 1)):
+            raise ValueError("history offsets must be strictly increasing from recent to older.")
+
     history_frame_ids = []
     masks = []
-    for i in range(1, hist_num + 1):
-        frame_id = this_frame_id - i
+    for offset in offsets:
+        frame_id = this_frame_id - offset
         if frame_id < 0:
             frame_id = 0
             masks.append(0)

@@ -215,6 +215,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
 
     prev_frame_ids = data.get('prev_frame_ids')
     this_frame_id = data.get('this_frame_id')
+    history_offsets = data.get('history_offsets')
 
     # Check the number of empty boxes
     for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
@@ -353,6 +354,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'current_delta_t': np.float32(current_delta_t),
         'velocity_label': velocity_label,
     }
+    if prev_frame_ids is not None:
+        data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
+    if this_frame_id is not None:
+        data_dict['this_frame_id'] = np.int64(this_frame_id)
+    if history_offsets is not None:
+        data_dict['history_offsets'] = np.array(history_offsets, dtype=np.int64)
 
     if getattr(config, 'box_aware', False):
         stack_points_split = np.split(stack_points, num_hist + 1, axis=0)
@@ -494,34 +501,62 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
     def __init__(self, dataset, config=None, **kwargs):
         super().__init__(dataset, random_sample=False, config=config, **kwargs)
         self.processing = motion_processing_mf
+        self.use_twc = getattr(self.config, 'use_twc', False)
+        self.twc_candidate_zero_only = getattr(self.config, 'twc_candidate_zero_only', True)
+        default_twc_b_offsets = [1 + 2 * i for i in range(self.dataset.hist_num)]
+        self.twc_view_a_offsets = list(getattr(self.config, 'twc_view_a_offsets',
+                                               list(range(1, self.dataset.hist_num + 1))))
+        self.twc_view_b_offsets = list(getattr(self.config, 'twc_view_b_offsets',
+                                               default_twc_b_offsets))
+        if self.use_twc and getattr(self.config, "use_augmentation", False):
+            raise ValueError("P4 TWC paired views require shared transforms; keep use_augmentation=False for now.")
+        if self.use_twc and self.twc_candidate_zero_only:
+            self.num_candidates = 1
+
+    def _locate_tracklet(self, anno_id):
+        for i in range(0, self.dataset.get_num_tracklets()):
+            if self.tracklet_start_ids[i] <= anno_id < self.tracklet_start_ids[i + 1]:
+                return i, anno_id - self.tracklet_start_ids[i]
+        raise IndexError(f"anno_id {anno_id} is outside tracklet ranges.")
+
+    def _build_view(self, tracklet_id, this_frame_id, first_frame, this_frame,
+                    candidate_id, offsets):
+        prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
+            this_frame_id, self.dataset.hist_num, offsets=offsets)
+        prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
+        prev_frames_dict = create_history_frame_dict(prev_frames_tuple)
+        data = {
+            "first_frame": first_frame,
+            "prev_frames": prev_frames_dict,
+            "this_frame": this_frame,
+            "candidate_id": candidate_id,
+            "valid_mask": valid_mask,
+            "prev_frame_ids": prev_frame_ids,
+            "this_frame_id": this_frame_id,
+            "history_offsets": offsets,
+        }
+        return self.processing(data, self.config,
+                               template_transform=self.transform,
+                               search_transform=self.transform)
 
     def __getitem__(self, index):
         anno_id = self.get_anno_index(index)
         candidate_id = self.get_candidate_index(index) 
         try:
-            for i in range(0, self.dataset.get_num_tracklets()):
-                if self.tracklet_start_ids[i] <= anno_id < self.tracklet_start_ids[i + 1]:
-                    tracklet_id = i
-                    this_frame_id = anno_id - self.tracklet_start_ids[i]
-                    prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(this_frame_id,self.dataset.hist_num)
-
-                    frame_ids = (0, this_frame_id)
-
+            tracklet_id, this_frame_id = self._locate_tracklet(anno_id)
+            frame_ids = (0, this_frame_id)
             first_frame, this_frame = self.dataset.get_frames(tracklet_id, frame_ids=frame_ids)
-            prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
-            prev_frames_dict = create_history_frame_dict(prev_frames_tuple)
-            data = {
-                "first_frame": first_frame, 
-                "prev_frames": prev_frames_dict,  
-                "this_frame": this_frame,   
-                "candidate_id": candidate_id,
-                "valid_mask":valid_mask,
-                "prev_frame_ids": prev_frame_ids,
-                "this_frame_id": this_frame_id,}
-            
-            return self.processing(data, self.config,
-                                   template_transform=self.transform,
-                                   search_transform=self.transform)
+            if self.use_twc:
+                paired_candidate_id = 0 if self.twc_candidate_zero_only else candidate_id
+                view_a = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
+                                          paired_candidate_id, self.twc_view_a_offsets)
+                view_b = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
+                                          paired_candidate_id, self.twc_view_b_offsets)
+                return {"view_a": view_a, "view_b": view_b}
+
+            offsets = list(range(1, self.dataset.hist_num + 1))
+            return self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
+                                    candidate_id, offsets)
         except AssertionError:
             # return 1
             return self[torch.randint(0, len(self), size=(1,)).item()]

@@ -25,6 +25,27 @@ limit_num_points_in_prev_box: 1 # A box is considered empty if it contains fewer
 use_real_time: True # Use real timestamps instead of fixed pseudo time.
 default_time_step: 0.1 # Waymo frames are approximately 10Hz.
 pseudo_time_step: 0.1 # Original SeqTrack3D fixed pseudo-time interval for ablation.
+time_encoding: raw # raw | mlp | fourier. Raw keeps the current scalar timestamp behavior.
+time_scale: 0.1 # Normalization scale for time encoding.
+time_clip: 4.0 # Clamp signed log-scaled time to this range.
+time_fourier_bands: 4 # Number of Fourier frequency bands when time_encoding=fourier.
+time_hidden_dim: 16 # Hidden dimension when time_encoding=mlp.
+use_dynamics_encoder: False # Enable timestamp-conditioned dynamics branch for P3.
+dynamics_hidden_dim: 128
+dynamics_eps: 0.001
+velocity_weight: 0.05
+dynamics_use_acceleration: False
+use_twc: False # Enable P4 time-resampling consistency paired-view training.
+twc_weight: 0.05
+twc_theta_weight: 0.5
+twc_view_a_offsets: [1, 2, 3]
+twc_view_b_offsets: [1, 3, 5]
+twc_full_history_only: True
+twc_candidate_zero_only: True
+twc_warmup_epoch: 0
+twc_timestamp_eps: 0.000001
+twc_anchor_eps: 0.0001
+twc_delta_eps: 0.00001
 
 
 box_aware: True

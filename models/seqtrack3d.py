@@ -11,6 +11,8 @@ from torchmetrics import Accuracy
 
 from datasets.misc_utils import get_tensor_corners_batch
 from datasets.misc_utils import create_corner_timestamps_from_deltas
+from models.dynamics import DynamicsEncoder
+from models.time_encoding import TimeEncoding
 
 # import vis_tool as vt
 
@@ -22,6 +24,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
+        self.use_dynamics_encoder = getattr(config, 'use_dynamics_encoder', False)
+        self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
+        default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
+        self.time_encoder = TimeEncoding(
+            mode=getattr(config, 'time_encoding', 'raw'),
+            scale=getattr(config, 'time_scale', default_time_scale),
+            clip=getattr(config, 'time_clip', 4.0),
+            fourier_bands=getattr(config, 'time_fourier_bands', 4),
+            hidden_dim=getattr(config, 'time_hidden_dim', 16),
+        )
         self.seg_pointnet = SegPointNet(input_channel=3 + 1 + 1 + (9 if self.box_aware else 0),
                                         per_point_mlp1=[64, 64, 64, 128, 1024],
                                         per_point_mlp2=[512, 256, 128, 128],
@@ -41,7 +53,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                                   nn.Linear(128, 2))
             self.motion_acc = Accuracy(task='multiclass',num_classes=2, average='none')
 
-        self.motion_mlp = nn.Sequential(nn.Linear(256, 128),
+        motion_feature_dim = 256
+        if self.use_dynamics_encoder:
+            self.dynamics_encoder = DynamicsEncoder(
+                hidden_dim=self.dynamics_hidden_dim,
+                eps=getattr(config, 'dynamics_eps', 1e-3),
+            )
+            motion_feature_dim += self.dynamics_hidden_dim
+
+        self.motion_mlp = nn.Sequential(nn.Linear(motion_feature_dim, 128),
                                         nn.BatchNorm1d(128),
                                         nn.ReLU(),
                                         nn.Linear(128, 128),
@@ -57,6 +77,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         self.Transformer = Seq2SeqFormer(d_word_vec=64, d_model=64, d_inner=512,
             n_layers=3, n_head=4, d_k=64, d_v=64, n_position = 1024*4)
+
+    def encode_point_time(self, points):
+        encoded_time = self.time_encoder(points[..., 3:4])
+        return torch.cat((points[..., :3], encoded_time, points[..., 4:]), dim=-1)
+
+    @staticmethod
+    def is_paired_batch(batch):
+        return isinstance(batch, dict) and "view_a" in batch and "view_b" in batch
 
 
     def forward(self, input_dict):
@@ -83,8 +111,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         Returns: B,4
 
         """
+        if self.is_paired_batch(input_dict):
+            return {
+                "view_a": self.forward(input_dict["view_a"]),
+                "view_b": self.forward(input_dict["view_b"]),
+            }
+
         output_dict = {}
-        x = input_dict["points"].transpose(1, 2) 
+        points = self.encode_point_time(input_dict["points"])
+        x = points.transpose(1, 2)
 
         if self.box_aware:
             candidate_bc = input_dict["candidate_bc"].transpose(1, 2) 
@@ -108,7 +143,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         # Coarse initial motion prediction
         point_feature = self.mini_pointnet(mask_points) #N*256
-        motion_pred = self.motion_mlp(point_feature)  # B,4
+        motion_feature = point_feature
+        if self.use_dynamics_encoder:
+            z_dyn, velocity_pred, dynamics_valid = self.dynamics_encoder(
+                input_dict["ref_boxs"], input_dict["delta_t"], input_dict["valid_mask"])
+            motion_feature = torch.cat((point_feature, z_dyn), dim=1)
+            output_dict["velocity_pred"] = velocity_pred
+            output_dict["dynamics_valid"] = dynamics_valid
+        motion_pred = self.motion_mlp(motion_feature)  # B,4
 
         if self.use_motion_cls:
             motion_state_logits = self.motion_state_mlp(point_feature)  # B,2
@@ -138,6 +180,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         delta_T = input_dict["delta_T"]
         corner_stamps = create_corner_timestamps_from_deltas(delta_T, 8).to(
             device=box_seq_corners.device, dtype=box_seq_corners.dtype)
+        corner_stamps = self.time_encoder(corner_stamps)
         box_seq_corners = torch.cat((box_seq_corners,corner_stamps),dim=-1) # B*(L*8)*4 where 4 represents features for x, y, z, and timestamp
 
         solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds
@@ -163,7 +206,102 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         return output_dict
 
+    def compute_twc_loss(self, output_a, output_b, data_a, data_b):
+        box_a = output_a["aux_estimation_boxes"]
+        box_b = output_b["aux_estimation_boxes"]
+
+        center_a, center_b = box_a[:, :3], box_b[:, :3]
+        theta_a, theta_b = box_a[:, 3], box_b[:, 3]
+
+        loss_center_per_sample = F.smooth_l1_loss(center_a, center_b, reduction="none").mean(dim=1)
+        loss_theta_per_sample = (
+            F.smooth_l1_loss(torch.sin(theta_a), torch.sin(theta_b), reduction="none")
+            + F.smooth_l1_loss(torch.cos(theta_a), torch.cos(theta_b), reduction="none")
+        )
+        loss_twc_per_sample = (
+            loss_center_per_sample
+            + getattr(self.config, "twc_theta_weight", 0.5) * loss_theta_per_sample
+        )
+
+        valid = torch.ones_like(loss_twc_per_sample, dtype=torch.bool)
+        eps = getattr(self.config, "twc_timestamp_eps", 1e-6)
+        anchor_eps = getattr(self.config, "twc_anchor_eps", 1e-4)
+        delta_eps = getattr(self.config, "twc_delta_eps", 1e-5)
+
+        if "current_timestamp" in data_a and "current_timestamp" in data_b:
+            current_gap = torch.abs(data_a["current_timestamp"].to(box_a.device)
+                                    - data_b["current_timestamp"].to(box_a.device))
+            valid = valid & (current_gap.view(-1) <= eps)
+
+        if "ref_boxs" in data_a and "ref_boxs" in data_b:
+            anchor_gap = torch.max(
+                torch.abs(data_a["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+            valid = valid & (anchor_gap <= anchor_eps)
+
+        if "delta_T" in data_a and "delta_T" in data_b:
+            delta_gap = torch.max(
+                torch.abs(data_a["delta_T"].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["delta_T"].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+            valid = valid & (delta_gap > delta_eps)
+
+        if getattr(self.config, "twc_full_history_only", True):
+            full_a = data_a["valid_mask"].to(box_a.device).sum(dim=1) >= data_a["valid_mask"].shape[1]
+            full_b = data_b["valid_mask"].to(box_a.device).sum(dim=1) >= data_b["valid_mask"].shape[1]
+            valid = valid & full_a & full_b
+
+        valid_float = valid.to(dtype=box_a.dtype)
+        valid_count = valid_float.sum().clamp_min(1.0)
+        loss_twc = (loss_twc_per_sample * valid_float).sum() / valid_count
+
+        center_gap = (torch.linalg.norm(center_a - center_b, dim=1) * valid_float).sum() / valid_count
+        angle_gap = torch.abs(torch.atan2(torch.sin(theta_a - theta_b), torch.cos(theta_a - theta_b)))
+        angle_gap = (angle_gap * valid_float).sum() / valid_count
+
+        return {
+            "loss_twc": loss_twc,
+            "twc_valid_ratio": valid_float.mean(),
+            "twc_center_gap": center_gap,
+            "twc_angle_gap": angle_gap,
+        }
+
+    def compute_paired_loss(self, data, output):
+        data_a, data_b = data["view_a"], data["view_b"]
+        output_a, output_b = output["view_a"], output["view_b"]
+
+        loss_a = self.compute_loss(data_a, output_a)
+        loss_b = self.compute_loss(data_b, output_b)
+
+        loss_total_sup = 0.5 * (loss_a["loss_total"] + loss_b["loss_total"])
+        twc_loss_dict = self.compute_twc_loss(output_a, output_b, data_a, data_b)
+
+        twc_weight = getattr(self.config, "twc_weight", 0.05)
+        warmup_epoch = getattr(self.config, "twc_warmup_epoch", 0)
+        if getattr(self, "current_epoch", 0) < warmup_epoch:
+            twc_weight = 0.0
+
+        loss_total = loss_total_sup + twc_weight * twc_loss_dict["loss_twc"]
+        loss_dict = {
+            "loss_total": loss_total,
+            "loss_total_sup": loss_total_sup,
+            "loss_total_a": loss_a["loss_total"],
+            "loss_total_b": loss_b["loss_total"],
+        }
+        for key, value in loss_a.items():
+            loss_dict[f"view_a_{key}"] = value
+        for key, value in loss_b.items():
+            loss_dict[f"view_b_{key}"] = value
+        loss_dict.update(twc_loss_dict)
+        return loss_dict
+
     def compute_loss(self, data, output):
+        if self.is_paired_batch(data):
+            return self.compute_paired_loss(data, output)
+
         loss_total = 0.0
         loss_dict = {}
         aux_estimation_boxes = output['aux_estimation_boxes']  
@@ -241,6 +379,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "loss_center_ref": loss_center_ref,
             "loss_angle_ref": loss_angle_ref,
         })
+        if self.use_dynamics_encoder and "velocity_pred" in output and "velocity_label" in data:
+            velocity_label = data["velocity_label"].to(device=output["velocity_pred"].device,
+                                                       dtype=output["velocity_pred"].dtype)
+            loss_velocity = F.smooth_l1_loss(output["velocity_pred"], velocity_label)
+            loss_total += loss_velocity * getattr(self.config, "velocity_weight", 0.05)
+            loss_dict.update({
+                "loss_total": loss_total,
+                "loss_velocity": loss_velocity,
+            })
+
         if self.box_aware:
             prev_bc = torch.flatten(data['prev_bc'], start_dim=1, end_dim=2)
             this_bc = data['this_bc'] #torch.Size([B, 1024, 9])
@@ -271,13 +419,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         loss_dict = self.compute_loss(batch, output)
         loss = loss_dict['loss_total']
 
+        if self.is_paired_batch(batch):
+            metric_batch = batch["view_a"]
+            metric_output = output["view_a"]
+        else:
+            metric_batch = batch
+            metric_output = output
+
         # log
-        seg_acc = self.seg_acc(torch.argmax(output['seg_logits'], dim=1, keepdim=False), batch['seg_label'])
+        seg_acc = self.seg_acc(torch.argmax(metric_output['seg_logits'], dim=1, keepdim=False),
+                               metric_batch['seg_label'])
         self.log('seg_acc_background/train', seg_acc[0], on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log('seg_acc_foreground/train', seg_acc[1], on_step=True, on_epoch=True, prog_bar=False, logger=True)
         if self.use_motion_cls:
-            motion_acc = self.motion_acc(torch.argmax(output['motion_cls'], dim=1, keepdim=False),
-                                         batch['motion_state_label'][:,0]) # 0 represents motion relative to the first historical box
+            motion_acc = self.motion_acc(torch.argmax(metric_output['motion_cls'], dim=1, keepdim=False),
+                                         metric_batch['motion_state_label'][:,0]) # 0 represents motion relative to the first historical box
             self.log('motion_acc_static/train', motion_acc[0], on_step=True, on_epoch=True, prog_bar=False, logger=True)
             self.log('motion_acc_dynamic/train', motion_acc[1], on_step=True, on_epoch=True, prog_bar=False,
                      logger=True)
