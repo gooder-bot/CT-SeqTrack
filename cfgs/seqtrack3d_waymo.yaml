@@ -33,6 +33,9 @@ time_hidden_dim: 16 # Hidden dimension when time_encoding=mlp.
 use_dynamics_encoder: False # Enable timestamp-conditioned dynamics branch for P3.
 dynamics_hidden_dim: 128
 dynamics_eps: 0.001
+dynamics_use_query_gap: True # Feed current_delta_t into the dynamics prior.
+dynamics_motion_mode: feature # feature | residual. residual adds velocity*current_delta_t to motion residual.
+dynamics_displacement_weight: 0.0 # Optional auxiliary displacement loss for dynamics_displacement_pred.
 velocity_weight: 0.05
 dynamics_use_acceleration: False
 use_observability_gate: False # Enable P5 observation/dynamics fusion gate. Requires use_dynamics_encoder=True.
@@ -42,7 +45,7 @@ obs_gate_entropy_weight: 0.0
 obs_gate_init_obs_bias: 1.0
 obs_gate_min_dyn_valid: 0.5
 obs_gate_log_stats: True
-obs_stats_detach_seg: True # Detach seg probabilities when building P5 observability statistics.
+obs_stats_detach_seg: True # Detach seg probabilities when building P5 observability statistics. Gate uses estimated_fg_points from mean_fg_score*num_points_in_search.
 use_twc: False # Enable P4 time-resampling consistency paired-view training.
 twc_weight: 0.05
 twc_theta_weight: 0.5
