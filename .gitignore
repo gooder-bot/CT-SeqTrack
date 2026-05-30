@@ -1,48 +1,40 @@
+# Local OS / editor noise
 .DS_Store
-.idea/
 */.DS_Store
-*.pyc
-events.*
-lightning_logs
-data
+Thumbs.db
+.idea/
+*.idea/
+*.suo
+*.sln
+*.sdf
+*.db
 
-# .gitignore
+# Python caches and virtual environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+.env/
 
-# Ignore object files
+# Build artifacts
+build/
+dist/
+*.egg-info/
+**/build/
+**/dist/
+**/*.egg-info/
 *.o
 *.obj
-
-# # Ignore CUDA files
-# *.cu
-# *.cuh
-
-# Ignore compiled and linked libraries
 *.a
 *.so
 *.dll
 *.dylib
 
-# Ignore build directories
-**build**
-**egg-info**
-**dist**
-**__pycache__**
-# dataset and model
-output/
-data/
-
-# Ignore Python virtual environments
-venv/
-*.pyc
-*.pyo
-*.pyd
-
-# Ignore Jupyter Notebook files
-*.ipynb_checkpoints/
-*.ipynb
-
-# Ignore other generated files
-*.log
+# Temporary editor/runtime files
 *.bak
 *.swp
 *.swo
@@ -50,23 +42,14 @@ venv/
 *.tmp
 *.core
 
-# Ignore IDE and editor folders
-# .vscode/ #vscode有用，暂时不屏蔽
-*.idea/
-*.suo
-*.sln
-*.sdf
-*.db
-*.bak
-#understand
-*.udb  
-*.bin
-
-#debug output
-*.zip
-*.pkl
-*.mp4
-*.png
-*.jpg 
-*.pth
-
+# Keep experiment outputs, checkpoints, TensorBoard logs, images, and docs trackable.
+# In particular, do not ignore:
+# output/
+# compare_results/
+# lightning_logs/
+# events.*
+# *.ckpt
+# *.pth
+# *.png
+# *.jpg
+# *.log
