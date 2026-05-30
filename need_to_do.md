@@ -804,3 +804,117 @@ The timestamp-native base path is evaluated first to verify no regression.
 The current full P5 configuration is unstable on nuScenes-mini, likely because
 dynamics features are weakly constrained and fused too aggressively.
 ```
+
+---
+
+## 7. 频域 / 谱域时间建模候选方向
+
+### 7.1 先明确概念
+
+频域是把随时间变化的信号从“时间轴上的数值变化”转换成“由哪些频率成分组成”的视角。直观理解：
+
+```text
+时域：目标每一帧在哪里、速度是多少、角度怎么变。
+频域：这些变化里有多少低频平滑趋势，多少高频突变/抖动/噪声。
+```
+
+在本项目里，可能被看作时间信号的量包括：
+
+```text
+box center trajectory
+velocity / angular velocity
+motion residual
+delta_t sequence
+TWC paired-view prediction gap
+gate alpha sequence
+```
+
+注意：当前 `time_encoding: fourier` 只是 Fourier feature 时间编码，属于“用正弦/余弦表达 timestamp”的输入编码方式；它还不等价于完整的频域建模或频域约束。
+
+### 7.2 对 CT-SeqTrack 的潜在影响
+
+可能有价值的地方：
+
+- 低频成分可对应目标的平滑运动趋势，有助于稳定长 gap 或低帧率场景。
+- 高频成分可对应急转弯、突然加速、遮挡后再出现、预测抖动或噪声。
+- 对 TWC 来说，可以比较不同采样路径下预测序列的频谱差异，而不仅比较最终框。
+- 对 P5 gate 来说，可以用历史运动的高频能量作为“不稳定/不可靠 dynamics prior”的统计量。
+
+风险：
+
+- 当前 `hist_num=3`，历史长度太短，直接做 FFT 的频率分辨率很差。
+- 3D SOT 轨迹通常不是周期信号，强行讲频域可能显得牵强。
+- 如果只是打开 `time_encoding: fourier`，创新性不够，最多算时间编码消融。
+- 在 A1/A2/A3 没跑清楚前加入频域，会进一步混淆退步来源。
+
+### 7.3 是否能作为创新点
+
+可以作为候选创新点，但暂时不要作为主创新点。更稳妥的定位是：
+
+```text
+Frequency-aware temporal diagnostics / spectral regularization for variable-rate 3D SOT.
+```
+
+只有当它在 `variable-gap`、`large delta_t`、`motion burst` 或 `re-appearance` 子集上带来稳定收益时，才考虑升级为论文贡献。
+
+当前建议写法：
+
+```text
+We further explore whether spectral cues of historical motion can help
+separate smooth motion trends from high-frequency tracking noise under
+variable-rate sampling.
+```
+
+不建议现在写成：
+
+```text
+We propose a frequency-domain 3D tracker.
+```
+
+### 7.4 最小验证任务
+
+- [ ] 先完成 A1/A2/A3 消融，确认 timestamp-native、dynamics、gate 的退步来源。
+- [ ] 做现有时间编码消融，明确 `fourier` 是否优于 `raw / mlp`：
+
+```text
+fixed pseudo time
+raw real time
+MLP time encoding
+Fourier time encoding
+```
+
+- [ ] 如果 `fourier` 有收益，再考虑频域扩展；如果没有收益，暂缓。
+- [ ] 增加一个只用于分析的脚本，统计历史 motion 序列的低频/高频能量：
+
+```text
+tools/check_motion_spectrum.py
+```
+
+- [ ] 分桶报告：
+
+```text
+spectral_energy by delta_t bin
+spectral_energy by sparse bin
+spectral_energy by success/failure cases
+```
+
+- [ ] 候选轻量模块：
+
+```text
+frequency_stats = [
+  low_freq_energy,
+  high_freq_energy,
+  high_to_low_ratio,
+  velocity_jitter,
+  angular_jitter
+]
+```
+
+- [ ] 若频域统计能区分成功/失败样本，再尝试把它加入 P5 gate 输入，而不是直接新建大模块。
+
+### 7.5 当前止损原则
+
+- 不在 A1/A2/A3 之前改模型主干。
+- 不把 `time_encoding: fourier` 直接包装成频域创新。
+- 不做复杂 FFT 网络、频域 Transformer 或 wavelet 模块，除非先有统计证据。
+- 第一版只做诊断和小统计量，优先服务于 variable-rate / TWC / observability 主线。

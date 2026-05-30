@@ -1,8 +1,46 @@
-# CT-SeqTrack 差距诊断与消融计划
+# CT-SeqTrack 差距诊断与下一步修改计划
 
 更新时间：2026-05-30
 
-本文整合了 `need_to_do.md` 末尾的第一轮 nuScenes-mini 诊断和原 `gap_analysis.md`。后续关于 **SeqTrack baseline vs CT-SeqTrack P5 full** 的性能差距、代码原因、止损策略和最小消融计划，统一以本文为准；`need_to_do.md` 只保留执行摘要。
+本文统一记录当前 **SeqTrack baseline vs CT-SeqTrack P5 full** 的退步原因、代码层诊断、下一步实验和需要修改的文件。后续关于这轮 nuScenes-mini 对比的解释，以本文为准；`need_to_do.md` 只保留执行摘要。
+
+---
+
+## 0. 先给结论
+
+当前第一轮结果不能说明 CT-SeqTrack 的 timestamp-native 思路失败。它更准确地说明：
+
+```text
+当前 P5 full 配置过早合并了 real timestamp + dynamics prior + observability gate，
+其中 P3 dynamics 和 P5 gate 至少有一个引入了不稳定。
+```
+
+这次退步不应直接归因给真实时间主链路，因为当前已跑的 CT 配置不是最小 CT-base，而是：
+
+```yaml
+use_real_time: True
+time_encoding: raw
+use_dynamics_encoder: True
+use_observability_gate: True
+use_twc: False
+num_candidates: 4
+dynamics_motion_mode: feature
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.0
+obs_gate_init_obs_bias: 1.0
+obs_gate_entropy_weight: 0.0
+```
+
+因此当前最重要的工作不是继续加模块，而是先把 A1/A2/A3 消融跑干净：
+
+```text
+A1: CT-base, dynamics=False, gate=False
+A2: CT + Dynamics, gate=False
+A2-lite: CT + Dynamics, num_candidates=1
+A2-disp: CT + Dynamics, dynamics_displacement_weight=0.01
+A3-safe: CT + Dynamics + Gate, higher observation bias
+A3-res: CT + Dynamics + residual gate
+```
 
 ---
 
@@ -14,12 +52,18 @@
 Dataset: nuScenes-mini
 Category: Car
 Training: 60 epochs
-Comparison:
-  A0: SeqTrack baseline
-  A3-old: CT-SeqTrack P5 full
+Validation interval: every 5 epochs
+
+A0:
+  SeqTrack baseline
+  path: /home/lishengjie/study/lcyu/seqtrack/output/20260528-1633-seqtrack3d_nuscenes_mini-seqtrack_mini_baseline_car_60ep_bs16
+
+A3-old:
+  CT-SeqTrack P5 full
+  path: /home/lishengjie/study/lcyu/CT-SeqTrack/output/20260528-1718-seqtrack3d_nuscenes_mini_p5_obs_gate-ct_seqtrack_mini_p5_car_60ep_bs16_gpu3
 ```
 
-结果：
+主结果：
 
 | model | metric | final | best |
 | --- | --- | ---: | ---: |
@@ -27,6 +71,13 @@ Comparison:
 | SeqTrack baseline | precision/test | 59.9617 | 65.2144 |
 | CT-SeqTrack P5 full | success/test | 31.1937 | 44.9836 |
 | CT-SeqTrack P5 full | precision/test | 31.8851 | 62.5120 |
+
+退步点数：
+
+| metric | best delta | final delta |
+| --- | ---: | ---: |
+| success/test | -7.2998 | -19.7921 |
+| precision/test | -2.7024 | -28.0766 |
 
 按 12 个验证点统计：
 
@@ -40,161 +91,38 @@ precision/test:
   CT       mean=36.0892, std=12.5834
 ```
 
-结论：
+关键现象：
 
-- CT-SeqTrack P5 full 的 final 明显低于 baseline，当前不能作为主结果。
-- CT 在早期验证点的 `precision/test=62.5120` 接近 baseline best `65.2144`，说明模型不是完全学不到定位。
-- 后续多次断崖式下降，且方差显著高于 baseline，更像是新增 P3/P5 模块造成的训练后期不稳定或递归跟踪 drift，而不是单纯欠拟合。
+1. CT 的 best precision 为 `62.5120`，接近 baseline best `65.2144`，说明模型不是完全学不到定位。
+2. CT 的 final precision 掉到 `31.8851`，相对 baseline final 低 `28.0766` 点，说明后期递归跟踪稳定性很差。
+3. CT 的方差明显大于 baseline，precision/std 约为 baseline 的两倍。这更像新增模块导致的 drift 或训练后期不稳定，而不是单纯数据集波动。
+4. 本轮 CT 配置 `use_twc=False`，所以这次退步不能归因给 P4 TWC。
 
 ---
 
-## 2. 总体判断
+## 2. 如何理解 success 和 precision 的退步
 
-nuScenes-mini 的小数据量、稀疏点云和 empty point cloud 会放大波动，但不是主因。理由是：
+`precision/test` 主要反映中心距离精度。CT early checkpoint precision 很高，但 final 大幅下降，说明 coarse motion 或 refine 后的中心定位在递归测试中容易漂移。
 
-- 两个模型使用同一数据集、同一 split、同一 60 epoch 设置。
-- baseline 虽然也波动，但整体保持在较稳定区间。
-- CT 的 precision/std 约为 baseline 的两倍，且退化集中出现在新增 dynamics/gate 之后。
+`success/test` 主要反映 3D IoU。它受中心、朝向和尺寸局部化共同影响。CT success best 已经比 baseline best 低 7.3 点，说明即使在较好 checkpoint，box 重叠质量也没有完全追上 baseline。
 
-因此当前优先假设是：
+更重要的是 best 与 final 的差距：
 
 ```text
-P0-P2 timestamp-native 主链路可能是安全的；
-P3 Dynamics 和 P5 Observability Gate 中至少一个模块引入了不稳定。
+SeqTrack baseline:
+  success best -> final: 52.2834 -> 50.9858, 下降 1.2976
+  precision best -> final: 65.2144 -> 59.9617, 下降 5.2527
+
+CT P5 full:
+  success best -> final: 44.9836 -> 31.1937, 下降 13.7899
+  precision best -> final: 62.5120 -> 31.8851, 下降 30.6269
 ```
 
-下一步必须先做最小消融，不能继续直接用 P5 full 和 baseline 对比。
+这说明 CT 的主要问题不是一开始没有能力，而是训练过程和测试递归分布不稳定。3D SOT 的测试不是独立样本分类，而是逐帧递归：前一帧预测框会成为后一帧搜索区域和历史输入。一旦 dynamics 或 gate 给出错误先验，错误会被下一帧继续使用，最终体现为 precision 和 success 同时掉点。
 
 ---
 
-## 3. 两个核心代码差距
-
-### 3.1 差距一：Dynamics 分支存在训练-测试分布不匹配
-
-相关代码：
-
-- `datasets/sampler.py`：训练时 `candidate_id != 0` 会给历史 `ref_boxs` 加随机 offset。
-- `models/dynamics.py`：`DynamicsEncoder` 直接从历史 `ref_boxs` 差分构造 velocity / angular velocity。
-- `cfgs/seqtrack3d_nuscenes.yaml`：默认 `num_candidates: 4`。
-
-关键代码语义：
-
-```python
-newer = ref_boxs[:, :-1, :]
-older = ref_boxs[:, 1:, :]
-displacement = newer[:, :, :3] - older[:, :, :3]
-velocity = displacement / gap.unsqueeze(-1)
-```
-
-训练时：
-
-- `num_candidates=4`。
-- 非 0 candidate 会对历史 `ref_boxs` 添加随机 offset。
-- `z_dyn` 学到的是带噪声的历史框差分分布。
-- `velocity_label` 却来自 GT motion / `current_delta_t`，和 noisy ref boxes 的统计口径不完全一致。
-
-测试时：
-
-- `ref_boxs` 来自模型递归预测。
-- 没有训练时那种随机 offset。
-- 历史框误差来自 tracker 自身 drift，而不是均匀扰动。
-
-后果：
-
-- `z_dyn` 在测试时容易变成 OOD feature。
-- 这些 OOD dynamics feature 进入 P5 gate 后，会在递归跟踪中逐帧放大 drift。
-- 这能解释 CT early checkpoint 还不错，但后期/final 严重不稳定。
-
-优先验证：
-
-- A2 dynamics-only 是否已经退化。
-- `num_candidates=1` 的 dynamics-only 是否明显更稳。
-- candidate 0 与 candidate 非 0 的 `loss_velocity` 是否存在明显差异。
-- `dynamics_displacement_pred` 是否能在打开小权重监督后贴近 `motion_label[:, 0, :3]`。
-
-### 3.2 差距二：Observability Gate 使用 feature replacement，融合过强
-
-相关代码：
-
-- `models/observability.py`
-- `models/seqtrack3d.py`
-- `cfgs/seqtrack3d_nuscenes_p5_obs_gate.yaml`
-
-当前融合语义：
-
-```python
-fused_feature = alpha[:, 0:1] * point_feature + alpha[:, 1:2] * z_dyn_proj
-```
-
-问题：
-
-- 这是 feature replacement，不是 residual correction。
-- `obs_gate_init_obs_bias=1.0` 时，valid dynamics 样本初始约为：
-
-```text
-alpha_obs = 0.731
-alpha_dyn = 0.269
-```
-
-- `z_dyn_proj` 是随机初始化的 Linear。训练初期等价于用约 27% 的随机 dynamics projection 替换已经能工作的 point feature。
-- gate 没有显式监督，无法保证 dense / reliable observation 时一定偏向 observation。
-- 如果差距一中的 `z_dyn` 已经 OOD，feature replacement 会把 OOD feature 直接注入 coarse motion prediction。
-
-更保守的融合方式：
-
-```python
-fused_feature = point_feature + alpha_dyn * dyn_residual_proj(z_dyn)
-```
-
-这样 dynamics 分支只提供残差修正，而不是替换主观测特征。
-
-优先验证：
-
-- A2 正常但 A3 退化时，基本可确认 P5 融合策略是主因。
-- 提高 `obs_gate_init_obs_bias` 到 3.0 或 4.0 后是否缓解。
-- 限制 `max_dyn_alpha` 到 0.1-0.2 后是否缓解。
-- 前 5-10 epoch freeze gate 或降低 dynamics/gate 学习率是否缓解。
-
----
-
-## 4. 次要但需要记录的因素
-
-### 4.1 Dynamics 约束偏弱
-
-当前配置：
-
-```yaml
-velocity_weight: 0.05
-dynamics_displacement_weight: 0.0
-```
-
-含义：
-
-- `velocity_pred` 有很弱的辅助监督。
-- `dynamics_displacement_pred` 只记录，不参与优化。
-- `z_dyn` 主要靠最终 tracking loss 间接学习。
-
-风险：
-
-- mini 数据量小，128 维 dynamics feature 容易学到不稳定模式。
-- dynamics feature 被 P5 gate 使用时，缺少足够强的可解释约束。
-
-建议：
-
-- 在 dynamics sanity ablation 中打开 `dynamics_displacement_weight=0.01`。
-- 记录 `loss_velocity` 和 `loss_dynamics_displacement` 的训练曲线。
-
-### 4.2 P5 full 在 mini 上自由度偏大
-
-新增模块约包含：
-
-- `gate_mlp`：5 -> 64 -> 64 -> 2，约 4.5K 参数。
-- `dyn_proj`：128 -> 256，约 33K 参数。
-- `DynamicsEncoder`：per-step MLP + global MLP + velocity head，约 30K 参数。
-
-这些参数主要依赖最终 tracking loss 学习。nuScenes-mini 的有效监督量偏小，所以容易出现 early checkpoint 尚可、后期过拟合或 drift 的现象。
-
-### 4.3 缺少 CT-base 对照
+## 3. 主要原因一：当前比较缺少 CT-base，无法证明真实时间主链路有问题
 
 当前对比是：
 
@@ -202,136 +130,437 @@ dynamics_displacement_weight: 0.0
 SeqTrack baseline vs CT-SeqTrack P5 full
 ```
 
-中间缺少关键消融点：
+但 P5 full 同时打开了：
 
-- P0-P2：真实时间字段和 TimeEncoding 是否安全。
-- P3：Dynamics 分支是否单独退化。
-- P5：Observability Gate 是否单独引入不稳定。
+```text
+real timestamp
+TimeEncoding(raw)
+DynamicsEncoder
+ObservabilityGate
+```
 
-这也是目前最需要补的实验。
+中间缺少三个关键层级：
+
+```text
+P0-P2: real timestamp + delta_t + delta_T + TimeEncoding
+P3: Dynamics only
+P5: Dynamics + Observability Gate
+```
+
+因此当前不能写成：
+
+```text
+real timestamp 让模型退步
+```
+
+只能写成：
+
+```text
+full P5 configuration 退步，退步来源需要通过 A1/A2/A3 消融定位。
+```
+
+这是论文层面最重要的止损：主叙事继续保留 timestamp-native / variable-rate 3D SOT，但必须先用 A1 证明真实时间主链路不退化。
 
 ---
 
-## 5. 最小消融矩阵
+## 4. 主要原因二：Dynamics 分支存在训练/测试分布不匹配
 
-| 编号 | 配置 | dynamics | gate | 目的 |
-| --- | --- | --- | --- | --- |
-| A0 | SeqTrack baseline | OFF | OFF | 已有基线，确认复现实验区间 |
-| A1 | CT-base：real timestamp / delta_t / delta_T / TimeEncoding | OFF | OFF | 验证 P0-P2 不退化 |
-| A2 | CT + Dynamics | ON | OFF | 隔离 P3 Dynamics 的影响 |
-| A2-lite | CT + Dynamics, `num_candidates=1` | ON | OFF | 排除 candidate offset 对 dynamics 的干扰 |
-| A2-disp | CT + Dynamics, `dynamics_displacement_weight=0.01` | ON | OFF | 检查显式 displacement 监督是否稳定 dynamics |
-| A3-safe | CT + Dynamics + Gate, obs bias=3/4 | ON | ON | 测试更保守 gate 初始化 |
-| A3-res | CT + Dynamics + residual Gate | ON | ON | 测试 residual fusion 是否优于 replacement |
-| A4 | Gate warmup / freeze 5-10 epoch | ON | ON | 测试训练日程是否缓解后期崩坏 |
+### 4.1 相关代码
 
-优先顺序：
+训练侧在 `datasets/sampler.py` 的 `motion_processing_mf()` 中构造历史 `ref_boxs`。当 `candidate_id != 0` 时，每一个历史框都会被加独立随机 offset：
+
+```python
+if candidate_id == 0:
+    sample_offsets = np.zeros(3)
+else:
+    sample_offsets = np.random.uniform(low=-0.3, high=0.3, size=3)
+    sample_offsets[2] = sample_offsets[2] * (5 if config.degrees else np.deg2rad(5))
+ref_box = points_utils.getOffsetBB(prev_box, sample_offsets, ...)
+```
+
+当前训练配置：
+
+```yaml
+num_candidates: 4
+```
+
+所以一个 GT 样本会对应 4 个 candidate，其中 3 个 candidate 的历史 `ref_boxs` 带随机扰动。
+
+而 `models/dynamics.py` 的 `DynamicsEncoder` 直接从 `ref_boxs` 差分构造 dynamics feature：
+
+```python
+newer = ref_boxs[:, :-1, :]
+older = ref_boxs[:, 1:, :]
+displacement = newer[:, :, :3] - older[:, :, :3]
+velocity = displacement / gap.unsqueeze(-1)
+angular_velocity = angle_delta / gap
+```
+
+### 4.2 为什么会导致掉点
+
+训练时：
+
+1. `ref_boxs` 是 candidate reference boxes，其中非 0 candidate 含随机 offset。
+2. 多个历史框的 offset 是逐帧独立采样的，会污染历史框差分。
+3. `z_dyn` 学到的是带随机扰动的历史框差分。
+4. 但 `velocity_label` 来自 `motion_label_list[0][:3] / current_delta_t`，本质是干净 GT motion 的监督口径。
+5. 所以 dynamics 输入分布和 dynamics 监督目标不是完全一致的。
+
+测试时：
+
+1. `ref_boxs` 来自 tracker 递归预测结果。
+2. 没有训练时那种均匀随机 offset。
+3. 历史误差来自模型自己的 drift、遮挡、搜索区域偏移。
+4. 这和训练时的随机 candidate 噪声不是同一种分布。
+
+后果：
 
 ```text
-A1 -> A2 -> A2-lite -> A3-safe -> A3-res
+DynamicsEncoder 在训练中看到的是 random-offset history，
+测试中看到的是 recursive-drift history。
 ```
 
-P4 TWC 暂时不要和 P5 混在一起。建议在 P3/P5 稳定后，再单独跑：
+如果 `z_dyn` 只是被轻量监督，测试时很容易变成 OOD feature。这个 OOD feature 一旦进入 coarse motion prediction，就会改变当前框；当前框又会进入下一帧搜索区域，形成逐帧放大的 tracking drift。
+
+这能解释：
+
+- early checkpoint 还有较高 precision，因为模型尚未过度依赖不稳定 dynamics。
+- 后期 final 大幅下降，因为 dynamics/gate 可能学到了 mini 数据上的脆弱模式。
+- precision 下降比 success 更严重，因为中心漂移会首先拉低中心距离精度。
+
+### 4.3 需要怎么验证
+
+必须先跑：
 
 ```text
-CT-base + TWC
-CT + Dynamics + TWC
+A2: CT + Dynamics, gate=False
+A2-lite: CT + Dynamics, num_candidates=1
+A2-disp: CT + Dynamics, dynamics_displacement_weight=0.01
 ```
 
----
+判断规则：
 
-## 6. 近期执行清单
+| 现象 | 解释 | 下一步 |
+| --- | --- | --- |
+| A2 已明显退化 | Dynamics 本身有问题 | 先修 P3，不要继续调 P5 |
+| A2 退化但 A2-lite 恢复 | candidate offset 污染 dynamics | 优先改 dynamics 训练输入或训练策略 |
+| A2 不退化但 A3 退化 | Gate 是主因 | 转向 residual gate / higher obs bias |
+| A2-disp 比 A2 稳 | dynamics 需要更强显式位移监督 | 保留小权重 displacement loss |
 
-1. 不再使用当前 P5 full 作为论文主结果。
-2. 用 best checkpoint 复测 CT，避免只用 last/final 判断。
-3. 拉取并检查 TensorBoard 标量：
+### 4.4 建议修改
 
-```text
-obs_alpha_dyn_mean
-obs_alpha_obs_mean
-obs_alpha_dyn_min / max
-loss_velocity
-loss_dynamics_displacement
-obs_estimated_fg_points_mean
-obs_num_points_search_mean
-```
-
-4. 先跑 A1，判断 P0-P2 是否安全。
-5. 再跑 A2，判断 dynamics-only 是否退化。
-6. 如果 A2 退化，优先检查 `num_candidates=1` 和 displacement 监督。
-7. 如果 A2 正常但 A3 退化，优先改 P5 为 residual / higher obs bias / max dyn alpha。
-8. 后续正式报告必须补困难子集：
-
-```text
-variable-gap: skip=1/2/3/5
-delta_t bins: [0,0.2), [0.2,0.5), [0.5,1.0), [1.0,+inf)
-sparse bins: [0,5), [5,10), [10,20), [20,50), [50,+inf)
-re-appearance: 连续低点数后恢复
-```
-
----
-
-## 7. 服务器命令参考
-
-### A1：CT-base
-
-```bash
-cd /home/lishengjie/study/lcyu/CT-SeqTrack
-
-CUDA_VISIBLE_DEVICES=0 \
-python main.py \
-  --cfg cfgs/seqtrack3d_nuscenes.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --batch_size 2 \
-  --epoch 60 \
-  --seed 42 \
-  --tag "ct_base_mini_car_60ep"
-```
-
-注意：`seqtrack3d_nuscenes.yaml` 当前默认 `use_dynamics_encoder=False`、`use_observability_gate=False`、`use_twc=False`，适合作为 CT-base。
-
-### A2：CT + Dynamics only
-
-建议复制一份配置：
-
-```text
-cfgs/seqtrack3d_nuscenes_a2_dyn.yaml
-```
-
-关键配置：
+短期先不改代码，先通过配置验证：
 
 ```yaml
 use_dynamics_encoder: True
 use_observability_gate: False
 use_twc: False
+num_candidates: 1
+dynamics_displacement_weight: 0.01
 ```
 
-训练命令：
+如果 A2-lite 明显更稳，再做代码修改：
 
-```bash
-cd /home/lishengjie/study/lcyu/CT-SeqTrack
-
-CUDA_VISIBLE_DEVICES=0 \
-python main.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a2_dyn.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --batch_size 2 \
-  --epoch 60 \
-  --seed 42 \
-  --tag "ct_dyn_mini_car_60ep"
-```
-
-### A3-safe：更保守的 Gate
-
-建议复制一份配置：
+1. 在 `datasets/sampler.py` 的 `data_dict` 中加入 `candidate_id`，用于日志和按 candidate 分桶分析。
+2. 增加 dynamics 诊断脚本或日志，分别统计 candidate 0 和 candidate 非 0 的：
 
 ```text
-cfgs/seqtrack3d_nuscenes_a3_gate_safe.yaml
+loss_velocity
+loss_dynamics_displacement
+||ref_boxs[i] - ref_boxs[i+1]||
+velocity_pred norm
+dynamics_displacement_pred norm
 ```
 
-关键配置：
+3. 给 dynamics 加一个保守训练选项，例如：
+
+```yaml
+dynamics_candidate_zero_only: True
+```
+
+含义：只在 clean candidate 上启用 dynamics loss 或 dynamics feature，用于判断随机 candidate 是否污染 P3。
+
+4. 更稳的长期方案是让历史框扰动在时间维度上更一致，而不是每个历史帧独立随机 offset。也就是让 candidate noise 模拟整体搜索框偏移，而不是制造不真实的历史速度噪声。
+
+---
+
+## 5. 主要原因三：Observability Gate 当前是 feature replacement，融合过强
+
+### 5.1 相关代码
+
+`models/observability.py` 当前融合方式：
+
+```python
+z_dyn_proj = self.dyn_proj(z_dyn)
+fused_feature = alpha[:, 0:1] * point_feature + alpha[:, 1:2] * z_dyn_proj
+```
+
+这不是 residual correction，而是 feature replacement。
+
+当前配置：
+
+```yaml
+obs_gate_init_obs_bias: 1.0
+obs_gate_entropy_weight: 0.0
+```
+
+初始化时 valid dynamics 样本大约是：
+
+```text
+alpha_obs = 0.731
+alpha_dyn = 0.269
+```
+
+### 5.2 为什么会导致掉点
+
+P5 的意图是：
+
+```text
+当前观测可靠时信 point_feature；
+当前点云稀疏或 gap 大时信 dynamics prior。
+```
+
+但当前实现一开始就会把约 27% 的 `point_feature` 替换成 `z_dyn_proj`。问题在于：
+
+1. `z_dyn_proj` 是随机初始化 Linear。
+2. `z_dyn` 来自约束偏弱的 DynamicsEncoder。
+3. gate 没有显式监督，不能保证 dense / high-confidence observation 时一定偏向 observation。
+4. 如果 P3 dynamics 已经存在 OOD 问题，P5 会把 OOD dynamics feature 直接注入 coarse motion branch。
+
+这会破坏原本已经能工作的 observation feature。尤其在递归测试时，错误先验不是只影响当前帧，而是会改变下一帧搜索区域。
+
+### 5.3 需要怎么验证
+
+如果 A2 不退化，但 A3 退化，基本可以确认 P5 融合方式是主因。此时按顺序跑：
+
+```text
+A3-safe: obs_gate_init_obs_bias=3.0 or 4.0
+A3-cap:  obs_gate_max_dyn_alpha=0.1 or 0.2
+A3-res:  residual gate
+```
+
+判断规则：
+
+| 现象 | 解释 | 下一步 |
+| --- | --- | --- |
+| 提高 obs bias 后恢复 | 早期 dynamics 注入过强 | 保留更高 obs bias 或 warmup |
+| 限制 max dyn alpha 后恢复 | dynamics 只能做弱补偿 | 增加 alpha cap |
+| residual gate 恢复 | feature replacement 是主因 | 改成 residual fusion |
+| 都不恢复 | P3 dynamics 或 obs_stats 本身无效 | 回到 A2 和 gate 分桶分析 |
+
+### 5.4 建议修改
+
+在 `models/observability.py` 或 `models/seqtrack3d.py` 中加入 gate 融合模式：
+
+```yaml
+obs_gate_fusion_mode: replacement  # replacement | residual
+obs_gate_max_dyn_alpha: null       # e.g. 0.2
+obs_gate_residual_scale: 0.1
+```
+
+推荐 residual 形式：
+
+```python
+dyn_residual = self.dyn_proj(z_dyn)
+fused_feature = point_feature + residual_scale * alpha_dyn * dyn_residual
+```
+
+并建议：
+
+1. residual 分支最后一层或 `dyn_proj` 可用小初始化或零初始化，避免训练初期破坏 point feature。
+2. `obs_gate_init_obs_bias` 先从 `3.0` 或 `4.0` 开始。
+3. 加 `obs_gate_max_dyn_alpha=0.2` 做安全上限。
+4. 后续如果要更稳，可加：
+
+```yaml
+obs_gate_warmup_epoch: 5
+```
+
+前 5 epoch 只用 observation 或极小 dynamics residual。
+
+---
+
+## 6. 次要但需要同步处理的问题
+
+### 6.1 Dynamics 监督偏弱
+
+当前：
+
+```yaml
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.0
+```
+
+`velocity_pred` 有轻量监督，但 `dynamics_displacement_pred` 只记录不优化。这样 `z_dyn` 主要依赖最终 tracking loss 间接学习，mini 数据量下容易不稳。
+
+建议在 A2-disp 中尝试：
+
+```yaml
+dynamics_displacement_weight: 0.01
+```
+
+如果 loss 量级安全，再试：
+
+```yaml
+velocity_weight: 0.1
+dynamics_displacement_weight: 0.01
+```
+
+### 6.2 缺少 gate 行为分桶分析
+
+仅看 `obs_alpha_dyn_mean` 不够。必须按困难条件分桶：
+
+```text
+alpha_dyn by sparse bin
+alpha_dyn by delta_t bin
+alpha_obs by fg confidence bin
+```
+
+如果 gate 学对了，应该看到：
+
+```text
+sparse / large delta_t / low fg score -> alpha_dyn 更高
+dense / high fg score -> alpha_obs 更高
+```
+
+如果看不到这种趋势，P5 即使主表偶然涨点，也缺少论文解释力。
+
+### 6.3 Transformer 中仍有固定 4 帧假设
+
+`models/attn/Models.py` 中仍有：
+
+```python
+enc_output.reshape(-1, 4 * 128, self.d_model)
+dec_output.view(dec_output.shape[0], 4, self.d_model * 8)
+```
+
+这暂时不影响当前 `hist_num=3`，因为 `hist_num + 1 = 4`。但它会限制后续历史长度消融：
+
+```text
+hist_num=2 / 4 / 6
+```
+
+建议暂缓修改，等 A1/A2/A3 跑清楚后再处理。否则容易把 shape 改动和模块收益混在一起。
+
+### 6.4 优化稳定性
+
+当前 P5 full 的正式训练 hparams 中：
+
+```yaml
+gradient_clip_val: 0.0
+```
+
+smoke test 中常用 `grad_clip=1.0`。如果后续发现 loss 或 gate alpha 曲线有尖峰，可以在正式消融中统一加入：
+
+```yaml
+gradient_clip_val: 1.0
+```
+
+但这必须对 baseline 和各 ablation 保持一致，否则会引入新的变量。
+
+---
+
+## 7. 下一步实验顺序
+
+### Step 1：复测已保存 CT checkpoint
+
+不要只看 last。当前 CT 已保存：
+
+```text
+epoch=4-step=6310.ckpt      # precision best 附近
+epoch=24-step=31550.ckpt    # success best 附近
+epoch=29-step=37860.ckpt
+epoch=34-step=44170.ckpt
+epoch=49-step=63100.ckpt
+last.ckpt
+```
+
+先复测：
+
+```text
+epoch=4-step=6310.ckpt
+epoch=24-step=31550.ckpt
+last.ckpt
+```
+
+目的：
+
+1. 确认 best checkpoint 是否稳定复现。
+2. 区分“训练后期退化”和“评估随机波动”。
+3. 为论文保留一个诚实的 early checkpoint 观察，而不是只用 final 下结论。
+
+### Step 2：跑 A1 CT-base
+
+配置：
+
+```yaml
+use_real_time: True
+time_encoding: raw
+use_dynamics_encoder: False
+use_observability_gate: False
+use_twc: False
+```
+
+目的：
+
+```text
+验证 P0-P2 timestamp-native 主链路是否安全。
+```
+
+判断：
+
+| A1 结果 | 结论 |
+| --- | --- |
+| 接近 baseline | timestamp-native 主线安全，可以继续 P3 |
+| 明显低于 baseline | 先查 time fields / TimeEncoding / point timestamp / box corner timestamp |
+
+### Step 3：跑 A2 Dynamics-only
+
+配置：
+
+```yaml
+use_dynamics_encoder: True
+use_observability_gate: False
+use_twc: False
+num_candidates: 4
+dynamics_displacement_weight: 0.0
+```
+
+目的：
+
+```text
+隔离 P3 Dynamics 是否单独造成退步。
+```
+
+### Step 4：跑 A2-lite 和 A2-disp
+
+A2-lite：
+
+```yaml
+use_dynamics_encoder: True
+use_observability_gate: False
+use_twc: False
+num_candidates: 1
+```
+
+A2-disp：
+
+```yaml
+use_dynamics_encoder: True
+use_observability_gate: False
+use_twc: False
+dynamics_displacement_weight: 0.01
+```
+
+目的：
+
+```text
+验证 candidate offset 污染和 dynamics 监督偏弱是否是 P3 的主要问题。
+```
+
+### Step 5：跑 A3-safe
+
+配置：
 
 ```yaml
 use_dynamics_encoder: True
@@ -340,13 +569,212 @@ use_twc: False
 obs_gate_init_obs_bias: 3.0
 ```
 
-如果仍不稳定，再尝试 residual fusion 或 `max_dyn_alpha`，不要继续堆更复杂的 gate。
+如果仍不稳：
+
+```yaml
+obs_gate_init_obs_bias: 4.0
+obs_gate_max_dyn_alpha: 0.2
+```
+
+目的：
+
+```text
+测试更保守 gate 是否缓解 P5 full 后期崩坏。
+```
+
+### Step 6：实现并跑 A3-res
+
+代码修改：
+
+```text
+models/observability.py
+models/seqtrack3d.py
+cfgs/*.yaml
+```
+
+新增配置：
+
+```yaml
+obs_gate_fusion_mode: residual
+obs_gate_residual_scale: 0.1
+obs_gate_max_dyn_alpha: 0.2
+```
+
+目标语义：
+
+```python
+fused_feature = point_feature + obs_gate_residual_scale * alpha_dyn * dyn_residual
+```
+
+目的：
+
+```text
+让 dynamics prior 只做残差修正，不替换 observation feature。
+```
+
+### Step 7：P4 TWC 暂后
+
+当前 P4 工程链路已经通过 smoke test，但本轮 P5 full 退步与 TWC 无关，因为 `use_twc=False`。建议等 A1/A2/A3 稳定后再跑：
+
+```text
+CT-base + TWC
+CT + Dynamics + TWC
+```
+
+不要现在把 TWC 和 P5 混在一起。
 
 ---
 
-## 8. 论文层面的处理
+## 8. 需要新增或修改的配置文件
 
-在 A1/A2/A3 消融完成前，不要把当前 P5 full 写成正向结果。推荐表述：
+建议新增：
+
+```text
+cfgs/seqtrack3d_nuscenes_mini_a1_ct_base.yaml
+cfgs/seqtrack3d_nuscenes_mini_a2_dyn.yaml
+cfgs/seqtrack3d_nuscenes_mini_a2_dyn_cand1.yaml
+cfgs/seqtrack3d_nuscenes_mini_a2_dyn_disp.yaml
+cfgs/seqtrack3d_nuscenes_mini_a3_gate_safe.yaml
+cfgs/seqtrack3d_nuscenes_mini_a3_gate_residual.yaml
+```
+
+如果不想维护太多文件，也可以先复制服务器上的 mini 配置，每次只改关键开关。但正式论文化前建议固定成独立 YAML，避免实验记录混乱。
+
+---
+
+## 9. 需要新增或修改的代码
+
+### 9.1 `datasets/sampler.py`
+
+短期建议：
+
+1. 在 `data_dict` 中加入：
+
+```python
+'candidate_id': np.int64(candidate_id)
+```
+
+2. 保留 `history_offsets`、`prev_frame_ids`、`num_points_in_search` 当前逻辑。
+
+目的：
+
+```text
+支持 candidate 0 / 非 0 的 dynamics loss 和 ref_boxs 差分诊断。
+```
+
+### 9.2 `models/seqtrack3d.py`
+
+建议增加日志：
+
+```text
+dynamics_velocity_norm
+dynamics_displacement_norm
+velocity_label_norm
+dynamics_valid_ratio
+candidate0_loss_velocity
+candidate_nonzero_loss_velocity
+```
+
+如果加入 `candidate_id`，可以在 `compute_loss()` 中按 candidate 分桶记录，不一定参与 loss。
+
+后续如果 A2-lite 证明 candidate offset 是主因，再增加：
+
+```yaml
+dynamics_candidate_zero_only: True
+```
+
+让非 0 candidate 不参与 dynamics loss，或者把其 `z_dyn` 置零做对照。
+
+### 9.3 `models/observability.py`
+
+建议增加：
+
+```yaml
+obs_gate_fusion_mode: replacement  # replacement | residual
+obs_gate_max_dyn_alpha: null
+obs_gate_residual_scale: 0.1
+```
+
+实现 residual gate：
+
+```python
+if fusion_mode == "replacement":
+    fused_feature = alpha_obs * point_feature + alpha_dyn * z_dyn_proj
+else:
+    fused_feature = point_feature + residual_scale * alpha_dyn * z_dyn_proj
+```
+
+并支持：
+
+```python
+if max_dyn_alpha is not None:
+    alpha_dyn = alpha_dyn.clamp(max=max_dyn_alpha)
+```
+
+注意：如果 clamp 以后要重新归一化，只用于 replacement；如果 residual 模式，`alpha_dyn` 可以直接作为残差强度，不必强制 `alpha_obs + alpha_dyn = 1`。
+
+### 9.4 `tools/`
+
+建议新增一个轻量分析脚本：
+
+```text
+tools/check_dynamics_stats.py
+```
+
+功能：
+
+```text
+读取一个 train batch
+打印 candidate_id
+打印 ref_boxs 差分速度分布
+打印 velocity_label 分布
+打印 dynamics_displacement_pred 与 motion_label 的量级
+```
+
+这比直接跑完整训练更快定位 P3 问题。
+
+---
+
+## 10. 需要拉取的 TensorBoard 标量
+
+在服务器上优先检查这些标量：
+
+```text
+loss_total
+loss_velocity
+loss_dynamics_displacement
+obs_alpha_obs_mean
+obs_alpha_dyn_mean
+obs_alpha_dyn_min
+obs_alpha_dyn_max
+obs_gate_entropy
+obs_num_points_search_mean
+obs_estimated_fg_points_mean
+obs_mean_fg_score
+obs_current_delta_t_ratio
+```
+
+重点看：
+
+1. `obs_alpha_dyn_mean` 是否后期升高。
+2. `obs_alpha_dyn_max` 是否长期接近 1。
+3. `loss_velocity` 是否真的下降。
+4. `loss_dynamics_displacement` 虽然权重为 0，量级是否合理。
+5. `obs_estimated_fg_points_mean` 和 `obs_num_points_search_mean` 是否在 mini 上过于稀疏，导致 gate 学到极端策略。
+
+如果 alpha 后期偏向 dynamics，同时 precision/test 下降，说明 P5 在放大不可靠 dynamics prior。
+
+---
+
+## 11. 论文表述
+
+当前不要写：
+
+```text
+CT-SeqTrack full model outperforms SeqTrack3D.
+```
+
+应该写成：
 
 ```text
 The timestamp-native base path is evaluated first to verify no regression.
@@ -356,25 +784,36 @@ configuration is unstable on nuScenes-mini, likely because dynamics features
 are weakly constrained and fused too aggressively at the feature level.
 ```
 
-当前论文叙事应保持克制：
+中文解释：
 
-- 可以继续主打 timestamp-native / variable-rate 3D SOT。
-- 可以保留 P3/P5 作为方法模块，但必须通过消融证明它们不是退化来源。
-- 如果 P5 最终只在 sparse / large-gap 子集提升，而主表不提升，可将其定位为困难场景增强模块，而不是默认全量模块。
+```text
+当前 full P5 不是最终正向结果。它暴露的是：真实时间主链路、动力学先验和可观测性门控不能一次性混合评价，必须逐级消融。只要 A1 能接近 baseline，timestamp-native 主线仍然成立；P3/P5 则作为后续增强模块继续修正。
+```
 
 ---
 
-## 9. 当前结论
+## 12. 当前最终判断
 
-当前项目不是 idea 不成立，而是 full configuration 过早合并了多个新增模块：
+本轮退步最可能来自两个叠加因素：
+
+1. **P3 Dynamics 分支训练/测试分布不匹配。**  
+   训练中 `num_candidates=4` 和独立随机 historical offsets 会污染 `ref_boxs` 差分；测试中 history 来自递归预测 drift。DynamicsEncoder 学到的 `z_dyn` 在测试时容易 OOD。
+
+2. **P5 Observability Gate 融合过强。**  
+   当前 gate 是 feature replacement，初始化就约有 27% dynamics 注入。若 dynamics feature 不稳，gate 会直接破坏 observation feature，并在递归跟踪中放大误差。
+
+下一步优先级：
 
 ```text
-real timestamp + dynamics prior + observability gate
+1. 复测 saved best checkpoints，不只看 last。
+2. 跑 A1，证明 timestamp-native 主链路是否安全。
+3. 跑 A2/A2-lite/A2-disp，定位 dynamics 是否退化及原因。
+4. 若 A2 正常，再跑 A3-safe/A3-res，修正 gate。
+5. P4 TWC 暂后，等 P3/P5 稳定后再接回。
 ```
 
-其中最可疑的两个代码差距是：
+一句话：
 
-1. Dynamics 分支训练/测试分布不匹配。
-2. Gate 用 feature replacement 过强地融合未充分约束的 dynamics feature。
-
-下一步的胜负手不是继续加模块，而是把 A1/A2/A3 消融跑干净，先证明 timestamp-native 主链路不退化，再逐步恢复 dynamics、TWC 和 gate。
+```text
+先证明时间主链路不退化，再修 dynamics 的分布口径，最后把 gate 从强替换改成保守残差。
+```
