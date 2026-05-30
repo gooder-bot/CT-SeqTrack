@@ -1,0 +1,5 @@
+model,metric,final,final_step,best,best_step
+SeqTrack baseline,success/test,50.9858,75719,52.2834,44169
+SeqTrack baseline,precision/test,59.9617,75719,65.2144,12619
+CT-SeqTrack,success/test,31.1937,75719,44.9836,31549
+CT-SeqTrack,precision/test,31.8851,75719,62.512,6309

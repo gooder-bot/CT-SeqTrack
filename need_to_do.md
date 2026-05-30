@@ -770,3 +770,37 @@ alpha_obs by fg confidence bin
 - 不上 Neural ODE / SDE / CDE。
 - 不主打任意时间查询或多传感器异步融合。
 - 每个模块都必须能独立消融，避免把真实时间收益和模型容量变大混在一起。
+
+---
+
+## 6. 第一轮 nuScenes-mini 差距诊断
+
+详细诊断已统一整合到 `gap_analysis.md`。后续关于第一轮 **SeqTrack baseline vs CT-SeqTrack P5 full** 的结果差距、代码原因、消融矩阵和论文表述，以 `gap_analysis.md` 为唯一来源，避免 `need_to_do.md` 与分析文档重复维护。
+
+当前执行摘要：
+
+- [ ] 不再直接把当前 P5 full 作为论文主结果；先定位不稳定来源。
+- [ ] 先用 best checkpoint 复测 CT，不只看 last/final。
+- [ ] 拉取 TensorBoard 标量：`obs_alpha_dyn_mean`、`obs_alpha_obs_mean`、`loss_velocity`、`loss_dynamics_displacement`、`obs_estimated_fg_points_mean`。
+- [ ] 优先跑最小消融：
+
+```text
+A0: SeqTrack baseline
+A1: CT-base = real timestamp / delta_t / delta_T / TimeEncoding, dynamics=False, gate=False
+A2: CT + Dynamics, gate=False
+A2-lite: CT + Dynamics, num_candidates=1
+A3-safe: CT + Dynamics + Gate, obs_gate_init_obs_bias=3.0 or 4.0
+A3-res: CT + Dynamics + residual Gate
+```
+
+- [ ] 两个最高优先级代码怀疑点：
+  - Dynamics 分支训练/测试分布不匹配：训练中 candidate offset 污染 `ref_boxs` 差分，测试中变成递归预测分布。
+  - P5 Gate 融合过强：当前是 feature replacement，建议优先试 residual fusion 或更高 observation bias。
+
+论文层面暂定表述：
+
+```text
+The timestamp-native base path is evaluated first to verify no regression.
+The current full P5 configuration is unstable on nuScenes-mini, likely because
+dynamics features are weakly constrained and fused too aggressively.
+```
