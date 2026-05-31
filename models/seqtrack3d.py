@@ -264,7 +264,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         
         # Appending timestamp features to the box corners
         delta_T = input_dict["delta_T"]
-        corner_stamps = create_corner_timestamps_from_deltas(delta_T, 8).to(
+        corner_stamps = create_corner_timestamps_from_deltas(
+            delta_T, 8, current_time=getattr(self.config, 'main_time_current', 0.0)).to(
             device=box_seq_corners.device, dtype=box_seq_corners.dtype)
         corner_stamps = self.time_encoder(corner_stamps)
         box_seq_corners = torch.cat((box_seq_corners,corner_stamps),dim=-1) # B*(L*8)*4 where 4 represents features for x, y, z, and timestamp

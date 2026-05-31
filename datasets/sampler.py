@@ -11,7 +11,8 @@ import datasets.points_utils as points_utils
 from datasets.misc_utils import get_history_frame_ids_and_masks, \
     create_history_frame_dict, \
     generate_virtual_points, \
-    build_time_fields
+    build_time_fields, \
+    build_main_time_fields
 
 
 def no_processing(data, *args):
@@ -276,11 +277,21 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         use_real_time=use_real_time,
         default_step=default_time_step,
         pseudo_step=pseudo_time_step)
+    main_current_value = float(getattr(config, 'main_time_current', 0.0))
+    point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
+        valid_mask,
+        relative_timestamps,
+        local_timestamps,
+        num_hist,
+        pseudo_step=pseudo_time_step,
+        source=getattr(config, 'main_time_source', 'real'),
+        current_value=main_current_value)
     timestamp_prev_list = [
         np.full((config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
-        for timestamp in relative_timestamps
+        for timestamp in point_timestamps
     ]
-    timestamp_this = np.zeros((config.point_sample_size, 1), dtype=np.float32)
+    timestamp_this = np.full(
+        (config.point_sample_size, 1), fill_value=main_current_value, dtype=np.float32)
 
     prev_points_list = [
         np.concatenate([prev_points, timestamp_prev, seg_mask_prev[:, None]],
@@ -348,9 +359,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'bbox_size': this_box.wlh, 
         'seg_label': stack_seg_label.astype('int'), 
         'valid_mask': np.array(valid_mask).astype('int'), 
-        'timestamps': local_timestamps,
+        'timestamps': main_timestamps,
         'delta_t': np.array(delta_t_list, dtype=np.float32),
-        'delta_T': np.array(relative_timestamps, dtype=np.float32),
+        'delta_T': np.array(corner_timestamps, dtype=np.float32),
+        'timestamps_real': local_timestamps,
+        'delta_T_real': np.array(relative_timestamps, dtype=np.float32),
         'current_timestamp': np.float64(current_timestamp if current_timestamp is not None else 0.0),
         'current_delta_t': np.float32(current_delta_t),
         'num_points_in_search': np.float32(num_points_in_search),

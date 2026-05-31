@@ -62,7 +62,8 @@ def summarize_batch(batch, cfg):
             f"max={frame_times.max():.6f}, unique={unique_times[:8].tolist()}"
         )
 
-    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t",
+    for key in ("timestamps", "delta_T", "timestamps_real", "delta_T_real",
+                "delta_t", "current_delta_t",
                 "current_timestamp", "num_points_in_search", "valid_mask"):
         if key not in batch:
             print(f"{key}: <missing>")

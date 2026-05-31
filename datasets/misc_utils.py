@@ -129,6 +129,58 @@ def compute_history_timestamps(frame_timestamps, current_timestamp, default_step
     return relative_timestamps, delta_t
 
 
+def build_order_time_fields(valid_mask, pseudo_step=0.1, current_value=0.1):
+    """Build baseline-style order tokens for the main point/corner branch.
+
+    This intentionally ignores physical frame gaps. It preserves the original
+    SeqTrack3D convention where historical frames are small negative order
+    tokens and the current frame is a small positive token.
+    """
+    values = list(valid_mask) if valid_mask is not None else []
+    relative_timestamps = []
+    valid_time = 0.0
+
+    for mask in values:
+        if int(mask) == 1:
+            valid_time -= pseudo_step
+        relative_timestamps.append(valid_time)
+
+    delta_t = []
+    prev_relative_timestamp = 0.0
+    for relative_timestamp in relative_timestamps:
+        dt = prev_relative_timestamp - relative_timestamp
+        if dt <= 0:
+            dt = pseudo_step
+        delta_t.append(dt)
+        prev_relative_timestamp = relative_timestamp
+
+    local_timestamps = np.array(
+        relative_timestamps + [float(current_value)], dtype=np.float32)
+    return relative_timestamps, delta_t, local_timestamps
+
+
+def build_fixed_order_corner_timestamps(hist_num, pseudo_step=0.1):
+    return [-(idx + 1) * pseudo_step for idx in range(int(hist_num))]
+
+
+def build_main_time_fields(valid_mask, real_relative_timestamps, real_local_timestamps,
+                           hist_num, pseudo_step=0.1, source="real",
+                           current_value=0.0):
+    source = str(source).lower()
+    if source in ("order", "pseudo_order", "baseline_order", "baseline"):
+        point_relative_timestamps, _, local_timestamps = build_order_time_fields(
+            valid_mask, pseudo_step=pseudo_step, current_value=current_value)
+        corner_relative_timestamps = build_fixed_order_corner_timestamps(
+            hist_num, pseudo_step=pseudo_step)
+        return point_relative_timestamps, corner_relative_timestamps, local_timestamps
+
+    return (
+        list(real_relative_timestamps),
+        list(real_relative_timestamps),
+        np.asarray(real_local_timestamps, dtype=np.float32),
+    )
+
+
 def build_time_fields(frame_timestamps, current_timestamp, frame_ids=None, current_frame_id=None,
                       use_real_time=True, default_step=0.1, pseudo_step=0.1):
     frame_timestamps = list(frame_timestamps) if frame_timestamps is not None else []
@@ -359,7 +411,7 @@ def create_corner_timestamps(B, H, corner_num=8):
 
     return timestamps
 
-def create_corner_timestamps_from_deltas(delta_T, corner_num=8):
+def create_corner_timestamps_from_deltas(delta_T, corner_num=8, current_time=0.0):
     if not torch.is_tensor(delta_T):
         delta_T = torch.as_tensor(delta_T, dtype=torch.float32)
 
@@ -370,6 +422,8 @@ def create_corner_timestamps_from_deltas(delta_T, corner_num=8):
     timestamps = torch.zeros((B, (H + 1) * corner_num, 1), dtype=delta_T.dtype, device=delta_T.device)
     for i in range(H):
         timestamps[:, i * corner_num:(i + 1) * corner_num] = delta_T[:, i].view(B, 1, 1)
+    if current_time != 0.0:
+        timestamps[:, -corner_num:] = timestamps.new_tensor(float(current_time))
     return timestamps
 
 

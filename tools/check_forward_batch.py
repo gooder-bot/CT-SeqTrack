@@ -64,7 +64,8 @@ def summarize_time_fields(batch):
         print("view_b:")
         summarize_time_fields(batch["view_b"])
         return
-    for key in ("timestamps", "delta_T", "delta_t", "current_delta_t",
+    for key in ("timestamps", "delta_T", "timestamps_real", "delta_T_real",
+                "delta_t", "current_delta_t",
                 "num_points_in_search", "valid_mask"):
         if key not in batch:
             print(f"{key}: <missing>")

@@ -17,7 +17,7 @@ import numpy as np
 from nuscenes.utils import geometry_utils
 
 from datasets.misc_utils import get_history_frame_ids_and_masks,get_last_n_bounding_boxes
-from datasets.misc_utils import build_time_fields
+from datasets.misc_utils import build_time_fields, build_main_time_fields
 
 import time
 
@@ -275,11 +275,21 @@ class MotionBaseModelMF(BaseModelMF):
             use_real_time=use_real_time,
             default_step=default_time_step,
             pseudo_step=pseudo_time_step)
+        main_current_value = float(getattr(self.config, 'main_time_current', 0.0))
+        point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
+            valid_mask,
+            relative_timestamps,
+            local_timestamps,
+            num_hist,
+            pseudo_step=pseudo_time_step,
+            source=getattr(self.config, 'main_time_source', 'real'),
+            current_value=main_current_value)
         timestamp_prev_list = [
             np.full((self.config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
-            for timestamp in relative_timestamps
+            for timestamp in point_timestamps
         ]
-        timestamp_this = np.zeros((self.config.point_sample_size, 1), dtype=np.float32)
+        timestamp_this = np.full(
+            (self.config.point_sample_size, 1), fill_value=main_current_value, dtype=np.float32)
         prev_points_list = [
         np.concatenate([prev_points, timestamp_prev, seg_mask_prev[:, None]],
                        axis=-1)
@@ -310,9 +320,11 @@ class MotionBaseModelMF(BaseModelMF):
                      "ref_boxs":torch.tensor(ref_boxs_np[None, :], device=self.device, dtype=torch.float32), 
                      "valid_mask":torch.tensor(valid_mask, device=self.device, dtype=torch.float32).unsqueeze(0), 
                      "bbox_size":torch.tensor(bbox_size[None, :],device=self.device, dtype=torch.float32),
-                     "timestamps": torch.tensor(local_timestamps[None, :], device=self.device, dtype=torch.float32),
+                     "timestamps": torch.tensor(main_timestamps[None, :], device=self.device, dtype=torch.float32),
                      "delta_t": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
-                     "delta_T": torch.tensor(np.array(relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "delta_T": torch.tensor(np.array(corner_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "timestamps_real": torch.tensor(local_timestamps[None, :], device=self.device, dtype=torch.float32),
+                     "delta_T_real": torch.tensor(np.array(relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "current_timestamp": torch.tensor([current_timestamp], device=self.device, dtype=torch.float64),
                      "current_delta_t": torch.tensor([current_delta_t], device=self.device, dtype=torch.float32),
                      "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
