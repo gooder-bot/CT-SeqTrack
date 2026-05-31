@@ -163,9 +163,199 @@ full P5 configuration 退步，退步来源需要通过 A1/A2/A3 消融定位。
 
 ---
 
-## 4. 主要原因二：Dynamics 分支存在训练/测试分布不匹配
+## 4. 主要原因二：A1-raw 可能改变了原 SeqTrack3D 的时间输入分布
 
-### 4.1 相关代码
+当前 A1 的定义是：
+
+```yaml
+use_real_time: True
+time_encoding: raw
+use_dynamics_encoder: False
+use_observability_gate: False
+use_twc: False
+```
+
+也就是说，A1 只打开真实时间主链路，不打开 P3/P5/P4。它的退步如果成立，优先怀疑的是 **raw real time 的输入分布**，而不是 dynamics 或 gate。
+
+### 4.1 点云时间通道尺度改变
+
+模型输入点云不是只有 `xyz`，还有时间和前景先验通道，形式类似：
+
+```text
+[x, y, z, time, mask]
+```
+
+伪时间下，历史点云时间大致为：
+
+```text
+[-0.1, -0.2, -0.3, 0.0]
+```
+
+真实 nuScenes keyframe 约 2Hz，真实时间下变成：
+
+```text
+[-0.5, -1.0, -1.5, 0.0]
+```
+
+这会直接进入 PointNet 第一层。第一层本质上会做：
+
+```text
+feature = w_x*x + w_y*y + w_z*z + w_t*time + w_m*mask + bias
+```
+
+因此当 `time` 从 `-0.1` 变成 `-0.5` 时，`w_t*time` 这部分贡献会被放大约 5 倍。即使真实时间语义更合理，raw 数值尺度也可能破坏 PointNet 第一层、BatchNorm 和后续特征分布。
+
+结论：
+
+```text
+A1-raw 不是“无损地加入真实时间”，而是显著改变了点云输入分布。
+```
+
+### 4.2 Box corner timestamp 分布改变
+
+SeqTrack3D 的 Transformer 不只看点云，也看历史 box corner token。每个历史框会被转成 corner token：
+
+```text
+[x_corner, y_corner, z_corner, time]
+```
+
+伪时间下，box corner timestamp 大致为：
+
+```text
+[-0.1, -0.2, -0.3, 0.0]
+```
+
+真实时间下变成：
+
+```text
+[-0.5, -1.0, -1.5, 0.0]
+```
+
+这会改变 Transformer 中 query / key / value 的输入分布。原始 SeqTrack3D 中，`-0.1/-0.2/-0.3` 更像离散历史顺序编码；A1-raw 中，`-0.5/-1.0/-1.5` 会被当成更大幅度的连续标量输入。Transformer 可能不再按原来的方式理解历史框顺序和远近。
+
+结论：
+
+```text
+A1-raw 同时改变了 point feature 和 box token 两条时间路径。
+```
+
+### 4.3 raw TimeEncoding 不做归一化
+
+当前 `models/time_encoding.py` 中 raw 模式等价于：
+
+```python
+return time_values
+```
+
+也就是说：
+
+```text
+伪时间: -0.1, -0.2, -0.3
+真实时间: -0.5, -1.0, -1.5
+```
+
+会原封不动进入网络。`raw` 不做 log normalize、不做 clamp、不做可学习映射。它适合用来验证“真实秒数直接输入”的最小路径，但不一定是最稳的时间表达。
+
+相比之下：
+
+```text
+time_encoding=mlp:
+  先做 signed-log normalize，再用小 MLP 输出 1 维时间通道。
+
+time_encoding=fourier:
+  先做 signed-log normalize，再用 sin/cos 多频率特征编码，最后投影回 1 维时间通道。
+```
+
+注意：当前 `mlp` 和 `fourier` 都是 scalar-preserving，最后仍输出 1 维时间通道，不直接增加 PointNet/Transformer 输入维度。因此如果它们比 raw 好，更容易归因于“时间表达更合适”，而不是简单模型容量变大。
+
+### 4.4 A1-pseudo / A1-MLP / A1-Fourier 的诊断意义
+
+下一步应补三个 A1 变体：
+
+```text
+A1-raw:
+  use_real_time=True
+  time_encoding=raw
+
+A1-pseudo:
+  use_real_time=False
+  time_encoding=raw
+
+A1-MLP:
+  use_real_time=True
+  time_encoding=mlp
+
+A1-Fourier:
+  use_real_time=True
+  time_encoding=fourier
+```
+
+判断逻辑：
+
+| 现象 | 解释 | 下一步 |
+| --- | --- | --- |
+| A1-pseudo 接近 SeqTrack baseline，A1-raw 很低 | CT 代码主链路没坏，raw real time 尺度是主要问题 | 不再用 raw 作为主配置，优先看 MLP/Fourier |
+| A1-pseudo 也很低 | CT 当前实现和原 SeqTrack baseline 还有其他差异 | 查 point time、corner time、配置和 baseline 代码差异 |
+| A1-MLP/Fourier 明显高于 A1-raw | 真实时间方向有价值，但需要编码/归一化 | 将时间编码作为正式消融 |
+| A1-MLP/Fourier 仍很低 | 真实时间接入位置或训练策略仍不适配 | 回查时间通道注入方式 |
+| A2 Dynamics 仍显著高于所有 A1 变体 | 仅靠时间编码不够，显式 dynamics prior 是当前有效模块 | 保留 P3，继续修 P5 gate |
+
+一句话：
+
+```text
+A1-raw 退步可能不是 timestamp-native 思路错，而是 raw 秒数输入破坏了原模型习惯的时间尺度。
+```
+
+### 4.5 最新 A1 时间编码结果
+
+已完成 A1-pseudo / A1-MLP / A1-Fourier 三组实验，并和 SeqTrack baseline 对齐到同一张表。完整文件见：
+
+```text
+compare_results/a1_time_encoding_comparison.md
+compare_results/a1_time_encoding_metrics_summary.csv
+compare_results/a1_time_encoding_metrics_points.csv
+compare_results/a1_time_encoding_curves.png
+```
+
+主结果如下：
+
+| model | final success | best success | final precision | best precision |
+| --- | ---: | ---: | ---: | ---: |
+| SeqTrack baseline | 50.9858 | 52.2834 | 59.9617 | 65.2144 |
+| A1-pseudo | 48.3381 | 49.8917 | 52.2505 | 65.2385 |
+| A1-MLP | 27.4387 | 31.5700 | 26.2779 | 32.7757 |
+| A1-Fourier | 30.7232 | 31.0646 | 29.8151 | 30.3228 |
+
+补充参考：之前的 A1-raw 结果为：
+
+| model | final success | best success | final precision | best precision |
+| --- | ---: | ---: | ---: | ---: |
+| A1-raw | 28.2768 | 32.3556 | 27.4289 | 40.3611 |
+
+这轮结果带来的判断变化：
+
+1. **A1-pseudo 基本修复 success**。A1-pseudo final success 为 `48.3381`，只比 baseline final success 低 `2.6477` 点；best success 低 `2.3917` 点。这说明 CT 当前 A1 主链路不是完全坏掉，之前 A1-raw 的大幅退步确实和真实时间数值尺度强相关。
+2. **A1-pseudo 仍然存在 precision gap**。A1-pseudo final precision 为 `52.2505`，比 baseline final precision 低 `7.7112` 点；但 best precision 为 `65.2385`，略高于 baseline best `65.2144`。这说明模型有能力在某些 checkpoint 达到 baseline 级别中心定位，但后期稳定性或递归测试鲁棒性仍弱。
+3. **A1-MLP 和 A1-Fourier 没有救回 real-time A1**。二者 final success / precision 都接近 A1-raw，远低于 A1-pseudo 和 baseline。当前 scalar-preserving 的 MLP/Fourier 时间编码还不能直接作为有效创新点，需要继续改注入方式、初始化或尺度设计。
+4. **当前不能简单写成“加时间编码有效”**。更准确的表述是：伪时间尺度可以显著恢复 A1 表现；真实秒数输入即使经过当前 MLP/Fourier 编码仍然不稳定。问题已经从“raw 是否太大”推进到“真实时间该如何以不破坏原特征分布的方式接入”。
+
+下一步不建议继续堆更多频域变体，而应优先做一个更保守的时间尺度桥接：
+
+```text
+A1-scaled:
+  use_real_time=True
+  time_encoding=scaled_raw 或 normalized_raw
+  目标是把真实秒数映射回接近原伪时间的数值范围
+  例如 -0.5, -1.0, -1.5 -> -0.1, -0.2, -0.3
+```
+
+如果 A1-scaled 接近 A1-pseudo，说明主问题就是输入尺度；如果 A1-scaled 仍低于 A1-pseudo，则需要进一步检查 point time 和 box corner timestamp 的注入位置，而不是继续只换编码函数。
+
+---
+
+## 5. 主要原因三：Dynamics 分支存在训练/测试分布不匹配
+
+### 5.1 相关代码
 
 训练侧在 `datasets/sampler.py` 的 `motion_processing_mf()` 中构造历史 `ref_boxs`。当 `candidate_id != 0` 时，每一个历史框都会被加独立随机 offset：
 
@@ -196,7 +386,7 @@ velocity = displacement / gap.unsqueeze(-1)
 angular_velocity = angle_delta / gap
 ```
 
-### 4.2 为什么会导致掉点
+### 5.2 为什么会导致掉点
 
 训练时：
 
@@ -228,7 +418,7 @@ DynamicsEncoder 在训练中看到的是 random-offset history，
 - 后期 final 大幅下降，因为 dynamics/gate 可能学到了 mini 数据上的脆弱模式。
 - precision 下降比 success 更严重，因为中心漂移会首先拉低中心距离精度。
 
-### 4.3 需要怎么验证
+### 5.3 需要怎么验证
 
 必须先跑：
 
@@ -247,7 +437,7 @@ A2-disp: CT + Dynamics, dynamics_displacement_weight=0.01
 | A2 不退化但 A3 退化 | Gate 是主因 | 转向 residual gate / higher obs bias |
 | A2-disp 比 A2 稳 | dynamics 需要更强显式位移监督 | 保留小权重 displacement loss |
 
-### 4.4 建议修改
+### 5.4 建议修改
 
 短期先不改代码，先通过配置验证：
 
@@ -284,9 +474,9 @@ dynamics_candidate_zero_only: True
 
 ---
 
-## 5. 主要原因三：Observability Gate 当前是 feature replacement，融合过强
+## 6. 主要原因四：Observability Gate 当前是 feature replacement，融合过强
 
-### 5.1 相关代码
+### 6.1 相关代码
 
 `models/observability.py` 当前融合方式：
 
@@ -311,7 +501,7 @@ alpha_obs = 0.731
 alpha_dyn = 0.269
 ```
 
-### 5.2 为什么会导致掉点
+### 6.2 为什么会导致掉点
 
 P5 的意图是：
 
@@ -329,7 +519,7 @@ P5 的意图是：
 
 这会破坏原本已经能工作的 observation feature。尤其在递归测试时，错误先验不是只影响当前帧，而是会改变下一帧搜索区域。
 
-### 5.3 需要怎么验证
+### 6.3 需要怎么验证
 
 如果 A2 不退化，但 A3 退化，基本可以确认 P5 融合方式是主因。此时按顺序跑：
 
@@ -348,7 +538,7 @@ A3-res:  residual gate
 | residual gate 恢复 | feature replacement 是主因 | 改成 residual fusion |
 | 都不恢复 | P3 dynamics 或 obs_stats 本身无效 | 回到 A2 和 gate 分桶分析 |
 
-### 5.4 建议修改
+### 6.4 建议修改
 
 在 `models/observability.py` 或 `models/seqtrack3d.py` 中加入 gate 融合模式：
 
@@ -380,9 +570,9 @@ obs_gate_warmup_epoch: 5
 
 ---
 
-## 6. 次要但需要同步处理的问题
+## 7. 次要但需要同步处理的问题
 
-### 6.1 Dynamics 监督偏弱
+### 7.1 Dynamics 监督偏弱
 
 当前：
 
@@ -406,7 +596,7 @@ velocity_weight: 0.1
 dynamics_displacement_weight: 0.01
 ```
 
-### 6.2 缺少 gate 行为分桶分析
+### 7.2 缺少 gate 行为分桶分析
 
 仅看 `obs_alpha_dyn_mean` 不够。必须按困难条件分桶：
 
@@ -425,7 +615,7 @@ dense / high fg score -> alpha_obs 更高
 
 如果看不到这种趋势，P5 即使主表偶然涨点，也缺少论文解释力。
 
-### 6.3 Transformer 中仍有固定 4 帧假设
+### 7.3 Transformer 中仍有固定 4 帧假设
 
 `models/attn/Models.py` 中仍有：
 
@@ -442,7 +632,7 @@ hist_num=2 / 4 / 6
 
 建议暂缓修改，等 A1/A2/A3 跑清楚后再处理。否则容易把 shape 改动和模块收益混在一起。
 
-### 6.4 优化稳定性
+### 7.4 优化稳定性
 
 当前 P5 full 的正式训练 hparams 中：
 
@@ -460,7 +650,7 @@ gradient_clip_val: 1.0
 
 ---
 
-## 7. 下一步实验顺序
+## 8. 下一步实验顺序
 
 ### Step 1：复测已保存 CT checkpoint
 
@@ -489,30 +679,31 @@ last.ckpt
 2. 区分“训练后期退化”和“评估随机波动”。
 3. 为论文保留一个诚实的 early checkpoint 观察，而不是只用 final 下结论。
 
-### Step 2：跑 A1 CT-base
+### Step 2：跑 A1 时间编码诊断
 
-配置：
+先补 A1-pseudo、A1-MLP、A1-Fourier，用来判断 A1-raw 退步是否来自 raw 时间尺度。
+
+基础配置：
 
 ```yaml
-use_real_time: True
-time_encoding: raw
 use_dynamics_encoder: False
 use_observability_gate: False
 use_twc: False
 ```
 
+三组变体：
+
+```text
+A1-pseudo:  use_real_time=False, time_encoding=raw
+A1-MLP:     use_real_time=True,  time_encoding=mlp
+A1-Fourier: use_real_time=True,  time_encoding=fourier
+```
+
 目的：
 
 ```text
-验证 P0-P2 timestamp-native 主链路是否安全。
+区分 CT 主链路问题、raw real time 尺度问题和时间编码形式问题。
 ```
-
-判断：
-
-| A1 结果 | 结论 |
-| --- | --- |
-| 接近 baseline | timestamp-native 主线安全，可以继续 P3 |
-| 明显低于 baseline | 先查 time fields / TimeEncoding / point timestamp / box corner timestamp |
 
 ### Step 3：跑 A2 Dynamics-only
 
@@ -625,12 +816,15 @@ CT + Dynamics + TWC
 
 ---
 
-## 8. 需要新增或修改的配置文件
+## 9. 需要新增或修改的配置文件
 
 建议新增：
 
 ```text
 cfgs/seqtrack3d_nuscenes_mini_a1_ct_base.yaml
+cfgs/seqtrack3d_nuscenes_mini_a1_pseudo.yaml
+cfgs/seqtrack3d_nuscenes_mini_a1_mlp.yaml
+cfgs/seqtrack3d_nuscenes_mini_a1_fourier.yaml
 cfgs/seqtrack3d_nuscenes_mini_a2_dyn.yaml
 cfgs/seqtrack3d_nuscenes_mini_a2_dyn_cand1.yaml
 cfgs/seqtrack3d_nuscenes_mini_a2_dyn_disp.yaml
@@ -642,9 +836,9 @@ cfgs/seqtrack3d_nuscenes_mini_a3_gate_residual.yaml
 
 ---
 
-## 9. 需要新增或修改的代码
+## 10. 需要新增或修改的代码
 
-### 9.1 `datasets/sampler.py`
+### 10.1 `datasets/sampler.py`
 
 短期建议：
 
@@ -662,7 +856,7 @@ cfgs/seqtrack3d_nuscenes_mini_a3_gate_residual.yaml
 支持 candidate 0 / 非 0 的 dynamics loss 和 ref_boxs 差分诊断。
 ```
 
-### 9.2 `models/seqtrack3d.py`
+### 10.2 `models/seqtrack3d.py`
 
 建议增加日志：
 
@@ -685,7 +879,7 @@ dynamics_candidate_zero_only: True
 
 让非 0 candidate 不参与 dynamics loss，或者把其 `z_dyn` 置零做对照。
 
-### 9.3 `models/observability.py`
+### 10.3 `models/observability.py`
 
 建议增加：
 
@@ -713,7 +907,7 @@ if max_dyn_alpha is not None:
 
 注意：如果 clamp 以后要重新归一化，只用于 replacement；如果 residual 模式，`alpha_dyn` 可以直接作为残差强度，不必强制 `alpha_obs + alpha_dyn = 1`。
 
-### 9.4 `tools/`
+### 10.4 `tools/`
 
 建议新增一个轻量分析脚本：
 
@@ -735,7 +929,7 @@ tools/check_dynamics_stats.py
 
 ---
 
-## 10. 需要拉取的 TensorBoard 标量
+## 11. 需要拉取的 TensorBoard 标量
 
 在服务器上优先检查这些标量：
 
@@ -766,7 +960,7 @@ obs_current_delta_t_ratio
 
 ---
 
-## 11. 论文表述
+## 12. 论文表述
 
 当前不要写：
 
@@ -792,7 +986,7 @@ are weakly constrained and fused too aggressively at the feature level.
 
 ---
 
-## 12. 当前最终判断
+## 13. 当前最终判断
 
 本轮退步最可能来自两个叠加因素：
 

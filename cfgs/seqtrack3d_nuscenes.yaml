@@ -27,8 +27,9 @@ limit_num_points_in_prev_box: 1 # A box is considered empty if it contains fewer
 use_real_time: True # Use real timestamps instead of fixed pseudo time.
 default_time_step: 0.5 # nuScenes keyframes are approximately 2Hz.
 pseudo_time_step: 0.1 # Original SeqTrack3D fixed pseudo-time interval for ablation.
-time_encoding: raw # raw | mlp | fourier. Raw keeps the current scalar timestamp behavior.
+time_encoding: raw # raw | scaled_raw | mlp | fourier. scaled_raw maps real seconds back to pseudo-time scale.
 time_scale: 0.5 # Normalization scale for time encoding.
+time_output_scale: 0.1 # Output scale for time_encoding=scaled_raw.
 time_clip: 4.0 # Clamp signed log-scaled time to this range.
 time_fourier_bands: 4 # Number of Fourier frequency bands when time_encoding=fourier.
 time_hidden_dim: 16 # Hidden dimension when time_encoding=mlp.

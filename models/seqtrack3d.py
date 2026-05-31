@@ -40,6 +40,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             clip=getattr(config, 'time_clip', 4.0),
             fourier_bands=getattr(config, 'time_fourier_bands', 4),
             hidden_dim=getattr(config, 'time_hidden_dim', 16),
+            output_scale=getattr(config, 'time_output_scale', getattr(config, 'pseudo_time_step', 0.1)),
         )
         self.seg_pointnet = SegPointNet(input_channel=3 + 1 + 1 + (9 if self.box_aware else 0),
                                         per_point_mlp1=[64, 64, 64, 128, 1024],

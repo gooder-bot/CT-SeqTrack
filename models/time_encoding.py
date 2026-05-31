@@ -5,23 +5,36 @@ from torch import nn
 
 
 class TimeEncoding(nn.Module):
-    def __init__(self, mode="raw", scale=0.5, clip=4.0, fourier_bands=4, hidden_dim=16):
+    def __init__(
+        self,
+        mode="raw",
+        scale=0.5,
+        clip=4.0,
+        fourier_bands=4,
+        hidden_dim=16,
+        output_scale=0.1,
+    ):
         super().__init__()
         self.mode = str(mode).lower()
         self.scale = float(scale) if scale is not None else 0.5
         self.clip = float(clip) if clip is not None else 4.0
         self.fourier_bands = int(fourier_bands)
         self.hidden_dim = int(hidden_dim)
+        self.output_scale = float(output_scale) if output_scale is not None else 0.1
 
         if self.scale <= 0:
             raise ValueError("time encoding scale must be positive.")
         if self.clip <= 0:
             raise ValueError("time encoding clip must be positive.")
+        if self.output_scale <= 0:
+            raise ValueError("time encoding output_scale must be positive.")
 
         if self.mode in ("none", "identity"):
             self.mode = "raw"
+        if self.mode in ("scaled", "raw_scaled", "normalized_raw"):
+            self.mode = "scaled_raw"
 
-        if self.mode == "raw":
+        if self.mode in ("raw", "scaled_raw"):
             return
 
         if self.mode == "mlp":
@@ -56,6 +69,8 @@ class TimeEncoding(nn.Module):
     def forward(self, time_values):
         if self.mode == "raw":
             return time_values
+        if self.mode == "scaled_raw":
+            return time_values * (self.output_scale / self.scale)
 
         tau = self._normalize(time_values)
 
