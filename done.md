@@ -1,8 +1,52 @@
-# CT-SeqTrack 工程日志
+# CT-SeqTrack 已完成记录
 
-更新时间：2026-05-27
+更新时间：2026-06-01
 
-这份文件记录已经完成的工程验收、关键输出和常用命令。当前执行清单见 `need_to_do.md`，研究计划见 `refined_plan.md`。
+这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
+
+注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
+
+---
+
+## 0. 完成总览
+
+### 工程链路
+
+- [x] P0：真实时间字段主链路闭合。
+- [x] P1：真实时间 batch 字段、CPU forward、GPU loss、2-step train smoke test 通过。
+- [x] P2：scalar-preserving `TimeEncoding` 已实现，`raw / mlp / fourier` smoke test 通过。
+- [x] P3：`DynamicsEncoder` / Velocity Branch 已实现，forward / loss / 2-step train smoke test 通过。
+- [x] P4：Time-resampling Consistency 已实现，paired batch / forward / loss / 2-step train smoke test 通过。
+- [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
+- [x] 当前五组新消融 YAML 已创建：
+
+```text
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml
+cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
+cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
+```
+
+### 已完成实验
+
+完整结果文件位于 `compare_results/`，简洁叙事见 `sum_results.md`。
+
+- [x] `SeqTrack baseline vs CT-SeqTrack P5 full`：P5 full final 明显退化，说明不能把 real time、dynamics、gate 混在一起下结论。
+- [x] `A1-raw vs A2 raw-dyn`：A1-raw 崩坏，A2 raw-dyn 明显恢复，说明 dynamics 分支有价值，但 raw real-time 主干路径有问题。
+- [x] `A1-pseudo / A1-MLP / A1-Fourier`：A1-pseudo 接近 baseline，MLP/Fourier 没有救回 real-time A1，说明问题不是简单时间编码函数。
+- [x] `A1-scaled / A2-scaled-dyn`：缩放 real time 仍未修复，说明主干对时间 token 语义敏感，不只是数值尺度问题。
+- [x] `A1-order / A2-order-dyn`：恢复 order-time 主干后，A1-order 基本修复 A1 崩坏；A2-order-dyn final precision 高于 baseline，是当前最强正向信号。
+
+### 当前结论
+
+```text
+真实时间方向没有被否定；
+当前最稳路线是保留 SeqTrack3D 主干的 order-time 语义，
+把真实 delta_t 放进 DynamicsEncoder 作为运动先验。
+```
+
+后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
 
 ---
 
@@ -481,7 +525,7 @@ loss_total 与 grad_norm 均 finite，P3 工程验收完成，可以进入 P4。
 .gitignore
 need_to_do.md
 refined_plan.md
-log.md
+done.md
 CT-SeqTrack/models/time_encoding.py
 CT-SeqTrack/models/dynamics.py
 CT-SeqTrack/models/seqtrack3d.py

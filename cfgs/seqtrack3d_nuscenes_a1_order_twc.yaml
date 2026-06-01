@@ -1,0 +1,98 @@
+dataset: nuscenes_mf
+path: /home/lishengjie/data/nuscenes-mini
+version: v1.0-mini
+category_name: Car
+bb_scale: 1.25
+bb_offset: 2
+point_sample_size: 1024
+degrees: false
+coordinate_mode: velodyne
+up_axis:
+- 0
+- 0
+- 1
+preload_offset: 10
+data_limit_box: true
+key_frame_only: true
+train_split: mini_train
+val_split: mini_val
+test_split: mini_val
+train_type: train_motion_mf
+num_candidates: 1
+motion_threshold: 0.15
+use_augmentation: false
+hist_num: 3
+empty_box_limit: 3
+limit_num_points_in_prev_box: 1
+
+# A1-order+TWC: baseline order-time tokens in the main branch, no dynamics,
+# paired historical views for time-resampling consistency.
+use_real_time: true
+main_time_source: order
+main_time_current: 0.1
+default_time_step: 0.5
+pseudo_time_step: 0.1
+time_encoding: raw
+time_scale: 0.5
+time_clip: 4.0
+time_fourier_bands: 4
+time_hidden_dim: 16
+
+use_dynamics_encoder: false
+dynamics_hidden_dim: 128
+dynamics_eps: 0.001
+dynamics_use_query_gap: true
+dynamics_motion_mode: feature
+dynamics_displacement_weight: 0.0
+velocity_weight: 0.05
+dynamics_use_acceleration: false
+use_observability_gate: false
+obs_gate_hidden_dim: 64
+obs_gate_num_stats: 5
+obs_gate_entropy_weight: 0.0
+obs_gate_init_obs_bias: 1.0
+obs_gate_min_dyn_valid: 0.5
+obs_gate_log_stats: true
+obs_stats_detach_seg: true
+use_twc: true
+twc_weight: 0.05
+twc_theta_weight: 0.5
+twc_view_a_offsets:
+- 1
+- 2
+- 3
+twc_view_b_offsets:
+- 1
+- 3
+- 5
+twc_full_history_only: true
+twc_candidate_zero_only: true
+twc_warmup_epoch: 0
+twc_timestamp_eps: 1.0e-06
+twc_anchor_eps: 0.0001
+twc_delta_eps: 1.0e-05
+
+net_model: seqtrack3d
+box_aware: true
+center_weight: 2
+angle_weight: 10.0
+seg_weight: 0.1
+bc_weight: 1
+ref_center_weight: 0.2
+ref_angle_weight: 1
+motion_cls_seg_weight: 0.1
+use_z: true
+limit_box: false
+IoU_space: 3
+
+batch_size: 2
+workers: 10
+epoch: 180
+from_epoch: 0
+lr: 0.0001
+max_lr: 0.001
+optimizer: Adam
+lr_decay_step: 20
+lr_decay_rate: 0.1
+wd: 0
+gradient_clip_val: 0.0

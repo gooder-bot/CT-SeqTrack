@@ -2,7 +2,18 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：P0-P5 的工程链路已经实现并通过 smoke test，但 P5 full 第一轮结果还不是正向结论。当前差距诊断、代码原因和下一步消融计划见 `gap_analysis.md`。
+当前仓库是研究快照：P0-P5 的工程链路已经实现并通过 smoke test；已有实验显示，直接把真实时间替换进 SeqTrack3D 主干时间 token 并不稳定，当前更稳的主线是保留 order-time 主干语义，并把真实 `delta_t/current_delta_t` 作为 `DynamicsEncoder` 的运动先验。已完成记录见 `done.md`，简洁实验结论见 `sum_results.md`，下一步消融计划见 `need_to_do.md`。
+
+## 文档导航
+
+| 文件 | 作用 |
+| --- | --- |
+| `README.md` | 项目入口、当前主线、环境和命令索引 |
+| `refined_plan.md` | 研究定位、论文边界、贡献叙事和 related work 边界 |
+| `sum_results.md` | 按时间顺序总结已有实验说明了什么 |
+| `need_to_do.md` | 当前和未来任务，只放还没有完成的事情 |
+| `done.md` | 已完成工程验收、历史实验和关键输出归档 |
+| `compare_results/` | 完整指标表、曲线和实验结果文件 |
 
 ---
 
@@ -33,7 +44,7 @@ to timestamp-native variable-rate state estimation.
 
 ## 核心创新点
 
-### 1. Timestamp-native Seq2Seq 3D SOT
+### 1. Timestamp-native 输入契约
 
 训练侧和测试侧都提供真实时间字段：
 
@@ -45,13 +56,13 @@ current_timestamp
 current_delta_t
 ```
 
-点云时间通道和历史 box corner token 共用 `TimeEncoding`。支持：
+工程上已经打通真实时间字段链路，并支持点云时间通道和历史 box corner token 共用 `TimeEncoding`。支持：
 
 ```text
 raw | mlp | fourier
 ```
 
-默认使用 `raw`，保持时间输入的 scalar 行为，避免把收益混到模型容量增加里。
+注意：当前实验不支持继续把真实秒数直接塞进主干时间 token。更稳的用法是让主干保持 SeqTrack3D 的 order-time 语义，把真实时间主要交给 dynamics prior 使用。
 
 ### 2. Dynamics / Velocity Branch
 
@@ -118,7 +129,21 @@ current_delta_t / time_scale
 use_observability_gate: False
 ```
 
-注意：当前 P5 feature-level gate 仍在诊断中。第一轮 P5 full 在 nuScenes-mini 上不稳定，主要怀疑是 dynamics feature 约束偏弱且融合方式过强。详细分析见 `gap_analysis.md`。
+注意：旧版 P5 full 同时混入 raw real-time 主干、dynamics 和 gate，不能作为最终 gate 结论。后续 gate 消融应基于干净的 order-time 主干和保守 observation-biased gate 重新验证。
+
+---
+
+## 术语速查
+
+| 名称 | 含义 |
+| --- | --- |
+| `A1-order` | 主干使用 SeqTrack3D order-time，关闭 dynamics / TWC / gate |
+| `A2-order-dyn` | 主干使用 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder` |
+| `cand1` | `num_candidates=1`，不是 `candidate_id=1` |
+| `cand4` | 默认多 candidate，包含 `candidate_id=0/1/2/3` |
+| `disp` | 在 dynamics 上增加小权重 displacement 监督 |
+| `TWC` | Time-resampling Consistency，不同历史采样路径到同一当前时刻的一致性 |
+| `gate-safe` | 更保守的 observation-biased observability gate |
 
 ---
 
@@ -129,20 +154,19 @@ use_observability_gate: False
 | P0 | 真实时间字段主链路 | 已完成 |
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
-| P3 | Dynamics / Velocity Branch | 已实现，默认关闭 |
-| P4 | Time-resampling Consistency | 已实现，默认关闭 |
-| P5 | Observability Gate | 已实现，默认关闭，正在诊断 |
-| Evaluation | 正式消融和困难子集评估 | 下一步 |
+| P3 | Dynamics / Velocity Branch | 已实现，默认关闭，`A2-order-dyn` 是当前最强正向信号 |
+| P4 | Time-resampling Consistency | 已实现，默认关闭，等待 order-time 消融验证 |
+| P5 | Observability Gate | 已实现，默认关闭，旧 P5 full 不能作为最终结论 |
+| Evaluation | 当前五组消融和困难子集评估 | 下一步 |
 
 当前最重要的消融顺序：
 
 ```text
-A0: SeqTrack baseline
-A1: CT-base, dynamics=False, gate=False
-A2: CT + Dynamics, gate=False
-A2-lite: CT + Dynamics, num_candidates=1
-A3-safe: CT + Dynamics + Gate, higher observation bias
-A3-res: CT + Dynamics + residual gate
+1. A2-order-dyn-cand1
+2. A2-order-dyn-disp
+3. A1-order+TWC
+4. A2-order-dyn+TWC
+5. A3-order-gate-safe
 ```
 
 ---
@@ -153,6 +177,11 @@ A3-res: CT + Dynamics + residual gate
 cfgs/
   seqtrack3d_nuscenes.yaml              # 默认 CT-base 配置，新模块默认关闭
   seqtrack3d_nuscenes_p5_obs_gate.yaml  # P5 gate 实验配置
+  seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml
+  seqtrack3d_nuscenes_a2_order_dyn_disp.yaml
+  seqtrack3d_nuscenes_a1_order_twc.yaml
+  seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
+  seqtrack3d_nuscenes_a3_order_gate_safe.yaml
   seqtrack3d_waymo.yaml                 # Waymo 配置
 
 datasets/
@@ -177,10 +206,10 @@ compare_results/
   metrics_summary.csv
   metrics_points.csv
 
-gap_analysis.md                         # 当前差距诊断与消融计划
-need_to_do.md                           # 当前执行清单
+need_to_do.md                           # 下一步和未来任务
+done.md                                 # 已完成工程验收和实验记录
+sum_results.md                          # 简洁实验结论
 refined_plan.md                         # 研究定位、贡献和论文边界
-log.md                                  # 工程验收日志
 ```
 
 ---
@@ -280,42 +309,31 @@ python tools/check_train_steps.py \
 
 ## 训练与测试
 
-### CT-base
+当前正式消融命令以 `need_to_do.md` 为准。除 `--cfg` 和 `--tag` 外，下一批实验统一保持：
 
-默认 `seqtrack3d_nuscenes.yaml` 中：
-
-```yaml
-use_dynamics_encoder: False
-use_observability_gate: False
-use_twc: False
+```text
+--batch_size 16
+--epoch 60
+--workers 12
+--seed 42
+--preloading
+--check_val_every_n_epoch 5
 ```
 
-训练命令：
+示例：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python main.py \
-  --cfg cfgs/seqtrack3d_nuscenes.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --batch_size 2 \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml \
+  --batch_size 16 \
   --epoch 60 \
+  --workers 12 \
   --seed 42 \
-  --tag "ct_base_mini_car_60ep"
-```
-
-### P5 Gate 实验
-
-```bash
-CUDA_VISIBLE_DEVICES=0 \
-python main.py \
-  --cfg cfgs/seqtrack3d_nuscenes_p5_obs_gate.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --batch_size 2 \
-  --epoch 60 \
-  --seed 42 \
-  --tag "ct_p5_obs_gate_mini_car_60ep"
+  --preloading \
+  --check_val_every_n_epoch 5 \
+  --tag ct_a2_order_dyn_cand1_car_60ep_bs16
 ```
 
 ### 测试 checkpoint
@@ -337,23 +355,26 @@ output/<time>-<config>-<tag>/
 
 ## 当前实验诊断
 
-第一轮 nuScenes-mini 对比：
+关键 nuScenes-mini 对比：
 
-| model | success best | precision best | success final | precision final |
-| --- | ---: | ---: | ---: | ---: |
-| SeqTrack baseline | 52.2834 | 65.2144 | 50.9858 | 59.9617 |
-| CT-SeqTrack P5 full | 44.9836 | 62.5120 | 31.1937 | 31.8851 |
+| model | success final | precision final | 说明 |
+| --- | ---: | ---: | --- |
+| SeqTrack baseline | 50.99 | 59.96 | 原始基线 |
+| CT-SeqTrack P5 full | 31.19 | 31.89 | 混入 raw real-time 主干、dynamics、gate，不能单独归因 |
+| A1-order | 51.23 | 57.86 | 恢复 order-time 主干后基本修复 A1 崩坏 |
+| A2-order-dyn | 50.96 | 63.31 | 当前最强正向信号，precision 高于 baseline |
 
 解释：
 
-- P5 full 当前不是最终正向结果。
-- early precision peak 说明模型仍有定位能力。
-- 后期崩坏更像是 dynamics train-test distribution mismatch 和 gate feature replacement 共同造成的不稳定。
+- 真实时间方向没有被否定，失败主要来自不合适的注入方式。
+- 当前不应继续把 raw / MLP / Fourier real-time token 作为主干主线。
+- 后续 TWC 和 gate 都应基于 `A1-order / A2-order-dyn` 继续验证。
 
-完整诊断见：
+简洁实验结论和后续计划见：
 
 ```text
-gap_analysis.md
+sum_results.md
+need_to_do.md
 ```
 
 ---
@@ -367,12 +388,21 @@ gap_analysis.md
 - Mamba / SSM tracker
 - 首次解决 sparse / occlusion 3D SOT
 - P5 full 已经取得最终正向结果
+- CT-SeqTrack full model 已经稳定超过 SeqTrack3D
 
 更稳的贡献表述是：
 
 ```text
 We convert SeqTrack3D from fixed-step frame sequence learning
 to timestamp-native variable-rate state estimation.
+```
+
+当前更具体的实验表述是：
+
+```text
+Preserving SeqTrack3D's order-time semantics while injecting real delta_t
+through a timestamp-conditioned dynamics prior is currently more stable than
+directly replacing the main branch time tokens with raw timestamps.
 ```
 
 ---
