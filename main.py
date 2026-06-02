@@ -29,6 +29,8 @@ import datetime
 import time
 
 def generate_log_folder_name(cfg):
+    if cfg.get('log_dir'):
+        return cfg['log_dir']
     now = datetime.datetime.now()
     time_str = now.strftime("%Y%m%d-%H%M")
     cfg_name = cfg['cfg'].split("/")[-1].replace(".yaml", "")

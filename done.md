@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-06-01
+更新时间：2026-06-02
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -18,7 +18,7 @@
 - [x] P3：`DynamicsEncoder` / Velocity Branch 已实现，forward / loss / 2-step train smoke test 通过。
 - [x] P4：Time-resampling Consistency 已实现，paired batch / forward / loss / 2-step train smoke test 通过。
 - [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
-- [x] 当前五组新消融 YAML 已创建：
+- [x] 当前六组新消融 YAML 已创建：
 
 ```text
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml
@@ -26,6 +26,7 @@ cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml
 cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
+cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 ```
 
 ### 已完成实验
@@ -37,6 +38,8 @@ cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
 - [x] `A1-pseudo / A1-MLP / A1-Fourier`：A1-pseudo 接近 baseline，MLP/Fourier 没有救回 real-time A1，说明问题不是简单时间编码函数。
 - [x] `A1-scaled / A2-scaled-dyn`：缩放 real time 仍未修复，说明主干对时间 token 语义敏感，不只是数值尺度问题。
 - [x] `A1-order / A2-order-dyn`：恢复 order-time 主干后，A1-order 基本修复 A1 崩坏；A2-order-dyn final precision 高于 baseline，是当前最强正向信号。
+- [x] `A2-order-dyn-cand1 / A2-order-dyn-disp`：cand1 在 60 epoch 协议下明显退化但 step 未对齐；disp 与 A2-order-dyn 基本持平，precision 小幅更高。
+- [x] `A1-order+TWC / A2-order-dyn+TWC`：两组已跑完并整理，但 `twc_valid_ratio=0`，说明 TWC 项未激活；这些结果不能作为 TWC 有效或无效的最终结论。
 
 ### 当前结论
 
@@ -47,6 +50,73 @@ cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-06-02：cand1 / disp / order+TWC 正式结果整理
+
+### cand1 / displacement 诊断
+
+关键结果：
+
+```text
+SeqTrack baseline final:    success 50.99, precision 59.96
+A2-order-dyn final:         success 50.96, precision 63.31
+A2-order-dyn-cand1 final:   success 26.68, precision 24.50
+A2-order-dyn-disp final:    success 50.54, precision 63.85
+```
+
+判断：
+
+- `A2-order-dyn-cand1` 明显退化，但 `num_candidates=1` 让 60 epoch 只有约 18899 step，而 cand4 的 A2-order-dyn 是 75719 step；当前只能说明 60 epoch cand1 协议不稳，不能彻底判死 candidate noise 假设。
+- `A2-order-dyn-disp` 与 `A2-order-dyn` 基本持平，final precision 高 0.53；小权重 displacement loss 不伤主线，但不是决定性收益来源。
+
+归档文件：
+
+```text
+compare_results/cand1_disp_dynamics_comparison.md
+compare_results/cand1_disp_dynamics_metrics_summary.csv
+compare_results/cand1_disp_dynamics_metrics_points.csv
+compare_results/cand1_disp_dynamics_curves.png
+compare_results/cand1_disp_dynamics_best_final_summary.png
+```
+
+### order+TWC 诊断
+
+关键结果：
+
+```text
+A1-order final:          success 51.23, precision 57.86
+A1-order+TWC final:      success 45.61, precision 50.77
+A2-order-dyn final:      success 50.96, precision 63.31
+A2-order-dyn+TWC final:  success 38.27, precision 38.85
+```
+
+关键诊断：
+
+```text
+两组 order+TWC 的 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap
+全程为 0。
+```
+
+判断：
+
+- 当前两组 order+TWC 不是 active-TWC 训练结果，而是 paired-view / cand1 / reduced-step 训练结果。
+- 下降幅度不能解释成 TWC 与 order-time 主干或 dynamics prior 不兼容。
+- 下一步应先修复 TWC validity / logging，使 `twc_valid_ratio` 非 0 后，先重跑 `A1-order+TWC`，再重跑 `A2-order-dyn+TWC`。
+
+归档文件：
+
+```text
+compare_results/twc_order_ablation_comparison.md
+compare_results/twc_order_ablation_metrics_summary.csv
+compare_results/twc_order_ablation_metrics_points.csv
+compare_results/twc_order_ablation_twc_diagnostics_summary.csv
+compare_results/twc_order_ablation_curves.png
+compare_results/twc_order_ablation_step_aligned_curves.png
+compare_results/twc_order_ablation_delta_summary.png
+compare_results/twc_order_ablation_twc_diagnostics.png
+```
 
 ---
 

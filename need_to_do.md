@@ -36,17 +36,23 @@
 | `A2-order-dyn` | 主干 order-time，真实时间只进入 `DynamicsEncoder` |
 | `TWC` | 不同历史采样路径到同一当前时刻的一致性 |
 | `gate-safe` | 保守 observation-biased gate，避免旧 P5 full 的强融合问题 |
+| `conf-res` | confidence residual gate，只用 dynamics 做小幅 motion residual 修正 |
 
-## 1. 当前五组消融实验
+## 1. 当前消融实验
 
-当前要跑：
+当前批次：
 
 ```text
+已跑并整理：
 1. A2-order-dyn-cand1
 2. A2-order-dyn-disp
 3. A1-order+TWC
 4. A2-order-dyn+TWC
-5. A3-order-gate-safe
+
+待跑或待重跑：
+5. 同步 TWC validity 修复后重跑 A1-order+TWC / A2-order-dyn+TWC
+6. A3-order-gate-safe
+7. A3-order-conf-res-gate
 ```
 
 对应配置：
@@ -57,6 +63,7 @@ cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml
 cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
+cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 ```
 
 统一训练命令参数：
@@ -74,13 +81,14 @@ cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
 
 | 实验 | cfg | tag | 状态 | final success | final precision | 结论 |
 | --- | --- | --- | --- | ---: | ---: | --- |
-| A2-order-dyn-cand1 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml` | `ct_a2_order_dyn_cand1_car_60ep_bs16` | 未跑 | - | - | - |
-| A2-order-dyn-disp | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml` | `ct_a2_order_dyn_disp_car_60ep_bs16` | 未跑 | - | - | - |
-| A1-order+TWC | `cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml` | `ct_a1_order_twc_car_60ep_bs16` | 未跑 | - | - | - |
-| A2-order-dyn+TWC | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml` | `ct_a2_order_dyn_twc_car_60ep_bs16` | 未跑 | - | - | - |
+| A2-order-dyn-cand1 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml` | `ct_a2_order_dyn_cand1_car_60ep_bs16` | 已跑已整理 | 26.68 | 24.50 | 明显退化；但 60 epoch 只有约 1/4 step，需等 step 复核才可最终判断 candidate noise。 |
+| A2-order-dyn-disp | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml` | `ct_a2_order_dyn_disp_car_60ep_bs16` | 已跑已整理 | 50.54 | 63.85 | 与 A2-order-dyn 基本持平，precision 小幅更高；可作为温和稳定项继续观察。 |
+| A1-order+TWC | `cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml` | `ct_a1_order_twc_car_60ep_bs16` | 已跑，本地已修 validity，待重跑 | 45.61 | 50.77 | `twc_valid_ratio=0` 来自 order-time `delta_T` 判定误杀；同步修复后重跑。 |
+| A2-order-dyn+TWC | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml` | `ct_a2_order_dyn_twc_car_60ep_bs16` | 已跑，本地已修 validity，待重跑 | 38.27 | 38.85 | `twc_valid_ratio=0` 且 cand1 / step 不对齐；同步修复后重跑。 |
 | A3-order-gate-safe | `cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml` | `ct_a3_order_gate_safe_car_60ep_bs16` | 未跑 | - | - | - |
+| A3-order-conf-res-gate | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_car_60ep_bs16` | 未跑 | - | - | - |
 
-跑完每组后，先填这个表，再更新 `sum_results.md` 和 `done.md`。如果要多卡并行，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。
+跑完每组后，先填这个表，再更新 `sum_results.md` 和 `done.md`。如果要多卡并行，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。当前 TWC 两组已经产出曲线和表格，但在服务器同步并验证新的 TWC validity 前不要作为 active-TWC 结论写入论文。
 
 ### 1.1 A2-order-dyn-cand1
 
@@ -176,7 +184,8 @@ use_dynamics_encoder: false
 use_observability_gate: false
 use_twc: true
 main_time_source: order
-num_candidates: 1
+num_candidates: 4
+twc_candidate_zero_only: false
 ```
 
 结果解读：
@@ -184,10 +193,18 @@ num_candidates: 1
 - 如果提升，说明 TWC 自身对 variable-rate / historical path consistency 有价值。
 - 如果不提升，先检查 `twc_valid_ratio`、TWC 权重、paired view 构造和 mini 数据规模。
 
+当前实测结果：
+
+```text
+final success 45.61，final precision 50.77。
+但 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap 全程为 0，
+所以这不是 active-TWC 结果。下一步同步本地 TWC validity 修复，先用检查脚本验证，再重跑。
+```
+
 命令：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=2 \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python main.py \
   --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
@@ -197,7 +214,7 @@ python main.py \
   --seed 42 \
   --preloading \
   --check_val_every_n_epoch 5 \
-  --tag ct_a1_order_twc_car_60ep_bs16
+  --tag ct_a1_order_twc_cand4_validfix_car_60ep_bs16
 ```
 
 ### 1.4 A2-order-dyn+TWC
@@ -215,7 +232,8 @@ use_dynamics_encoder: true
 use_observability_gate: false
 use_twc: true
 main_time_source: order
-num_candidates: 1
+num_candidates: 4
+twc_candidate_zero_only: false
 ```
 
 结果解读：
@@ -224,10 +242,19 @@ num_candidates: 1
 - 如果只比 `A1-order+TWC` 好，说明 dynamics 仍是主要收益来源。
 - 如果退化，暂时不要继续叠 gate，先检查 `twc_weight / twc_valid_ratio / loss_twc`。
 
+当前实测结果：
+
+```text
+final success 38.27，final precision 38.85。
+但 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap 全程为 0，
+且 num_candidates=1 导致 60 epoch 只有约 18899 step。
+因此当前下降不能解读为 TWC 与 dynamics 不兼容。
+```
+
 命令：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=3 \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python main.py \
   --cfg cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml \
@@ -237,7 +264,7 @@ python main.py \
   --seed 42 \
   --preloading \
   --check_val_every_n_epoch 5 \
-  --tag ct_a2_order_dyn_twc_car_60ep_bs16
+  --tag ct_a2_order_dyn_twc_cand4_validfix_car_60ep_bs16
 ```
 
 ### 1.5 A3-order-gate-safe
@@ -279,7 +306,71 @@ python main.py \
   --tag ct_a3_order_gate_safe_car_60ep_bs16
 ```
 
-## 2. 五组实验完成后的整理任务
+### 1.6 A3-order-conf-res-gate
+
+目的：
+
+```text
+测试比 gate-safe 更保守的 confidence residual gate：
+不在 feature 空间替换 observation，而是在 motion 空间用 dynamics 做小幅残差修正。
+```
+
+关键设置：
+
+```yaml
+use_dynamics_encoder: true
+use_observability_gate: true
+use_twc: false
+main_time_source: order
+obs_gate_fusion_mode: confidence_residual
+obs_gate_init_obs_bias: 3.0
+obs_gate_residual_scale: 0.1
+obs_gate_max_dyn_alpha: 0.2
+dynamics_motion_mode: feature
+```
+
+候选语义：
+
+```text
+obs_motion_pred = motion_mlp(point_feature)
+alpha_dyn = clamp(alpha_dyn, 0, obs_gate_max_dyn_alpha)
+motion_pred_xyz = obs_motion_pred_xyz
+                + obs_gate_residual_scale * alpha_dyn * dynamics_displacement_pred
+```
+
+结果解读：
+
+- 如果优于 `A3-order-gate-safe`，说明 feature replacement 太激进，residual correction 更安全。
+- 如果优于 `A2-order-dyn`，说明 observability-aware dynamics 修正确实能带来额外收益。
+- 如果总体持平但 sparse / long-delta_t 子集提升，也可以作为困难场景增强模块。
+- 如果仍退化，优先检查 `obs_alpha_dyn_raw_mean / obs_alpha_dyn_clamped_mean / obs_dyn_residual_norm`。
+
+命令：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+python main.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml \
+  --batch_size 16 \
+  --epoch 60 \
+  --workers 12 \
+  --seed 42 \
+  --preloading \
+  --check_val_every_n_epoch 5 \
+  --tag ct_a3_order_conf_res_gate_car_60ep_bs16
+```
+
+## 2. 当前消融实验完成后的整理任务
+
+已完成局部整理：
+
+```text
+compare_results/cand1_disp_dynamics_*
+compare_results/twc_order_ablation_*
+```
+
+注意：`twc_order_ablation_*` 已经完成表格和图，但结论是 TWC validity 出错；本地代码已修，需要服务器同步验证后重跑，不是最终 active-TWC 消融。
 
 - [ ] 把每组 TensorBoard 的 `success/test` 和 `precision/test` 拉成统一 CSV。
 - [ ] 生成一份新的比较表，至少包含：
@@ -293,12 +384,14 @@ A2-order-dyn-disp
 A1-order+TWC
 A2-order-dyn+TWC
 A3-order-gate-safe
+A3-order-conf-res-gate
 ```
 
 - [ ] 更新 `sum_results.md`，写清楚每组结果支持或反驳了什么。
 - [ ] 如果某组 final 和 best 差距很大，复测 best checkpoint，不只看 last。
 - [ ] 如果 TWC 退化，优先查看 `loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap`。
 - [ ] 如果 gate 退化，优先查看 `obs_alpha_dyn_mean / obs_alpha_dyn_max / obs_gate_entropy`。
+- [ ] 如果 conf-res 退化，优先查看 `obs_alpha_dyn_raw_mean / obs_alpha_dyn_clamped_mean / obs_dyn_residual_norm`。
 
 ## 3. Dynamics 诊断日志
 
@@ -368,9 +461,10 @@ dynamics_candidate_zero_only: true
 
 ### 4.3 TWC
 
-- [ ] 如果 `A1-order+TWC` 有收益：TWC 可以独立作为贡献。
-- [ ] 如果 `A2-order-dyn+TWC` 进一步提升：把 `A2-order-dyn+TWC` 作为下一版主配置。
-- [ ] 如果 TWC 退化：先调小 `twc_weight` 或增加 warmup，不要直接接 gate。
+- [ ] 先修复 validity：`twc_valid_ratio` 必须非 0，`loss_twc / twc_center_gap / twc_angle_gap` 必须有实际量级。
+- [ ] 如果 active `A1-order+TWC` 有收益：TWC 可以独立作为贡献。
+- [ ] 如果 active `A2-order-dyn+TWC` 进一步提升：把 `A2-order-dyn+TWC` 作为下一版主配置。
+- [ ] 如果 active TWC 仍退化：再调小 `twc_weight` 或增加 warmup，不要直接接 gate。
 
 候选设置：
 
@@ -397,6 +491,51 @@ obs_gate_max_dyn_alpha: 0.2
 ```python
 fused_feature = point_feature + obs_gate_residual_scale * alpha_dyn * dyn_residual
 ```
+
+### 4.5 置信空间 / residual confidence gate
+
+这个想法已经落地为 `A3-order-conf-res-gate`，作为 `A3-order-gate-safe` 的并行对照。它不替代当前主线，只用于判断 feature replacement 是否过于激进，以及 residual correction 是否更安全。
+
+核心原则：
+
+```text
+不要再用 dynamics 强替换 observation feature；
+改成用观测置信度和 dynamics 置信度控制一个小幅 residual 修正。
+```
+
+候选形式：
+
+```text
+conf_obs = f(num_points, foreground_score, seg_entropy, estimated_fg_points)
+conf_dyn = f(dynamics_valid, valid_history_ratio, delta_t, velocity_consistency)
+
+alpha_dyn = conf_dyn / (conf_obs + conf_dyn)
+alpha_dyn = clamp(alpha_dyn, 0, obs_gate_max_dyn_alpha)
+
+final_pred = obs_pred + obs_gate_residual_scale * alpha_dyn * dyn_residual
+```
+
+也可以考虑 precision-weighted fusion：
+
+```text
+precision = 1 / variance
+pred = (precision_obs * obs_pred + precision_dyn * dyn_pred)
+       / (precision_obs + precision_dyn)
+```
+
+优先实现方式：
+
+- [ ] 先放在 box / motion residual 空间，不要直接融合 256 维 feature。
+- [ ] `alpha_dyn` 必须有上限，例如 `0.1` 或 `0.2`。
+- [ ] `dynamics_valid` 不足时强制 `alpha_dyn=0`。
+- [ ] 记录 `conf_obs / conf_dyn / alpha_dyn / dyn_residual_norm`。
+- [ ] 按 sparse bin、delta_t bin、foreground confidence bin 看是否只在困难样本上启用 dynamics。
+
+它能体现什么：
+
+- 如果 sparse / long delta_t / low foreground confidence 时 dynamics 权重上升且指标提升，说明 observability-aware fusion 有价值。
+- 如果 confidence residual gate 仍退化，说明问题可能不在 gate 数学形式，而在 dynamics prior 质量或监督信号。
+- 如果总体持平但困难子集提升，也可以作为“真实时间 dynamics prior 对困难场景有帮助”的分析点。
 
 ## 5. 后续评估协议
 

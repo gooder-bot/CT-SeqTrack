@@ -37,22 +37,22 @@ class ObservabilityGate(nn.Module):
         nn.init.zeros_(final.bias)
         final.bias.data[0] = init_obs_bias
 
-    def forward(self, point_feature, z_dyn, obs_stats, dynamics_valid):
-        obs_stats = obs_stats.to(device=point_feature.device, dtype=point_feature.dtype)
-        z_dyn = z_dyn.to(device=point_feature.device, dtype=point_feature.dtype)
-        dynamics_valid = dynamics_valid.to(device=point_feature.device, dtype=point_feature.dtype)
+    def compute_alpha(self, obs_stats, dynamics_valid, dtype=None, device=None):
+        if device is None:
+            device = obs_stats.device
+        if dtype is None:
+            dtype = obs_stats.dtype
 
+        obs_stats = obs_stats.to(device=device, dtype=dtype)
+        dynamics_valid = dynamics_valid.to(device=device, dtype=dtype)
         logits = self.gate_mlp(obs_stats)
         alpha = torch.softmax(logits, dim=1)
 
-        dyn_valid = (dynamics_valid.view(-1, 1) >= self.min_dyn_valid).to(point_feature.dtype)
+        dyn_valid = (dynamics_valid.view(-1, 1) >= self.min_dyn_valid).to(dtype)
         alpha_dyn = alpha[:, 1:2] * dyn_valid
         alpha_obs = alpha[:, 0:1]
         alpha_sum = (alpha_obs + alpha_dyn).clamp_min(self.eps)
         alpha = torch.cat((alpha_obs / alpha_sum, alpha_dyn / alpha_sum), dim=1)
-
-        z_dyn_proj = self.dyn_proj(z_dyn)
-        fused_feature = alpha[:, 0:1] * point_feature + alpha[:, 1:2] * z_dyn_proj
         entropy = -(alpha * torch.log(alpha.clamp_min(self.eps))).sum(dim=1)
 
         aux = {
@@ -61,4 +61,17 @@ class ObservabilityGate(nn.Module):
             "obs_alpha_dyn": alpha[:, 1],
             "obs_gate_entropy": entropy,
         }
+        return alpha, aux
+
+    def forward(self, point_feature, z_dyn, obs_stats, dynamics_valid):
+        z_dyn = z_dyn.to(device=point_feature.device, dtype=point_feature.dtype)
+        alpha, aux = self.compute_alpha(
+            obs_stats,
+            dynamics_valid,
+            dtype=point_feature.dtype,
+            device=point_feature.device,
+        )
+
+        z_dyn_proj = self.dyn_proj(z_dyn)
+        fused_feature = alpha[:, 0:1] * point_feature + alpha[:, 1:2] * z_dyn_proj
         return fused_feature, aux

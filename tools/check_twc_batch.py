@@ -91,6 +91,8 @@ def main():
                         help="Comma-separated offsets, e.g. 1,2,3")
     parser.add_argument("--view-b-offsets", default=None,
                         help="Comma-separated offsets, e.g. 1,3,5")
+    parser.add_argument("--candidate-zero-only", action="store_true",
+                        help="Force paired TWC views to use candidate_id=0.")
     args = parser.parse_args()
 
     cfg = load_config(args.cfg)
@@ -103,7 +105,8 @@ def main():
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
     cfg.use_twc = True
-    cfg.twc_candidate_zero_only = True
+    if args.candidate_zero_only:
+        cfg.twc_candidate_zero_only = True
     if args.view_a_offsets is not None:
         cfg.twc_view_a_offsets = parse_offsets(args.view_a_offsets)
     if args.view_b_offsets is not None:
@@ -162,20 +165,37 @@ def main():
 
     same_current_timestamp = np.abs(current_a - current_b) <= timestamp_eps
     same_anchor_ref_box = np.max(np.abs(anchor_a - anchor_b), axis=1) <= anchor_eps
-    different_delta_T = np.max(np.abs(delta_a - delta_b), axis=1) > delta_eps
+    if "history_offsets" in view_a and "history_offsets" in view_b:
+        history_gap = np.max(np.abs(to_numpy(view_a["history_offsets"])
+                                    - to_numpy(view_b["history_offsets"])), axis=1)
+        history_source = "history_offsets"
+    elif "delta_T_real" in view_a and "delta_T_real" in view_b:
+        history_gap = np.max(np.abs(to_numpy(view_a["delta_T_real"])
+                                    - to_numpy(view_b["delta_T_real"])), axis=1)
+        history_source = "delta_T_real"
+    elif "timestamps_real" in view_a and "timestamps_real" in view_b:
+        history_gap = np.max(np.abs(to_numpy(view_a["timestamps_real"])[:, :-1]
+                                    - to_numpy(view_b["timestamps_real"])[:, :-1]), axis=1)
+        history_source = "timestamps_real"
+    else:
+        history_gap = np.max(np.abs(delta_a - delta_b), axis=1)
+        history_source = "delta_T"
+    different_history_path = history_gap > delta_eps
     full_history_a = np.sum(to_numpy(view_a["valid_mask"]), axis=1) >= int(cfg.hist_num)
     full_history_b = np.sum(to_numpy(view_b["valid_mask"]), axis=1) >= int(cfg.hist_num)
     twc_valid = (
         same_current_timestamp.reshape(-1)
         & same_anchor_ref_box
-        & different_delta_T
+        & different_history_path
         & full_history_a
         & full_history_b
     )
 
     print(f"same_current_timestamp: {same_current_timestamp.tolist()}")
     print(f"same_anchor_ref_box: {same_anchor_ref_box.tolist()}")
-    print(f"different_delta_T: {different_delta_T.tolist()}")
+    print(f"history_difference_source: {history_source}")
+    print(f"history_gap: {history_gap.tolist()}")
+    print(f"different_history_path: {different_history_path.tolist()}")
     print(f"full_history_a: {full_history_a.tolist()}")
     print(f"full_history_b: {full_history_b.tolist()}")
     print(f"twc_valid: {twc_valid.tolist()}")

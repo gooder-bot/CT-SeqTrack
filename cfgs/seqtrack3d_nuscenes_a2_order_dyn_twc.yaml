@@ -18,7 +18,7 @@ train_split: mini_train
 val_split: mini_val
 test_split: mini_val
 train_type: train_motion_mf
-num_candidates: 1
+num_candidates: 4
 motion_threshold: 0.15
 use_augmentation: false
 hist_num: 3
@@ -66,7 +66,7 @@ twc_view_b_offsets:
 - 3
 - 5
 twc_full_history_only: true
-twc_candidate_zero_only: true
+twc_candidate_zero_only: false
 twc_warmup_epoch: 0
 twc_timestamp_eps: 1.0e-06
 twc_anchor_eps: 0.0001

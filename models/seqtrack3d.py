@@ -27,11 +27,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
         self.use_dynamics_encoder = getattr(config, 'use_dynamics_encoder', False)
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
+        self.obs_gate_fusion_mode = str(getattr(config, 'obs_gate_fusion_mode', 'feature')).lower()
+        self.obs_gate_fusion_mode = self.obs_gate_fusion_mode.replace('-', '_')
+        if self.obs_gate_fusion_mode == 'conf_res':
+            self.obs_gate_fusion_mode = 'confidence_residual'
+        if self.obs_gate_fusion_mode not in ('feature', 'confidence_residual'):
+            raise ValueError("obs_gate_fusion_mode must be 'feature' or 'confidence_residual'.")
+        self.obs_gate_residual_scale = float(getattr(config, 'obs_gate_residual_scale', 0.1))
+        self.obs_gate_max_dyn_alpha = float(getattr(config, 'obs_gate_max_dyn_alpha', 0.2))
         self.dynamics_motion_mode = str(getattr(config, 'dynamics_motion_mode', 'feature')).lower()
         if self.dynamics_motion_mode not in ('feature', 'residual'):
             raise ValueError("dynamics_motion_mode must be 'feature' or 'residual'.")
         if self.use_observability_gate and not self.use_dynamics_encoder:
             raise ValueError("use_observability_gate=True requires use_dynamics_encoder=True.")
+        if (self.use_observability_gate
+                and self.obs_gate_fusion_mode == 'confidence_residual'
+                and self.dynamics_motion_mode == 'residual'):
+            raise ValueError(
+                "confidence_residual gate already applies a dynamics residual; "
+                "keep dynamics_motion_mode='feature'.")
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
@@ -225,12 +239,43 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output_dict["dynamics_displacement_pred"] = dynamics_displacement_pred
             output_dict["dynamics_valid"] = dynamics_valid
             if self.use_observability_gate:
-                motion_feature, gate_aux = self.observability_gate(
-                    point_feature, z_dyn, obs_stats, dynamics_valid)
-                output_dict.update(gate_aux)
+                if self.obs_gate_fusion_mode == 'feature':
+                    motion_feature, gate_aux = self.observability_gate(
+                        point_feature, z_dyn, obs_stats, dynamics_valid)
+                    output_dict.update(gate_aux)
+                elif self.obs_gate_fusion_mode == 'confidence_residual':
+                    obs_alpha, gate_aux = self.observability_gate.compute_alpha(
+                        obs_stats,
+                        dynamics_valid,
+                        dtype=point_feature.dtype,
+                        device=point_feature.device,
+                    )
+                    alpha_dyn_raw = obs_alpha[:, 1:2]
+                    alpha_dyn_clamped = torch.clamp(
+                        alpha_dyn_raw, max=self.obs_gate_max_dyn_alpha)
+                    output_dict.update(gate_aux)
+                    output_dict["obs_alpha_dyn_raw"] = alpha_dyn_raw.squeeze(1)
+                    output_dict["obs_alpha_dyn_clamped"] = alpha_dyn_clamped.squeeze(1)
+                    output_dict["obs_gate_residual_scale"] = point_feature.new_tensor(
+                        self.obs_gate_residual_scale)
+                    motion_feature = point_feature
+                else:
+                    raise ValueError(f"Unsupported obs_gate_fusion_mode: {self.obs_gate_fusion_mode}")
             else:
                 motion_feature = torch.cat((point_feature, z_dyn), dim=1)
         motion_pred = self.motion_mlp(motion_feature)  # B,4
+        if self.use_observability_gate and self.obs_gate_fusion_mode == 'confidence_residual':
+            dyn_residual = (
+                self.obs_gate_residual_scale
+                * alpha_dyn_clamped
+                * output_dict["dynamics_displacement_pred"]
+            )
+            output_dict["motion_obs_pred"] = motion_pred
+            output_dict["motion_dyn_residual"] = dyn_residual
+            motion_pred = torch.cat((
+                motion_pred[:, :3] + dyn_residual,
+                motion_pred[:, 3:4],
+            ), dim=1)
         if self.use_dynamics_encoder and self.dynamics_motion_mode == 'residual':
             output_dict["motion_residual_pred"] = motion_pred
             motion_pred = torch.cat((
@@ -329,13 +374,34 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             ).values
             valid = valid & (anchor_gap <= anchor_eps)
 
-        if "delta_T" in data_a and "delta_T" in data_b:
-            delta_gap = torch.max(
+        history_gap = None
+        if "history_offsets" in data_a and "history_offsets" in data_b:
+            history_gap = torch.max(
+                torch.abs(data_a["history_offsets"].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["history_offsets"].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "delta_T_real" in data_a and "delta_T_real" in data_b:
+            history_gap = torch.max(
+                torch.abs(data_a["delta_T_real"].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["delta_T_real"].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "timestamps_real" in data_a and "timestamps_real" in data_b:
+            history_gap = torch.max(
+                torch.abs(data_a["timestamps_real"][:, :-1].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["timestamps_real"][:, :-1].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "delta_T" in data_a and "delta_T" in data_b:
+            history_gap = torch.max(
                 torch.abs(data_a["delta_T"].to(box_a.device, dtype=box_a.dtype)
                           - data_b["delta_T"].to(box_a.device, dtype=box_a.dtype)),
                 dim=1,
             ).values
-            valid = valid & (delta_gap > delta_eps)
+
+        if history_gap is not None:
+            valid = valid & (history_gap > delta_eps)
 
         if getattr(self.config, "twc_full_history_only", True):
             full_a = data_a["valid_mask"].to(box_a.device).sum(dim=1) >= data_a["valid_mask"].shape[1]
@@ -534,6 +600,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "obs_alpha_dyn_max": obs_alpha[:, 1].max(),
                 "obs_gate_entropy": obs_gate_entropy,
             })
+
+        if "obs_alpha_dyn_raw" in output and "obs_alpha_dyn_clamped" in output:
+            loss_dict.update({
+                "obs_alpha_dyn_raw_mean": output["obs_alpha_dyn_raw"].mean(),
+                "obs_alpha_dyn_clamped_mean": output["obs_alpha_dyn_clamped"].mean(),
+                "obs_alpha_dyn_clamped_max": output["obs_alpha_dyn_clamped"].max(),
+            })
+        if "motion_dyn_residual" in output:
+            loss_dict["obs_dyn_residual_norm"] = torch.linalg.norm(
+                output["motion_dyn_residual"], dim=1).mean()
 
         return loss_dict
 
