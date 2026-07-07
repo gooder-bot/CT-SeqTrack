@@ -1,0 +1,49 @@
+model,metric,index,epoch,step,value
+SeqTrack baseline,success/test,0,5,6309,40.6969
+SeqTrack baseline,success/test,1,10,12619,46.0908
+SeqTrack baseline,success/test,2,15,18929,45.7298
+SeqTrack baseline,success/test,3,20,25239,42.8851
+SeqTrack baseline,success/test,4,25,31549,51.7363
+SeqTrack baseline,success/test,5,30,37859,48.9289
+SeqTrack baseline,success/test,6,35,44169,52.2834
+SeqTrack baseline,success/test,7,40,50479,46.4781
+SeqTrack baseline,success/test,8,45,56789,50.4628
+SeqTrack baseline,success/test,9,50,63099,50.2024
+SeqTrack baseline,success/test,10,55,69409,49.1346
+SeqTrack baseline,success/test,11,60,75719,50.9858
+SeqTrack baseline,precision/test,0,5,6309,41.8698
+SeqTrack baseline,precision/test,1,10,12619,65.2144
+SeqTrack baseline,precision/test,2,15,18929,50.5416
+SeqTrack baseline,precision/test,3,20,25239,49.2309
+SeqTrack baseline,precision/test,4,25,31549,60.6324
+SeqTrack baseline,precision/test,5,30,37859,53.9092
+SeqTrack baseline,precision/test,6,35,44169,62.3392
+SeqTrack baseline,precision/test,7,40,50479,51.174
+SeqTrack baseline,precision/test,8,45,56789,59.6105
+SeqTrack baseline,precision/test,9,50,63099,57.3085
+SeqTrack baseline,precision/test,10,55,69409,59.3184
+SeqTrack baseline,precision/test,11,60,75719,59.9617
+CT-SeqTrack,success/test,0,5,6309,44.9376
+CT-SeqTrack,success/test,1,10,12619,25.419
+CT-SeqTrack,success/test,2,15,18929,24.233
+CT-SeqTrack,success/test,3,20,25239,22.8063
+CT-SeqTrack,success/test,4,25,31549,44.9836
+CT-SeqTrack,success/test,5,30,37859,41.4344
+CT-SeqTrack,success/test,6,35,44169,40.6707
+CT-SeqTrack,success/test,7,40,50479,28.3534
+CT-SeqTrack,success/test,8,45,56789,32.1433
+CT-SeqTrack,success/test,9,50,63099,38.8829
+CT-SeqTrack,success/test,10,55,69409,25.7123
+CT-SeqTrack,success/test,11,60,75719,31.1937
+CT-SeqTrack,precision/test,0,5,6309,62.512
+CT-SeqTrack,precision/test,1,10,12619,23.3228
+CT-SeqTrack,precision/test,2,15,18929,24.2166
+CT-SeqTrack,precision/test,3,20,25239,21.581
+CT-SeqTrack,precision/test,4,25,31549,49.4934
+CT-SeqTrack,precision/test,5,30,37859,45.3512
+CT-SeqTrack,precision/test,6,35,44169,46.4147
+CT-SeqTrack,precision/test,7,40,50479,27.2899
+CT-SeqTrack,precision/test,8,45,56789,33.2473
+CT-SeqTrack,precision/test,9,50,63099,43.9398
+CT-SeqTrack,precision/test,10,55,69409,23.8162
+CT-SeqTrack,precision/test,11,60,75719,31.8851

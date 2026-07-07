@@ -1,0 +1,97 @@
+model,metric,eval_idx,epoch,step,value
+SeqTrack baseline,success/test,0,5,6309,40.6969
+SeqTrack baseline,success/test,1,10,12619,46.0908
+SeqTrack baseline,success/test,2,15,18929,45.7298
+SeqTrack baseline,success/test,3,20,25239,42.8851
+SeqTrack baseline,success/test,4,25,31549,51.7363
+SeqTrack baseline,success/test,5,30,37859,48.9289
+SeqTrack baseline,success/test,6,35,44169,52.2834
+SeqTrack baseline,success/test,7,40,50479,46.4781
+SeqTrack baseline,success/test,8,45,56789,50.4628
+SeqTrack baseline,success/test,9,50,63099,50.2024
+SeqTrack baseline,success/test,10,55,69409,49.1346
+SeqTrack baseline,success/test,11,60,75719,50.9858
+SeqTrack baseline,precision/test,0,5,6309,41.8698
+SeqTrack baseline,precision/test,1,10,12619,65.2144
+SeqTrack baseline,precision/test,2,15,18929,50.5416
+SeqTrack baseline,precision/test,3,20,25239,49.2309
+SeqTrack baseline,precision/test,4,25,31549,60.6324
+SeqTrack baseline,precision/test,5,30,37859,53.9092
+SeqTrack baseline,precision/test,6,35,44169,62.3392
+SeqTrack baseline,precision/test,7,40,50479,51.174
+SeqTrack baseline,precision/test,8,45,56789,59.6105
+SeqTrack baseline,precision/test,9,50,63099,57.3085
+SeqTrack baseline,precision/test,10,55,69409,59.3184
+SeqTrack baseline,precision/test,11,60,75719,59.9617
+A2-order-dyn,success/test,0,5,6309,28.206787109375
+A2-order-dyn,success/test,1,10,12619,51.31619644165039
+A2-order-dyn,success/test,2,15,18929,43.98577880859375
+A2-order-dyn,success/test,3,20,25239,40.847923278808594
+A2-order-dyn,success/test,4,25,31549,50.35120391845703
+A2-order-dyn,success/test,5,30,37859,44.2614860534668
+A2-order-dyn,success/test,6,35,44169,49.95732879638672
+A2-order-dyn,success/test,7,40,50479,51.15207290649414
+A2-order-dyn,success/test,8,45,56789,51.54158020019531
+A2-order-dyn,success/test,9,50,63099,50.19365692138672
+A2-order-dyn,success/test,10,55,69409,49.15645599365234
+A2-order-dyn,success/test,11,60,75719,50.961708068847656
+A2-order-dyn,precision/test,0,5,6309,27.12910461425781
+A2-order-dyn,precision/test,1,10,12619,63.57330703735352
+A2-order-dyn,precision/test,2,15,18929,58.25929641723633
+A2-order-dyn,precision/test,3,20,25239,51.07986831665039
+A2-order-dyn,precision/test,4,25,31549,63.44639587402344
+A2-order-dyn,precision/test,5,30,37859,56.505470275878906
+A2-order-dyn,precision/test,6,35,44169,60.55799102783203
+A2-order-dyn,precision/test,7,40,50479,62.92231750488281
+A2-order-dyn,precision/test,8,45,56789,63.21443939208984
+A2-order-dyn,precision/test,9,50,63099,62.531734466552734
+A2-order-dyn,precision/test,10,55,69409,60.62144088745117
+A2-order-dyn,precision/test,11,60,75719,63.31401062011719
+A2-order-dyn-cand1,success/test,0,5,1574,40.64442443847656
+A2-order-dyn-cand1,success/test,1,10,3149,41.98577880859375
+A2-order-dyn-cand1,success/test,2,15,4724,31.515316009521484
+A2-order-dyn-cand1,success/test,3,20,6299,29.0010929107666
+A2-order-dyn-cand1,success/test,4,25,7874,31.605031967163086
+A2-order-dyn-cand1,success/test,5,30,9449,29.21772575378418
+A2-order-dyn-cand1,success/test,6,35,11024,27.664112091064453
+A2-order-dyn-cand1,success/test,7,40,12599,26.60503387451172
+A2-order-dyn-cand1,success/test,8,45,14174,28.18927764892578
+A2-order-dyn-cand1,success/test,9,50,15749,26.355579376220703
+A2-order-dyn-cand1,success/test,10,55,17324,25.89387321472168
+A2-order-dyn-cand1,success/test,11,60,18899,26.677244186401367
+A2-order-dyn-cand1,precision/test,0,5,1574,54.624725341796875
+A2-order-dyn-cand1,precision/test,1,10,3149,48.81181716918945
+A2-order-dyn-cand1,precision/test,2,15,4724,36.96936798095703
+A2-order-dyn-cand1,precision/test,3,20,6299,30.161922454833984
+A2-order-dyn-cand1,precision/test,4,25,7874,29.317289352416992
+A2-order-dyn-cand1,precision/test,5,30,9449,27.56127166748047
+A2-order-dyn-cand1,precision/test,6,35,11024,27.064552307128906
+A2-order-dyn-cand1,precision/test,7,40,12599,25.130197525024414
+A2-order-dyn-cand1,precision/test,8,45,14174,25.978118896484375
+A2-order-dyn-cand1,precision/test,9,50,15749,24.873083114624023
+A2-order-dyn-cand1,precision/test,10,55,17324,24.08643341064453
+A2-order-dyn-cand1,precision/test,11,60,18899,24.4989070892334
+A2-order-dyn-disp,success/test,0,5,6309,26.031728744506836
+A2-order-dyn-disp,success/test,1,10,12619,52.44091796875
+A2-order-dyn-disp,success/test,2,15,18929,40.950767517089844
+A2-order-dyn-disp,success/test,3,20,25239,27.52406883239746
+A2-order-dyn-disp,success/test,4,25,31549,45.7625846862793
+A2-order-dyn-disp,success/test,5,30,37859,44.89387130737305
+A2-order-dyn-disp,success/test,6,35,44169,47.98796844482422
+A2-order-dyn-disp,success/test,7,40,50479,50.81071853637695
+A2-order-dyn-disp,success/test,8,45,56789,51.097373962402344
+A2-order-dyn-disp,success/test,9,50,63099,49.95733642578125
+A2-order-dyn-disp,success/test,10,55,69409,49.62254333496094
+A2-order-dyn-disp,success/test,11,60,75719,50.54157257080078
+A2-order-dyn-disp,precision/test,0,5,6309,31.40591049194336
+A2-order-dyn-disp,precision/test,1,10,12619,64.42013549804688
+A2-order-dyn-disp,precision/test,2,15,18929,51.6761474609375
+A2-order-dyn-disp,precision/test,3,20,25239,22.912471771240234
+A2-order-dyn-disp,precision/test,4,25,31549,57.03610610961914
+A2-order-dyn-disp,precision/test,5,30,37859,54.59737014770508
+A2-order-dyn-disp,precision/test,6,35,44169,57.84027099609375
+A2-order-dyn-disp,precision/test,7,40,50479,64.80853271484375
+A2-order-dyn-disp,precision/test,8,45,56789,63.824947357177734
+A2-order-dyn-disp,precision/test,9,50,63099,62.5864372253418
+A2-order-dyn-disp,precision/test,10,55,69409,61.79978942871094
+A2-order-dyn-disp,precision/test,11,60,75719,63.847923278808594

@@ -39,7 +39,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 - 已有结果支持：主干保留 SeqTrack3D 的 order-time 语义，同时把真实 `delta_t/current_delta_t` 注入 `DynamicsEncoder`，比直接替换主干时间 token 更稳定。
 - 目前不能宣称：完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 目前不能宣称：TWC 和 observability gate 已经带来最终收益；二者还需要基于 `A1-order / A2-order-dyn` 重新消融。
+- 目前不能宣称：TWC 和 observability gate 已经带来稳定最终收益。active A1-order+TWC 有 precision-positive 信号，但 A2-order-dyn+TWC 后期崩坏；gate-safe 低于 A2，conf-res 需要复测 best checkpoint。
 
 ### 连续时间视角给当前工作的启发
 
@@ -267,7 +267,7 @@ view B: [t-1, t-3, t-5] -> t
 
 这个设计能让 P4 的实验解释更干净：如果 TWC 有收益，应来自模型对不同真实时间采样路径的稳定性提升，而不是来自额外 batch 大小、额外 crop 扰动或坐标系变化。
 
-当前状态：TWC 工程链路已经实现并通过 smoke test，但正式消融仍待完成。TWC 是否能作为第二个核心贡献，要看 `A1-order+TWC` 和 `A2-order-dyn+TWC`。
+当前状态：TWC 工程链路已经实现并通过 smoke test，validity-fixed 消融也已完成。`A1-order+TWC` 相对 A1-order success 基本持平、precision 提升，说明 TWC 有定位精度稳定信号；但 `A2-order-dyn+TWC` 在 TWC 生效后仍后期崩坏，当前 `twc_weight=0.05` 不适合作为 dynamics 主配置。后续如果继续 TWC，应先做低权重或 warmup 版本。
 
 ### P5：Observability Gate
 
@@ -294,7 +294,7 @@ motion_pred = motion_mlp(motion_feature)
 
 P5 的核心验收不只是 loss finite，而是 gate 行为可解释：稀疏、大 gap、低前景置信度样本中 `alpha_dyn` 应更高；当前观测清晰时 `alpha_obs` 应更高。
 
-当前状态：旧 P5 full 结果不能作为最终 gate 结论，因为它混入了 raw real-time 主干失败路径。下一步只在 order-time 主干上测试保守 `A3-order-gate-safe`；如果仍退化，优先考虑 residual gate 和限制 `alpha_dyn`，而不是直接否定 observability-aware fusion。
+当前状态：旧 P5 full 结果不能作为最终 gate 结论，因为它混入了 raw real-time 主干失败路径。新的 `A3-order-gate-safe` 比旧 P5 full 安全很多，但 final 仍低于 `A2-order-dyn`；`A3-order-conf-res-gate` best checkpoint 很高但 last 崩坏。后续优先复测 conf-res best checkpoint，并做 sparse / delta_t / foreground confidence 分桶，再决定是否继续 gate。
 
 ---
 
@@ -320,19 +320,21 @@ A1-raw / A2 raw-dyn
 A1-pseudo / A1-MLP / A1-Fourier
 A1-scaled / A2-scaled-dyn
 A1-order / A2-order-dyn
+A2-order-dyn-cand1 / A2-order-dyn-disp
+A1-order+TWC / A2-order-dyn+TWC
+A3-order-gate-safe / A3-order-conf-res-gate
 ```
 
-下一步优先消融：
+下一步优先复核：
 
 ```text
-A2-order-dyn-cand1
-A2-order-dyn-disp
-A1-order+TWC
-A2-order-dyn+TWC
-A3-order-gate-safe
+A3-order-conf-res-gate best checkpoint
+low-weight / warmup TWC
+gate sparse / delta_t / foreground-confidence bins
+candidate-wise dynamics diagnostics
 ```
 
-这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：dynamics 是否被非 0 candidate 污染、是否需要 displacement 监督、TWC 是否独立有效、TWC 是否能和 dynamics 互补、gate 在干净主干上是否仍不稳定。
+这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：dynamics 是否被非 0 candidate 污染、是否需要 displacement 监督、TWC 是否独立有效、TWC 是否能和 dynamics 互补、gate 在干净主干上是否仍不稳定。当前答案是：cand1 不支持简单移除非 0 candidate，disp 只有温和 precision 信号，A1+TWC 有 precision-positive 信号，A2+TWC 不稳定，gate-safe 不够强，conf-res 需要 best checkpoint 复核。
 
 ### 困难子集
 

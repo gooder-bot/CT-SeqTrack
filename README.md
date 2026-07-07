@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：P0-P5 的工程链路已经实现并通过 smoke test；已有实验显示，直接把真实时间替换进 SeqTrack3D 主干时间 token 并不稳定，当前更稳的主线是保留 order-time 主干语义，并把真实 `delta_t/current_delta_t` 作为 `DynamicsEncoder` 的运动先验。已完成记录见 `done.md`，简洁实验结论见 `sum_results.md`，下一步消融计划见 `need_to_do.md`。
+当前仓库是研究快照：P0-P5 的工程链路已经实现并通过 smoke test；已有实验显示，直接把真实时间替换进 SeqTrack3D 主干时间 token 并不稳定，当前更稳的主线是保留 order-time 主干语义，并把真实 `delta_t/current_delta_t` 作为 `DynamicsEncoder` 的运动先验。validity 修复后的 TWC 在 A1-order 上有 precision-positive 信号，但 A2-order-dyn+TWC 后期崩坏；gate-safe 比旧 P5 full 安全但仍低于 A2；conf-res 需要复测 best checkpoint。已完成记录见 `done.md`，简洁实验结论见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -129,7 +129,7 @@ current_delta_t / time_scale
 use_observability_gate: False
 ```
 
-注意：旧版 P5 full 同时混入 raw real-time 主干、dynamics 和 gate，不能作为最终 gate 结论。后续 gate 消融应基于干净的 order-time 主干和保守 observation-biased gate 重新验证。
+注意：旧版 P5 full 同时混入 raw real-time 主干、dynamics 和 gate，不能作为最终 gate 结论。新的 gate-safe 已经更安全，但 final 仍低于 A2-order-dyn；conf-res 有很高 best checkpoint，但 last checkpoint 崩坏，需要先复测 best。
 
 ---
 
@@ -144,6 +144,7 @@ use_observability_gate: False
 | `disp` | 在 dynamics 上增加小权重 displacement 监督 |
 | `TWC` | Time-resampling Consistency，不同历史采样路径到同一当前时刻的一致性 |
 | `gate-safe` | 更保守的 observation-biased observability gate |
+| `conf-res` | confidence residual gate，只在 motion residual 空间做小幅 dynamics 修正 |
 
 ---
 
@@ -155,18 +156,27 @@ use_observability_gate: False
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
 | P3 | Dynamics / Velocity Branch | 已实现，默认关闭，`A2-order-dyn` 是当前最强正向信号 |
-| P4 | Time-resampling Consistency | 已实现，默认关闭，等待 order-time 消融验证 |
-| P5 | Observability Gate | 已实现，默认关闭，旧 P5 full 不能作为最终结论 |
-| Evaluation | 当前五组消融和困难子集评估 | 下一步 |
+| P4 | Time-resampling Consistency | 已实现，默认关闭；A1+TWC 有 precision-positive 信号，A2+TWC 组合不稳定 |
+| P5 | Observability Gate | 已实现，默认关闭；gate-safe 仍低于 A2，conf-res 需复测 best checkpoint |
+| Evaluation | cand1 / disp / active TWC / gate-safe / conf-res | 已完成本轮整理 |
 
-当前最重要的消融顺序：
+当前已完成的关键消融：
 
 ```text
 1. A2-order-dyn-cand1
 2. A2-order-dyn-disp
-3. A1-order+TWC
-4. A2-order-dyn+TWC
+3. A1-order+TWC（validity-fixed active TWC）
+4. A2-order-dyn+TWC（validity-fixed active TWC）
 5. A3-order-gate-safe
+6. A3-order-conf-res-gate
+```
+
+当前下一步：
+
+```text
+1. 复测 A3-order-conf-res-gate 的 best checkpoint。
+2. 如果继续 TWC，先降 twc_weight 或加 warmup。
+3. 如果继续 gate，做 sparse / delta_t / foreground confidence 分桶。
 ```
 
 ---
@@ -182,6 +192,7 @@ cfgs/
   seqtrack3d_nuscenes_a1_order_twc.yaml
   seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
   seqtrack3d_nuscenes_a3_order_gate_safe.yaml
+  seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
   seqtrack3d_waymo.yaml                 # Waymo 配置
 
 datasets/
@@ -205,6 +216,7 @@ compare_results/
   experiment_comparison.md
   metrics_summary.csv
   metrics_points.csv
+  twc_gate_ablation_*                   # active TWC / gate-safe / conf-res 汇总
 
 need_to_do.md                           # 下一步和未来任务
 done.md                                 # 已完成工程验收和实验记录
@@ -309,7 +321,7 @@ python tools/check_train_steps.py \
 
 ## 训练与测试
 
-当前正式消融命令以 `need_to_do.md` 为准。除 `--cfg` 和 `--tag` 外，下一批实验统一保持：
+当前正式复跑命令以 `need_to_do.md` 为准。除 `--cfg` 和 `--tag` 外，后续复跑建议继续保持：
 
 ```text
 --batch_size 16
@@ -363,12 +375,16 @@ output/<time>-<config>-<tag>/
 | CT-SeqTrack P5 full | 31.19 | 31.89 | 混入 raw real-time 主干、dynamics、gate，不能单独归因 |
 | A1-order | 51.23 | 57.86 | 恢复 order-time 主干后基本修复 A1 崩坏 |
 | A2-order-dyn | 50.96 | 63.31 | 当前最强正向信号，precision 高于 baseline |
+| A1-order+TWC | 51.16 | 61.10 | TWC 已激活；success 持平，precision 相对 A1-order +3.24 |
+| A2-order-dyn+TWC | 28.23 | 32.04 | TWC 已激活但与 dynamics 组合后期崩坏 |
+| A3-order-gate-safe | 48.32 | 54.87 | 比旧 P5 full 安全，但仍低于 A2-order-dyn |
+| A3-order-conf-res-gate | 31.17 | 30.92 | best 很高（62.04 / 76.30），last 崩坏，需复测 best |
 
 解释：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - 当前不应继续把 raw / MLP / Fourier real-time token 作为主干主线。
-- 后续 TWC 和 gate 都应基于 `A1-order / A2-order-dyn` 继续验证。
+- 主配置仍保持 `A2-order-dyn`；TWC / gate 需要稳定性复核后再考虑接入主线。
 
 简洁实验结论和后续计划见：
 

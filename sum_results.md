@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-06-02
+更新时间：2026-06-03
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -14,7 +14,7 @@
 TWC 和 gate 之后都基于这个 order-time 主干继续验证。
 ```
 
-当前最有价值的正向信号仍然是 `A2-order-dyn`：final success 基本追平 SeqTrack baseline，final precision 高于 baseline。`cand1 / disp` 诊断说明：简单移除非 0 candidate 不能直接修复 dynamics，反而在当前 60 epoch 协议下明显退化；小权重 displacement 辅助监督与 `A2-order-dyn` 基本持平，precision 略高，但还不是决定性收益来源。新增的两组 TWC 训练显示 `twc_valid_ratio=0`，说明当前 TWC 约束没有真正生效，必须先修正 TWC validity 后再判断 TWC 是否有效。
+当前最稳的主线仍然是 `A2-order-dyn`：final success 基本追平 SeqTrack baseline，final precision 高于 baseline。`cand1 / disp` 诊断说明：简单移除非 0 candidate 不能直接修复 dynamics；小权重 displacement 辅助监督与 `A2-order-dyn` 基本持平，precision 略高，但还不是决定性收益来源。validity 修复后的 active TWC 已经真正生效：`A1-order+TWC` 在 success 基本持平的同时提升 final precision，但 `A2-order-dyn+TWC` 后期明显崩坏，说明当前 `twc_weight=0.05` 下 TWC 还不能和 dynamics 直接合成主配置。`gate-safe` 比旧 P5 full 安全很多但仍低于 A2；`conf-res` 有很高 best checkpoint 信号，但 final 严重退化，需要复测 best checkpoint 后再判断。
 
 ### 0.1 当前能说和不能说
 
@@ -25,13 +25,17 @@ TWC 和 gate 之后都基于这个 order-time 主干继续验证。
 - `A2-order-dyn` 是当前最强正向信号，说明真实 `delta_t/current_delta_t` 作为 dynamics prior 有价值。
 - `A2-order-dyn-cand1` 在当前 60 epoch 协议下明显退化，不支持简单去掉非 0 candidate。
 - `A2-order-dyn-disp` 与 `A2-order-dyn` 基本持平，final precision 小幅更高，说明小权重 displacement loss 不伤主线，但也不是主要解释。
-- 当前两组 order+TWC 运行中 `loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap` 全程为 0；这说明 TWC 项没有激活，而不是 TWC 机制已经被有效检验。
+- active `A1-order+TWC` 的 `twc_valid_ratio` 均值约 0.75，final precision 相对 A1-order 提升 +3.24；TWC 在无 dynamics 主干上有 precision-positive 信号。
+- active `A2-order-dyn+TWC` 同样 valid，但 final success / precision 相对 A2-order-dyn 下降 -22.73 / -31.28；当前 TWC 权重和 dynamics 组合不稳定。
+- `A3-order-gate-safe` 比旧 P5 full 安全，但相对 A2-order-dyn final success / precision 仍下降 -2.64 / -8.45。
+- `A3-order-conf-res-gate` best checkpoint 很高（success 62.04 / precision 76.30），但 final 只有 31.17 / 30.92，必须先复测 best。
 
 当前不能说：
 
 - 不能说完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 不能说 TWC 已经有效或无效，因为当前 order+TWC 运行的 valid ratio 为 0，需要修复后重跑。
-- 不能说 gate 无效，因为旧 P5 full 的主干时间路径本身不干净。
+- 不能说 TWC 已经可以作为完整主配置，因为它在 A1 上主要提升 precision，但和 dynamics 组合后明显退化。
+- 不能说 gate 已经无效，因为 gate-safe 比旧 P5 full 安全，conf-res 又出现很高 best；但也不能说 gate 已经稳定有效。
+- 不能按 `A3-order-conf-res-gate` last checkpoint 下结论，因为 best/final 差距过大。
 - 不能说 candidate noise 已被彻底排除，因为 `cand1` 只有 `num_candidates=4` 实验约 1/4 的 optimizer step，且还缺少 candidate 分桶日志。
 - 不能说 displacement 监督已经是必要模块；目前它只是一个小幅、温和的正向/不伤信号。
 
@@ -260,7 +264,7 @@ compare_results/cand1_disp_dynamics_metrics_summary.csv
 compare_results/cand1_disp_dynamics_comparison.md
 ```
 
-## 7. 第七轮：order+TWC 诊断
+## 7. 第七轮：旧 order+TWC 诊断（inactive）
 
 比较：
 
@@ -281,66 +285,112 @@ A2-order-dyn final:      success 50.96, precision 63.31
 A2-order-dyn+TWC final:  success 38.27, precision 38.85
 ```
 
-相对父配置：
+关键诊断：
 
 ```text
-A1-order+TWC vs A1-order:
-  final success   -5.62
-  final precision -7.10
+两组旧 order+TWC 的 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap
+全程为 0。也就是说，这一轮训练没有真正施加 TWC consistency 项。
 
-A2-order-dyn+TWC vs A2-order-dyn:
-  final success   -12.69
-  final precision -24.46
+旧结果也使用 num_candidates=1，60 epoch final_step 只有 18899，
+不是 active-TWC，也不是严格 optimizer-step 对齐结果。
+```
+
+结果解读：
+
+- 旧 `A1-order+TWC` 和 `A2-order-dyn+TWC` 的下降是真实观察，但不能据此判断 TWC 机制本身有害，因为 TWC loss 没有激活。
+- 这轮的价值是暴露了 TWC validity / paired-view 训练协议问题。
+- validity 修复后已经重跑，正式 active-TWC 结论见下一节。
+
+## 8. 第八轮：active TWC / gate-safe / conf-res
+
+比较：
+
+```text
+SeqTrack baseline
+A1-order
+A2-order-dyn
+A1-order+TWC
+A2-order-dyn+TWC
+A3-order-gate-safe
+A3-order-conf-res-gate
+```
+
+关键结果：
+
+```text
+SeqTrack baseline final:      success 50.99, precision 59.96
+A1-order final:               success 51.23, precision 57.86
+A2-order-dyn final:           success 50.96, precision 63.31
+A1-order+TWC final:           success 51.16, precision 61.10
+A2-order-dyn+TWC final:       success 28.23, precision 32.04
+A3-order-gate-safe final:     success 48.32, precision 54.87
+A3-order-conf-res-gate final: success 31.17, precision 30.92
+```
+
+best 结果：
+
+```text
+A1-order+TWC best:           success 53.16, precision 63.35
+A2-order-dyn+TWC best:       success 45.24, precision 57.43
+A3-order-gate-safe best:     success 50.99, precision 60.17
+A3-order-conf-res-gate best: success 62.04, precision 76.30
 ```
 
 关键诊断：
 
 ```text
-两组 order+TWC 的 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap
-全程为 0。也就是说，当前训练没有真正施加 TWC consistency 项。
-```
+A1-order+TWC:
+  twc_valid_ratio mean 0.750, tail1000 0.753
+  loss_twc tail1000 0.0081
+  vs A1-order final success -0.07, precision +3.24
 
-重要注意：
+A2-order-dyn+TWC:
+  twc_valid_ratio mean 0.750, tail1000 0.750
+  loss_twc tail1000 0.0077
+  vs A2-order-dyn final success -22.73, precision -31.28
 
-```text
-两组 TWC 配置都使用 num_candidates=1。
-因此 60 epoch final_step 只有 18899，
-而 A1-order / A2-order-dyn 的 cand4 baseline final_step 是 75719。
-这些结果既不是 active-TWC 结果，也不是严格 optimizer-step 对齐结果。
+A3-order-gate-safe:
+  obs_alpha_dyn_mean mean 0.127, tail1000 0.116
+  vs A2-order-dyn final success -2.64, precision -8.45
+
+A3-order-conf-res-gate:
+  obs_alpha_dyn_raw_mean mean 0.493
+  obs_alpha_dyn_clamped_mean mean 0.181
+  obs_dyn_residual_norm mean 0.0315
+  best-final gap: success 30.86, precision 45.38
 ```
 
 结果解读：
 
-- `A1-order+TWC` 和 `A2-order-dyn+TWC` 的指标下降是真实观察，但不能据此判断 TWC 机制本身有害，因为 TWC loss 没有激活。
-- 当前更合理的解释是 paired-view 训练、`num_candidates=1`、step 数减少，以及 TWC validity 判定共同导致了退化。
-- 需要先修正 TWC validity / logging，使 `twc_valid_ratio` 非 0 且 `loss_twc` 有实际量级，再重跑 `A1-order+TWC`。
-- 只有 active-TWC 的 A1 版本正常后，`A2-order-dyn+TWC` 才能用于判断 dynamics prior 和 TWC 是否互补。
+- TWC validity 已经修复。`A1-order+TWC` 给出 precision-positive 信号，但 success 基本持平，所以 TWC 还不能被写成全面收益。
+- `A2-order-dyn+TWC` 在 TWC 有效的情况下后期崩坏，说明当前 `twc_weight=0.05` 或 paired-view 训练与 dynamics prior 组合不稳定。下一步如果继续 TWC，应先降权或 warmup，不要直接接 gate。
+- `A3-order-gate-safe` 相比旧 P5 full 安全很多，但仍低于 A2-order-dyn。它说明强融合问题被缓解，却还没有证明 gate 能带来最终收益。
+- `A3-order-conf-res-gate` 出现非常高的 best checkpoint，但 last checkpoint 崩坏。这里最重要的下一步不是改结构，而是复测 best checkpoint，确认 best 是否可复现。
 
 当前决策：
 
 ```text
-暂停把当前两组 order+TWC 当作正式机制结论。
-优先修复 TWC 有效样本判定，重新跑 A1-order+TWC；
-在 valid ratio 正常后再重跑 A2-order-dyn+TWC。
+主配置仍保持 A2-order-dyn。
+TWC 可以保留为 A1 上的 precision-positive 候选贡献，但需要降权 / warmup 后再测 A2 组合。
+gate-safe / conf-res 暂时都不能作为最终收益模块；conf-res 先复测 best checkpoint。
 ```
 
 图表和完整表格：
 
 ```text
-compare_results/twc_order_ablation_curves.png
-compare_results/twc_order_ablation_step_aligned_curves.png
-compare_results/twc_order_ablation_success_curve.png
-compare_results/twc_order_ablation_precision_curve.png
-compare_results/twc_order_ablation_best_final_summary.png
-compare_results/twc_order_ablation_delta_summary.png
-compare_results/twc_order_ablation_twc_diagnostics.png
-compare_results/twc_order_ablation_metrics_points.csv
-compare_results/twc_order_ablation_metrics_summary.csv
-compare_results/twc_order_ablation_twc_diagnostics_summary.csv
-compare_results/twc_order_ablation_comparison.md
+compare_results/twc_gate_ablation_curves.png
+compare_results/twc_gate_ablation_success_curve.png
+compare_results/twc_gate_ablation_precision_curve.png
+compare_results/twc_gate_ablation_best_final_summary.png
+compare_results/twc_gate_ablation_twc_diagnostics.png
+compare_results/twc_gate_ablation_gate_diagnostics.png
+compare_results/twc_gate_ablation_metrics_points.csv
+compare_results/twc_gate_ablation_metrics_summary.csv
+compare_results/twc_gate_ablation_diagnostics_summary.csv
+compare_results/twc_gate_ablation_comparison.md
 ```
 
-## 8. 当前各实验共同说明了什么
+## 9. 当前各实验共同说明了什么
 
 可以支持的结论：
 
@@ -349,27 +399,29 @@ compare_results/twc_order_ablation_comparison.md
 - DynamicsEncoder 是当前最有潜力的真实时间使用方式，尤其对 final precision 有帮助。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
-- 当前 order+TWC 训练没有激活 TWC 项，因此它只暴露了 TWC validity / paired-view 训练协议问题，不能作为 TWC 有效性结论。
-- P5 full 旧结果不能作为最终 gate 结论，因为它混入了 raw real-time 主干失败路径。
+- TWC validity 已经修复；A1-order+TWC 有 precision-positive 信号，但还不是全面指标提升。
+- A2-order-dyn+TWC 在 TWC 生效后仍后期崩坏，说明当前 TWC 权重 / 协议不能直接和 dynamics 组合。
+- P5 full 旧结果不能作为最终 gate 结论；gate-safe 比旧 P5 full 安全，但仍低于 A2-order-dyn。
+- conf-res 出现很高 best checkpoint，说明 residual confidence gate 不应被直接否定，但 final 崩坏要求先复测 best。
 - 后续 TWC 和 gate 都应该基于 `A1-order / A2-order-dyn`，不要再基于 raw real-time main branch。
 
 还不能说明的事情：
 
 - 还不能说完整 CT-SeqTrack 已经稳定超过 SeqTrack3D。
-- 还不能说 TWC 一定有效或无效，因为当前 order+TWC 的 valid ratio 为 0。
-- 还不能说 gate 无效，因为旧 P5 full 的主干时间路径本身不干净。
+- 还不能说 TWC 已经能作为主配置，因为它和 dynamics 组合后明显退化。
+- 还不能说 gate 无效或有效，因为 gate-safe final 不够好，conf-res best/final 又差距巨大。
 - 还不能彻底解释非 0 candidate 是否污染 dynamics，因为 cand1 没有与原 A2 做 optimizer-step 对齐，也缺少 candidate 分桶日志。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 
-## 9. 接下来应该做什么
+## 10. 接下来应该做什么
 
 当前优先顺序：
 
 ```text
-1. 修复 TWC validity / logging，让 twc_valid_ratio 非 0。
-2. 重跑 A1-order+TWC，先确认 active TWC 在无 dynamics 主干上是否成立。
-3. 重跑 A2-order-dyn+TWC，再判断 dynamics prior 和 TWC 是否互补。
-4. 继续 A3-order-gate-safe / A3-order-conf-res-gate。
+1. 复测 A3-order-conf-res-gate 的 best checkpoint，确认 62.04 / 76.30 是否可复现。
+2. 如果继续 TWC，先做 twc_weight=0.01 或 warmup 版本；不要直接接 gate。
+3. 如果继续 gate，做 sparse / delta_t / foreground confidence 分桶，看是否只在困难样本上收益。
+4. 补 dynamics candidate 分桶日志，解释 cand1 / disp 的机制来源。
 ```
 
 可选复核：
@@ -380,7 +432,7 @@ A2-order-dyn-cand1-240ep
 
 作用是让 `num_candidates=1` 的 cand1 与 `num_candidates=4` 的 A2-order-dyn 做 optimizer-step 对齐。只有这个版本也退化，才能更干净地说明移除非 0 candidate 本身有问题。
 
-### 9.1 A1-order+TWC
+### 10.1 A1-order+TWC
 
 目的：
 
@@ -390,11 +442,11 @@ A2-order-dyn-cand1-240ep
 
 看什么：
 
-- 重跑前先保证 `twc_valid_ratio > 0`，否则结果仍然不能解释 TWC。
-- 如果 active-TWC 后提升，说明 TWC 自身对 variable-rate / historical path consistency 有价值。
-- 如果 active-TWC 后仍不提升，再看 TWC 权重、paired view 构造或 mini 数据规模。
+- 已确认 `twc_valid_ratio > 0`，active A1-order+TWC final precision +3.24。
+- success 基本持平，说明它更像定位精度稳定项，而不是全面收益模块。
+- 后续如果要继续，优先看更小权重 / warmup 是否能保留 precision 同时改善 success。
 
-### 9.2 A2-order-dyn+TWC
+### 10.2 A2-order-dyn+TWC
 
 目的：
 
@@ -404,11 +456,11 @@ A2-order-dyn-cand1-240ep
 
 看什么：
 
-- 如果比 `A2-order-dyn` 更好，TWC 可以作为第二个核心贡献接入主线。
-- 如果只比 `A1-order+TWC` 好，说明 dynamics 仍是主要收益来源。
-- 如果退化，先不要把 TWC 和 gate 混合，回头检查 TWC loss 权重和 valid ratio。
+- active A2-order-dyn+TWC 明显退化，且 validity 正常。
+- 先不要把 TWC 和 gate 混合。
+- 如果继续，先降 `twc_weight` 或加 warmup，并观察后期递归跟踪是否仍崩。
 
-### 9.3 A3-order-gate-safe
+### 10.3 A3-order-gate-safe / conf-res
 
 目的：
 
@@ -418,10 +470,11 @@ A2-order-dyn-cand1-240ep
 
 看什么：
 
-- 如果比旧 P5 full 稳，说明旧 gate 失败部分来自 raw real-time 主干和过强 dynamics 注入。
-- 如果仍退化，优先实现 residual gate 或限制 `alpha_dyn`，不要直接否定 observability-aware fusion。
+- gate-safe 比旧 P5 full 稳，但 final 仍低于 A2-order-dyn。
+- conf-res best 很高但 final 崩坏，优先复测 best checkpoint。
+- 如果 best 可复现，再做分桶分析；如果 best 不可复现，先回到更保守的 alpha / residual 约束。
 
-## 10. 后续需要补的诊断
+## 11. 后续需要补的诊断
 
 建议增加 dynamics 诊断日志：
 
@@ -441,7 +494,7 @@ dynamics_valid_ratio
 - 判断 velocity prediction 是否爆炸、塌缩或量级不匹配。
 - 给 cand1 / disp 的结果提供机制解释，而不是只看 success 和 precision。
 
-## 11. 当前论文叙事建议
+## 12. 当前论文叙事建议
 
 暂时不要写：
 
@@ -463,5 +516,6 @@ delta_t through a timestamp-conditioned dynamics prior.
 ```text
 真实 timestamp 改变历史状态的物理含义，但它不应该粗暴替换 SeqTrack3D
 主干里的顺序 token。当前最稳的 CT-SeqTrack 路线是：主干保留 order-time，
-真实 delta_t 进入 dynamics prior，再逐步验证 TWC 和 observability gate。
+真实 delta_t 进入 dynamics prior；TWC 在 A1-order 上有 precision-positive 信号，
+但和 dynamics 组合、以及 gate / conf-res 的后期稳定性仍需要进一步复核。
 ```

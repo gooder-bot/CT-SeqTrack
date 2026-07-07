@@ -1,0 +1,121 @@
+model,metric,index,epoch,step,value
+SeqTrack baseline,precision/test,0,5,6309,41.8698
+SeqTrack baseline,precision/test,1,10,12619,65.2144
+SeqTrack baseline,precision/test,2,15,18929,50.5416
+SeqTrack baseline,precision/test,3,20,25239,49.2309
+SeqTrack baseline,precision/test,4,25,31549,60.6324
+SeqTrack baseline,precision/test,5,30,37859,53.9092
+SeqTrack baseline,precision/test,6,35,44169,62.3392
+SeqTrack baseline,precision/test,7,40,50479,51.174
+SeqTrack baseline,precision/test,8,45,56789,59.6105
+SeqTrack baseline,precision/test,9,50,63099,57.3085
+SeqTrack baseline,precision/test,10,55,69409,59.3184
+SeqTrack baseline,precision/test,11,60,75719,59.9617
+SeqTrack baseline,success/test,0,5,6309,40.6969
+SeqTrack baseline,success/test,1,10,12619,46.0908
+SeqTrack baseline,success/test,2,15,18929,45.7298
+SeqTrack baseline,success/test,3,20,25239,42.8851
+SeqTrack baseline,success/test,4,25,31549,51.7363
+SeqTrack baseline,success/test,5,30,37859,48.9289
+SeqTrack baseline,success/test,6,35,44169,52.2834
+SeqTrack baseline,success/test,7,40,50479,46.4781
+SeqTrack baseline,success/test,8,45,56789,50.4628
+SeqTrack baseline,success/test,9,50,63099,50.2024
+SeqTrack baseline,success/test,10,55,69409,49.1346
+SeqTrack baseline,success/test,11,60,75719,50.9858
+A1-raw,precision/test,0,5,6309,30.680524826049805
+A1-raw,precision/test,1,10,12619,40.36105346679688
+A1-raw,precision/test,2,15,18929,36.4146614074707
+A1-raw,precision/test,3,20,25239,27.946388244628903
+A1-raw,precision/test,4,25,31549,24.46061134338379
+A1-raw,precision/test,5,30,37859,23.643325805664062
+A1-raw,precision/test,6,35,44169,27.41684913635254
+A1-raw,precision/test,7,40,50479,25.37308692932129
+A1-raw,precision/test,8,45,56789,25.142234802246094
+A1-raw,precision/test,9,50,63099,26.55908203125
+A1-raw,precision/test,10,55,69409,25.29759788513184
+A1-raw,precision/test,11,60,75719,27.42888641357422
+A1-raw,success/test,0,5,6309,25.11706924438477
+A1-raw,success/test,1,10,12619,29.53501319885254
+A1-raw,success/test,2,15,18929,32.35557556152344
+A1-raw,success/test,3,20,25239,28.77352523803711
+A1-raw,success/test,4,25,31549,26.090808868408203
+A1-raw,success/test,5,30,37859,25.821664810180664
+A1-raw,success/test,6,35,44169,28.62253761291504
+A1-raw,success/test,7,40,50479,27.47593307495117
+A1-raw,success/test,8,45,56789,27.0864372253418
+A1-raw,success/test,9,50,63099,28.00547218322754
+A1-raw,success/test,10,55,69409,27.079872131347656
+A1-raw,success/test,11,60,75719,28.27680778503418
+A1-pseudo,precision/test,0,5,6309,65.23851013183594
+A1-pseudo,precision/test,1,10,12619,42.877464294433594
+A1-pseudo,precision/test,2,15,18929,58.739601135253906
+A1-pseudo,precision/test,3,20,25239,52.92341613769531
+A1-pseudo,precision/test,4,25,31549,37.45076370239258
+A1-pseudo,precision/test,5,30,37859,42.167396545410156
+A1-pseudo,precision/test,6,35,44169,54.613792419433594
+A1-pseudo,precision/test,7,40,50479,42.199127197265625
+A1-pseudo,precision/test,8,45,56789,55.98906326293945
+A1-pseudo,precision/test,9,50,63099,52.12035369873047
+A1-pseudo,precision/test,10,55,69409,53.35448455810547
+A1-pseudo,precision/test,11,60,75719,52.250545501708984
+A1-pseudo,success/test,0,5,6309,41.213348388671875
+A1-pseudo,success/test,1,10,12619,34.13895034790039
+A1-pseudo,success/test,2,15,18929,41.39715576171875
+A1-pseudo,success/test,3,20,25239,40.3512077331543
+A1-pseudo,success/test,4,25,31549,41.11050796508789
+A1-pseudo,success/test,5,30,37859,44.060176849365234
+A1-pseudo,success/test,6,35,44169,46.712257385253906
+A1-pseudo,success/test,7,40,50479,42.64223098754883
+A1-pseudo,success/test,8,45,56789,49.891685485839844
+A1-pseudo,success/test,9,50,63099,48.93107604980469
+A1-pseudo,success/test,10,55,69409,47.957332611083984
+A1-pseudo,success/test,11,60,75719,48.338077545166016
+A1-MLP,precision/test,0,5,6309,32.77571105957031
+A1-MLP,precision/test,1,10,12619,23.121444702148438
+A1-MLP,precision/test,2,15,18929,23.205692291259766
+A1-MLP,precision/test,3,20,25239,22.5284481048584
+A1-MLP,precision/test,4,25,31549,26.452959060668945
+A1-MLP,precision/test,5,30,37859,24.2636775970459
+A1-MLP,precision/test,6,35,44169,27.82713508605957
+A1-MLP,precision/test,7,40,50479,29.39387321472168
+A1-MLP,precision/test,8,45,56789,29.757112503051758
+A1-MLP,precision/test,9,50,63099,27.280086517333984
+A1-MLP,precision/test,10,55,69409,28.468271255493164
+A1-MLP,precision/test,11,60,75719,26.277902603149414
+A1-MLP,success/test,0,5,6309,31.570022583007812
+A1-MLP,success/test,1,10,12619,23.7954044342041
+A1-MLP,success/test,2,15,18929,24.250547409057617
+A1-MLP,success/test,3,20,25239,23.587528228759766
+A1-MLP,success/test,4,25,31549,28.071117401123047
+A1-MLP,success/test,5,30,37859,26.650985717773438
+A1-MLP,success/test,6,35,44169,29.0864315032959
+A1-MLP,success/test,7,40,50479,30.37089729309082
+A1-MLP,success/test,8,45,56789,30.401527404785156
+A1-MLP,success/test,9,50,63099,28.07549476623535
+A1-MLP,success/test,10,55,69409,29.644420623779297
+A1-MLP,success/test,11,60,75719,27.438732147216797
+A1-Fourier,precision/test,0,5,6309,23.582056045532227
+A1-Fourier,precision/test,1,10,12619,30.206785202026367
+A1-Fourier,precision/test,2,15,18929,30.3227596282959
+A1-Fourier,precision/test,3,20,25239,24.10831642150879
+A1-Fourier,precision/test,4,25,31549,26.086435317993164
+A1-Fourier,precision/test,5,30,37859,28.224288940429688
+A1-Fourier,precision/test,6,35,44169,28.508752822875977
+A1-Fourier,precision/test,7,40,50479,28.237417221069336
+A1-Fourier,precision/test,8,45,56789,28.951862335205078
+A1-Fourier,precision/test,9,50,63099,28.60831642150879
+A1-Fourier,precision/test,10,55,69409,28.820571899414062
+A1-Fourier,precision/test,11,60,75719,29.81509780883789
+A1-Fourier,success/test,0,5,6309,24.397157669067383
+A1-Fourier,success/test,1,10,12619,31.064552307128906
+A1-Fourier,success/test,2,15,18929,29.580963134765625
+A1-Fourier,success/test,3,20,25239,23.909191131591797
+A1-Fourier,success/test,4,25,31549,27.2636775970459
+A1-Fourier,success/test,5,30,37859,29.554706573486328
+A1-Fourier,success/test,6,35,44169,29.72319793701172
+A1-Fourier,success/test,7,40,50479,29.130199432373047
+A1-Fourier,success/test,8,45,56789,30.252737045288086
+A1-Fourier,success/test,9,50,63099,29.254924774169922
+A1-Fourier,success/test,10,55,69409,29.620351791381836
+A1-Fourier,success/test,11,60,75719,30.723196029663086

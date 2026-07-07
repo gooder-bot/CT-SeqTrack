@@ -41,15 +41,14 @@ dist/
 *.swn
 *.tmp
 *.core
+logs_*.out
+run_logs/
 
-# Keep experiment outputs, checkpoints, TensorBoard logs, images, and docs trackable.
-# In particular, do not ignore:
-# output/
-# compare_results/
-# lightning_logs/
-# events.*
-# *.ckpt
-# *.pth
-# *.png
-# *.jpg
-# *.log
+# Local analysis environments / package caches
+.analysis_venv/
+.analysis_pkgs/
+
+# Heavy experiment runtime outputs stay local.
+output/
+lightning_logs/
+events.out.tfevents*

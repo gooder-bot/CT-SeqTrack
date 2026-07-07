@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-06-02
+更新时间：2026-06-03
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -39,7 +39,9 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 - [x] `A1-scaled / A2-scaled-dyn`：缩放 real time 仍未修复，说明主干对时间 token 语义敏感，不只是数值尺度问题。
 - [x] `A1-order / A2-order-dyn`：恢复 order-time 主干后，A1-order 基本修复 A1 崩坏；A2-order-dyn final precision 高于 baseline，是当前最强正向信号。
 - [x] `A2-order-dyn-cand1 / A2-order-dyn-disp`：cand1 在 60 epoch 协议下明显退化但 step 未对齐；disp 与 A2-order-dyn 基本持平，precision 小幅更高。
-- [x] `A1-order+TWC / A2-order-dyn+TWC`：两组已跑完并整理，但 `twc_valid_ratio=0`，说明 TWC 项未激活；这些结果不能作为 TWC 有效或无效的最终结论。
+- [x] 旧 `A1-order+TWC / A2-order-dyn+TWC`：两组已跑完并整理，但 `twc_valid_ratio=0`，说明 TWC 项未激活；这些结果不能作为 TWC 有效或无效的最终结论。
+- [x] validity-fixed active `A1-order+TWC / A2-order-dyn+TWC`：TWC 已激活；A1 上 precision 有正向信号，A2+dynamics 组合后期崩坏。
+- [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res best 很高但 final 崩坏，需复测 best checkpoint。
 
 ### 当前结论
 
@@ -47,9 +49,71 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 真实时间方向没有被否定；
 当前最稳路线是保留 SeqTrack3D 主干的 order-time 语义，
 把真实 delta_t 放进 DynamicsEncoder 作为运动先验。
+TWC / gate 目前还不是稳定主配置：A1+TWC 有 precision-positive 信号，
+conf-res 有 best-checkpoint 信号，但都需要进一步稳定性复核。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-06-03：active TWC / gate-safe / conf-res 结果整理
+
+### active TWC
+
+关键结果：
+
+```text
+A1-order final:          success 51.23, precision 57.86
+A1-order+TWC final:      success 51.16, precision 61.10
+A2-order-dyn final:      success 50.96, precision 63.31
+A2-order-dyn+TWC final:  success 28.23, precision 32.04
+```
+
+关键诊断：
+
+```text
+A1-order+TWC twc_valid_ratio mean 0.750, tail1000 0.753
+A2-order-dyn+TWC twc_valid_ratio mean 0.750, tail1000 0.750
+```
+
+判断：
+
+- TWC validity 已修复；这轮不再是 `twc_valid_ratio=0` 的 inactive 结果。
+- `A1-order+TWC` 相对 A1-order final success 基本持平（-0.07），final precision 提升 +3.24。
+- `A2-order-dyn+TWC` 在 TWC 有效时仍明显退化，说明当前 `twc_weight=0.05` / paired-view 协议与 dynamics prior 组合不稳定。
+
+### gate-safe / conf-res
+
+关键结果：
+
+```text
+A2-order-dyn final:               success 50.96, precision 63.31
+A3-order-gate-safe final:         success 48.32, precision 54.87
+A3-order-conf-res-gate final:     success 31.17, precision 30.92
+A3-order-conf-res-gate best:      success 62.04, precision 76.30
+```
+
+判断：
+
+- `A3-order-gate-safe` 比旧 P5 full 的 `31.19 / 31.89` 安全很多，但仍低于 A2-order-dyn。
+- `A3-order-conf-res-gate` 的 best checkpoint 信号很强，但 last checkpoint 崩坏；应优先复测 best checkpoint。
+- 当前主配置仍应保持 `A2-order-dyn`，不要把 active TWC 或 gate 直接写成 full-model 收益。
+
+归档文件：
+
+```text
+compare_results/twc_gate_ablation_comparison.md
+compare_results/twc_gate_ablation_metrics_summary.csv
+compare_results/twc_gate_ablation_metrics_points.csv
+compare_results/twc_gate_ablation_diagnostics_summary.csv
+compare_results/twc_gate_ablation_curves.png
+compare_results/twc_gate_ablation_success_curve.png
+compare_results/twc_gate_ablation_precision_curve.png
+compare_results/twc_gate_ablation_best_final_summary.png
+compare_results/twc_gate_ablation_twc_diagnostics.png
+compare_results/twc_gate_ablation_gate_diagnostics.png
+```
 
 ---
 

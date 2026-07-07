@@ -1,7 +1,13 @@
 # CT-SeqTrack 当前执行清单
 
-更新时间：2026-06-01
-
+更新时间：2026-06-03
+用真实时间的解决方法
+用 dt_norm = dt / dt_ref，例如 nuScenes keyframe dt_ref=0.5，Waymo/KITTI dt_ref=0.1。
+对 dt 做 clip，比如 [0.5x, 3x] 或按数据分位数裁剪。
+velocity 分支里用 max(dt, eps)，避免小 dt 放大噪声。
+加 valid_mask 和 frame-gap 信息，区分“真的 0.2s”与“缺了一帧”。
+做 ablation：fixed step、true timestamp、jittered timestamp、shuffled timestamp、按 delta_t 分桶评估。
+如果跨数据集训练，最好随机 temporal dropout / jitter augmentation，让网络学会 variable-rate，而不是记住某个数据集的频率。
 ## 文件分工
 
 - `need_to_do.md`：只放下一步和未来要做的事情。
@@ -46,13 +52,16 @@
 已跑并整理：
 1. A2-order-dyn-cand1
 2. A2-order-dyn-disp
-3. A1-order+TWC
-4. A2-order-dyn+TWC
+3. A1-order+TWC（validity-fixed active TWC）
+4. A2-order-dyn+TWC（validity-fixed active TWC）
+5. A3-order-gate-safe
+6. A3-order-conf-res-gate
 
-待跑或待重跑：
-5. 同步 TWC validity 修复后重跑 A1-order+TWC / A2-order-dyn+TWC
-6. A3-order-gate-safe
-7. A3-order-conf-res-gate
+当前下一步：
+1. 复测 A3-order-conf-res-gate 的 best checkpoint，不只看 last。
+2. 如果继续 TWC，优先做低权重 / warmup 版本，不要直接把 A2-order-dyn+TWC 接 gate。
+3. 如果继续 gate，优先做分桶诊断或更保守的 residual / confidence 约束。
+4. 补 dynamics candidate 分桶日志，解释 cand1 / disp 的机制来源。
 ```
 
 对应配置：
@@ -83,12 +92,12 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 | --- | --- | --- | --- | ---: | ---: | --- |
 | A2-order-dyn-cand1 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml` | `ct_a2_order_dyn_cand1_car_60ep_bs16` | 已跑已整理 | 26.68 | 24.50 | 明显退化；但 60 epoch 只有约 1/4 step，需等 step 复核才可最终判断 candidate noise。 |
 | A2-order-dyn-disp | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml` | `ct_a2_order_dyn_disp_car_60ep_bs16` | 已跑已整理 | 50.54 | 63.85 | 与 A2-order-dyn 基本持平，precision 小幅更高；可作为温和稳定项继续观察。 |
-| A1-order+TWC | `cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml` | `ct_a1_order_twc_car_60ep_bs16` | 已跑，本地已修 validity，待重跑 | 45.61 | 50.77 | `twc_valid_ratio=0` 来自 order-time `delta_T` 判定误杀；同步修复后重跑。 |
-| A2-order-dyn+TWC | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml` | `ct_a2_order_dyn_twc_car_60ep_bs16` | 已跑，本地已修 validity，待重跑 | 38.27 | 38.85 | `twc_valid_ratio=0` 且 cand1 / step 不对齐；同步修复后重跑。 |
-| A3-order-gate-safe | `cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml` | `ct_a3_order_gate_safe_car_60ep_bs16` | 未跑 | - | - | - |
-| A3-order-conf-res-gate | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_car_60ep_bs16` | 未跑 | - | - | - |
+| A1-order+TWC | `cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml` | `ct_a1_order_twc_cand4_validfix_car_60ep_bs16_gpu2` | 已跑已整理 | 51.16 | 61.10 | `twc_valid_ratio` 均值约 0.75；相对 A1-order success 基本持平，precision +3.24，是一个 precision-positive 但非 success-positive 的 TWC 信号。 |
+| A2-order-dyn+TWC | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml` | `ct_a2_order_dyn_twc_cand4_validfix_car_60ep_bs16_gpu3` | 已跑已整理 | 28.23 | 32.04 | TWC 已激活但后期崩坏；相对 A2-order-dyn final success/precision 分别 -22.73/-31.28，当前 `twc_weight=0.05` 不适合作为主配置。 |
+| A3-order-gate-safe | `cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml` | `ct_a3_order_gate_safe_car_60ep_bs16` | 已跑已整理 | 48.32 | 54.87 | 比旧 P5 full 安全很多，但仍低于 A2-order-dyn；保守 feature gate 不是当前最终收益来源。 |
+| A3-order-conf-res-gate | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_car_60ep_bs16_gpu3` | 已跑已整理 | 31.17 | 30.92 | best 很高（success 62.04 / precision 76.30）但 final 崩坏；优先复测 best checkpoint 和检查 alpha/residual 诊断。 |
 
-跑完每组后，先填这个表，再更新 `sum_results.md` 和 `done.md`。如果要多卡并行，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。当前 TWC 两组已经产出曲线和表格，但在服务器同步并验证新的 TWC validity 前不要作为 active-TWC 结论写入论文。
+本轮完整整理文件见 `compare_results/twc_gate_ablation_*`。如果后续要多卡并行复跑，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。
 
 ### 1.1 A2-order-dyn-cand1
 
@@ -196,10 +205,20 @@ twc_candidate_zero_only: false
 当前实测结果：
 
 ```text
-final success 45.61，final precision 50.77。
-但 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap 全程为 0，
-所以这不是 active-TWC 结果。下一步同步本地 TWC validity 修复，先用检查脚本验证，再重跑。
+validity-fixed cand4 版本：
+final success 51.16，final precision 61.10；
+best success 53.16，best precision 63.35。
+
+twc_valid_ratio 均值约 0.750，tail1000 约 0.753；
+loss_twc tail1000 约 0.0081。
+所以这已经是 active-TWC 结果，不再是旧的 twc_valid_ratio=0 诊断。
+
+相对 A1-order：
+final success   -0.07
+final precision +3.24
 ```
+
+当前解读：TWC 在无 dynamics 的 A1-order 主干上没有带来明确 success 增益，但给 final precision 带来有意义的正向信号。论文里可以把它作为“路径一致性有助于定位精度”的候选证据，但不要写成完整指标全面提升。
 
 命令：
 
@@ -245,11 +264,20 @@ twc_candidate_zero_only: false
 当前实测结果：
 
 ```text
-final success 38.27，final precision 38.85。
-但 loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap 全程为 0，
-且 num_candidates=1 导致 60 epoch 只有约 18899 step。
-因此当前下降不能解读为 TWC 与 dynamics 不兼容。
+validity-fixed cand4 版本：
+final success 28.23，final precision 32.04；
+best success 45.24，best precision 57.43。
+
+twc_valid_ratio 均值约 0.750，tail1000 约 0.750；
+loss_twc tail1000 约 0.0077。
+所以 TWC 确实激活，但和 dynamics 组合后明显后期崩坏。
+
+相对 A2-order-dyn：
+final success   -22.73
+final precision -31.28
 ```
+
+当前解读：这次下降可以解释为“当前 `twc_weight=0.05` / paired-view 协议与 dynamics prior 组合不稳定”，不再是 validity 没生效的问题。下一步如果继续 TWC，应先降到 `twc_weight=0.01` 或加入 warmup，再考虑和 dynamics 组合；不要把当前 A2+TWC 直接接 gate。
 
 命令：
 
@@ -289,6 +317,23 @@ obs_gate_init_obs_bias: 3.0
 
 - 如果比旧 P5 full 稳，说明旧 gate 失败部分来自 raw real-time 主干和过强 dynamics 注入。
 - 如果仍退化，优先实现 residual gate 或限制 `alpha_dyn`，不要直接否定 observability-aware fusion。
+
+当前实测结果：
+
+```text
+final success 48.32，final precision 54.87；
+best success 50.99，best precision 60.17。
+
+obs_alpha_dyn_mean 均值约 0.127，tail1000 约 0.116；
+obs_alpha_dyn_max 均值约 0.152；
+obs_gate_entropy 均值约 0.365。
+
+相对 A2-order-dyn：
+final success   -2.64
+final precision -8.45
+```
+
+当前解读：gate-safe 比旧 P5 full 的 `31.19 / 31.89` 安全很多，说明保守 observation-biased gate 确实缓解了强融合灾难；但它仍低于 A2-order-dyn，暂时不能作为最终收益模块。
 
 命令：
 
@@ -345,6 +390,27 @@ motion_pred_xyz = obs_motion_pred_xyz
 - 如果总体持平但 sparse / long-delta_t 子集提升，也可以作为困难场景增强模块。
 - 如果仍退化，优先检查 `obs_alpha_dyn_raw_mean / obs_alpha_dyn_clamped_mean / obs_dyn_residual_norm`。
 
+当前实测结果：
+
+```text
+version_1 早期点 + version_2 续跑点合并，重复 step=18930 保留 version_2。
+
+final success 31.17，final precision 30.92；
+best success 62.04，best precision 76.30。
+
+obs_alpha_dyn_raw_mean 均值约 0.493；
+obs_alpha_dyn_clamped_mean 均值约 0.181；
+obs_dyn_residual_norm 均值约 0.0315。
+
+相对 A2-order-dyn：
+final success   -19.79
+final precision -32.40
+best success    +10.50
+best precision  +12.72
+```
+
+当前解读：conf-res 的 best 信号很强，但 final 崩得很重，说明它更像 checkpoint-selection / 后期稳定性问题，而不是稳定最终模型。下一步优先复测 best checkpoint；在复测前不要按 last checkpoint 否定或肯定 conf-res。
+
 命令：
 
 ```bash
@@ -367,13 +433,13 @@ python main.py \
 
 ```text
 compare_results/cand1_disp_dynamics_*
-compare_results/twc_order_ablation_*
+compare_results/twc_gate_ablation_*
 ```
 
-注意：`twc_order_ablation_*` 已经完成表格和图，但结论是 TWC validity 出错；本地代码已修，需要服务器同步验证后重跑，不是最终 active-TWC 消融。
+注意：旧 inactive-TWC 诊断结论是 TWC validity 出错，当前 active-TWC / gate 正式整理以 `twc_gate_ablation_*` 为准。
 
-- [ ] 把每组 TensorBoard 的 `success/test` 和 `precision/test` 拉成统一 CSV。
-- [ ] 生成一份新的比较表，至少包含：
+- [x] 把每组 TensorBoard 的 `success/test` 和 `precision/test` 拉成统一 CSV：`compare_results/twc_gate_ablation_metrics_points.csv`。
+- [x] 生成新的比较表和 summary：`compare_results/twc_gate_ablation_metrics_summary.csv`、`compare_results/twc_gate_ablation_comparison.md`，包含：
 
 ```text
 SeqTrack baseline
@@ -387,11 +453,22 @@ A3-order-gate-safe
 A3-order-conf-res-gate
 ```
 
-- [ ] 更新 `sum_results.md`，写清楚每组结果支持或反驳了什么。
-- [ ] 如果某组 final 和 best 差距很大，复测 best checkpoint，不只看 last。
-- [ ] 如果 TWC 退化，优先查看 `loss_twc / twc_valid_ratio / twc_center_gap / twc_angle_gap`。
-- [ ] 如果 gate 退化，优先查看 `obs_alpha_dyn_mean / obs_alpha_dyn_max / obs_gate_entropy`。
-- [ ] 如果 conf-res 退化，优先查看 `obs_alpha_dyn_raw_mean / obs_alpha_dyn_clamped_mean / obs_dyn_residual_norm`。
+- [x] 生成曲线和诊断图：
+
+```text
+compare_results/twc_gate_ablation_curves.png
+compare_results/twc_gate_ablation_success_curve.png
+compare_results/twc_gate_ablation_precision_curve.png
+compare_results/twc_gate_ablation_best_final_summary.png
+compare_results/twc_gate_ablation_twc_diagnostics.png
+compare_results/twc_gate_ablation_gate_diagnostics.png
+compare_results/twc_gate_ablation_diagnostics_summary.csv
+```
+
+- [x] 更新 `sum_results.md`，写清楚 active TWC、gate-safe、conf-res 分别支持或反驳了什么。
+- [ ] `A3-order-conf-res-gate` final / best 差距巨大，优先复测 best checkpoint（success 62.04 / precision 76.30）。
+- [ ] `A2-order-dyn+TWC` 已确认 active 但后期崩坏；如果继续做 TWC，先降 `twc_weight` 或加 warmup。
+- [ ] 如果继续 gate，优先做 sparse / delta_t / foreground confidence 分桶，不只看整体 final。
 
 ## 3. Dynamics 诊断日志
 
@@ -461,10 +538,10 @@ dynamics_candidate_zero_only: true
 
 ### 4.3 TWC
 
-- [ ] 先修复 validity：`twc_valid_ratio` 必须非 0，`loss_twc / twc_center_gap / twc_angle_gap` 必须有实际量级。
-- [ ] 如果 active `A1-order+TWC` 有收益：TWC 可以独立作为贡献。
-- [ ] 如果 active `A2-order-dyn+TWC` 进一步提升：把 `A2-order-dyn+TWC` 作为下一版主配置。
-- [ ] 如果 active TWC 仍退化：再调小 `twc_weight` 或增加 warmup，不要直接接 gate。
+- [x] validity 已修复并验证：两组 active TWC 的 `twc_valid_ratio` 均值约 0.75，`loss_twc / twc_center_gap / twc_angle_gap` 都有实际量级。
+- [x] `A1-order+TWC`：final success 基本持平（-0.07），final precision 提升（+3.24）。TWC 可以作为 precision-positive 候选信号，但还不能说全面提升。
+- [x] `A2-order-dyn+TWC`：final success / precision 明显退化（-22.73 / -31.28）。当前 `twc_weight=0.05` 不适合作为 dynamics 主配置。
+- [ ] 如果继续 active TWC，优先调小 `twc_weight` 或增加 warmup；不要直接接 gate。
 
 候选设置：
 
@@ -475,8 +552,9 @@ twc_warmup_epoch: 5
 
 ### 4.4 gate
 
-- [ ] 如果 `A3-order-gate-safe` 稳定：继续做 gate 分桶分析。
-- [ ] 如果仍退化：实现 residual gate，而不是 feature replacement。
+- [x] `A3-order-gate-safe` 已跑：比旧 P5 full 安全，但相对 A2-order-dyn final success / precision 仍为 -2.64 / -8.45。
+- [ ] 如果继续 gate，先做分桶分析确认 sparse / long-delta_t / low-confidence 样本是否受益。
+- [ ] feature replacement 版本暂时不要作为主线；后续优先 residual / confidence 约束，并严格限制 `alpha_dyn`。
 
 候选配置：
 
@@ -495,6 +573,13 @@ fused_feature = point_feature + obs_gate_residual_scale * alpha_dyn * dyn_residu
 ### 4.5 置信空间 / residual confidence gate
 
 这个想法已经落地为 `A3-order-conf-res-gate`，作为 `A3-order-gate-safe` 的并行对照。它不替代当前主线，只用于判断 feature replacement 是否过于激进，以及 residual correction 是否更安全。
+
+当前结果：
+
+- [x] `A3-order-conf-res-gate` 已跑，final success / precision 为 31.17 / 30.92。
+- [x] best checkpoint 信号很强：best success 62.04，best precision 76.30。
+- [ ] 优先复测 best checkpoint。复测前不要按 last checkpoint 直接否定 conf-res。
+- [ ] 如果 best 可复现，再检查为什么后期崩坏：raw alpha 均值约 0.493，clamped alpha 均值约 0.181，说明 gate 仍然很想依赖 dynamics。
 
 核心原则：
 

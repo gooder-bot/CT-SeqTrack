@@ -1,0 +1,73 @@
+model,metric,eval_idx,epoch,step,value
+SeqTrack baseline,success/test,0,5,6309,40.6969
+SeqTrack baseline,success/test,1,10,12619,46.0908
+SeqTrack baseline,success/test,2,15,18929,45.7298
+SeqTrack baseline,success/test,3,20,25239,42.8851
+SeqTrack baseline,success/test,4,25,31549,51.7363
+SeqTrack baseline,success/test,5,30,37859,48.9289
+SeqTrack baseline,success/test,6,35,44169,52.2834
+SeqTrack baseline,success/test,7,40,50479,46.4781
+SeqTrack baseline,success/test,8,45,56789,50.4628
+SeqTrack baseline,success/test,9,50,63099,50.2024
+SeqTrack baseline,success/test,10,55,69409,49.1346
+SeqTrack baseline,success/test,11,60,75719,50.9858
+A1-order+TWC,success/test,0,5,6310,48.32057189941406
+A1-order+TWC,success/test,1,10,12620,30.079872131347656
+A1-order+TWC,success/test,2,15,18930,38.71663284301758
+A1-order+TWC,success/test,3,20,25240,43.33150863647461
+A1-order+TWC,success/test,4,25,31550,51.390586853027344
+A1-order+TWC,success/test,5,30,37860,44.50000381469727
+A1-order+TWC,success/test,6,35,44170,52.19365310668945
+A1-order+TWC,success/test,7,40,50480,49.66411590576172
+A1-order+TWC,success/test,8,45,56790,52.1433219909668
+A1-order+TWC,success/test,9,50,63100,52.76258087158203
+A1-order+TWC,success/test,10,55,69410,53.15645980834961
+A1-order+TWC,success/test,11,60,75720,51.15645599365234
+A2-order-dyn+TWC,success/test,0,5,6310,36.06454849243164
+A2-order-dyn+TWC,success/test,1,10,12620,45.235233306884766
+A2-order-dyn+TWC,success/test,2,15,18930,24.025161743164062
+A2-order-dyn+TWC,success/test,3,20,25240,26.394969940185547
+A2-order-dyn+TWC,success/test,4,25,31550,34.28118133544922
+A2-order-dyn+TWC,success/test,5,30,37860,26.9682731628418
+A2-order-dyn+TWC,success/test,6,35,44170,31.419038772583008
+A2-order-dyn+TWC,success/test,7,40,50480,29.014223098754883
+A2-order-dyn+TWC,success/test,8,45,56790,28.882932662963867
+A2-order-dyn+TWC,success/test,9,50,63100,27.624725341796875
+A2-order-dyn+TWC,success/test,10,55,69410,28.28556060791016
+A2-order-dyn+TWC,success/test,11,60,75720,28.230854034423828
+SeqTrack baseline,precision/test,0,5,6309,41.8698
+SeqTrack baseline,precision/test,1,10,12619,65.2144
+SeqTrack baseline,precision/test,2,15,18929,50.5416
+SeqTrack baseline,precision/test,3,20,25239,49.2309
+SeqTrack baseline,precision/test,4,25,31549,60.6324
+SeqTrack baseline,precision/test,5,30,37859,53.9092
+SeqTrack baseline,precision/test,6,35,44169,62.3392
+SeqTrack baseline,precision/test,7,40,50479,51.174
+SeqTrack baseline,precision/test,8,45,56789,59.6105
+SeqTrack baseline,precision/test,9,50,63099,57.3085
+SeqTrack baseline,precision/test,10,55,69409,59.3184
+SeqTrack baseline,precision/test,11,60,75719,59.9617
+A1-order+TWC,precision/test,0,5,6310,61.594085693359375
+A1-order+TWC,precision/test,1,10,12620,28.489059448242188
+A1-order+TWC,precision/test,2,15,18930,39.87417984008789
+A1-order+TWC,precision/test,3,20,25240,54.65864562988281
+A1-order+TWC,precision/test,4,25,31550,58.96060562133789
+A1-order+TWC,precision/test,5,30,37860,49.02735137939453
+A1-order+TWC,precision/test,6,35,44170,61.76367950439453
+A1-order+TWC,precision/test,7,40,50480,59.284461975097656
+A1-order+TWC,precision/test,8,45,56790,62.77243041992188
+A1-order+TWC,precision/test,9,50,63100,62.65098571777344
+A1-order+TWC,precision/test,10,55,69410,63.35011291503906
+A1-order+TWC,precision/test,11,60,75720,61.10174560546875
+A2-order-dyn+TWC,precision/test,0,5,6310,57.432167053222656
+A2-order-dyn+TWC,precision/test,1,10,12620,50.39934539794922
+A2-order-dyn+TWC,precision/test,2,15,18930,22.71444129943848
+A2-order-dyn+TWC,precision/test,3,20,25240,28.356678009033203
+A2-order-dyn+TWC,precision/test,4,25,31550,40.19037628173828
+A2-order-dyn+TWC,precision/test,5,30,37860,28.749454498291016
+A2-order-dyn+TWC,precision/test,6,35,44170,36.78993606567383
+A2-order-dyn+TWC,precision/test,7,40,50480,33.54486083984375
+A2-order-dyn+TWC,precision/test,8,45,56790,32.94310760498047
+A2-order-dyn+TWC,precision/test,9,50,63100,29.9989070892334
+A2-order-dyn+TWC,precision/test,10,55,69410,31.72538375854492
+A2-order-dyn+TWC,precision/test,11,60,75720,32.03719711303711

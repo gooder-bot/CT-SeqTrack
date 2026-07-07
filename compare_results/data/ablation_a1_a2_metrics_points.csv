@@ -1,0 +1,97 @@
+model,metric,index,epoch,step,value
+SeqTrack baseline,success/test,0,5,6309,40.6969
+SeqTrack baseline,success/test,1,10,12619,46.0908
+SeqTrack baseline,success/test,2,15,18929,45.7298
+SeqTrack baseline,success/test,3,20,25239,42.8851
+SeqTrack baseline,success/test,4,25,31549,51.7363
+SeqTrack baseline,success/test,5,30,37859,48.9289
+SeqTrack baseline,success/test,6,35,44169,52.2834
+SeqTrack baseline,success/test,7,40,50479,46.4781
+SeqTrack baseline,success/test,8,45,56789,50.4628
+SeqTrack baseline,success/test,9,50,63099,50.2024
+SeqTrack baseline,success/test,10,55,69409,49.1346
+SeqTrack baseline,success/test,11,60,75719,50.9858
+CT P5 full,success/test,0,5,6309,44.9376
+CT P5 full,success/test,1,10,12619,25.419
+CT P5 full,success/test,2,15,18929,24.233
+CT P5 full,success/test,3,20,25239,22.8063
+CT P5 full,success/test,4,25,31549,44.9836
+CT P5 full,success/test,5,30,37859,41.4344
+CT P5 full,success/test,6,35,44169,40.6707
+CT P5 full,success/test,7,40,50479,28.3534
+CT P5 full,success/test,8,45,56789,32.1433
+CT P5 full,success/test,9,50,63099,38.8829
+CT P5 full,success/test,10,55,69409,25.7123
+CT P5 full,success/test,11,60,75719,31.1937
+A1 CT-base,success/test,0,5,6309,25.117069244384766
+A1 CT-base,success/test,1,10,12619,29.53501319885254
+A1 CT-base,success/test,2,15,18929,32.35557556152344
+A1 CT-base,success/test,3,20,25239,28.77352523803711
+A1 CT-base,success/test,4,25,31549,26.090808868408203
+A1 CT-base,success/test,5,30,37859,25.821664810180664
+A1 CT-base,success/test,6,35,44169,28.62253761291504
+A1 CT-base,success/test,7,40,50479,27.475933074951172
+A1 CT-base,success/test,8,45,56789,27.086437225341797
+A1 CT-base,success/test,9,50,63099,28.00547218322754
+A1 CT-base,success/test,10,55,69409,27.079872131347656
+A1 CT-base,success/test,11,60,75719,28.27680778503418
+A2 Dynamics,success/test,0,5,6309,27.136760711669922
+A2 Dynamics,success/test,1,10,12619,43.05580520629883
+A2 Dynamics,success/test,2,15,18929,43.35120391845703
+A2 Dynamics,success/test,3,20,25239,39.90481948852539
+A2 Dynamics,success/test,4,25,31549,45.35995864868164
+A2 Dynamics,success/test,5,30,37859,44.163021087646484
+A2 Dynamics,success/test,6,35,44169,44.14332962036133
+A2 Dynamics,success/test,7,40,50479,43.41028594970703
+A2 Dynamics,success/test,8,45,56789,44.440921783447266
+A2 Dynamics,success/test,9,50,63099,45.02516555786133
+A2 Dynamics,success/test,10,55,69409,44.559078216552734
+A2 Dynamics,success/test,11,60,75719,45.265865325927734
+SeqTrack baseline,precision/test,0,5,6309,41.8698
+SeqTrack baseline,precision/test,1,10,12619,65.2144
+SeqTrack baseline,precision/test,2,15,18929,50.5416
+SeqTrack baseline,precision/test,3,20,25239,49.2309
+SeqTrack baseline,precision/test,4,25,31549,60.6324
+SeqTrack baseline,precision/test,5,30,37859,53.9092
+SeqTrack baseline,precision/test,6,35,44169,62.3392
+SeqTrack baseline,precision/test,7,40,50479,51.174
+SeqTrack baseline,precision/test,8,45,56789,59.6105
+SeqTrack baseline,precision/test,9,50,63099,57.3085
+SeqTrack baseline,precision/test,10,55,69409,59.3184
+SeqTrack baseline,precision/test,11,60,75719,59.9617
+CT P5 full,precision/test,0,5,6309,62.512
+CT P5 full,precision/test,1,10,12619,23.3228
+CT P5 full,precision/test,2,15,18929,24.2166
+CT P5 full,precision/test,3,20,25239,21.581
+CT P5 full,precision/test,4,25,31549,49.4934
+CT P5 full,precision/test,5,30,37859,45.3512
+CT P5 full,precision/test,6,35,44169,46.4147
+CT P5 full,precision/test,7,40,50479,27.2899
+CT P5 full,precision/test,8,45,56789,33.2473
+CT P5 full,precision/test,9,50,63099,43.9398
+CT P5 full,precision/test,10,55,69409,23.8162
+CT P5 full,precision/test,11,60,75719,31.8851
+A1 CT-base,precision/test,0,5,6309,30.680524826049805
+A1 CT-base,precision/test,1,10,12619,40.361053466796875
+A1 CT-base,precision/test,2,15,18929,36.4146614074707
+A1 CT-base,precision/test,3,20,25239,27.946388244628906
+A1 CT-base,precision/test,4,25,31549,24.46061134338379
+A1 CT-base,precision/test,5,30,37859,23.643325805664062
+A1 CT-base,precision/test,6,35,44169,27.41684913635254
+A1 CT-base,precision/test,7,40,50479,25.37308692932129
+A1 CT-base,precision/test,8,45,56789,25.142234802246094
+A1 CT-base,precision/test,9,50,63099,26.55908203125
+A1 CT-base,precision/test,10,55,69409,25.297597885131836
+A1 CT-base,precision/test,11,60,75719,27.42888641357422
+A2 Dynamics,precision/test,0,5,6309,24.578773498535156
+A2 Dynamics,precision/test,1,10,12619,49.05251693725586
+A2 Dynamics,precision/test,2,15,18929,57.154266357421875
+A2 Dynamics,precision/test,3,20,25239,39.89934539794922
+A2 Dynamics,precision/test,4,25,31549,58.852298736572266
+A2 Dynamics,precision/test,5,30,37859,55.40919494628906
+A2 Dynamics,precision/test,6,35,44169,54.3807373046875
+A2 Dynamics,precision/test,7,40,50479,56.13129806518555
+A2 Dynamics,precision/test,8,45,56789,57.12582015991211
+A2 Dynamics,precision/test,9,50,63099,57.5612678527832
+A2 Dynamics,precision/test,10,55,69409,57.185997009277344
+A2 Dynamics,precision/test,11,60,75719,58.831512451171875
