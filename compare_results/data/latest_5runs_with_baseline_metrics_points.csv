@@ -1,0 +1,123 @@
+run_order,run_key,source_model,display_model,metric,epoch,step,value
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,5,6309,41.8698
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,10,12619,65.2144
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,15,18929,50.5416
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,20,25239,49.2309
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,25,31549,60.6324
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,30,37859,53.9092
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,35,44169,62.3392
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,40,50479,51.174
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,45,56789,59.6105
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,50,63099,57.3085
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,55,69409,59.3184
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,precision/test,60,75719,59.9617
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,5,6309,40.6969
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,10,12619,46.0908
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,15,18929,45.7298
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,20,25239,42.8851
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,25,31549,51.7363
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,30,37859,48.9289
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,35,44169,52.2834
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,40,50479,46.4781
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,45,56789,50.4628
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,50,63099,50.2024
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,55,69409,49.1346
+0,baseline_60ep,SeqTrack baseline,SeqTrack baseline,success/test,60,75719,50.9858
+1,a3_conf_res_best_e14_retest,A3-conf-res best-e14 retest,A3 best-e14 retest,success/test,14,18930,28.0579891204834
+1,a3_conf_res_best_e14_retest,A3-conf-res best-e14 retest,A3 best-e14 retest,precision/test,14,18930,37.69584274291992
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,5,6310,45.92232131958008
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,10,12620,41.729759216308594
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,15,18930,36.76696014404297
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,20,25240,20.88730812072754
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,25,31550,36.50656509399414
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,30,37860,23.624727249145508
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,35,44170,28.530635833740234
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,40,50480,28.753829956054688
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,45,56790,27.41028594970703
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,50,63100,23.539384841918945
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,55,69410,27.2636775970459
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,success/test,60,75720,23.640047073364258
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,5,6310,52.053619384765625
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,10,12620,54.87964630126953
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,15,18930,50.905906677246094
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,20,25240,20.084247589111328
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,25,31550,45.352298736572266
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,30,37860,23.158645629882812
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,35,44170,32.610504150390625
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,40,50480,35.9737434387207
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,45,56790,32.19475173950195
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,50,63100,23.4102840423584
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,55,69410,32.241798400878906
+2,a2_order_dyn_seed43,A2-order-dyn seed43,A2 seed43,precision/test,60,75720,23.765865325927734
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,5,6310,31.931072235107422
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,10,12620,38.98577880859375
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,15,18930,31.742889404296875
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,20,25240,33.427791595458984
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,25,31550,45.74070358276367
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,30,37860,45.26148986816406
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,35,44170,38.493438720703125
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,40,50480,43.20240783691406
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,45,56790,49.19365692138672
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,50,63100,50.228668212890625
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,55,69410,48.7035026550293
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,success/test,60,75720,46.904815673828125
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,5,6310,35.59080505371094
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,10,12620,51.85667419433594
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,15,18930,26.487964630126953
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,20,25240,45.12035369873047
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,25,31550,52.05032730102539
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,30,37860,53.95842742919922
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,35,44170,44.669586181640625
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,40,50480,47.59299850463867
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,45,56790,57.45732879638672
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,50,63100,58.192562103271484
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,55,69410,55.67833709716797
+3,a2_order_dyn_seed44,A2-order-dyn seed44,A2 seed44,precision/test,60,75720,52.62253952026367
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,5,6310,30.26805305480957
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,10,12620,26.39715576171875
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,15,18930,23.30087661743164
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,20,25240,26.524070739746094
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,25,31550,26.386213302612305
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,30,37860,24.090810775756836
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,35,44170,22.34682846069336
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,40,50480,21.34026527404785
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,45,56790,22.98796844482422
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,50,63100,23.007659912109375
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,55,69410,22.618162155151367
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,success/test,60,75720,22.878559112548828
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,5,6310,32.156455993652344
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,10,12620,30.056894302368164
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,15,18930,22.671772003173828
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,20,25240,27.026260375976562
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,25,31550,28.51969337463379
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,30,37860,25.42560386657715
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,35,44170,23.263675689697266
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,40,50480,21.789936065673828
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,45,56790,24.635665893554688
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,50,63100,24.471553802490234
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,55,69410,23.690372467041016
+4,a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,A2+TWC .01 seed42,precision/test,60,75720,24.269147872924805
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,5,6310,30.75820541381836
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,10,12620,31.049236297607422
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,15,18930,25.806346893310547
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,20,25240,25.24179458618164
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,25,31550,28.902626037597656
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,30,37860,27.913570404052734
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,35,44170,28.57877540588379
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,40,50480,34.545955657958984
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,45,56790,32.21990966796875
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,50,63100,32.07768249511719
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,55,69410,31.756019592285156
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,success/test,60,75720,32.10612869262695
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,5,6310,32.32823181152344
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,10,12620,36.50437545776367
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,15,18930,25.237417221069336
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,20,25240,23.65864372253418
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,25,31550,26.963895797729492
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,30,37860,26.63129234313965
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,35,44170,27.62582015991211
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,40,50480,35.736324310302734
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,45,56790,31.842449188232422
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,50,63100,31.618165969848633
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,55,69410,31.649887084960938
+5,a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,A3 conf-res rerun,precision/test,60,75720,31.87417984008789

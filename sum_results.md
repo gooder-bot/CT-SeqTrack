@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-06-03
+更新时间：2026-07-08
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -10,11 +10,12 @@
 
 ```text
 主干保留 SeqTrack3D 的 order-time 语义；
-真实 delta_t 主要作为 DynamicsEncoder 的运动先验；
-TWC 和 gate 之后都基于这个 order-time 主干继续验证。
+真实 delta_t 主要作为保守 residual dynamics prior；
+先补 variable-rate / HTV 评测协议，再追求困难子集稳定收益；
+TWC 和 gate 暂时作为候选诊断模块，不接入当前主配置。
 ```
 
-当前最稳的主线仍然是 `A2-order-dyn`：final success 基本追平 SeqTrack baseline，final precision 高于 baseline。`cand1 / disp` 诊断说明：简单移除非 0 candidate 不能直接修复 dynamics；小权重 displacement 辅助监督与 `A2-order-dyn` 基本持平，precision 略高，但还不是决定性收益来源。validity 修复后的 active TWC 已经真正生效：`A1-order+TWC` 在 success 基本持平的同时提升 final precision，但 `A2-order-dyn+TWC` 后期明显崩坏，说明当前 `twc_weight=0.05` 下 TWC 还不能和 dynamics 直接合成主配置。`gate-safe` 比旧 P5 full 安全很多但仍低于 A2；`conf-res` 有很高 best checkpoint 信号，但 final 严重退化，需要复测 best checkpoint 后再判断。
+旧 60ep seed42 汇总里，`A2-order-dyn` 的 final success 基本追平 SeqTrack baseline，final precision 高于 baseline，因此它曾是最清楚的真实时间正向信号。但 2026-07-08 整理的 5 次复核改变了当前判断力度：`A2-order-dyn` seed43 崩坏到 23.64 / 23.77，seed44 只有 46.90 / 52.62；`A2-order-dyn+TWC w0.01` 仍只有 22.88 / 24.27；`A3-conf-res` best-e14 复测只有 28.06 / 37.70，没有复现旧 62.04 / 76.30 高点。现在的主线应从“证明 A2 已稳定有效”改为“先建立 variable-rate 问题设置，再围绕 residual dynamics 做 seed 稳定性、checkpoint 对齐和机制诊断”。
 
 ### 0.1 当前能说和不能说
 
@@ -22,22 +23,24 @@ TWC 和 gate 之后都基于这个 order-time 主干继续验证。
 
 - 真实时间方向没有被否定；失败主要来自不合适的注入方式。
 - SeqTrack3D 主干对 order-time token 语义敏感，直接替换为 raw real-time token 不稳定。
-- `A2-order-dyn` 是当前最强正向信号，说明真实 `delta_t/current_delta_t` 作为 dynamics prior 有价值。
+- `A2-order-dyn` 是旧 60ep seed42 下最强正向信号，说明真实 `delta_t/current_delta_t` 作为 dynamics prior 有潜力。
+- 标准 fixed-step 整体 final 不是当前最有把握的涨点场景；variable-rate、long-gap、sparse / re-appearance 子集更适合证明真实时间的价值。
 - `A2-order-dyn-cand1` 在当前 60 epoch 协议下明显退化，不支持简单去掉非 0 candidate。
 - `A2-order-dyn-disp` 与 `A2-order-dyn` 基本持平，final precision 小幅更高，说明小权重 displacement loss 不伤主线，但也不是主要解释。
 - active `A1-order+TWC` 的 `twc_valid_ratio` 均值约 0.75，final precision 相对 A1-order 提升 +3.24；TWC 在无 dynamics 主干上有 precision-positive 信号。
-- active `A2-order-dyn+TWC` 同样 valid，但 final success / precision 相对 A2-order-dyn 下降 -22.73 / -31.28；当前 TWC 权重和 dynamics 组合不稳定。
+- active `A2-order-dyn+TWC` 同样 valid，但 final success / precision 相对 A2-order-dyn 下降 -22.73 / -31.28；最新 `twc_weight=0.01` 版本仍只有 22.88 / 24.27，说明降权没有直接救回 A2+TWC。
 - `A3-order-gate-safe` 比旧 P5 full 安全，但相对 A2-order-dyn final success / precision 仍下降 -2.64 / -8.45。
-- `A3-order-conf-res-gate` best checkpoint 很高（success 62.04 / precision 76.30），但 final 只有 31.17 / 30.92，必须先复测 best。
+- `A3-order-conf-res-gate` 旧汇总 best checkpoint 很高（success 62.04 / precision 76.30），但最新 best-e14 复测只有 28.06 / 37.70，暂时不能把旧 best 当作确认收益。
 
 当前不能说：
 
 - 不能说完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
 - 不能说 TWC 已经可以作为完整主配置，因为它在 A1 上主要提升 precision，但和 dynamics 组合后明显退化。
 - 不能说 gate 已经无效，因为 gate-safe 比旧 P5 full 安全，conf-res 又出现很高 best；但也不能说 gate 已经稳定有效。
-- 不能按 `A3-order-conf-res-gate` last checkpoint 下结论，因为 best/final 差距过大。
+- 不能按 `A3-order-conf-res-gate` 旧 best 下正向结论，因为最新复测未复现。
 - 不能说 candidate noise 已被彻底排除，因为 `cand1` 只有 `num_candidates=4` 实验约 1/4 的 optimizer step，且还缺少 candidate 分桶日志。
 - 不能说 displacement 监督已经是必要模块；目前它只是一个小幅、温和的正向/不伤信号。
+- 不能只靠普通 fixed-step benchmark 讲论文成功；如果没有 variable-rate / HTV 协议和分桶收益，真实时间贡献会显得证据不足。
 
 ## 1. 第一轮：Baseline vs P5 full
 
@@ -365,15 +368,17 @@ A3-order-conf-res-gate:
 - TWC validity 已经修复。`A1-order+TWC` 给出 precision-positive 信号，但 success 基本持平，所以 TWC 还不能被写成全面收益。
 - `A2-order-dyn+TWC` 在 TWC 有效的情况下后期崩坏，说明当前 `twc_weight=0.05` 或 paired-view 训练与 dynamics prior 组合不稳定。下一步如果继续 TWC，应先降权或 warmup，不要直接接 gate。
 - `A3-order-gate-safe` 相比旧 P5 full 安全很多，但仍低于 A2-order-dyn。它说明强融合问题被缓解，却还没有证明 gate 能带来最终收益。
-- `A3-order-conf-res-gate` 出现非常高的 best checkpoint，但 last checkpoint 崩坏。这里最重要的下一步不是改结构，而是复测 best checkpoint，确认 best 是否可复现。
+- `A3-order-conf-res-gate` 出现非常高的旧 best checkpoint，但 last checkpoint 崩坏。后续 2026-07-08 的 best-e14 复测只有 28.06 / 37.70，旧 best 暂时不能作为确认收益。
 
-当前决策：
+当时决策：
 
 ```text
-主配置仍保持 A2-order-dyn。
+当时暂以 A2-order-dyn 作为主线配置。
 TWC 可以保留为 A1 上的 precision-positive 候选贡献，但需要降权 / warmup 后再测 A2 组合。
 gate-safe / conf-res 暂时都不能作为最终收益模块；conf-res 先复测 best checkpoint。
 ```
+
+注意：2026-07-08 五次复核后，`A2-order-dyn` 已从“当前主配置”降级为“最值得诊断的真实时间使用方式”。后续优先级转向 variable-rate 协议和 residual dynamics。
 
 图表和完整表格：
 
@@ -390,38 +395,98 @@ compare_results/twc_gate_ablation_diagnostics_summary.csv
 compare_results/twc_gate_ablation_comparison.md
 ```
 
-## 9. 当前各实验共同说明了什么
+## 9. 第九轮：2026-07-08 五次稳定性复核
+
+比较：
+
+```text
+A3-conf-res best-e14 retest
+A2-order-dyn seed43
+A2-order-dyn seed44
+A2-order-dyn+TWC w0.01 seed42
+A3-conf-res rerun seed42
+```
+
+关键结果：
+
+```text
+A3-conf-res best-e14 retest:        success 28.06, precision 37.70
+A2-order-dyn seed43 final:          success 23.64, precision 23.77
+A2-order-dyn seed44 final:          success 46.90, precision 52.62
+A2-order-dyn+TWC w0.01 final:       success 22.88, precision 24.27
+A3-conf-res rerun seed42 final:     success 32.11, precision 31.87
+```
+
+关键诊断：
+
+```text
+A2-order-dyn+TWC w0.01:
+  loss_twc tail1000 mean 0.0083
+  twc_valid_ratio tail1000 mean 0.7541
+  twc_center_gap tail1000 mean 0.1748
+  twc_angle_gap tail1000 mean 0.0103
+
+A3-conf-res rerun:
+  obs_alpha_dyn_mean tail1000 mean 0.4988
+  obs_alpha_dyn_clamped_mean tail1000 mean 0.1810
+  obs_dyn_residual_norm tail1000 mean 0.0314
+```
+
+说明：
+
+- `A3-conf-res best-e14 retest` 没有复现旧汇总里的 62.04 / 76.30，高 best 暂时应视为未确认信号。
+- `A2-order-dyn` seed43 / seed44 差异很大，说明旧 seed42 的 precision-positive 结果不能直接当成稳定结论。
+- `A2-order-dyn+TWC w0.01` 的 TWC 仍然有效，但 final 继续崩坏，说明问题不只是 `twc_weight=0.05` 过大。
+- `A3-conf-res rerun` 仍低，gate/conf-res 现在应先转向评测路径、alpha/residual 行为和困难分桶诊断。
+
+归档文件：
+
+```text
+compare_results/reports/latest_5runs_comparison.md
+compare_results/data/latest_5runs_metrics_points.csv
+compare_results/data/latest_5runs_metrics_summary.csv
+compare_results/data/latest_5runs_diagnostics_summary.csv
+compare_results/data/latest_5runs_hparams_summary.csv
+compare_results/figures/line_charts/latest_5runs_success_curve.svg
+compare_results/figures/line_charts/latest_5runs_precision_curve.svg
+compare_results/figures/bar_charts/latest_5runs_best_final_summary.svg
+compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
+```
+
+## 10. 当前各实验共同说明了什么
 
 可以支持的结论：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 是当前最有潜力的真实时间使用方式，尤其对 final precision 有帮助。
+- DynamicsEncoder 仍是当前最有潜力的真实时间使用方式，但旧 60ep seed42 正向信号需要多 seed 复核支撑。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - TWC validity 已经修复；A1-order+TWC 有 precision-positive 信号，但还不是全面指标提升。
-- A2-order-dyn+TWC 在 TWC 生效后仍后期崩坏，说明当前 TWC 权重 / 协议不能直接和 dynamics 组合。
+- A2-order-dyn+TWC 在 TWC 生效后仍后期崩坏，且 `twc_weight=0.01` 复核仍未救回，说明当前 TWC 协议不能直接和 dynamics 组合。
 - P5 full 旧结果不能作为最终 gate 结论；gate-safe 比旧 P5 full 安全，但仍低于 A2-order-dyn。
-- conf-res 出现很高 best checkpoint，说明 residual confidence gate 不应被直接否定，但 final 崩坏要求先复测 best。
+- conf-res 旧 best checkpoint 未被最新 best-e14 复测确认；当前不能按旧 best 写正向收益。
 - 后续 TWC 和 gate 都应该基于 `A1-order / A2-order-dyn`，不要再基于 raw real-time main branch。
 
 还不能说明的事情：
 
 - 还不能说完整 CT-SeqTrack 已经稳定超过 SeqTrack3D。
 - 还不能说 TWC 已经能作为主配置，因为它和 dynamics 组合后明显退化。
-- 还不能说 gate 无效或有效，因为 gate-safe final 不够好，conf-res best/final 又差距巨大。
+- 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 还不能彻底解释非 0 candidate 是否污染 dynamics，因为 cand1 没有与原 A2 做 optimizer-step 对齐，也缺少 candidate 分桶日志。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 
-## 10. 接下来应该做什么
+## 11. 接下来应该做什么
 
 当前优先顺序：
 
 ```text
-1. 复测 A3-order-conf-res-gate 的 best checkpoint，确认 62.04 / 76.30 是否可复现。
-2. 如果继续 TWC，先做 twc_weight=0.01 或 warmup 版本；不要直接接 gate。
-3. 如果继续 gate，做 sparse / delta_t / foreground confidence 分桶，看是否只在困难样本上收益。
-4. 补 dynamics candidate 分桶日志，解释 cand1 / disp 的机制来源。
+1. 先做 variable-rate / HTV 评测协议：skip=1/2/3/5、temporal dropout、delta_t bins、sparse bins。
+2. 实现 A2-residual-dyn，对比当前 A2 feature-concat dyn，检查是否缓解 seed collapse。
+3. 做 A2-order-dyn seed 统计和训练曲线复核，确认 seed43 collapse 是偶然还是常态。
+4. 暂停继续把 TWC 接入 A2 主配置；0.05 和 0.01 都已显示 A2+dynamics 组合不稳定。
+5. 暂停把 conf-res 写成收益模块；先核对旧 best 的评测路径，并做 alpha/residual 分桶。
+6. 补 dynamics candidate 分桶日志，解释 cand1 / disp / seed collapse 的机制来源。
 ```
 
 可选复核：
@@ -432,7 +497,7 @@ A2-order-dyn-cand1-240ep
 
 作用是让 `num_candidates=1` 的 cand1 与 `num_candidates=4` 的 A2-order-dyn 做 optimizer-step 对齐。只有这个版本也退化，才能更干净地说明移除非 0 candidate 本身有问题。
 
-### 10.1 A1-order+TWC
+### 11.1 A1-order+TWC
 
 目的：
 
@@ -446,7 +511,7 @@ A2-order-dyn-cand1-240ep
 - success 基本持平，说明它更像定位精度稳定项，而不是全面收益模块。
 - 后续如果要继续，优先看更小权重 / warmup 是否能保留 precision 同时改善 success。
 
-### 10.2 A2-order-dyn+TWC
+### 11.2 A2-order-dyn+TWC
 
 目的：
 
@@ -458,9 +523,30 @@ A2-order-dyn-cand1-240ep
 
 - active A2-order-dyn+TWC 明显退化，且 validity 正常。
 - 先不要把 TWC 和 gate 混合。
-- 如果继续，先降 `twc_weight` 或加 warmup，并观察后期递归跟踪是否仍崩。
+- `twc_weight=0.01` 已经复核仍崩；如果继续，只应尝试 warmup / 延后启用 / 只在 A1 上保留，而不是直接接 A2 主线。
 
-### 10.3 A3-order-gate-safe / conf-res
+### 11.2b A2-residual-dyn
+
+目的：
+
+```text
+检查真实时间 dynamics prior 是否能以更保守的 residual correction 形式稳定发挥作用。
+```
+
+建议设置：
+
+- 主干保持 `A1-order`，不要把 raw real-time token 放回主干。
+- `DynamicsEncoder` 继续预测 `velocity_pred / dynamics_displacement_pred`。
+- 最终中心预测采用小幅 residual：`center = obs_center + scale * clamp(dyn_disp)`。
+- 先设 `scale=0.05/0.1/0.2` 做小网格，必要时加 warmup 或只在 long-delta_t / sparse bin 启用。
+- 与当前 `A2-order-dyn` feature-concat 版本做同 seed 对照。
+
+判断标准：
+
+- 如果普通 final 只持平，但 long-gap / sparse bin 稳定提升，可以作为更强论文证据。
+- 如果 residual 仍 seed collapse，问题更可能在 dynamics 监督质量、candidate history 或真实 `delta_t` 信号不足。
+
+### 11.3 A3-order-gate-safe / conf-res
 
 目的：
 
@@ -471,10 +557,10 @@ A2-order-dyn-cand1-240ep
 看什么：
 
 - gate-safe 比旧 P5 full 稳，但 final 仍低于 A2-order-dyn。
-- conf-res best 很高但 final 崩坏，优先复测 best checkpoint。
-- 如果 best 可复现，再做分桶分析；如果 best 不可复现，先回到更保守的 alpha / residual 约束。
+- conf-res best-e14 复测没有复现旧 best；先核对旧汇总路径，再回到更保守的 alpha / residual 约束。
+- 分桶分析仍有价值，但它现在用于解释 gate 行为，而不是证明 gate 已经有效。
 
-## 11. 后续需要补的诊断
+## 12. 后续需要补的诊断
 
 建议增加 dynamics 诊断日志：
 
@@ -494,7 +580,7 @@ dynamics_valid_ratio
 - 判断 velocity prediction 是否爆炸、塌缩或量级不匹配。
 - 给 cand1 / disp 的结果提供机制解释，而不是只看 success 和 precision。
 
-## 12. 当前论文叙事建议
+## 13. 当前论文叙事建议
 
 暂时不要写：
 
@@ -508,7 +594,8 @@ CT-SeqTrack full model outperforms SeqTrack3D.
 We find that directly replacing SeqTrack3D's order-time tokens with raw
 timestamps destabilizes the main branch. A more stable design is to preserve
 the order-time semantics in the SeqTrack3D backbone while injecting real
-delta_t through a timestamp-conditioned dynamics prior.
+delta_t through a conservative timestamp-conditioned residual dynamics prior,
+especially under variable-rate and long-gap tracking.
 ```
 
 中文主线：
@@ -516,6 +603,7 @@ delta_t through a timestamp-conditioned dynamics prior.
 ```text
 真实 timestamp 改变历史状态的物理含义，但它不应该粗暴替换 SeqTrack3D
 主干里的顺序 token。当前最稳的 CT-SeqTrack 路线是：主干保留 order-time，
-真实 delta_t 进入 dynamics prior；TWC 在 A1-order 上有 precision-positive 信号，
-但和 dynamics 组合、以及 gate / conf-res 的后期稳定性仍需要进一步复核。
+先用 variable-rate / long-gap / sparse 协议把问题设置做清楚，再让真实 delta_t
+进入保守 residual dynamics prior。A2 的 seed 稳定性、TWC 与 dynamics 的组合、
+以及 gate / conf-res 的 checkpoint 可复现性都还没有解决。
 ```

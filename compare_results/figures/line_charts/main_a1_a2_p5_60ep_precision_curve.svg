@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" font-size="22" font-family="Arial" font-weight="700">Main A1/A2/P5 Progression (60ep)</text>
+<text x="24" y="58" font-size="13" font-family="Arial" fill="#555">60ep seed42 nuScenes-mini - precision curve</text>
+<line x1="70" y1="526.0" x2="860" y2="526.0" stroke="#e6e6e6"/>
+<text x="60" y="530.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">10</text>
+<line x1="70" y1="452.0" x2="860" y2="452.0" stroke="#e6e6e6"/>
+<text x="60" y="456.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">20</text>
+<line x1="70" y1="378.0" x2="860" y2="378.0" stroke="#e6e6e6"/>
+<text x="60" y="382.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">30</text>
+<line x1="70" y1="304.0" x2="860" y2="304.0" stroke="#e6e6e6"/>
+<text x="60" y="308.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">40</text>
+<line x1="70" y1="230.0" x2="860" y2="230.0" stroke="#e6e6e6"/>
+<text x="60" y="234.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">50</text>
+<line x1="70" y1="156.0" x2="860" y2="156.0" stroke="#e6e6e6"/>
+<text x="60" y="160.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">60</text>
+<line x1="70" y1="82.0" x2="860" y2="82.0" stroke="#e6e6e6"/>
+<text x="60" y="86.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">70</text>
+<line x1="-1.8" y1="82" x2="-1.8" y2="526" stroke="#f0f0f0"/>
+<text x="-1.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">0</text>
+<line x1="141.8" y1="82" x2="141.8" y2="526" stroke="#f0f0f0"/>
+<text x="141.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">10</text>
+<line x1="285.5" y1="82" x2="285.5" y2="526" stroke="#f0f0f0"/>
+<text x="285.5" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">20</text>
+<line x1="429.1" y1="82" x2="429.1" y2="526" stroke="#f0f0f0"/>
+<text x="429.1" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">30</text>
+<line x1="572.7" y1="82" x2="572.7" y2="526" stroke="#f0f0f0"/>
+<text x="572.7" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">40</text>
+<line x1="716.4" y1="82" x2="716.4" y2="526" stroke="#f0f0f0"/>
+<text x="716.4" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">50</text>
+<line x1="860.0" y1="82" x2="860.0" y2="526" stroke="#f0f0f0"/>
+<text x="860.0" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">60</text>
+<line x1="70" y1="526" x2="860" y2="526" stroke="#999"/>
+<line x1="70" y1="82" x2="70" y2="526" stroke="#999"/>
+<text x="465.0" y="588" font-size="12" font-family="Arial" text-anchor="middle">epoch</text>
+<polyline points="70.0,290.2 141.8,117.4 213.6,226.0 285.5,235.7 357.3,151.3 429.1,201.1 500.9,138.7 572.7,221.3 644.5,158.9 716.4,175.9 788.2,161.0 860.0,156.3" fill="none" stroke="#2f5f9f" stroke-width="2.1"/>
+<circle cx="70.0" cy="290.2" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="141.8" cy="117.4" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="213.6" cy="226.0" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="285.5" cy="235.7" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="357.3" cy="151.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="429.1" cy="201.1" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="500.9" cy="138.7" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="572.7" cy="221.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="644.5" cy="158.9" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="716.4" cy="175.9" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="788.2" cy="161.0" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="860.0" cy="156.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<line x1="884" y1="82" x2="908" y2="82" stroke="#2f5f9f" stroke-width="2.2"/>
+<text x="916" y="86" font-size="12" font-family="Arial">SeqTrack baseline</text>
+<polyline points="70.0,373.0 141.8,301.3 213.6,330.5 285.5,393.2 357.3,419.0 429.1,425.0 500.9,397.1 572.7,412.2 644.5,413.9 716.4,403.5 788.2,412.8 860.0,397.0" fill="none" stroke="#c85a3a" stroke-width="2.1"/>
+<circle cx="70.0" cy="373.0" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="141.8" cy="301.3" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="213.6" cy="330.5" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="285.5" cy="393.2" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="357.3" cy="419.0" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="429.1" cy="425.0" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="500.9" cy="397.1" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="572.7" cy="412.2" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="644.5" cy="413.9" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="716.4" cy="403.5" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="788.2" cy="412.8" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="860.0" cy="397.0" r="3" fill="#c85a3a" opacity="0.9"/>
+<line x1="884" y1="104" x2="908" y2="104" stroke="#c85a3a" stroke-width="2.2"/>
+<text x="916" y="108" font-size="12" font-family="Arial">A1 raw real-time</text>
+<polyline points="70.0,418.1 141.8,237.0 213.6,177.1 285.5,304.7 357.3,164.5 429.1,190.0 500.9,197.6 572.7,184.6 644.5,177.3 716.4,174.0 788.2,176.8 860.0,164.6" fill="none" stroke="#3d8b62" stroke-width="2.1"/>
+<circle cx="70.0" cy="418.1" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="141.8" cy="237.0" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="213.6" cy="177.1" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="285.5" cy="304.7" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="357.3" cy="164.5" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="429.1" cy="190.0" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="500.9" cy="197.6" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="572.7" cy="184.6" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="644.5" cy="177.3" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="716.4" cy="174.0" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="788.2" cy="176.8" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="860.0" cy="164.6" r="3" fill="#3d8b62" opacity="0.9"/>
+<line x1="884" y1="126" x2="908" y2="126" stroke="#3d8b62" stroke-width="2.2"/>
+<text x="916" y="130" font-size="12" font-family="Arial">A2 raw-dyn</text>
+<polyline points="70.0,137.4 141.8,427.4 213.6,420.8 285.5,440.3 357.3,233.7 429.1,264.4 500.9,256.5 572.7,398.1 644.5,354.0 716.4,274.8 788.2,423.8 860.0,364.1" fill="none" stroke="#7a5195" stroke-width="2.1"/>
+<circle cx="70.0" cy="137.4" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="141.8" cy="427.4" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="213.6" cy="420.8" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="285.5" cy="440.3" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="357.3" cy="233.7" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="429.1" cy="264.4" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="500.9" cy="256.5" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="572.7" cy="398.1" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="644.5" cy="354.0" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="716.4" cy="274.8" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="788.2" cy="423.8" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="860.0" cy="364.1" r="3" fill="#7a5195" opacity="0.9"/>
+<line x1="884" y1="148" x2="908" y2="148" stroke="#7a5195" stroke-width="2.2"/>
+<text x="916" y="152" font-size="12" font-family="Arial">P5 full</text>
+</svg>

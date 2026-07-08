@@ -1,13 +1,23 @@
 # CT-SeqTrack 当前执行清单
 
-更新时间：2026-06-03
-用真实时间的解决方法
-用 dt_norm = dt / dt_ref，例如 nuScenes keyframe dt_ref=0.5，Waymo/KITTI dt_ref=0.1。
-对 dt 做 clip，比如 [0.5x, 3x] 或按数据分位数裁剪。
-velocity 分支里用 max(dt, eps)，避免小 dt 放大噪声。
-加 valid_mask 和 frame-gap 信息，区分“真的 0.2s”与“缺了一帧”。
-做 ablation：fixed step、true timestamp、jittered timestamp、shuffled timestamp、按 delta_t 分桶评估。
-如果跨数据集训练，最好随机 temporal dropout / jitter augmentation，让网络学会 variable-rate，而不是记住某个数据集的频率。
+更新时间：2026-07-08
+
+当前总路线：
+
+```text
+先做 variable-rate / HTV 协议，把真实时间的应用场景立住；
+再把 A2 从 feature-concat dynamics 改成更保守的 residual dynamics；
+最后用多 seed、delta_t/sparse 分桶和 candidate 日志解释稳定性。
+```
+
+真实时间处理原则：
+
+- 用 `dt_norm = dt / dt_ref`，例如 nuScenes keyframe `dt_ref=0.5`，Waymo/KITTI 可按数据频率设定。
+- 对 `dt` 做 clip，例如 `[0.5x, 3x]` 或按训练集分位数裁剪。
+- velocity 分支里用 `max(dt, eps)`，避免小 `dt` 放大噪声。
+- 加 `valid_mask` 和 frame-gap 信息，区分“真的 0.2s”与“缺了一帧”。
+- 做 ablation：fixed step、true timestamp、jittered timestamp、shuffled timestamp、按 `delta_t` 分桶评估。
+- 如果跨数据集训练，最好随机 temporal dropout / jitter augmentation，让网络学会 variable-rate，而不是记住某个数据集的频率。
 ## 文件分工
 
 - `need_to_do.md`：只放下一步和未来要做的事情。
@@ -25,9 +35,10 @@ velocity 分支里用 max(dt, eps)，避免小 dt 放大噪声。
 
 ## 0. 当前原则
 
-- 当前主线优先基于 `A2-order-dyn`：主干保留 SeqTrack3D 的 order-time token，DynamicsEncoder 使用真实 `delta_t/current_delta_t`。
+- 当前主线优先围绕 `variable-rate 评测协议 + A2 residual dynamics` 做稳定性和机制诊断：主干保留 SeqTrack3D 的 order-time token，真实 `delta_t/current_delta_t` 只进入保守 dynamics prior。
 - 暂时不要继续投入 raw / MLP / Fourier real-time 主干，因为已有实验说明它们没有修复 A1 崩坏。
-- 下一批实验只改机制变量，学习率、batch size、epoch、seed、验证间隔等训练条件保持统一。
+- 下一批实验优先统一 seed / checkpoint / optimizer step 口径；不要在 variable-rate 协议和 residual dynamics 之前继续叠加 TWC 或 gate。
+- 普通 fixed-step final 不是唯一成功标准；如果 long-delta_t / sparse / re-appearance 子集稳定提升，也可以支撑论文叙事。
 - `main.py` 会用命令行覆盖 YAML 中的 `batch_size / epoch / workers / check_val_every_n_epoch / tag`，正式命令必须显式写这些参数。
 - 已有工程 smoke test 和已完成实验统一归档到 `done.md`，这里不再重复维护。
 
@@ -56,12 +67,18 @@ velocity 分支里用 max(dt, eps)，避免小 dt 放大噪声。
 4. A2-order-dyn+TWC（validity-fixed active TWC）
 5. A3-order-gate-safe
 6. A3-order-conf-res-gate
+7. A3-order-conf-res best-e14 checkpoint retest
+8. A2-order-dyn seed43 / seed44
+9. A2-order-dyn+TWC w0.01
+10. A3-order-conf-res rerun seed42
 
 当前下一步：
-1. 复测 A3-order-conf-res-gate 的 best checkpoint，不只看 last。
-2. 如果继续 TWC，优先做低权重 / warmup 版本，不要直接把 A2-order-dyn+TWC 接 gate。
-3. 如果继续 gate，优先做分桶诊断或更保守的 residual / confidence 约束。
-4. 补 dynamics candidate 分桶日志，解释 cand1 / disp 的机制来源。
+1. 新增 variable-rate / HTV 评测协议：`skip=1/2/3/5`、temporal dropout、delta_t bins、sparse bins。
+2. 新增 A2 residual dynamics 配置，与当前 A2 feature-concat dynamics 做同 seed 对照。
+3. 汇总 A2-order-dyn 多 seed 稳定性，确认 seed43 collapse 是否可复现。
+4. 暂停 A2-order-dyn+TWC 主线接入；0.05 和 0.01 都已崩。
+5. 暂停 conf-res 正向表述；先核对旧 best 评测路径和 alpha/residual 行为。
+6. 补 dynamics candidate / velocity / displacement 分桶日志，解释 cand1 / disp / seed collapse 的机制来源。
 ```
 
 对应配置：
@@ -71,6 +88,7 @@ cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_disp.yaml
 cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc_w001.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 ```
@@ -95,9 +113,24 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 | A1-order+TWC | `cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml` | `ct_a1_order_twc_cand4_validfix_car_60ep_bs16_gpu2` | 已跑已整理 | 51.16 | 61.10 | `twc_valid_ratio` 均值约 0.75；相对 A1-order success 基本持平，precision +3.24，是一个 precision-positive 但非 success-positive 的 TWC 信号。 |
 | A2-order-dyn+TWC | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml` | `ct_a2_order_dyn_twc_cand4_validfix_car_60ep_bs16_gpu3` | 已跑已整理 | 28.23 | 32.04 | TWC 已激活但后期崩坏；相对 A2-order-dyn final success/precision 分别 -22.73/-31.28，当前 `twc_weight=0.05` 不适合作为主配置。 |
 | A3-order-gate-safe | `cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml` | `ct_a3_order_gate_safe_car_60ep_bs16` | 已跑已整理 | 48.32 | 54.87 | 比旧 P5 full 安全很多，但仍低于 A2-order-dyn；保守 feature gate 不是当前最终收益来源。 |
-| A3-order-conf-res-gate | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_car_60ep_bs16_gpu3` | 已跑已整理 | 31.17 | 30.92 | best 很高（success 62.04 / precision 76.30）但 final 崩坏；优先复测 best checkpoint 和检查 alpha/residual 诊断。 |
+| A3-order-conf-res-gate | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_car_60ep_bs16_gpu3` | 已跑已整理 | 31.17 | 30.92 | 旧 best 很高（62.04 / 76.30）但最新 best-e14 复测未复现；不能作为确认收益。 |
+| A3-conf-res best-e14 retest | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `retest_a3_conf_res_precision_best_e14` | 已跑已整理 | 28.06 | 37.70 | 单 checkpoint 测试，未复现旧 best；需核对旧汇总评测路径。 |
+| A2-order-dyn seed43 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn.yaml` | `ct_a2_order_dyn_car_60ep_bs16_seed43` | 已跑已整理 | 23.64 | 23.77 | seed43 崩坏，A2 稳定性风险很大。 |
+| A2-order-dyn seed44 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn.yaml` | `ct_a2_order_dyn_car_60ep_bs16_seed44` | 已跑已整理 | 46.90 | 52.62 | 好于 seed43，但仍低于旧 seed42 60ep 汇总。 |
+| A2-order-dyn+TWC w0.01 | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc_w001.yaml` | `ct_a2_order_dyn_twc_w001_seed42_car_60ep_gpu0_nowpreload` | 已跑已整理 | 22.88 | 24.27 | 降低 TWC 权重仍崩，A2+TWC 暂停接主线。 |
+| A3-conf-res rerun seed42 | `cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml` | `ct_a3_order_conf_res_gate_rerun_seed42_car_60ep_gpu0_nowpreload` | 已跑已整理 | 32.11 | 31.87 | rerun 仍低，gate/conf-res 先转诊断。 |
 
-本轮完整整理文件见 `compare_results/twc_gate_ablation_*`。如果后续要多卡并行复跑，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。
+本轮完整整理文件见 `compare_results/twc_gate_ablation_*` 和 `compare_results/reports/latest_5runs_comparison.md`。如果后续要多卡并行复跑，保持命令参数不变，只替换 `CUDA_VISIBLE_DEVICES=<GPU>` 和 tag 中必要的实验名。
+
+### 1.0a 下一批优先实验
+
+| 优先级 | 实验 | 目的 | 成功信号 |
+| --- | --- | --- | --- |
+| P0 | `A1-order` variable-rate eval | 建立 fixed-step baseline 在长 gap / sparse 下的退化曲线 | 指标随 `skip/delta_t` 退化，证明问题设置有必要 |
+| P1 | `A2-residual-dyn` seed42/43 | 检查保守 residual 是否比 feature concat 更稳 | final 不崩，或 long-gap/sparse bin 提升 |
+| P2 | `A2-feature-dyn` 同协议复评 | 与当前 A2 做公平对照 | 解释 seed collapse 是否来自接入方式 |
+| P3 | dynamics candidate 日志 | 判断非 0 candidate 是否污染 velocity 监督 | candidate0 与 nonzero candidate 的 velocity/residual 误差可分 |
+| P4 | TWC on A1 variable-rate | 检查 TWC 是否在 variable-rate 下更有价值 | prediction variance 降低，precision 或 long-gap bin 提升 |
 
 ### 1.1 A2-order-dyn-cand1
 
@@ -277,7 +310,7 @@ final success   -22.73
 final precision -31.28
 ```
 
-当前解读：这次下降可以解释为“当前 `twc_weight=0.05` / paired-view 协议与 dynamics prior 组合不稳定”，不再是 validity 没生效的问题。下一步如果继续 TWC，应先降到 `twc_weight=0.01` 或加入 warmup，再考虑和 dynamics 组合；不要把当前 A2+TWC 直接接 gate。
+当前解读：这次下降可以解释为“当前 `twc_weight=0.05` / paired-view 协议与 dynamics prior 组合不稳定”，不再是 validity 没生效的问题。后续 `twc_weight=0.01` 复核仍崩坏，因此如果继续 TWC，应优先考虑 warmup / 延后启用 / 仅保留 A1 诊断，不要把当前 A2+TWC 直接接 gate。
 
 命令：
 
@@ -409,7 +442,7 @@ best success    +10.50
 best precision  +12.72
 ```
 
-当前解读：conf-res 的 best 信号很强，但 final 崩得很重，说明它更像 checkpoint-selection / 后期稳定性问题，而不是稳定最终模型。下一步优先复测 best checkpoint；在复测前不要按 last checkpoint 否定或肯定 conf-res。
+当前解读：conf-res 的旧 best 信号很强，但 final 崩得很重，说明它更像 checkpoint-selection / 后期稳定性问题，而不是稳定最终模型。后续 best-e14 复测只有 28.06 / 37.70，暂时不能按旧 best 肯定 conf-res；下一步应核对旧 best 的评测路径和 alpha/residual 行为。
 
 命令：
 
@@ -466,8 +499,9 @@ compare_results/twc_gate_ablation_diagnostics_summary.csv
 ```
 
 - [x] 更新 `sum_results.md`，写清楚 active TWC、gate-safe、conf-res 分别支持或反驳了什么。
-- [ ] `A3-order-conf-res-gate` final / best 差距巨大，优先复测 best checkpoint（success 62.04 / precision 76.30）。
-- [ ] `A2-order-dyn+TWC` 已确认 active 但后期崩坏；如果继续做 TWC，先降 `twc_weight` 或加 warmup。
+- [x] `A3-order-conf-res-gate` best checkpoint 已复测：best-e14 retest 为 28.06 / 37.70，未复现旧 62.04 / 76.30。
+- [x] `A2-order-dyn+TWC` 已确认 active 但后期崩坏；`twc_weight=0.01` 复核仍为 22.88 / 24.27，低权重未救回。
+- [ ] 汇总 A2-order-dyn seed42 / seed43 / seed44 稳定性，必要时补更多 seed 或重跑 seed42。
 - [ ] 如果继续 gate，优先做 sparse / delta_t / foreground confidence 分桶，不只看整体 final。
 
 ## 3. Dynamics 诊断日志
@@ -540,7 +574,7 @@ dynamics_candidate_zero_only: true
 
 - [x] validity 已修复并验证：两组 active TWC 的 `twc_valid_ratio` 均值约 0.75，`loss_twc / twc_center_gap / twc_angle_gap` 都有实际量级。
 - [x] `A1-order+TWC`：final success 基本持平（-0.07），final precision 提升（+3.24）。TWC 可以作为 precision-positive 候选信号，但还不能说全面提升。
-- [x] `A2-order-dyn+TWC`：final success / precision 明显退化（-22.73 / -31.28）。当前 `twc_weight=0.05` 不适合作为 dynamics 主配置。
+- [x] `A2-order-dyn+TWC`：final success / precision 明显退化（-22.73 / -31.28）。`twc_weight=0.01` 复核仍崩，当前 TWC 不适合作为 dynamics 主配置。
 - [ ] 如果继续 active TWC，优先调小 `twc_weight` 或增加 warmup；不要直接接 gate。
 
 候选设置：
@@ -577,8 +611,8 @@ fused_feature = point_feature + obs_gate_residual_scale * alpha_dyn * dyn_residu
 当前结果：
 
 - [x] `A3-order-conf-res-gate` 已跑，final success / precision 为 31.17 / 30.92。
-- [x] best checkpoint 信号很强：best success 62.04，best precision 76.30。
-- [ ] 优先复测 best checkpoint。复测前不要按 last checkpoint 直接否定 conf-res。
+- [x] best checkpoint 已复测：best-e14 retest 为 28.06 / 37.70，没有复现旧 62.04 / 76.30。
+- [ ] 核对旧 best 汇总的 checkpoint / version 拼接 / test split / metric 读取路径，再决定是否继续 conf-res。
 - [ ] 如果 best 可复现，再检查为什么后期崩坏：raw alpha 均值约 0.493，clamped alpha 均值约 0.181，说明 gate 仍然很想依赖 dynamics。
 
 核心原则：
@@ -633,6 +667,18 @@ re-appearance: 连续低点数后恢复的片段
 variable-gap: skip=1/2/3/5
 ```
 
+- [ ] variable-rate / HTV 协议：
+
+```text
+fixed-step: offsets=[1,2,3]
+skip-2: offsets=[1,3,5]
+skip-3: offsets=[1,4,7]
+mixed-gap: per-sample random offsets with shared current frame
+temporal-dropout: randomly remove earlier history while keeping nearest anchor
+jittered-dt: perturb timestamps only, to test whether the model uses real time robustly
+shuffled-dt: shuffle delta_t within batch, as a negative control
+```
+
 - [ ] TWC 额外报告：
 
 ```text
@@ -654,21 +700,22 @@ alpha_obs by foreground confidence bin
 - [ ] 暂缓移除 Transformer 中固定 4 帧假设，等当前五组消融完成后再做。
 - [ ] 检查 `models/attn/Models.py` 中 `4 * 128`、`view(..., 4, ...)`、`reshape(-1, 4 * 128, ...)` 等硬编码。
 - [ ] 后续如果要做 `hist_num=2/4/6` 历史长度消融，再把 `L = hist_num + 1` 动态传入 `Seq2SeqFormer.forward()`。
+- [ ] 实现 `dynamics_motion_mode=residual_limited` 或等价配置：`scale`、`max_residual_norm`、`warmup_epoch`、long-gap-only 开关。
 - [ ] 如果 gate 继续退化，再实现 residual gate 和 `obs_gate_max_dyn_alpha`。
 - [ ] 如果 cand1 证明 candidate noise 是主因，再实现 dynamics clean-history 或 candidate 分桶 loss。
 
 ## 7. 论文与文档后续
 
-- [ ] 根据五组新消融结果更新 `sum_results.md`。
-- [ ] 根据最终正向模块更新 `README.md` 的当前实验诊断。
-- [ ] 根据最终主配置更新 `refined_plan.md` 的贡献顺序。
+- [x] 根据五组新消融结果更新 `sum_results.md`。
+- [x] 根据 2026-07-08 五次复核更新 `README.md` 的当前实验诊断。
+- [x] 根据当前判断更新 `refined_plan.md` 的贡献顺序：variable-rate 协议、residual dynamics、TWC 候选。
 - [ ] 不要写“CT-SeqTrack full model outperforms SeqTrack3D”，除非完整消融支持。
 - [ ] 更稳的当前表述：
 
 ```text
 Preserving SeqTrack3D's order-time semantics while injecting real delta_t
-through a timestamp-conditioned dynamics prior is currently more stable than
-directly replacing the main branch time tokens with raw timestamps.
+through a conservative timestamp-conditioned residual dynamics prior is the
+next most plausible route, especially under variable-rate / long-gap tracking.
 ```
 
 ## 8. 暂缓方向

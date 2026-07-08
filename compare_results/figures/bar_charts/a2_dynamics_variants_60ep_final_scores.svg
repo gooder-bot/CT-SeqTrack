@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="478" viewBox="0 0 1120 478">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" font-size="22" font-family="Arial" font-weight="700">A2 Dynamics Variants (60ep)</text>
+<text x="24" y="58" font-size="13" font-family="Arial" fill="#555">60ep nuScenes-mini; cand1 has fewer optimizer steps - final scores, baseline included</text>
+<line x1="230.0" y1="74" x2="230.0" y2="426" stroke="#e6e6e6"/>
+<text x="230.0" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">0</text>
+<line x1="351.4" y1="74" x2="351.4" y2="426" stroke="#e6e6e6"/>
+<text x="351.4" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">10</text>
+<line x1="472.9" y1="74" x2="472.9" y2="426" stroke="#e6e6e6"/>
+<text x="472.9" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">20</text>
+<line x1="594.3" y1="74" x2="594.3" y2="426" stroke="#e6e6e6"/>
+<text x="594.3" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">30</text>
+<line x1="715.7" y1="74" x2="715.7" y2="426" stroke="#e6e6e6"/>
+<text x="715.7" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">40</text>
+<line x1="837.1" y1="74" x2="837.1" y2="426" stroke="#e6e6e6"/>
+<text x="837.1" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">50</text>
+<line x1="958.6" y1="74" x2="958.6" y2="426" stroke="#e6e6e6"/>
+<text x="958.6" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">60</text>
+<line x1="1080.0" y1="74" x2="1080.0" y2="426" stroke="#e6e6e6"/>
+<text x="1080.0" y="454" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">70</text>
+<line x1="230" y1="426" x2="1080" y2="426" stroke="#999"/>
+<line x1="849.1" y1="74" x2="849.1" y2="426" stroke="#2f5f9f" stroke-dasharray="5 4" stroke-width="1.4"/>
+<line x1="958.1" y1="74" x2="958.1" y2="426" stroke="#c85a3a" stroke-dasharray="5 4" stroke-width="1.4"/>
+<rect x="230" y="64" width="12" height="12" fill="#2f5f9f"/><text x="248" y="75" font-size="12" font-family="Arial">success final</text>
+<rect x="370" y="64" width="12" height="12" fill="#c85a3a"/><text x="388" y="75" font-size="12" font-family="Arial">precision final</text>
+<line x1="530" y1="70" x2="558" y2="70" stroke="#777" stroke-dasharray="5 4"/><text x="566" y="75" font-size="12" font-family="Arial">baseline line</text>
+<text x="218" y="106" font-size="12" font-family="Arial" text-anchor="end">SeqTrack baseline</text>
+<rect x="230" y="89" width="619.1" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="854.1" y="99" font-size="11" font-family="Arial" fill="#333">50.99</text>
+<rect x="230" y="104" width="728.1" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="963.1" y="114" font-size="11" font-family="Arial" fill="#333">59.96</text>
+<text x="218" y="148" font-size="12" font-family="Arial" text-anchor="end">A2 raw-dyn</text>
+<rect x="230" y="131" width="549.7" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="784.7" y="141" font-size="11" font-family="Arial" fill="#333">45.27</text>
+<rect x="230" y="146" width="714.4" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="949.4" y="156" font-size="11" font-family="Arial" fill="#333">58.83</text>
+<text x="218" y="190" font-size="12" font-family="Arial" text-anchor="end">A2 scaled-dyn</text>
+<rect x="230" y="173" width="357.1" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="592.1" y="183" font-size="11" font-family="Arial" fill="#333">29.41</text>
+<rect x="230" y="188" width="382.7" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="617.7" y="198" font-size="11" font-family="Arial" fill="#333">31.51</text>
+<text x="218" y="232" font-size="12" font-family="Arial" text-anchor="end">A2 order-dyn seed42</text>
+<rect x="230" y="215" width="618.8" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="853.8" y="225" font-size="11" font-family="Arial" fill="#333">50.96</text>
+<rect x="230" y="230" width="768.8" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="1003.8" y="240" font-size="11" font-family="Arial" fill="#333">63.31</text>
+<text x="218" y="274" font-size="12" font-family="Arial" text-anchor="end">A2 cand1</text>
+<rect x="230" y="257" width="323.9" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="558.9" y="267" font-size="11" font-family="Arial" fill="#333">26.68</text>
+<rect x="230" y="272" width="297.5" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="532.5" y="282" font-size="11" font-family="Arial" fill="#333">24.50</text>
+<text x="218" y="316" font-size="12" font-family="Arial" text-anchor="end">A2 dyn+disp</text>
+<rect x="230" y="299" width="613.7" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="848.7" y="309" font-size="11" font-family="Arial" fill="#333">50.54</text>
+<rect x="230" y="314" width="775.3" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="1010.3" y="324" font-size="11" font-family="Arial" fill="#333">63.85</text>
+<text x="218" y="358" font-size="12" font-family="Arial" text-anchor="end">A2 dyn+TWC .05</text>
+<rect x="230" y="341" width="342.8" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="577.8" y="351" font-size="11" font-family="Arial" fill="#333">28.23</text>
+<rect x="230" y="356" width="389.0" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="624.0" y="366" font-size="11" font-family="Arial" fill="#333">32.04</text>
+<text x="218" y="400" font-size="12" font-family="Arial" text-anchor="end">A2 dyn+TWC .01</text>
+<rect x="230" y="383" width="277.8" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="512.8" y="393" font-size="11" font-family="Arial" fill="#333">22.88</text>
+<rect x="230" y="398" width="294.7" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="529.7" y="408" font-size="11" font-family="Arial" fill="#333">24.27</text>
+</svg>

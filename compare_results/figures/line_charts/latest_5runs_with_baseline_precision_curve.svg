@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="24" y="34" font-size="22" font-family="Arial" font-weight="700">Latest 5 Runs + SeqTrack Baseline</text>
+<text x="24" y="58" font-size="13" font-family="Arial" fill="#555">precision curve</text>
+<line x1="70" y1="526.0" x2="860" y2="526.0" stroke="#e6e6e6"/>
+<text x="60" y="530.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">10</text>
+<line x1="70" y1="452.0" x2="860" y2="452.0" stroke="#e6e6e6"/>
+<text x="60" y="456.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">20</text>
+<line x1="70" y1="378.0" x2="860" y2="378.0" stroke="#e6e6e6"/>
+<text x="60" y="382.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">30</text>
+<line x1="70" y1="304.0" x2="860" y2="304.0" stroke="#e6e6e6"/>
+<text x="60" y="308.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">40</text>
+<line x1="70" y1="230.0" x2="860" y2="230.0" stroke="#e6e6e6"/>
+<text x="60" y="234.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">50</text>
+<line x1="70" y1="156.0" x2="860" y2="156.0" stroke="#e6e6e6"/>
+<text x="60" y="160.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">60</text>
+<line x1="70" y1="82.0" x2="860" y2="82.0" stroke="#e6e6e6"/>
+<text x="60" y="86.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">70</text>
+<line x1="-1.8" y1="82" x2="-1.8" y2="526" stroke="#f0f0f0"/>
+<text x="-1.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">0</text>
+<line x1="141.8" y1="82" x2="141.8" y2="526" stroke="#f0f0f0"/>
+<text x="141.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">10</text>
+<line x1="285.5" y1="82" x2="285.5" y2="526" stroke="#f0f0f0"/>
+<text x="285.5" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">20</text>
+<line x1="429.1" y1="82" x2="429.1" y2="526" stroke="#f0f0f0"/>
+<text x="429.1" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">30</text>
+<line x1="572.7" y1="82" x2="572.7" y2="526" stroke="#f0f0f0"/>
+<text x="572.7" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">40</text>
+<line x1="716.4" y1="82" x2="716.4" y2="526" stroke="#f0f0f0"/>
+<text x="716.4" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">50</text>
+<line x1="860.0" y1="82" x2="860.0" y2="526" stroke="#f0f0f0"/>
+<text x="860.0" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">60</text>
+<line x1="70" y1="526" x2="860" y2="526" stroke="#999"/>
+<line x1="70" y1="82" x2="70" y2="526" stroke="#999"/>
+<polyline points="70.0,290.2 141.8,117.4 213.6,226.0 285.5,235.7 357.3,151.3 429.1,201.1 500.9,138.7 572.7,221.3 644.5,158.9 716.4,175.9 788.2,161.0 860.0,156.3" fill="none" stroke="#2f5f9f" stroke-width="2.1"/>
+<circle cx="70.0" cy="290.2" r="3" fill="#2f5f9f"/>
+<circle cx="141.8" cy="117.4" r="3" fill="#2f5f9f"/>
+<circle cx="213.6" cy="226.0" r="3" fill="#2f5f9f"/>
+<circle cx="285.5" cy="235.7" r="3" fill="#2f5f9f"/>
+<circle cx="357.3" cy="151.3" r="3" fill="#2f5f9f"/>
+<circle cx="429.1" cy="201.1" r="3" fill="#2f5f9f"/>
+<circle cx="500.9" cy="138.7" r="3" fill="#2f5f9f"/>
+<circle cx="572.7" cy="221.3" r="3" fill="#2f5f9f"/>
+<circle cx="644.5" cy="158.9" r="3" fill="#2f5f9f"/>
+<circle cx="716.4" cy="175.9" r="3" fill="#2f5f9f"/>
+<circle cx="788.2" cy="161.0" r="3" fill="#2f5f9f"/>
+<circle cx="860.0" cy="156.3" r="3" fill="#2f5f9f"/>
+<line x1="884" y1="82" x2="908" y2="82" stroke="#2f5f9f" stroke-width="2.2"/>
+<text x="916" y="86" font-size="12" font-family="Arial">SeqTrack baseline</text>
+<circle cx="199.3" cy="321.1" r="3" fill="#ef5675"/>
+<line x1="884" y1="104" x2="908" y2="104" stroke="#ef5675" stroke-width="2.2"/>
+<text x="916" y="108" font-size="12" font-family="Arial">A3 best-e14 retest</text>
+<polyline points="70.0,214.8 141.8,193.9 213.6,223.3 285.5,451.4 357.3,264.4 429.1,428.6 500.9,358.7 572.7,333.8 644.5,361.8 716.4,426.8 788.2,361.4 860.0,424.1" fill="none" stroke="#2f4b7c" stroke-width="2.1"/>
+<circle cx="70.0" cy="214.8" r="3" fill="#2f4b7c"/>
+<circle cx="141.8" cy="193.9" r="3" fill="#2f4b7c"/>
+<circle cx="213.6" cy="223.3" r="3" fill="#2f4b7c"/>
+<circle cx="285.5" cy="451.4" r="3" fill="#2f4b7c"/>
+<circle cx="357.3" cy="264.4" r="3" fill="#2f4b7c"/>
+<circle cx="429.1" cy="428.6" r="3" fill="#2f4b7c"/>
+<circle cx="500.9" cy="358.7" r="3" fill="#2f4b7c"/>
+<circle cx="572.7" cy="333.8" r="3" fill="#2f4b7c"/>
+<circle cx="644.5" cy="361.8" r="3" fill="#2f4b7c"/>
+<circle cx="716.4" cy="426.8" r="3" fill="#2f4b7c"/>
+<circle cx="788.2" cy="361.4" r="3" fill="#2f4b7c"/>
+<circle cx="860.0" cy="424.1" r="3" fill="#2f4b7c"/>
+<line x1="884" y1="126" x2="908" y2="126" stroke="#2f4b7c" stroke-width="2.2"/>
+<text x="916" y="130" font-size="12" font-family="Arial">A2 seed43</text>
+<polyline points="70.0,336.6 141.8,216.3 213.6,404.0 285.5,266.1 357.3,214.8 429.1,200.7 500.9,269.4 572.7,247.8 644.5,174.8 716.4,169.4 788.2,188.0 860.0,210.6" fill="none" stroke="#ffa600" stroke-width="2.1"/>
+<circle cx="70.0" cy="336.6" r="3" fill="#ffa600"/>
+<circle cx="141.8" cy="216.3" r="3" fill="#ffa600"/>
+<circle cx="213.6" cy="404.0" r="3" fill="#ffa600"/>
+<circle cx="285.5" cy="266.1" r="3" fill="#ffa600"/>
+<circle cx="357.3" cy="214.8" r="3" fill="#ffa600"/>
+<circle cx="429.1" cy="200.7" r="3" fill="#ffa600"/>
+<circle cx="500.9" cy="269.4" r="3" fill="#ffa600"/>
+<circle cx="572.7" cy="247.8" r="3" fill="#ffa600"/>
+<circle cx="644.5" cy="174.8" r="3" fill="#ffa600"/>
+<circle cx="716.4" cy="169.4" r="3" fill="#ffa600"/>
+<circle cx="788.2" cy="188.0" r="3" fill="#ffa600"/>
+<circle cx="860.0" cy="210.6" r="3" fill="#ffa600"/>
+<line x1="884" y1="148" x2="908" y2="148" stroke="#ffa600" stroke-width="2.2"/>
+<text x="916" y="152" font-size="12" font-family="Arial">A2 seed44</text>
+<polyline points="70.0,362.0 141.8,377.6 213.6,432.2 285.5,400.0 357.3,389.0 429.1,411.9 500.9,427.8 572.7,438.8 644.5,417.7 716.4,418.9 788.2,424.7 860.0,420.4" fill="none" stroke="#3d8b62" stroke-width="2.1"/>
+<circle cx="70.0" cy="362.0" r="3" fill="#3d8b62"/>
+<circle cx="141.8" cy="377.6" r="3" fill="#3d8b62"/>
+<circle cx="213.6" cy="432.2" r="3" fill="#3d8b62"/>
+<circle cx="285.5" cy="400.0" r="3" fill="#3d8b62"/>
+<circle cx="357.3" cy="389.0" r="3" fill="#3d8b62"/>
+<circle cx="429.1" cy="411.9" r="3" fill="#3d8b62"/>
+<circle cx="500.9" cy="427.8" r="3" fill="#3d8b62"/>
+<circle cx="572.7" cy="438.8" r="3" fill="#3d8b62"/>
+<circle cx="644.5" cy="417.7" r="3" fill="#3d8b62"/>
+<circle cx="716.4" cy="418.9" r="3" fill="#3d8b62"/>
+<circle cx="788.2" cy="424.7" r="3" fill="#3d8b62"/>
+<circle cx="860.0" cy="420.4" r="3" fill="#3d8b62"/>
+<line x1="884" y1="170" x2="908" y2="170" stroke="#3d8b62" stroke-width="2.2"/>
+<text x="916" y="174" font-size="12" font-family="Arial">A2+TWC .01 seed42</text>
+<polyline points="70.0,360.8 141.8,329.9 213.6,413.2 285.5,424.9 357.3,400.5 429.1,402.9 500.9,395.6 572.7,335.6 644.5,364.4 716.4,366.0 788.2,365.8 860.0,364.1" fill="none" stroke="#7a5195" stroke-width="2.1"/>
+<circle cx="70.0" cy="360.8" r="3" fill="#7a5195"/>
+<circle cx="141.8" cy="329.9" r="3" fill="#7a5195"/>
+<circle cx="213.6" cy="413.2" r="3" fill="#7a5195"/>
+<circle cx="285.5" cy="424.9" r="3" fill="#7a5195"/>
+<circle cx="357.3" cy="400.5" r="3" fill="#7a5195"/>
+<circle cx="429.1" cy="402.9" r="3" fill="#7a5195"/>
+<circle cx="500.9" cy="395.6" r="3" fill="#7a5195"/>
+<circle cx="572.7" cy="335.6" r="3" fill="#7a5195"/>
+<circle cx="644.5" cy="364.4" r="3" fill="#7a5195"/>
+<circle cx="716.4" cy="366.0" r="3" fill="#7a5195"/>
+<circle cx="788.2" cy="365.8" r="3" fill="#7a5195"/>
+<circle cx="860.0" cy="364.1" r="3" fill="#7a5195"/>
+<line x1="884" y1="192" x2="908" y2="192" stroke="#7a5195" stroke-width="2.2"/>
+<text x="916" y="196" font-size="12" font-family="Arial">A3 conf-res rerun</text>
+</svg>

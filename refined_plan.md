@@ -1,6 +1,6 @@
 # CT-SeqTrack 研究计划与论文定位
 
-更新时间：2026-06-01
+更新时间：2026-07-08
 
 这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。
 
@@ -39,7 +39,16 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 - 已有结果支持：主干保留 SeqTrack3D 的 order-time 语义，同时把真实 `delta_t/current_delta_t` 注入 `DynamicsEncoder`，比直接替换主干时间 token 更稳定。
 - 目前不能宣称：完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 目前不能宣称：TWC 和 observability gate 已经带来稳定最终收益。active A1-order+TWC 有 precision-positive 信号，但 A2-order-dyn+TWC 后期崩坏；gate-safe 低于 A2，conf-res 需要复测 best checkpoint。
+- 目前不能宣称：TWC 和 observability gate 已经带来稳定最终收益。active A1-order+TWC 有 precision-positive 信号，但 A2-order-dyn+TWC 在 0.05 和 0.01 权重下都崩坏；gate-safe 低于 A2，conf-res best-e14 复测未复现旧 best。
+- 目前不宜把普通 fixed-step benchmark 的全局涨点作为唯一成功标准。标准 nuScenes-mini 的真实 `delta_t` 变化有限，直接追求整体 final 全面超过 SeqTrack3D 的成功率偏低；更合理的论文主战场是 variable-rate / high-temporal-variation / long-gap / sparse 子集。
+
+当前执行策略：
+
+```text
+1. 先把问题设置做强：构造 variable-rate / HTV 评测和分桶，而不是只看普通 fixed-step final。
+2. 再把方法做稳：从 feature-concat dynamics 转向保守 residual dynamics，减少 seed collapse。
+3. 最后回看候选模块：TWC 和 gate 只作为条件性分析或困难样本增强，不作为已验证主贡献。
+```
 
 ### 连续时间视角给当前工作的启发
 
@@ -68,19 +77,38 @@ state(t) = timestamp-conditioned state estimation, t in R+
 
 ## 2. 收敛后的三个贡献
 
-### 贡献 1：Timestamp-native 输入契约与 dynamics prior
+### 贡献 1：Timestamp-native 输入契约与 variable-rate 评测
 
 CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而不是简单把所有主干时间 token 都替换为真实秒数：
 
 - 训练和测试都提供一致的 `timestamps / delta_t / delta_T / current_delta_t`。
 - 点特征时间通道和 box corner token 工程上支持 `raw / mlp / fourier` 时间编码。
 - 已有消融显示，直接把 real-time token 放进 SeqTrack3D 主干会破坏原始 order-time 语义。
-- 当前更稳的主线是：主干保持 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder`。
-- 历史框差分按真实 `delta_t` 计算速度和角速度，形成 timestamp-conditioned dynamics prior。
+- 后续应把 `skip=1/2/3/5`、temporal dropout、delta_t bins、sparse bins 和 re-appearance 片段作为主要评测补充，证明真实时间不是装饰字段，而是 variable-rate 3D SOT 的任务条件。
 
-这仍然是 timestamp-native 的地基：真实时间进入数据、监督和动力学解释，但论文叙事要避免把失败的 raw main-branch 注入方式写成最终方法。
+这仍然是 timestamp-native 的地基：真实时间进入数据、监督和评价协议。论文叙事要避免把失败的 raw main-branch 注入方式写成最终方法，也不要只在普通 fixed-step final 上判断方向成败。
 
-### 贡献 2：Time-resampling Consistency
+### 贡献 2：Conservative timestamp-conditioned dynamics prior
+
+当前更稳的模型主线是：主干保持 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder`。历史框差分按真实 `delta_t` 计算速度和角速度，形成 timestamp-conditioned dynamics prior。
+
+旧版 `A2-order-dyn` 通过 feature concat 把 `z_dyn` 接入 coarse motion branch，seed42 有 precision-positive 信号，但 seed43/44 暴露了稳定性风险。下一步建议把 P3 主线改成更保守的 residual 形式：
+
+```text
+obs_pred = observation_branch(point_feature)
+dyn_disp = velocity_pred * current_delta_t
+final_center = obs_center + scale * clamp(alpha * dyn_disp)
+```
+
+这个设计的好处是：
+
+- observation branch 仍是主预测，避免 dynamics feature 过早接管。
+- `scale / alpha / clamp / warmup` 都可控，便于解释 seed collapse。
+- 可以只在 long-delta_t / sparse / low-confidence 分桶启用或报告收益。
+
+当前论文里应把 dynamics 写成 **timestamp-conditioned residual motion prior**，而不是完整连续动力学求解器。
+
+### 贡献 3：Time-resampling Consistency
 
 同一条 tracklet 通过不同历史采样路径观察同一当前绝对时刻时，最终状态估计应该一致。这里的“不同采样路径”不是改变当前帧，也不是改变搜索区域，而是在共享最近历史 anchor 的前提下改变更早历史帧：
 
@@ -106,9 +134,9 @@ L_twc    = L_center + lambda_theta_twc * L_theta
 L = 0.5 * (L_a + L_b) + lambda_twc * L_twc
 ```
 
-这个贡献必须写窄：不是泛泛 temporal consistency，而是 **time-resampling consistency under different sampling paths to the same absolute time**。
+这个贡献必须写窄：不是泛泛 temporal consistency，而是 **time-resampling consistency under different sampling paths to the same absolute time**。当前证据只能支持它是 A1-order 上的 precision-positive 候选信号；它还不是 A2+dynamics 主配置。
 
-### 贡献 3：Observability-aware Fusion
+### 候选扩展：Observability-aware Fusion
 
 当前点云可靠时，更信 observation feature；当前点云稀疏、遮挡或 gap 较大时，更信 timestamp-conditioned dynamics prior。
 
@@ -126,7 +154,7 @@ o_t = [
 
 这里的 `num_points_in_search` 必须是 regularize 之前的当前搜索区域真实点数；`soft_fg_count / mean_fg_score` 只统计当前帧 chunk，避免把历史点云质量混进当前观测可靠性。
 
-不要依赖复杂的 `res_hist`、`occ_est` 或手工遮挡估计器。P5 的贡献应写成 **observability-aware observation/dynamics fusion**，而不是“首次解决稀疏或遮挡”。CXTrack、MBPTrack、MVCTrack、HVTrack 已经分别从 context、memory、virtual cues 和 high temporal variation 角度处理过相关困难；CT-SeqTrack 的边界是用真实时间动力学 prior 去补当前观测可靠性变化。
+不要依赖复杂的 `res_hist`、`occ_est` 或手工遮挡估计器。P5 应暂时写成 **observability-aware observation/dynamics fusion 的诊断候选**，而不是已验证主贡献，更不是“首次解决稀疏或遮挡”。CXTrack、MBPTrack、MVCTrack、HVTrack 已经分别从 context、memory、virtual cues 和 high temporal variation 角度处理过相关困难；CT-SeqTrack 的边界是用真实时间动力学 prior 去补当前观测可靠性变化。
 
 ---
 
@@ -222,7 +250,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 当前仓库已经完成 P0-P5 的工程链路和 smoke test，可以作为“真实时间字段 + dynamics + TWC + gate 都已落地”的研究快照。默认配置保持保守，各模块通过显式 YAML 开关启用，便于把性能变化归因到明确机制。
 
-已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏，`A2-order-dyn` 在 final precision 上超过 baseline。后续主线不再继续堆主干时间编码，而是围绕 `A2-order-dyn` 验证 candidate noise、displacement 监督、TWC 和保守 gate。
+已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏，旧 seed42 的 `A2-order-dyn` 在 final precision 上超过 baseline。但 2026-07-08 的 seed43 / seed44 复核显示 A2 稳定性不足。后续主线不再继续堆主干时间编码，也不急着叠 TWC / gate，而是先做 variable-rate 评测协议、保守 residual dynamics、多 seed 稳定性、candidate/velocity 诊断、checkpoint 对齐和困难子集分桶。
 
 ### P0-P2：已完成地基
 
@@ -235,7 +263,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-当前代码已实现 P3，默认关闭。服务器 `check_forward_batch.py` + loss smoke test 以及 `check_train_steps.py --max-steps 2` 均已通过。正式实验中，`A2-order-dyn` 是当前最强正向信号。
+当前代码已实现 P3，默认关闭。服务器 `check_forward_batch.py` + loss smoke test 以及 `check_train_steps.py --max-steps 2` 均已通过。正式实验中，`A2-order-dyn` 是最值得继续诊断的真实时间使用方式，但还不是稳定结论。下一版 P3 应优先验证 residual dynamics，而不是继续扩大 feature-concat 分支。
 
 第一版只做真实时间差分动力学：
 
@@ -244,7 +272,7 @@ v_i     = (c_i - c_{i-1}) / delta_t_i
 omega_i = wrap(theta_i - theta_{i-1}) / delta_t_i
 ```
 
-用小 MLP 编码成 `z_dyn`，接到 coarse motion prediction 前，并用轻量 `L_vel` 监督。
+当前实现用小 MLP 编码成 `z_dyn`，接到 coarse motion prediction 前，并用轻量 `L_vel` 监督。后续更推荐把它改成小幅 residual correction：保留 `velocity_pred / dynamics_displacement_pred`，让最终中心只接受受限的 dynamics residual。
 
 注意：不要把 P3 写成完整 continuous dynamics solver。它只是把历史框差分从 frame-step 解释改成 real-time velocity / angular velocity 解释，为 P5 的 dynamics prior 提供一个轻量、可消融的时间条件分支。
 
@@ -267,7 +295,7 @@ view B: [t-1, t-3, t-5] -> t
 
 这个设计能让 P4 的实验解释更干净：如果 TWC 有收益，应来自模型对不同真实时间采样路径的稳定性提升，而不是来自额外 batch 大小、额外 crop 扰动或坐标系变化。
 
-当前状态：TWC 工程链路已经实现并通过 smoke test，validity-fixed 消融也已完成。`A1-order+TWC` 相对 A1-order success 基本持平、precision 提升，说明 TWC 有定位精度稳定信号；但 `A2-order-dyn+TWC` 在 TWC 生效后仍后期崩坏，当前 `twc_weight=0.05` 不适合作为 dynamics 主配置。后续如果继续 TWC，应先做低权重或 warmup 版本。
+当前状态：TWC 工程链路已经实现并通过 smoke test，validity-fixed 消融也已完成。`A1-order+TWC` 相对 A1-order success 基本持平、precision 提升，说明 TWC 有定位精度稳定信号；但 `A2-order-dyn+TWC` 在 TWC 生效后仍后期崩坏，`twc_weight=0.01` 复核也没有救回 A2+dynamics 组合。后续如果继续 TWC，应先限定在 A1 或尝试 warmup / 延后启用，而不是直接接 A2 主配置。
 
 ### P5：Observability Gate
 
@@ -294,7 +322,7 @@ motion_pred = motion_mlp(motion_feature)
 
 P5 的核心验收不只是 loss finite，而是 gate 行为可解释：稀疏、大 gap、低前景置信度样本中 `alpha_dyn` 应更高；当前观测清晰时 `alpha_obs` 应更高。
 
-当前状态：旧 P5 full 结果不能作为最终 gate 结论，因为它混入了 raw real-time 主干失败路径。新的 `A3-order-gate-safe` 比旧 P5 full 安全很多，但 final 仍低于 `A2-order-dyn`；`A3-order-conf-res-gate` best checkpoint 很高但 last 崩坏。后续优先复测 conf-res best checkpoint，并做 sparse / delta_t / foreground confidence 分桶，再决定是否继续 gate。
+当前状态：旧 P5 full 结果不能作为最终 gate 结论，因为它混入了 raw real-time 主干失败路径。新的 `A3-order-gate-safe` 比旧 P5 full 安全很多，但 final 仍低于 `A2-order-dyn`；`A3-order-conf-res-gate` best-e14 复测没有复现旧 best，高点暂不能作为稳定收益。后续应先核对评测路径，并做 sparse / delta_t / foreground confidence / alpha-residual 分桶，再决定是否继续 gate。
 
 ---
 
@@ -302,12 +330,24 @@ P5 的核心验收不只是 loss finite，而是 gate 行为可解释：稀疏�
 
 ### 主表
 
-至少保留：
+至少保留普通主表，但不要只依赖普通主表：
 
 - nuScenes
 - Waymo
 
 KITTI 可作为补充，不宜作为主战场，因为 KITTI 对高时变和稀疏的体现不如 nuScenes/Waymo。
+
+新增主表建议：
+
+```text
+standard fixed-step evaluation
+variable-gap evaluation: skip=1/2/3/5
+temporal dropout / jitter evaluation
+long-delta_t bins
+sparse / re-appearance bins
+```
+
+如果普通 fixed-step final 没有稳定全面超过 baseline，但 variable-rate / long-gap / sparse 子集有稳定收益，这仍然可以支撑论文叙事；反过来，如果只在普通 fixed-step 上追全局涨点，当前证据不足。
 
 ### 消融表
 
@@ -323,18 +363,24 @@ A1-order / A2-order-dyn
 A2-order-dyn-cand1 / A2-order-dyn-disp
 A1-order+TWC / A2-order-dyn+TWC
 A3-order-gate-safe / A3-order-conf-res-gate
+A3-conf-res best-e14 retest
+A2-order-dyn seed43 / seed44
+A2-order-dyn+TWC w0.01
+A3-conf-res rerun seed42
 ```
 
 下一步优先复核：
 
 ```text
-A3-order-conf-res-gate best checkpoint
-low-weight / warmup TWC
-gate sparse / delta_t / foreground-confidence bins
+A1-order + variable-rate protocol
+A2 residual-dyn vs A2 feature-concat dyn
+A2-order-dyn multi-seed stability
+old conf-res best checkpoint evaluation path
+gate sparse / delta_t / foreground-confidence / alpha-residual bins
 candidate-wise dynamics diagnostics
 ```
 
-这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：dynamics 是否被非 0 candidate 污染、是否需要 displacement 监督、TWC 是否独立有效、TWC 是否能和 dynamics 互补、gate 在干净主干上是否仍不稳定。当前答案是：cand1 不支持简单移除非 0 candidate，disp 只有温和 precision 信号，A1+TWC 有 precision-positive 信号，A2+TWC 不稳定，gate-safe 不够强，conf-res 需要 best checkpoint 复核。
+这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：dynamics 是否被非 0 candidate 污染、是否需要 displacement 监督、TWC 是否独立有效、TWC 是否能和 dynamics 互补、gate 在干净主干上是否仍不稳定。当前答案是：cand1 不支持简单移除非 0 candidate，disp 只有温和 precision 信号，A1+TWC 有 precision-positive 信号，A2+TWC 不稳定且低权重未救回，gate-safe 不够强，conf-res best 复测未确认。
 
 ### 困难子集
 

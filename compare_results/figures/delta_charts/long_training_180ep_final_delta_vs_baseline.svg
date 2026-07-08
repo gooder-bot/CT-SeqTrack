@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="268" viewBox="0 0 1120 268">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" font-size="22" font-family="Arial" font-weight="700">Long Training Stability (180ep)</text>
+<text x="24" y="58" font-size="13" font-family="Arial" fill="#555">180ep nuScenes-mini - final delta vs group baseline</text>
+<line x1="169.3" y1="74" x2="169.3" y2="216" stroke="#e6e6e6"/>
+<text x="169.3" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">-40</text>
+<line x1="290.7" y1="74" x2="290.7" y2="216" stroke="#e6e6e6"/>
+<text x="290.7" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">-30</text>
+<line x1="412.1" y1="74" x2="412.1" y2="216" stroke="#e6e6e6"/>
+<text x="412.1" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">-20</text>
+<line x1="533.6" y1="74" x2="533.6" y2="216" stroke="#e6e6e6"/>
+<text x="533.6" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">-10</text>
+<line x1="655.0" y1="74" x2="655.0" y2="216" stroke="#e6e6e6"/>
+<text x="655.0" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">0</text>
+<line x1="776.4" y1="74" x2="776.4" y2="216" stroke="#e6e6e6"/>
+<text x="776.4" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">10</text>
+<line x1="897.9" y1="74" x2="897.9" y2="216" stroke="#e6e6e6"/>
+<text x="897.9" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">20</text>
+<line x1="1019.3" y1="74" x2="1019.3" y2="216" stroke="#e6e6e6"/>
+<text x="1019.3" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">30</text>
+<line x1="1140.7" y1="74" x2="1140.7" y2="216" stroke="#e6e6e6"/>
+<text x="1140.7" y="244" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">40</text>
+<line x1="655.0" y1="74" x2="655.0" y2="216" stroke="#333" stroke-width="1.2"/>
+<rect x="230" y="64" width="12" height="12" fill="#2f5f9f"/><text x="248" y="75" font-size="12" font-family="Arial">success delta</text>
+<rect x="370" y="64" width="12" height="12" fill="#c85a3a"/><text x="388" y="75" font-size="12" font-family="Arial">precision delta</text>
+<text x="218" y="106" font-size="12" font-family="Arial" text-anchor="end">Baseline 180ep</text>
+<rect x="655.0" y="89" width="1.0" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="660.0" y="99" font-size="11" font-family="Arial" text-anchor="start" fill="#333">+0.00</text>
+<rect x="655.0" y="104" width="1.0" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="660.0" y="114" font-size="11" font-family="Arial" text-anchor="start" fill="#333">+0.00</text>
+<text x="218" y="148" font-size="12" font-family="Arial" text-anchor="end">A2 180ep</text>
+<rect x="405.8" y="131" width="249.2" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="400.8" y="141" font-size="11" font-family="Arial" text-anchor="end" fill="#333">-20.52</text>
+<rect x="342.5" y="146" width="312.5" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="337.5" y="156" font-size="11" font-family="Arial" text-anchor="end" fill="#333">-25.74</text>
+<text x="218" y="190" font-size="12" font-family="Arial" text-anchor="end">A3 conf-res 180ep</text>
+<rect x="377.3" y="173" width="277.7" height="12" fill="#2f5f9f" opacity="0.88"/>
+<text x="372.3" y="183" font-size="11" font-family="Arial" text-anchor="end" fill="#333">-22.87</text>
+<rect x="255.9" y="188" width="399.1" height="12" fill="#c85a3a" opacity="0.88"/>
+<text x="250.9" y="198" font-size="11" font-family="Arial" text-anchor="end" fill="#333">-32.87</text>
+</svg>

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" font-size="22" font-family="Arial" font-weight="700">TWC-Related Runs (60ep)</text>
+<text x="24" y="58" font-size="13" font-family="Arial" fill="#555">60ep nuScenes-mini; active TWC validity fixed - precision curve</text>
+<line x1="70" y1="526.0" x2="860" y2="526.0" stroke="#e6e6e6"/>
+<text x="60" y="530.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">10</text>
+<line x1="70" y1="452.0" x2="860" y2="452.0" stroke="#e6e6e6"/>
+<text x="60" y="456.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">20</text>
+<line x1="70" y1="378.0" x2="860" y2="378.0" stroke="#e6e6e6"/>
+<text x="60" y="382.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">30</text>
+<line x1="70" y1="304.0" x2="860" y2="304.0" stroke="#e6e6e6"/>
+<text x="60" y="308.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">40</text>
+<line x1="70" y1="230.0" x2="860" y2="230.0" stroke="#e6e6e6"/>
+<text x="60" y="234.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">50</text>
+<line x1="70" y1="156.0" x2="860" y2="156.0" stroke="#e6e6e6"/>
+<text x="60" y="160.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">60</text>
+<line x1="70" y1="82.0" x2="860" y2="82.0" stroke="#e6e6e6"/>
+<text x="60" y="86.0" font-size="11" font-family="Arial" text-anchor="end" fill="#666">70</text>
+<line x1="-1.8" y1="82" x2="-1.8" y2="526" stroke="#f0f0f0"/>
+<text x="-1.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">0</text>
+<line x1="141.8" y1="82" x2="141.8" y2="526" stroke="#f0f0f0"/>
+<text x="141.8" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">10</text>
+<line x1="285.5" y1="82" x2="285.5" y2="526" stroke="#f0f0f0"/>
+<text x="285.5" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">20</text>
+<line x1="429.1" y1="82" x2="429.1" y2="526" stroke="#f0f0f0"/>
+<text x="429.1" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">30</text>
+<line x1="572.7" y1="82" x2="572.7" y2="526" stroke="#f0f0f0"/>
+<text x="572.7" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">40</text>
+<line x1="716.4" y1="82" x2="716.4" y2="526" stroke="#f0f0f0"/>
+<text x="716.4" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">50</text>
+<line x1="860.0" y1="82" x2="860.0" y2="526" stroke="#f0f0f0"/>
+<text x="860.0" y="562" font-size="11" font-family="Arial" text-anchor="middle" fill="#666">60</text>
+<line x1="70" y1="526" x2="860" y2="526" stroke="#999"/>
+<line x1="70" y1="82" x2="70" y2="526" stroke="#999"/>
+<text x="465.0" y="588" font-size="12" font-family="Arial" text-anchor="middle">epoch</text>
+<polyline points="70.0,290.2 141.8,117.4 213.6,226.0 285.5,235.7 357.3,151.3 429.1,201.1 500.9,138.7 572.7,221.3 644.5,158.9 716.4,175.9 788.2,161.0 860.0,156.3" fill="none" stroke="#2f5f9f" stroke-width="2.1"/>
+<circle cx="70.0" cy="290.2" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="141.8" cy="117.4" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="213.6" cy="226.0" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="285.5" cy="235.7" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="357.3" cy="151.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="429.1" cy="201.1" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="500.9" cy="138.7" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="572.7" cy="221.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="644.5" cy="158.9" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="716.4" cy="175.9" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="788.2" cy="161.0" r="3" fill="#2f5f9f" opacity="0.9"/>
+<circle cx="860.0" cy="156.3" r="3" fill="#2f5f9f" opacity="0.9"/>
+<line x1="884" y1="82" x2="908" y2="82" stroke="#2f5f9f" stroke-width="2.2"/>
+<text x="916" y="86" font-size="12" font-family="Arial">SeqTrack baseline</text>
+<polyline points="70.0,148.0 141.8,145.4 213.6,175.3 285.5,270.4 357.3,197.3 429.1,197.5 500.9,158.8 572.7,216.1 644.5,141.1 716.4,159.9 788.2,160.6 860.0,171.8" fill="none" stroke="#c85a3a" stroke-width="2.1"/>
+<circle cx="70.0" cy="148.0" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="141.8" cy="145.4" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="213.6" cy="175.3" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="285.5" cy="270.4" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="357.3" cy="197.3" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="429.1" cy="197.5" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="500.9" cy="158.8" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="572.7" cy="216.1" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="644.5" cy="141.1" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="716.4" cy="159.9" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="788.2" cy="160.6" r="3" fill="#c85a3a" opacity="0.9"/>
+<circle cx="860.0" cy="171.8" r="3" fill="#c85a3a" opacity="0.9"/>
+<line x1="884" y1="104" x2="908" y2="104" stroke="#c85a3a" stroke-width="2.2"/>
+<text x="916" y="108" font-size="12" font-family="Arial">A1 order</text>
+<polyline points="70.0,144.2 141.8,389.2 213.6,304.9 285.5,195.5 357.3,163.7 429.1,237.2 500.9,142.9 572.7,161.3 644.5,135.5 716.4,136.4 788.2,131.2 860.0,147.8" fill="none" stroke="#3d8b62" stroke-width="2.1"/>
+<circle cx="70.0" cy="144.2" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="141.8" cy="389.2" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="213.6" cy="304.9" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="285.5" cy="195.5" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="357.3" cy="163.7" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="429.1" cy="237.2" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="500.9" cy="142.9" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="572.7" cy="161.3" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="644.5" cy="135.5" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="716.4" cy="136.4" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="788.2" cy="131.2" r="3" fill="#3d8b62" opacity="0.9"/>
+<circle cx="860.0" cy="147.8" r="3" fill="#3d8b62" opacity="0.9"/>
+<line x1="884" y1="126" x2="908" y2="126" stroke="#3d8b62" stroke-width="2.2"/>
+<text x="916" y="130" font-size="12" font-family="Arial">A1 order+TWC</text>
+<polyline points="70.0,399.2 141.8,129.6 213.6,168.9 285.5,222.0 357.3,130.5 429.1,181.9 500.9,151.9 572.7,134.4 644.5,132.2 716.4,137.3 788.2,151.4 860.0,131.5" fill="none" stroke="#7a5195" stroke-width="2.1"/>
+<circle cx="70.0" cy="399.2" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="141.8" cy="129.6" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="213.6" cy="168.9" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="285.5" cy="222.0" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="357.3" cy="130.5" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="429.1" cy="181.9" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="500.9" cy="151.9" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="572.7" cy="134.4" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="644.5" cy="132.2" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="716.4" cy="137.3" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="788.2" cy="151.4" r="3" fill="#7a5195" opacity="0.9"/>
+<circle cx="860.0" cy="131.5" r="3" fill="#7a5195" opacity="0.9"/>
+<line x1="884" y1="148" x2="908" y2="148" stroke="#7a5195" stroke-width="2.2"/>
+<text x="916" y="152" font-size="12" font-family="Arial">A2 order-dyn</text>
+<polyline points="70.0,175.0 141.8,227.0 213.6,431.9 285.5,390.2 357.3,302.6 429.1,387.3 500.9,327.8 572.7,351.8 644.5,356.2 716.4,378.0 788.2,365.2 860.0,362.9" fill="none" stroke="#d9862c" stroke-width="2.1"/>
+<circle cx="70.0" cy="175.0" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="141.8" cy="227.0" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="213.6" cy="431.9" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="285.5" cy="390.2" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="357.3" cy="302.6" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="429.1" cy="387.3" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="500.9" cy="327.8" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="572.7" cy="351.8" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="644.5" cy="356.2" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="716.4" cy="378.0" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="788.2" cy="365.2" r="3" fill="#d9862c" opacity="0.9"/>
+<circle cx="860.0" cy="362.9" r="3" fill="#d9862c" opacity="0.9"/>
+<line x1="884" y1="170" x2="908" y2="170" stroke="#d9862c" stroke-width="2.2"/>
+<text x="916" y="174" font-size="12" font-family="Arial">A2 dyn+TWC .05</text>
+<polyline points="70.0,362.0 141.8,377.6 213.6,432.2 285.5,400.0 357.3,389.0 429.1,411.9 500.9,427.8 572.7,438.8 644.5,417.7 716.4,418.9 788.2,424.7 860.0,420.4" fill="none" stroke="#4d7c8a" stroke-width="2.1"/>
+<circle cx="70.0" cy="362.0" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="141.8" cy="377.6" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="213.6" cy="432.2" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="285.5" cy="400.0" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="357.3" cy="389.0" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="429.1" cy="411.9" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="500.9" cy="427.8" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="572.7" cy="438.8" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="644.5" cy="417.7" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="716.4" cy="418.9" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="788.2" cy="424.7" r="3" fill="#4d7c8a" opacity="0.9"/>
+<circle cx="860.0" cy="420.4" r="3" fill="#4d7c8a" opacity="0.9"/>
+<line x1="884" y1="192" x2="908" y2="192" stroke="#4d7c8a" stroke-width="2.2"/>
+<text x="916" y="196" font-size="12" font-family="Arial">A2 dyn+TWC .01</text>
+</svg>

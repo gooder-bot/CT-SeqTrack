@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-06-03
+更新时间：2026-07-08
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -41,19 +41,162 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 - [x] `A2-order-dyn-cand1 / A2-order-dyn-disp`：cand1 在 60 epoch 协议下明显退化但 step 未对齐；disp 与 A2-order-dyn 基本持平，precision 小幅更高。
 - [x] 旧 `A1-order+TWC / A2-order-dyn+TWC`：两组已跑完并整理，但 `twc_valid_ratio=0`，说明 TWC 项未激活；这些结果不能作为 TWC 有效或无效的最终结论。
 - [x] validity-fixed active `A1-order+TWC / A2-order-dyn+TWC`：TWC 已激活；A1 上 precision 有正向信号，A2+dynamics 组合后期崩坏。
-- [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res best 很高但 final 崩坏，需复测 best checkpoint。
+- [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res 旧 best 很高但 final 崩坏。
+- [x] 2026-07-08 五次稳定性复核：A3 best-e14 retest、A2 seed43、A2 seed44、A2+TWC w0.01、A3 conf-res rerun 均已整理到 `compare_results/reports/latest_5runs_comparison.md`。
 
 ### 当前结论
 
 ```text
 真实时间方向没有被否定；
-当前最稳路线是保留 SeqTrack3D 主干的 order-time 语义，
-把真实 delta_t 放进 DynamicsEncoder 作为运动先验。
-TWC / gate 目前还不是稳定主配置：A1+TWC 有 precision-positive 信号，
-conf-res 有 best-checkpoint 信号，但都需要进一步稳定性复核。
+当前最稳论文边界仍是保留 SeqTrack3D 主干的 order-time 语义，
+把真实 delta_t 放进保守 residual dynamics prior。
+但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
+普通 fixed-step 全局涨点把握不高；
+后续应转向 variable-rate / HTV 协议、困难子集分桶和 residual dynamics。
+TWC / gate / conf-res 目前都不能作为稳定主配置。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-07-08：论文叙事与执行路线重定向
+
+### 已更新文档
+
+```text
+README.md
+refined_plan.md
+sum_results.md
+need_to_do.md
+```
+
+### 新的当前判断
+
+- 普通 fixed-step benchmark 上追求整体 final 稳定涨点的把握不高。
+- 更稳的论文主战场是 variable-rate / high-temporal-variation / long-gap / sparse 子集。
+- `A2-order-dyn` 仍是最有价值的真实时间线索，但 feature-concat dynamics 已暴露 seed sensitivity。
+- 下一步优先实现保守 residual dynamics，而不是继续叠加 TWC 或 gate。
+- TWC 当前只能作为 A1-order 上的 precision-positive 候选信号；gate / conf-res 先转向分桶诊断和评测路径核对。
+
+### 文档口径
+
+```text
+Fixed-step 3D SOT hides the physical meaning of irregular frame intervals.
+CT-SeqTrack should first expose this issue with variable-rate evaluation,
+then use a conservative timestamp-conditioned residual dynamics prior to
+improve tracking under long gaps and sparse observations.
+```
+
+---
+
+## 2026-07-08：关联实验图表整理
+
+### 已生成文件
+
+```text
+compare_results/reports/related_comparisons.md
+compare_results/data/related_comparisons_metrics_summary.csv
+compare_results/data/related_comparisons_metrics_points.csv
+compare_results/figures/bar_charts/*related group charts
+compare_results/figures/delta_charts/*related group charts
+compare_results/figures/line_charts/*related group charts
+tools/summarize_related_comparisons.py
+```
+
+### 覆盖分组
+
+- Main A1/A2/P5 Progression (60ep)
+- A1 Time Encoding / Main-Branch Variants (60ep)
+- A2 Dynamics Variants (60ep)
+- TWC-Related Runs (60ep)
+- A3 / Gate Variants (60ep)
+- A2 Seed Stability (60ep)
+- Long Training Stability (180ep)
+
+每个分组都包含 SeqTrack baseline 或对应 180ep baseline，并重新计算 final/best 相对 baseline 的 delta。每组生成 final score 柱状图、final delta 柱状图、success 曲线和 precision 曲线。
+
+---
+
+## 2026-07-08：latest 5 runs + baseline 图表整理
+
+### 已生成文件
+
+```text
+compare_results/reports/latest_5runs_with_baseline_comparison.md
+compare_results/data/latest_5runs_with_baseline_metrics_summary.csv
+compare_results/data/latest_5runs_with_baseline_metrics_points.csv
+compare_results/figures/bar_charts/latest_5runs_with_baseline_final_scores.svg
+compare_results/figures/delta_charts/latest_5runs_with_baseline_final_delta_vs_baseline.svg
+compare_results/figures/line_charts/latest_5runs_with_baseline_success_curve.svg
+compare_results/figures/line_charts/latest_5runs_with_baseline_precision_curve.svg
+tools/summarize_latest_5runs_with_baseline.py
+```
+
+### 内容
+
+- 将 2026-07-08 五次最新实验与 60ep `SeqTrack baseline` 合并。
+- baseline 取自 `twc_gate_ablation_metrics_*` 中的 `SeqTrack baseline`，避免混入 180ep baseline。
+- 生成 final score 柱状图、final delta vs baseline 柱状图、success 曲线和 precision 曲线。
+- 输出表格中为每个 run 重新计算 `final_delta_vs_baseline` 和 `best_delta_vs_baseline`。
+
+---
+
+## 2026-07-08：五次稳定性复核整理
+
+### 覆盖实验
+
+```text
+A3-conf-res best-e14 retest
+A2-order-dyn seed43
+A2-order-dyn seed44
+A2-order-dyn+TWC w0.01 seed42
+A3-conf-res rerun seed42
+```
+
+### 关键结果
+
+```text
+A3-conf-res best-e14 retest:        success 28.06, precision 37.70
+A2-order-dyn seed43 final:          success 23.64, precision 23.77
+A2-order-dyn seed44 final:          success 46.90, precision 52.62
+A2-order-dyn+TWC w0.01 final:       success 22.88, precision 24.27
+A3-conf-res rerun seed42 final:     success 32.11, precision 31.87
+```
+
+### 关键诊断
+
+```text
+A2-order-dyn+TWC w0.01:
+  twc_valid_ratio tail1000 mean 0.7541
+  loss_twc tail1000 mean 0.0083
+
+A3-conf-res rerun:
+  obs_alpha_dyn_mean tail1000 mean 0.4988
+  obs_alpha_dyn_clamped_mean tail1000 mean 0.1810
+  obs_dyn_residual_norm tail1000 mean 0.0314
+```
+
+判断：
+
+- `A3-conf-res best-e14 retest` 没有复现旧汇总里的 62.04 / 76.30，高 best 暂时不能作为确认收益。
+- `A2-order-dyn` seed43 / seed44 差异很大，旧 seed42 的 precision-positive 信号需要多 seed 统计支撑。
+- `A2-order-dyn+TWC w0.01` 在 TWC 有效时仍明显退化，说明问题不只是 `twc_weight=0.05` 太大。
+- `A3-conf-res rerun` 仍低，后续应先做评测路径核对和 gate 行为分桶。
+
+归档文件：
+
+```text
+compare_results/reports/latest_5runs_comparison.md
+compare_results/data/latest_5runs_metrics_points.csv
+compare_results/data/latest_5runs_metrics_summary.csv
+compare_results/data/latest_5runs_diagnostics_summary.csv
+compare_results/data/latest_5runs_hparams_summary.csv
+compare_results/figures/line_charts/latest_5runs_success_curve.svg
+compare_results/figures/line_charts/latest_5runs_precision_curve.svg
+compare_results/figures/bar_charts/latest_5runs_best_final_summary.svg
+compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
+```
 
 ---
 
@@ -97,7 +240,7 @@ A3-order-conf-res-gate best:      success 62.04, precision 76.30
 判断：
 
 - `A3-order-gate-safe` 比旧 P5 full 的 `31.19 / 31.89` 安全很多，但仍低于 A2-order-dyn。
-- `A3-order-conf-res-gate` 的 best checkpoint 信号很强，但 last checkpoint 崩坏；应优先复测 best checkpoint。
+- `A3-order-conf-res-gate` 的旧 best checkpoint 信号很强，但 last checkpoint 崩坏；后续 2026-07-08 best-e14 复测未复现旧 best。
 - 当前主配置仍应保持 `A2-order-dyn`，不要把 active TWC 或 gate 直接写成 full-model 收益。
 
 归档文件：

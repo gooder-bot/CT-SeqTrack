@@ -1,0 +1,99 @@
+run_key,model,metric,epoch,step,value
+a3_conf_res_best_e14_retest,A3-conf-res best-e14 retest,success/test,14,18930,28.0579891204834
+a3_conf_res_best_e14_retest,A3-conf-res best-e14 retest,precision/test,14,18930,37.69584274291992
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,5,6310,45.92232131958008
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,10,12620,41.729759216308594
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,15,18930,36.76696014404297
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,20,25240,20.88730812072754
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,25,31550,36.50656509399414
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,30,37860,23.624727249145508
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,35,44170,28.530635833740234
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,40,50480,28.753829956054688
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,45,56790,27.41028594970703
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,50,63100,23.539384841918945
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,55,69410,27.2636775970459
+a2_order_dyn_seed43,A2-order-dyn seed43,success/test,60,75720,23.640047073364258
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,5,6310,52.053619384765625
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,10,12620,54.87964630126953
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,15,18930,50.905906677246094
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,20,25240,20.084247589111328
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,25,31550,45.352298736572266
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,30,37860,23.158645629882812
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,35,44170,32.610504150390625
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,40,50480,35.9737434387207
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,45,56790,32.19475173950195
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,50,63100,23.4102840423584
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,55,69410,32.241798400878906
+a2_order_dyn_seed43,A2-order-dyn seed43,precision/test,60,75720,23.765865325927734
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,5,6310,31.931072235107422
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,10,12620,38.98577880859375
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,15,18930,31.742889404296875
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,20,25240,33.427791595458984
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,25,31550,45.74070358276367
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,30,37860,45.26148986816406
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,35,44170,38.493438720703125
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,40,50480,43.20240783691406
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,45,56790,49.19365692138672
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,50,63100,50.228668212890625
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,55,69410,48.7035026550293
+a2_order_dyn_seed44,A2-order-dyn seed44,success/test,60,75720,46.904815673828125
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,5,6310,35.59080505371094
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,10,12620,51.85667419433594
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,15,18930,26.487964630126953
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,20,25240,45.12035369873047
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,25,31550,52.05032730102539
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,30,37860,53.95842742919922
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,35,44170,44.669586181640625
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,40,50480,47.59299850463867
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,45,56790,57.45732879638672
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,50,63100,58.192562103271484
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,55,69410,55.67833709716797
+a2_order_dyn_seed44,A2-order-dyn seed44,precision/test,60,75720,52.62253952026367
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,5,6310,30.26805305480957
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,10,12620,26.39715576171875
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,15,18930,23.30087661743164
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,20,25240,26.524070739746094
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,25,31550,26.386213302612305
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,30,37860,24.090810775756836
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,35,44170,22.34682846069336
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,40,50480,21.34026527404785
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,45,56790,22.98796844482422
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,50,63100,23.007659912109375
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,55,69410,22.618162155151367
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,success/test,60,75720,22.878559112548828
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,5,6310,32.156455993652344
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,10,12620,30.056894302368164
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,15,18930,22.671772003173828
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,20,25240,27.026260375976562
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,25,31550,28.51969337463379
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,30,37860,25.42560386657715
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,35,44170,23.263675689697266
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,40,50480,21.789936065673828
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,45,56790,24.635665893554688
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,50,63100,24.471553802490234
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,55,69410,23.690372467041016
+a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,precision/test,60,75720,24.269147872924805
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,5,6310,30.75820541381836
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,10,12620,31.049236297607422
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,15,18930,25.806346893310547
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,20,25240,25.24179458618164
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,25,31550,28.902626037597656
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,30,37860,27.913570404052734
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,35,44170,28.57877540588379
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,40,50480,34.545955657958984
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,45,56790,32.21990966796875
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,50,63100,32.07768249511719
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,55,69410,31.756019592285156
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,success/test,60,75720,32.10612869262695
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,5,6310,32.32823181152344
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,10,12620,36.50437545776367
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,15,18930,25.237417221069336
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,20,25240,23.65864372253418
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,25,31550,26.963895797729492
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,30,37860,26.63129234313965
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,35,44170,27.62582015991211
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,40,50480,35.736324310302734
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,45,56790,31.842449188232422
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,50,63100,31.618165969848633
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,55,69410,31.649887084960938
+a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,precision/test,60,75720,31.87417984008789
