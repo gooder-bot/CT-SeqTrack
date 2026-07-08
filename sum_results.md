@@ -481,9 +481,9 @@ compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
 当前优先顺序：
 
 ```text
-1. 先做 variable-rate / HTV 评测协议：skip=1/2/3/5、temporal dropout、delta_t bins、sparse bins。
-2. 实现 A2-residual-dyn，对比当前 A2 feature-concat dyn，检查是否缓解 seed collapse。
-3. 做 A2-order-dyn seed 统计和训练曲线复核，确认 seed43 collapse 是偶然还是常态。
+1. 先等第一批 nuScenes-mini-HTV 6 组 60ep 跑完：gap1124 / burst_drop / random20 下 A1-order vs A2-order-dyn。
+2. 按同一 protocol 计算 A2 - A1，并补 delta_t / sparse / displacement 分桶。
+3. 实现 A2-residual-dyn，对比当前 A2 feature-concat dyn，检查是否缓解 seed collapse。
 4. 暂停继续把 TWC 接入 A2 主配置；0.05 和 0.01 都已显示 A2+dynamics 组合不稳定。
 5. 暂停把 conf-res 写成收益模块；先核对旧 best 的评测路径，并做 alpha/residual 分桶。
 6. 补 dynamics candidate 分桶日志，解释 cand1 / disp / seed collapse 的机制来源。

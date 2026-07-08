@@ -84,7 +84,7 @@ CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而�
 - 训练和测试都提供一致的 `timestamps / delta_t / delta_T / current_delta_t`。
 - 点特征时间通道和 box corner token 工程上支持 `raw / mlp / fourier` 时间编码。
 - 已有消融显示，直接把 real-time token 放进 SeqTrack3D 主干会破坏原始 order-time 语义。
-- 后续应把 `skip=1/2/3/5`、temporal dropout、delta_t bins、sparse bins 和 re-appearance 片段作为主要评测补充，证明真实时间不是装饰字段，而是 variable-rate 3D SOT 的任务条件。
+- 当前第一批评测已转向 `gap1124 / burst_drop / random20` 这三种可复现 virtual-rate protocol；后续再补 `fixed-dt / shuffled-dt` negative control、delta_t bins、sparse bins、displacement bins 和 re-appearance 片段，证明真实时间不是装饰字段，而是 variable-rate 3D SOT 的任务条件。
 
 这仍然是 timestamp-native 的地基：真实时间进入数据、监督和评价协议。论文叙事要避免把失败的 raw main-branch 注入方式写成最终方法，也不要只在普通 fixed-step final 上判断方向成败。
 
@@ -341,8 +341,8 @@ KITTI 可作为补充，不宜作为主战场，因为 KITTI 对高时变和稀�
 
 ```text
 standard fixed-step evaluation
-variable-gap evaluation: skip=1/2/3/5
-temporal dropout / jitter evaluation
+virtual-rate evaluation: gap1124 / burst_drop / random20
+fixed-dt / shuffled-dt / jittered-dt negative controls
 long-delta_t bins
 sparse / re-appearance bins
 ```
@@ -372,7 +372,7 @@ A3-conf-res rerun seed42
 下一步优先复核：
 
 ```text
-A1-order + variable-rate protocol
+A1-order vs A2-order-dyn under gap1124 / burst_drop / random20
 A2 residual-dyn vs A2 feature-concat dyn
 A2-order-dyn multi-seed stability
 old conf-res best checkpoint evaluation path

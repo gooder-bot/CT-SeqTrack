@@ -180,9 +180,9 @@ use_observability_gate: False
 当前下一步：
 
 ```text
-1. 先补 variable-rate / HTV 评测协议：skip=1/2/3/5、temporal dropout、delta_t bins、sparse bins。
-2. 在 A1-order 主干上实现保守 residual dynamics，对比 feature concat dynamics 是否降低 seed collapse。
-3. 汇总 A2-order-dyn 多 seed 统计，判断 60ep precision-positive 信号是否可复现。
+1. 等待并整理第一批 nuScenes-mini-HTV 6 组 60ep：gap1124 / burst_drop / random20 下的 A1-order vs A2-order-dyn。
+2. 按同一 protocol 计算 A2 - A1，并补 delta_t / sparse / displacement 分桶。
+3. 实现 A2-residual-dyn，对比 feature-concat dynamics 是否降低 seed collapse。
 4. 暂停把 TWC 接入 A2 主配置；0.01 / 0.05 都已显示 A2+dynamics 组合不稳定。
 5. 暂停把 conf-res 写成正向模块；先对 checkpoint / 评测路径 / alpha-residual 行为做诊断。
 6. 补 dynamics candidate 分桶和困难子集分桶，解释 seed collapse / late collapse 的机制。
@@ -333,7 +333,7 @@ python tools/check_train_steps.py \
 
 ## 训练与测试
 
-当前正式复跑命令以 `need_to_do.md` 为准。除 `--cfg` 和 `--tag` 外，后续复跑建议继续保持：
+当前正式复跑命令以 `need_to_do.md` 为准。历史固定消融常用参数如下；当前 HTV 6 组已按 `workers=4` 在服务器后台运行：
 
 ```text
 --batch_size 16

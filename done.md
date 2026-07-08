@@ -18,6 +18,7 @@
 - [x] P3：`DynamicsEncoder` / Velocity Branch 已实现，forward / loss / 2-step train smoke test 通过。
 - [x] P4：Time-resampling Consistency 已实现，paired batch / forward / loss / 2-step train smoke test 通过。
 - [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
+- [x] nuScenes-mini-HTV / virtual-rate 数据层、检查脚本和 6 个 A1/A2 smoke 配置已实现。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text
@@ -57,6 +58,111 @@ TWC / gate / conf-res 目前都不能作为稳定主配置。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-07-08：nuScenes-mini-HTV 数据层与第一批运行启动
+
+### 已完成工程
+
+已在当前 `CT-SeqTrack` 工程中完成 nuScenes-mini virtual-rate / HTV 数据协议支持：
+
+```text
+datasets/nuscenes_lidar_mf.py
+datasets/__init__.py
+tools/check_virtual_rate_batch.py
+tools/build_virtual_rate_manifest.py
+```
+
+完成内容：
+
+- `NuScenesMFDataset` 支持在 tracklet 构造后生成虚拟变帧率序列。
+- 已支持 `gap_pattern`、`burst_drop`、`random_drop`、`stride` 等模式。
+- preload cache 名称已加入 virtual-rate tag，避免误读 fixed-step 旧缓存。
+- `datasets/__init__.py` 已透传 `virtual_rate_*` 配置。
+- `tools/check_virtual_rate_batch.py` 可打印 tracklet keep indices、timestamp gaps、batch 里的 `delta_t/current_delta_t/valid_mask`。
+- `tools/build_virtual_rate_manifest.py` 已用于后续 formal manifest 工作。
+
+### 已创建配置
+
+```text
+cfgs/seqtrack3d_nuscenes_a1_order_vr_gap1124.yaml
+cfgs/seqtrack3d_nuscenes_a1_order_vr_burst_drop.yaml
+cfgs/seqtrack3d_nuscenes_a1_order_vr_random20.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_gap1124.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_burst_drop.yaml
+cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_random20.yaml
+```
+
+### 服务器检查结果
+
+`gap1124` metadata 检查已通过：
+
+```text
+virtual-rate mode=gap_pattern
+tracklets=243/274
+frames=2856/5051
+drop=0.435
+keep examples: [0,1,2,4,8,...]
+timestamp gaps include about 0.5 / 1.0 / 2.0 seconds
+gap_cv about 0.58-0.61
+```
+
+`burst_drop` full-history batch 检查已通过：
+
+```text
+virtual-rate mode=burst_drop
+train frames=2827/5051, drop=0.440
+val frames=1251/2285, drop=0.453
+prev_frame_ids [2 1 0]
+valid_mask [1 1 1]
+delta_t [1.4545531, 0.55020094, 0.49989605]
+current_delta_t 1.4545531
+```
+
+`random20` metadata 检查已通过：
+
+```text
+virtual-rate mode=random_drop
+frames=4074/5051
+drop=0.193
+metadata gap_cv about 0.37-0.56
+```
+
+说明：`random20` 的某个 full-history batch 可能刚好落在普通相邻 gap 上，这是随机丢帧的正常现象，不代表协议失败。
+
+### 第一批 6 组后台运行已启动
+
+本批实验已按 `seed=42 / batch_size=16 / epoch=60 / workers=4 / preloading / check_val_every_n_epoch=5` 在服务器后台启动。此处只记录“已启动”和当时配置，不代表已经得到 final 指标；最终结果仍需跑完后再整理到本文件和 `compare_results/`。
+
+| 协议 | 模型 | GPU | tag | log |
+| --- | --- | ---: | --- | --- |
+| gap1124 | A1-order | 0 | `htv_gap1124_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_gap1124_a1_order_seed42_w4_60ep_bs16.log` |
+| gap1124 | A2-order-dyn | 0 | `htv_gap1124_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_gap1124_a2_order_dyn_seed42_w4_60ep_bs16.log` |
+| burst_drop | A1-order | 1 | `htv_burst_drop_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_burst_drop_a1_order_seed42_w4_60ep_bs16.log` |
+| burst_drop | A2-order-dyn | 1 | `htv_burst_drop_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_burst_drop_a2_order_dyn_seed42_w4_60ep_bs16.log` |
+| random20 | A1-order | 1 | `htv_random20_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_random20_a1_order_seed42_w4_60ep_bs16.log` |
+| random20 | A2-order-dyn | 1 | `htv_random20_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_random20_a2_order_dyn_seed42_w4_60ep_bs16.log` |
+
+当时观察到 `burst_drop A2-order-dyn` 进程 PID 为 `1714325`，日志进入 train / val preload 阶段：
+
+```text
+Global seed set to 42
+virtual-rate mode=burst_drop tracklets=243/274 frames=2827/5051 drop=0.440 tag=vr_burst_k323_s233
+preloading data into memory
+reading from annos
+saving loaded data to /home/lishengjie/data/nuscenes-mini/preload_nuscenes_Car_mini_train_v1.0-mini_10_-1_vr_burst_k323_s233.dat
+virtual-rate mode=burst_drop tracklets=91/106 frames=1251/2285 drop=0.453 tag=vr_burst_k323_s233
+preloading data into memory
+reading from annos
+```
+
+### 文档清理
+
+已按新的文档分工清理：
+
+- `need_to_do.md`：只保留当前正在跑、待整理、后续要做的任务。
+- `done.md`：保留已经完成的工程、实验、检查输出和当时状态。
 
 ---
 
