@@ -1,6 +1,6 @@
 # CT-SeqTrack 研究计划与论文定位
 
-更新时间：2026-07-08
+更新时间：2026-07-11
 
 这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。
 
@@ -20,7 +20,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 一句话主线：
 
-**真实 timestamp 改变了历史状态的物理含义；CT-SeqTrack 的贡献是让 3D SOT 从 fixed-step sequence learning 变成 variable-rate timestamp-native state estimation。**
+**真实 timestamp 改变了历史状态的物理含义；CT-SeqTrack 研究序列内部不规则采样，并用物理 `delta_t` 条件化轻量运动先验与重采样一致性。**
 
 可考虑标题：
 
@@ -39,16 +39,19 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 - 已有结果支持：主干保留 SeqTrack3D 的 order-time 语义，同时把真实 `delta_t/current_delta_t` 注入 `DynamicsEncoder`，比直接替换主干时间 token 更稳定。
 - 目前不能宣称：完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 目前不能宣称：TWC 和 observability gate 已经带来稳定最终收益。active A1-order+TWC 有 precision-positive 信号，但 A2-order-dyn+TWC 在 0.05 和 0.01 权重下都崩坏；gate-safe 低于 A2，conf-res best-e14 复测未复现旧 best。
+- 目前不能宣称：TWC 和 observability gate 已经带来稳定最终收益。2026-07-11 审计发现旧 active-TWC 在 nonzero candidate 下两路坐标/crop 不共享，旧 A1 正向和 A2 负向归因均已撤回；gate-safe 低于 A2，conf-res best-e14 复测未复现旧 best。
+- bounded residual 已完成工程实现，但尚未通过服务器真实 batch 回归，也没有性能结果。
 - 目前不宜把普通 fixed-step benchmark 的全局涨点作为唯一成功标准。标准 nuScenes-mini 的真实 `delta_t` 变化有限，直接追求整体 final 全面超过 SeqTrack3D 的成功率偏低；更合理的论文主战场是 variable-rate / high-temporal-variation / long-gap / sparse 子集。
 
 当前执行策略：
 
 ```text
 1. 先把问题设置做强：构造 variable-rate / HTV 评测和分桶，而不是只看普通 fixed-step final。
-2. 再把方法做稳：从 feature-concat dynamics 转向保守 residual dynamics，减少 seed collapse。
-3. 最后回看候选模块：TWC 和 gate 只作为条件性分析或困难样本增强，不作为已验证主贡献。
+2. 验收并验证已实现的 bounded residual：先做 true-dt/fixed-dt/shuffled-dt 因果对照，再看 seed collapse。
+3. corrected-TWC 先独立重跑 A1；gate 只作为后续诊断，不作为已验证主贡献。
 ```
+
+当前最可防御的新颖性不是单独的“timestamp”“HTV”“运动先验”或“temporal consistency”，而是它们的窄组合：**同一 tracklet 内不规则物理时间间隔、同一模型对未见 cadence/drop schedule 的泛化、有界 observation-first time-conditioned residual，以及同一 endpoint 的历史重采样一致性**。
 
 ### 连续时间视角给当前工作的启发
 
@@ -92,12 +95,13 @@ CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而�
 
 当前更稳的模型主线是：主干保持 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder`。历史框差分按真实 `delta_t` 计算速度和角速度，形成 timestamp-conditioned dynamics prior。
 
-旧版 `A2-order-dyn` 通过 feature concat 把 `z_dyn` 接入 coarse motion branch，seed42 有 precision-positive 信号，但 seed43/44 暴露了稳定性风险。下一步建议把 P3 主线改成更保守的 residual 形式：
+旧版 `A2-order-dyn` 通过 feature concat 把 `z_dyn` 接入 coarse motion branch，seed42 有 precision-positive 信号，但 seed43/44 暴露了稳定性风险。当前代码已经实现更保守的 residual 形式：
 
 ```text
 obs_pred = observation_branch(point_feature)
 dyn_disp = velocity_pred * current_delta_t
-final_center = obs_center + scale * clamp(alpha * dyn_disp)
+dyn_disp = clamp_norm(dyn_disp, max_norm)
+final_center = obs_center + scale * alpha * dyn_disp
 ```
 
 这个设计的好处是：
@@ -106,7 +110,7 @@ final_center = obs_center + scale * clamp(alpha * dyn_disp)
 - `scale / alpha / clamp / warmup` 都可控，便于解释 seed collapse。
 - 可以只在 long-delta_t / sparse / low-confidence 分桶启用或报告收益。
 
-当前论文里应把 dynamics 写成 **timestamp-conditioned residual motion prior**，而不是完整连续动力学求解器。
+当前论文里应把 dynamics 写成 **bounded timestamp-conditioned residual motion prior**，而不是完整连续动力学求解器。实现完成不等于假设成立；只有服务器回归、因果时间对照和多 seed 通过后，才能升级为论文贡献。
 
 ### 贡献 3：Time-resampling Consistency
 
@@ -117,7 +121,7 @@ view A: [t-1, t-2, t-3] -> t
 view B: [t-1, t-3, t-5] -> t
 ```
 
-这样两个 view 的预测仍位于同一个局部坐标系里，TWC 约束的就是历史时间路径差异，而不是坐标系或 crop 差异。
+这样两个 view 的预测应位于同一个局部坐标系里，TWC 才只约束历史时间路径差异，而不是坐标系、crop 或随机点采样差异。2026-07-11 修复后，candidate offset 与 point-sampling seed 都以绝对 frame id 为键共享，并在归一化前输出 `coordinate_anchor` 做 fail-fast 检查。
 
 第一版只约束最终框：
 
@@ -134,7 +138,7 @@ L_twc    = L_center + lambda_theta_twc * L_theta
 L = 0.5 * (L_a + L_b) + lambda_twc * L_twc
 ```
 
-这个贡献必须写窄：不是泛泛 temporal consistency，而是 **time-resampling consistency under different sampling paths to the same absolute time**。当前证据只能支持它是 A1-order 上的 precision-positive 候选信号；它还不是 A2+dynamics 主配置。
+这个贡献必须写窄：不是泛泛 temporal consistency，而是 **time-resampling consistency under different sampling paths to the same absolute time**。旧 active-TWC 结果受坐标系污染，当前没有干净的性能证据；corrected-TWC 仍是待验证假设，不是 A2+dynamics 主配置。
 
 ### 候选扩展：Observability-aware Fusion
 
@@ -162,16 +166,16 @@ o_t = [
 
 ### 连续时间升级路线图
 
-`claude_thinking.md` 提到的 MambaTrack3D、TrackM3D、HVTrack 和 TrajTrack 可以作为 future work 的路线图，而不是当前第一版方法的组成部分。
+MambaTrack3D、HVTrack、TrajTrack 和通用 Kalman/连续时间状态估计可以作为 future work 的路线图，而不是当前第一版方法的组成部分。当前检索未找到名为 `TrackM3D` 的可核验 3D SOT 论文，因此删除该名称，避免误引。
 
 | 方法族 | 可升级方向 | 对当前 CT-SeqTrack 的启发 | 当前是否采用 |
 | --- | --- | --- | --- |
 | MambaTrack3D / SSM | 用真实 `delta_t` 替换固定离散步长，例如 `A_bar = exp(delta_t * A)` | 说明 fixed-step SSM 可以自然扩展到 variable-rate temporal modeling | 不采用，作为 future work |
-| TrackM3D / Kalman-style motion | 用 Neural SDE 或连续不确定性传播替换离散转移矩阵 | 提醒遮挡和长 gap 下不确定性应随时间累计 | 不采用，避免复杂 SDE |
+| Kalman / continuous-time state estimation | 用连续不确定性传播替换固定步长转移 | 提醒遮挡和长 gap 下不确定性应随时间累计 | 不采用，避免复杂 SDE |
 | HVTrack / attention memory | 用连续 timestamp encoding 替代 frame-index positional encoding | 支持当前 `TimeEncoding(raw/mlp/fourier)` 的设计动机 | 部分采用：只做 scalar-preserving 时间编码 |
 | TrajTrack / trajectory prior | 用 Neural CDE 或 spline 表示连续轨迹 | 说明轨迹可被视为连续函数而非离散 waypoint | 不采用，避免变成 trajectory-prior 论文 |
 
-因此 related work 中可以承认：连续时间动力系统、variable-`Delta t` SSM、Neural ODE/SDE/CDE 都是合理扩展；但 CT-SeqTrack 的贡献更窄，聚焦在现有 Seq2Seq 3D SOT 框架内证明真实 timestamp、time-resampling consistency 和 observability-aware fusion 的必要性。
+因此 related work 中可以承认：连续时间动力系统、variable-`Delta t` SSM、Neural ODE/SDE/CDE 都是合理扩展；但 CT-SeqTrack 的贡献更窄，聚焦在现有 Seq2Seq 3D SOT 框架内检验真实 timestamp、bounded residual 和 endpoint resampling consistency。Observability-aware fusion 目前只是诊断候选。
 
 ### SeqTrack3D
 
@@ -187,8 +191,8 @@ SeqTrack3D 是最直接的基线和继承对象。它已经做了多帧历史点
 因此不能 claim “首次使用历史序列”，而要 claim：
 
 ```text
-We convert Seq2Seq 3D SOT from fixed-step frame sequence learning
-to variable-rate timestamp-conditioned state estimation.
+We study within-track variable-rate LiDAR 3D SOT by conditioning a
+Seq2Seq tracker on physical elapsed time.
 ```
 
 ### StreamTrack
@@ -210,6 +214,7 @@ HVTrack 已系统讨论 high temporal variation；MambaTrack3D 已把 SSM/Mamba 
 区别：
 
 - HVTrack 的核心是 memory、context attention 和 noise suppression。
+- HVTrack 已用不同固定 frame interval 构造 KITTI-HV，因此普通 skip-frame / HTV protocol 不能再作为 CT-SeqTrack 的独立创新；CT 必须强调 tracklet 内部不规则 `delta_t`、一个模型跨 cadence，以及 unseen schedule。
 - MambaTrack3D 会削弱“用 SSM 解决高时变”的新意。
 - CT-SeqTrack 第一版不把 HTV 或 Mamba 作为核心贡献，而是在 SeqTrack3D 上验证真实时间字段、TWC 和观测-动力学融合。
 
@@ -224,6 +229,10 @@ TrajTrack 已把历史 box trajectory 做成轻量轨迹先验。
 - TrajTrack 更偏历史框轨迹到未来修正。
 - CT-SeqTrack 同时保留当前点云观测、历史点云、历史框和真实时间。
 - CT-SeqTrack 要证明的不是“历史轨迹有用”，而是“真实时间间隔改变了历史轨迹的解释方式”。
+
+### Motion-to-Matching / motion-centric trackers
+
+Motion-to-Matching、M²-Track、DMT 和 FlowTrack 已经覆盖“历史运动先验、粗定位、点云匹配或 refinement”这一大类思路。它们会直接削弱泛泛的“首次用运动先验修正 observation”主张。CT-SeqTrack 只有在以下组合同时成立时才有可辨识边界：物理 `delta_t` 条件、序列内部不规则采样、observation-first 近零初始化有界 residual、以及同一 endpoint 的重采样一致性。
 
 ### ChronoTrack
 
@@ -248,7 +257,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### 当前快照
 
-当前仓库已经完成 P0-P5 的工程链路和 smoke test，可以作为“真实时间字段 + dynamics + TWC + gate 都已落地”的研究快照。默认配置保持保守，各模块通过显式 YAML 开关启用，便于把性能变化归因到明确机制。
+当前仓库已经完成 P0-P5 工程链路，并新增 bounded residual 与 corrected-TWC。纯逻辑和静态检查已通过；由于本机缺少 nuScenes 运行依赖，这两个新路径的真实 batch / forward / loss / backward 仍待服务器验收。默认配置保持保守，各模块通过显式 YAML 开关启用。
 
 已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏，旧 seed42 的 `A2-order-dyn` 在 final precision 上超过 baseline。但 2026-07-08 的 seed43 / seed44 复核显示 A2 稳定性不足。后续主线不再继续堆主干时间编码，也不急着叠 TWC / gate，而是先做 variable-rate 评测协议、保守 residual dynamics、多 seed 稳定性、candidate/velocity 诊断、checkpoint 对齐和困难子集分桶。
 
@@ -263,7 +272,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-当前代码已实现 P3，默认关闭。服务器 `check_forward_batch.py` + loss smoke test 以及 `check_train_steps.py --max-steps 2` 均已通过。正式实验中，`A2-order-dyn` 是最值得继续诊断的真实时间使用方式，但还不是稳定结论。下一版 P3 应优先验证 residual dynamics，而不是继续扩大 feature-concat 分支。
+feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已实现但只通过本地纯逻辑检查。正式实验中，`A2-order-dyn` 是最值得继续诊断的真实时间使用方式，但还不是稳定结论。下一步是服务器验收 residual，并与同容量 true/fixed/shuffled-dt 做配对对照，而不是继续扩大 feature-concat 分支。
 
 第一版只做真实时间差分动力学：
 
@@ -272,7 +281,7 @@ v_i     = (c_i - c_{i-1}) / delta_t_i
 omega_i = wrap(theta_i - theta_{i-1}) / delta_t_i
 ```
 
-当前实现用小 MLP 编码成 `z_dyn`，接到 coarse motion prediction 前，并用轻量 `L_vel` 监督。后续更推荐把它改成小幅 residual correction：保留 `velocity_pred / dynamics_displacement_pred`，让最终中心只接受受限的 dynamics residual。
+feature 模式用小 MLP 编码成 `z_dyn` 并接到 coarse motion prediction 前；residual 模式不拼接 `z_dyn`，而是保留 `velocity_pred / dynamics_displacement_pred`，让最终中心只接受 clamp、alpha、scale 和 warmup 共同限制的 dynamics residual。
 
 注意：不要把 P3 写成完整 continuous dynamics solver。它只是把历史框差分从 frame-step 解释改成 real-time velocity / angular velocity 解释，为 P5 的 dynamics prior 提供一个轻量、可消融的时间条件分支。
 
@@ -288,14 +297,16 @@ view B: [t-1, t-3, t-5] -> t
 先约束最终当前框，不约束所有历史框。第一版 TWC 必须满足以下边界：
 
 - 两个 view 的 `current_timestamp` 相同。
-- 两个 view 的 `ref_boxs[0]` 相同或等价，因为 SeqTrack3D 的当前搜索区域和输出框坐标系由最近历史框决定。
+- 两个 view 的预归一化 `coordinate_anchor` 相同，因为 SeqTrack3D 的当前搜索区域和输出框坐标系由最近历史框决定；不能再用归一化后的 `ref_boxs[0]` 代替检查。
+- 共同绝对历史帧复用同一个 candidate offset，且 candidate 1/2/3 必须参与验收。
+- 共同历史帧和当前帧复用 point regularization seed，最终输入 XYZ 应一致；时间 token 仍按各自历史路径构造。
 - 两个 view 的 `delta_T` 至少在旧历史位置不同，保证约束来自重采样路径差异。
 - 早期 padding 或任一 view 历史不完整时，不计算 TWC，只保留 supervised loss。
 - `L_a` 和 `L_b` 取平均后再加 `lambda_twc * L_twc`，避免 paired view 把监督项权重翻倍。
 
 这个设计能让 P4 的实验解释更干净：如果 TWC 有收益，应来自模型对不同真实时间采样路径的稳定性提升，而不是来自额外 batch 大小、额外 crop 扰动或坐标系变化。
 
-当前状态：TWC 工程链路已经实现并通过 smoke test，validity-fixed 消融也已完成。`A1-order+TWC` 相对 A1-order success 基本持平、precision 提升，说明 TWC 有定位精度稳定信号；但 `A2-order-dyn+TWC` 在 TWC 生效后仍后期崩坏，`twc_weight=0.01` 复核也没有救回 A2+dynamics 组合。后续如果继续 TWC，应先限定在 A1 或尝试 warmup / 延后启用，而不是直接接 A2 主配置。
+当前状态：旧 validity-fixed 消融后来被证明仍存在 nonzero candidate 坐标污染，旧 A1 precision-positive 与 A2 崩坏均已撤回。共享绝对 frame offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；下一步先做服务器 candidate 1/2/3 回归，再只重跑 corrected A1+TWC。没有干净 A1 证据前，不接 A2、residual 或 gate。
 
 ### P5：Observability Gate
 
@@ -361,7 +372,7 @@ A1-pseudo / A1-MLP / A1-Fourier
 A1-scaled / A2-scaled-dyn
 A1-order / A2-order-dyn
 A2-order-dyn-cand1 / A2-order-dyn-disp
-A1-order+TWC / A2-order-dyn+TWC
+A1-order+TWC / A2-order-dyn+TWC（历史 run，TWC 归因失效）
 A3-order-gate-safe / A3-order-conf-res-gate
 A3-conf-res best-e14 retest
 A2-order-dyn seed43 / seed44
@@ -373,6 +384,8 @@ A3-conf-res rerun seed42
 
 ```text
 A1-order vs A2-order-dyn under gap1124 / burst_drop / random20
+corrected A1-order+TWC vs paired A1-order
+A2 residual-dyn true-dt vs fixed-dt vs shuffled-dt
 A2 residual-dyn vs A2 feature-concat dyn
 A2-order-dyn multi-seed stability
 old conf-res best checkpoint evaluation path
@@ -380,7 +393,7 @@ gate sparse / delta_t / foreground-confidence / alpha-residual bins
 candidate-wise dynamics diagnostics
 ```
 
-这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：dynamics 是否被非 0 candidate 污染、是否需要 displacement 监督、TWC 是否独立有效、TWC 是否能和 dynamics 互补、gate 在干净主干上是否仍不稳定。当前答案是：cand1 不支持简单移除非 0 candidate，disp 只有温和 precision 信号，A1+TWC 有 precision-positive 信号，A2+TWC 不稳定且低权重未救回，gate-safe 不够强，conf-res best 复测未确认。
+这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：收益是否真的来自物理时间、residual 是否缓解 seed collapse、TWC 是否降低同一 endpoint 的采样路径方差，以及 long-gap 失败是否其实来自 search crop。当前只有工程假设，没有 corrected-TWC 或 residual 的性能结论。
 
 ### 困难子集
 
@@ -413,7 +426,7 @@ re-appearance：
 - 标准主表不能明显退化。
 - `delta_t` 越大，相比 fixed-time baseline 的优势越明显。
 - sparse / occlusion / re-appearance 子集更稳定。
-- TWC 能降低不同采样路径下的预测方差。
+- corrected-TWC 应能降低不同采样路径下的预测方差；这是待验证假设，不是当前结论。
 
 ---
 
@@ -464,9 +477,12 @@ uncertainty propagation across long observation gaps.
 - `_extracted_text/PillarTrack.txt`
 - `_extracted_text/P2B.txt`
 - `_extracted_text/SC3D.txt`
+- SeqTrack3D: https://arxiv.org/abs/2402.16249
 - StreamTrack: https://arxiv.org/abs/2303.07605
-- HVTrack: https://arxiv.org/abs/2408.02049
+- HVTrack: https://www.ecva.net/papers/eccv_2024/papers_ECCV/html/1145_ECCV_2024_paper.php
 - MambaTrack3D: https://arxiv.org/abs/2511.15077
 - TrajTrack: https://arxiv.org/abs/2509.11453
-- ChronoTrack: https://arxiv.org/abs/2604.13789
-- `claude_thinking.md`：连续时间 3D tracking 路线图与 future-work 边界整理。
+- ChronoTrack: https://openaccess.thecvf.com/content/CVPR2026F/html/Yoo_Temporally_Consistent_Long-Term_Memory_for_3D_Single_Object_Tracking_CVPRF_2026_paper.html
+- Motion-to-Matching: https://arxiv.org/abs/2308.11875
+- M3SOT: https://ojs.aaai.org/index.php/AAAI/article/view/28152
+- FlowTrack: https://arxiv.org/abs/2407.01959

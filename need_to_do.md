@@ -1,445 +1,270 @@
 # CT-SeqTrack 当前执行清单
 
-更新时间：2026-07-08
+更新时间：2026-07-11
 
-本文只放还没完成、正在进行、或者后续要做的事情。已经完成的工程验收、实验记录和当时结果统一归档到 `done.md`；简洁实验结论放 `sum_results.md`；研究定位、论文边界和贡献顺序放 `refined_plan.md`。
+本文只维护尚未完成的任务。已完成工程改动见 `done.md`，历史与当前结果口径见 `sum_results.md`，研究定位和论文边界见 `refined_plan.md`。
 
-## 0. 当前主线
+## 0. 当前主线与结论边界
 
 ```text
-先用 nuScenes-mini-HTV / variable-rate 协议把真实时间的应用场景立住；
-再把 A2 从 feature-concat dynamics 改成更保守的 residual dynamics；
-最后用多 seed、delta_t/sparse/displacement 分桶和 candidate 日志解释稳定性。
+P0 先完成 corrected-TWC 与 bounded residual 的服务器真实数据验收；
+P1 再做最小、配对、可归因的 corrected-TWC 和 residual 实验；
+P2 用 true-dt / fixed-dt / shuffled-dt、多 seed 和困难分桶决定是否进入 full data；
+P3 只有因果证据成立后，才考虑 gate、uncertainty 或更复杂 trajectory prior。
 ```
 
-当前原则：
+当前必须遵守：
 
-- 不再把已完成实验结果堆在本文件；旧结果见 `done.md` 和 `compare_results/`。
-- 第一批 HTV 主表只比较 `A1-order` 与 `A2-order-dyn`，暂不混入 TWC / gate。
-- 同一个 protocol 内比较 `A2 - A1`，不要跨 protocol 直接比较 absolute metric。
-- 如果 `burst_drop` / `gap1124` 上 A2 有提升，但 `random20` 不明显，也仍然是合理信号，因为 `random20` 更温和。
-- 如果 6 组里 A2 仍整体不稳，下一步优先实现 `A2-residual-dyn`，不要先叠加 TWC / gate。
-- 参考 TrajTrack 的经验时，只借鉴“低维历史 box trajectory 作为保守 proposal / residual prior”的用法；不要把 CT-SeqTrack 改成 trajectory-prior 论文，也不要直接复制完整 TrajFormer。
-- TrajTrack 对当前 dyn 不稳定问题的核心启发：长期运动先验应从 point feature 主干中解耦，先生成低维 motion proposal，再按可靠性小幅修正 observation prediction；避免继续用 `concat(point_feature, z_dyn)` 让 dynamics 过早接管 motion head。
+- 旧 active-TWC 的 nonzero candidate 两路坐标系不同，旧正向与负向效果归因全部撤回；不能把旧 A1 precision 增益或 A2 崩坏写进新结论。
+- `A2-residual-dyn` 已实现，但只有本地纯逻辑 smoke test；不能写成“已有效”。
+- mini 数据只用于筛选假设和排错，不能作为正式论文主结果。
+- 同一对照必须使用相同 protocol、manifest、candidate 数、optimizer steps、checkpoint 选择规则和 seed。
+- 不再同时叠加 TWC、residual 和 gate。一次只回答一个因果问题。
+- 先检查 target-in-crop recall / out-of-search ratio；目标已离开固定 search crop 时，dynamics 再强也无法恢复。
 
 术语：
 
-| 名称 | 含义 |
+| 名称 | 当前含义 |
 | --- | --- |
-| `A1-order` | 主干 order-time，无 dynamics / TWC / gate |
-| `A2-order-dyn` | 主干 order-time，真实时间只进入 `DynamicsEncoder` |
-| `A2-residual-dyn` | 待实现的保守 residual dynamics 版本 |
-| `A2-dyn-proposal` | TrajTrack-style 候选方向：dyn 只输出低维 motion proposal / residual，不拼接到主 motion feature |
-| `dyn_reliability_gate` | 根据 gap、点数、前景置信度、obs-dyn 一致性决定 residual 权重的轻量门控 |
-| `obs_uncertainty_head` | 从 observation feature 预测中心定位不确定度，第一版只做辅助监督和 gate 统计，不替代主回归 |
-| `unc_conf_residual` | uncertainty / confidence-aware residual dynamics：只有观测不可靠且 dyn 相对可靠时，才允许小幅 dynamics residual |
-| `nuScenes-mini-HTV` | 在 nuScenes-mini 上按固定协议构造的虚拟高时间变化评测集 |
-| `gap1124` | gap pattern `[1,1,2,4]`，制造强不等间隔 |
-| `burst_drop` | 短连续片段后跳过若干帧，制造 burst missing / long gap |
-| `random20` | 固定 seed 随机丢 20%，较温和的 variable-rate 协议 |
-| `stride-k` | 等间隔 long-gap 辅助对照，不作为核心 variable-dt 证据 |
+| `A1-order` | order-time 主干，无 dynamics / TWC / gate |
+| `A2-order-dyn` | 旧 feature-concat dynamics，真实时间只进入 `DynamicsEncoder` |
+| `A2-residual-dyn` | observation-only motion head + 有界、近零初始化、真实时间驱动的中心 residual |
+| `corrected-TWC` | 共享绝对 frame candidate offset、crop、`coordinate_anchor` 和训练步数的 TWC |
+| `gap1124` | gap pattern `[1,1,2,4]` |
+| `burst_drop` | 连续保留与连续丢帧交替的强 variable-rate 协议 |
+| `random20` | 固定 seed 随机丢 20%，相对温和 |
 
-## 1. 正在运行：HTV 第一批 6 组 60ep
+## 1. P0：服务器工程验收
 
-服务器统一设置：
+本机缺少 `easydict / nuscenes-devkit`，以下真实数据检查必须在服务器 `/home/lishengjie/study/lcyu/CT-SeqTrack` 环境完成。任何正式训练都以本节全部通过为前提。
 
-```text
-server path: /home/lishengjie/study/lcyu/CT-SeqTrack
-dataset: /home/lishengjie/data/nuscenes-mini
-category: Car
-split: mini_train / mini_val
-seed: 42
-batch_size: 16
-epoch: 60
-workers: 4
-preloading: true
-check_val_every_n_epoch: 5
-logs: logs/vr_htv/
-```
-
-GPU 分配：
-
-```text
-GPU0:
-  gap1124 A1-order
-  gap1124 A2-order-dyn
-
-GPU1:
-  burst_drop A1-order
-  burst_drop A2-order-dyn
-  random20 A1-order
-  random20 A2-order-dyn
-```
-
-运行状态表：
-
-| 协议 | 模型 | cfg | GPU | tag | log | 当前状态 | final success | final precision |
-| --- | --- | --- | ---: | --- | --- | --- | ---: | ---: |
-| gap1124 | A1-order | `cfgs/seqtrack3d_nuscenes_a1_order_vr_gap1124.yaml` | 0 | `htv_gap1124_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_gap1124_a1_order_seed42_w4_60ep_bs16.log` | 后台运行中，待完成 | 待填 | 待填 |
-| gap1124 | A2-order-dyn | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_gap1124.yaml` | 0 | `htv_gap1124_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_gap1124_a2_order_dyn_seed42_w4_60ep_bs16.log` | 后台运行中，待完成 | 待填 | 待填 |
-| burst_drop | A1-order | `cfgs/seqtrack3d_nuscenes_a1_order_vr_burst_drop.yaml` | 1 | `htv_burst_drop_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_burst_drop_a1_order_seed42_w4_60ep_bs16.log` | 后台运行中，待完成 | 待填 | 待填 |
-| burst_drop | A2-order-dyn | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_burst_drop.yaml` | 1 | `htv_burst_drop_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_burst_drop_a2_order_dyn_seed42_w4_60ep_bs16.log` | 后台运行中，待完成；已见 PID `1714325` | 待填 | 待填 |
-| random20 | A1-order | `cfgs/seqtrack3d_nuscenes_a1_order_vr_random20.yaml` | 1 | `htv_random20_a1_order_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_random20_a1_order_seed42_w4_60ep_bs16.log` | 后台运行中，待完成 | 待填 | 待填 |
-| random20 | A2-order-dyn | `cfgs/seqtrack3d_nuscenes_a2_order_dyn_vr_random20.yaml` | 1 | `htv_random20_a2_order_dyn_seed42_w4_60ep_bs16` | `logs/vr_htv/htv_random20_a2_order_dyn_seed42_w4_60ep_bs16.log` | 后台运行中，待完成 | 待填 | 待填 |
-
-进度检查命令：
+### 1.1 Corrected-TWC paired batch
 
 ```bash
 cd /home/lishengjie/study/lcyu/CT-SeqTrack
 
+python tools/check_twc_batch.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 4 \
+  --workers 0 \
+  --require-full-history
+```
+
+不要传 `--candidate-zero-only`。验收项：
+
+- [ ] batch 明确覆盖 `candidate_id=0/1/2/3`，A/B candidate id 完全一致。
+- [ ] `sampler.num_candidates == cfg.num_candidates == 4`。
+- [ ] `len(dataset) == base_frames * num_candidates`，开启 TWC 不减少 steps per epoch。
+- [ ] `coordinate_anchor` A/B gap 不超过 `twc_anchor_eps=1e-4`。
+- [ ] A/B 共同绝对历史帧的 `candidate_offsets` 完全共享。
+- [ ] A/B 共同绝对历史帧和当前帧的 point-sampling seed 共享，最终 XYZ gap 不超过 `1e-6`。
+- [ ] candidate 1/2/3 的 anchor offset 非零，但 A/B gap 为零。
+- [ ] `num_points_in_search` A/B 相同；`current_timestamp` 相同；历史路径确实不同。
+- [ ] 所有 full-history 样本 `twc_valid=True`。
+
+负例保护：
+
+- [ ] 在临时测试中给 view B 的 `coordinate_anchor[:, 0] += 0.01`，`compute_twc_loss()` 必须报错。
+- [ ] 临时删除 `coordinate_anchor`，默认配置必须报 `KeyError`，不能退回旧的归一化 `ref_boxs[0]` 检查。
+
+### 1.2 Corrected-TWC forward/loss/backward
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 2 \
+  --workers 0 \
+  --require-full-history
+
+CUDA_VISIBLE_DEVICES=0 python tools/check_train_steps.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 2 \
+  --workers 0 \
+  --max-steps 2 \
+  --require-full-history \
+  --seed 42 \
+  --grad-clip 1.0 \
+  --tag corrected_twc_smoke
+```
+
+- [ ] forward、supervised loss、`loss_twc`、gradient 全部 finite。
+- [ ] `twc_valid_ratio=1`（full-history smoke batch）。
+- [ ] `twc_anchor_gap_max <= 1e-4`。
+- [ ] `twc_current_point_gap_max <= 1e-6`。
+- [ ] 两步训练没有 OOM、NaN、递归重采样异常。
+
+### 1.3 A2-residual-dyn forward/loss/backward
+
+先验收 standard 和最强 variable-rate 两个配置：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 2 \
+  --workers 0 \
+  --require-full-history
+
+CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 2 \
+  --workers 0 \
+  --require-full-history
+
+CUDA_VISIBLE_DEVICES=0 python tools/check_train_steps.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 2 \
+  --workers 0 \
+  --max-steps 2 \
+  --require-full-history \
+  --seed 42 \
+  --grad-clip 1.0 \
+  --tag a2_residual_gap1124_smoke
+```
+
+- [ ] `motion_mlp` 输入仍为 256 维，residual 模式没有 concat `z_dyn`。
+- [ ] epoch 0 warmup 时 `dynamics_residual_scale_effective=0`。
+- [ ] 临时令 `current_epoch >= 5` 后，alpha 有界于 `[0, 0.2]`。
+- [ ] `dynamics_residual_clamped_norm <= 1.0`。
+- [ ] 最终 residual norm 不超过 `scale * max_alpha * max_norm = 0.02`。
+- [ ] `dynamics_valid=0` 时 residual 严格为零。
+- [ ] loss、gradient 和全部诊断量 finite。
+
+## 2. P1：最小可归因实验
+
+### 2.1 Corrected A1-order+TWC
+
+只有 P0 全部通过后才启动：
+
+- [ ] 用修复后的代码原样重跑 `A1-order` 与 `A1-order+TWC`，保持 candidate4、总 optimizer steps、seed 和 checkpoint 规则一致。
+- [ ] 第一轮只用 `twc_weight=0.05`，不要先扫权重。
+- [ ] 至少 seed 42/43/44 三个配对 seed，报告 mean±std 和 tracklet-level bootstrap CI。
+- [ ] 除 Success/Precision 外，直接报告同一 endpoint 下 A/B `center_gap / angle_gap / prediction variance`。
+- [ ] 若 corrected-TWC 不能显著降低路径方差，不再做 A2+TWC。
+- [ ] 若降低方差但不涨 tracking metric，只把 TWC 写成稳定性分析，不写成主增益模块。
+
+### 2.2 Residual mini 筛选矩阵
+
+先只跑 `gap1124` 与 `burst_drop`，每个协议使用完全相同的 virtual-rate manifest：
+
+| 模型/时间条件 | seed | 目的 |
+| --- | --- | --- |
+| A1-order | 42/43/44 | observation baseline |
+| A2 feature-concat true-dt | 42/43/44 | 旧 dynamics 方式 |
+| A2 residual true-dt | 42/43/44 | 主假设 |
+| A2 residual fixed-dt | 42/43/44 | 同容量时间负对照 |
+| A2 residual shuffled-dt | 42/43/44 | 检查物理时间是否真正被使用 |
+
+待新增配置/开关：
+
+- [ ] `fixed-dt`：帧序列保持不变，只把 dynamics 的 `delta_t/current_delta_t` 固定为 reference step。
+- [ ] `shuffled-dt`：使用固定 manifest 离线打乱时间字段，不能让每个 epoch 随机变化。
+- [ ] `frame-index-dt`：可选，使用离散 offset 作为时间，区分帧序与物理秒数。
+- [ ] 所有对照保持模型参数量、训练帧、crop 和 optimizer steps 完全相同。
+
+第一轮不要扫大网格。默认只测：
+
+```yaml
+dynamics_residual_scale: 0.1
+dynamics_max_residual_norm: 1.0
+dynamics_max_alpha: 0.2
+dynamics_warmup_epoch: 5
+dynamics_long_gap_only: false
+dynamics_sparse_only: false
+```
+
+只有默认设置出现跨 seed 正信号，才补 `scale=0.05/0.2` 或 `long_gap_only/sparse_only`。
+
+## 3. P2：协议、诊断与公平性
+
+### 3.1 核对历史 HTV 任务状态
+
+旧文档记录过 6 个后台任务，但本地无法确认 2026-07-11 的服务器进程状态。不要沿用旧 PID 推断“仍在运行”。
+
+```bash
+cd /home/lishengjie/study/lcyu/CT-SeqTrack
 ps -ef | grep "htv_" | grep -v grep
 nvidia-smi
-
-for f in logs/vr_htv/*.pid; do echo "$f $(cat "$f")"; done
-
-tail -n 80 logs/vr_htv/htv_burst_drop_a2_order_dyn_seed42_w4_60ep_bs16.log
-
 grep -iE "error|exception|traceback|cuda out|nan|killed" logs/vr_htv/*.log
-grep -E "Epoch|precision/test|success/test|Validation|loss" logs/vr_htv/*.log | tail -n 120
 ```
 
-跑完后立刻补充：
-
-- [ ] 每组 final success / final precision。
-- [ ] 每组 best success / best precision。
-- [ ] 同协议差值表：`A2-order-dyn - A1-order`。
-- [ ] 判断 A2 的收益是否集中在 `gap1124` / `burst_drop` 这种强 variable-dt protocol。
-- [ ] 将完整结果归档到 `done.md` 和 `compare_results/reports/virtual_rate_protocol_comparison.md`。
-
-## 2. 跑完 6 组后优先做的结果整理
-
-- [ ] 新增或完善 `tools/summarize_virtual_rate_protocols.py`。
-- [ ] 输出 `compare_results/reports/virtual_rate_protocol_comparison.md`。
-- [ ] 输出 protocol-level summary CSV：
-  - [ ] `num_tracklets_before / after`
-  - [ ] `num_frames_before / after`
-  - [ ] `dropped_frame_ratio`
-  - [ ] `mean_tracklet_len_before / after`
-- [ ] 输出 time diagnostics CSV：
-  - [ ] `delta_t mean / std / p50 / p75 / p95 / max`
-  - [ ] `current_delta_t mean / p95 / max`
-  - [ ] `gap_bins count`
-  - [ ] `delta_t coefficient of variation`
-- [ ] 输出 metric bins：
-  - [ ] short / medium / long `delta_t`
-  - [ ] sparse / medium / dense point count
-  - [ ] small / large target displacement
-  - [ ] valid-history vs incomplete-history
-
-结果解读模板：
-
-```text
-protocol:
-  gap1124 / burst_drop / random20
-
-same-protocol comparison:
-  A1-order final success / precision
-  A2-order-dyn final success / precision
-  A2 - A1 delta
-
-claim boundary:
-  如果只在 long-gap / sparse / large-displacement bin 提升，也可作为 timestamp-native dynamics 的证据；
-  如果 overall final 不升，不要写成 full model 全面优于 SeqTrack3D。
-```
-
-## 3. 下一轮模型与配置待办
-
-### 3.1 A2-residual-dyn
-
-- [ ] 实现 `dynamics_motion_mode=residual_limited` 或等价配置。
-- [ ] 增加 residual 限制参数：
-  - [ ] `dynamics_residual_scale`
-  - [ ] `dynamics_max_residual_norm`
-  - [ ] `dynamics_warmup_epoch`
-  - [ ] `dynamics_long_gap_only`
-- [ ] 增加可选 residual 可靠性参数：
-  - [ ] `dynamics_min_delta_t`
-  - [ ] `dynamics_sparse_only`
-  - [ ] `dynamics_min_obs_confidence`
-  - [ ] `dynamics_max_alpha`
-- [ ] 第一版不要再把 `z_dyn` concat 到 `motion_feature`；改成：
-
-```text
-obs_motion = motion_mlp(point_feature)
-dyn_disp = velocity_pred * current_delta_t
-dyn_disp = clamp_norm(dyn_disp, dynamics_max_residual_norm)
-alpha_dyn = reliability_gate(...)
-final_center = obs_center + dynamics_residual_scale * alpha_dyn * dyn_disp
-```
-
-- [ ] `alpha_dyn` 第一版可以先用规则或很小 MLP，不要复杂化：
-
-```text
-输入候选:
-  current_delta_t / time_scale
-  log1p(num_points_in_search)
-  mean_fg_score
-  dynamics_valid
-  ||obs_motion[:3] - dyn_disp||
-  valid_history_ratio
-
-约束:
-  0 <= alpha_dyn <= dynamics_max_alpha
-  dynamics_valid=0 时 alpha_dyn=0
-  warmup 前 alpha_dyn=0 或 scale=0
-```
-
-- [ ] 先做 2-step smoke test，确认 loss finite、residual norm 受限。
-- [ ] 新增 3 个 HTV 配置：
-  - [ ] `cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml`
-  - [ ] `cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_burst_drop.yaml`
-  - [ ] `cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml`
-- [ ] 如果 A2 feature-dyn 6 组结果不稳，优先跑 residual-dyn 的 gap1124 / burst_drop 对照。
-
-初始网格建议：
-
-```text
-dynamics_residual_scale: 0.05 / 0.1 / 0.2
-dynamics_max_residual_norm: 0.5 / 1.0
-dynamics_warmup_epoch: 5 / 10
-dynamics_max_alpha: 0.2
-```
+- [ ] 核对 gap1124/burst_drop/random20 的 A1/A2 六组是否完成、失败或只有 partial checkpoint。
+- [ ] 为每个 run 记录 git commit、cfg hash、manifest hash、seed、样本数、steps/epoch、best/final checkpoint。
+- [ ] 完成的历史 run 只作为筛选证据；新 residual 因果矩阵必须使用冻结 manifest 重跑。
 
-验收标准：
+### 3.2 必须补的诊断
 
-- [ ] 相比当前 `A2-order-dyn`，seed collapse 缓解，late mean 不再大幅低于 best。
-- [ ] 即使 overall final 只持平，也要检查 long-delta_t / sparse / large-displacement bins 是否提升。
-- [ ] 如果 residual 仍崩，优先怀疑 dynamics 监督质量、candidate history、速度量级或当前 `delta_t` 信号不足。
-
-### 3.1b TrajTrack-style dyn proposal / refinement 备选
-
-目标：把 dyn 从“特征增强分支”降级为“低维 trajectory proposal / fallback”，更接近 TrajTrack 的 `local proposal + global trajectory proposal + reliability refinement` 思路。
-
-- [ ] 保留 observation branch 的 `obs_motion` 作为主预测。
-- [ ] 新增 `dyn_motion_proposal`，只预测当前中心位移，不参与主特征 concat。
-- [ ] 记录 `obs_dyn_center_gap = ||obs_motion[:3] - dyn_motion_proposal||`。
-- [ ] 第一版 refinement 不用真值 IoU；用可训练时可得、推理时也可得的可靠性统计：
-  - [ ] `num_points_in_search`
-  - [ ] `mean_fg_score`
-  - [ ] `current_delta_t`
-  - [ ] `valid_history_ratio`
-  - [ ] `obs_dyn_center_gap`
-- [ ] 如果观测可靠且 `obs_dyn_center_gap` 小，信 `obs_motion`；如果 sparse / low-confidence / long-gap 且 dyn 合理，再加小幅 residual。
-- [ ] 暂不实现完整 TrajFormer；如需轨迹模块，先做小 MLP / GRU / Transformer-lite 的 bbox-center-only 对照。是否引入轨迹模块！？
-- [ ] 如果该方向有效，再考虑将 `DynamicsEncoder` 扩展为 timestamp-conditioned trajectory prior，而不是直接引入 TrajTrack 的完整 IMM。
-
-### 3.1c Uncertainty / confidence-aware residual dynamics
-
-目标：不要把 CT-SeqTrack 改成完整概率跟踪器，而是把不确定度/置信度作为“什么时候相信 observation、什么时候允许 dyn 小幅修正”的稳定器。最适合接在 `A2-residual-dyn` / `A2-dyn-proposal` 后面做，不放入第一批 HTV 主表。
-
-外部依据：
-
-- [ ] RLE / probabilistic regression 的启发：回归头可以预测误差分布或 `sigma/logvar`，用 NLL 类辅助损失让模型知道“自己不确定”。
-- [ ] Probabilistic detection / bbox uncertainty 的启发：定位框不应只有一个 deterministic center，空间不确定度可以用于避免过度自信。
-- [ ] UncTrack 的启发：localization uncertainty 可以作为可靠性信号，用于筛选高置信样本或控制更新。
-- [ ] UA-Track 的启发：uncertainty-aware 机制更适合放在困难样本、噪声样本、遮挡/稀疏/小目标场景，而不是全样本强行接管主预测。
-
-第一阶段 U0：先做“无结构改动”的置信度诊断。
-
-- [ ] 在 `compute_loss` 里只记录诊断，不改模型输出：
-  - [ ] `obs_center_err = ||obs_motion[:3] - center_label_motion||`
-  - [ ] `dyn_center_err = ||dynamics_displacement_pred - center_label_motion||`
-  - [ ] `obs_dyn_center_gap = ||obs_motion[:3] - dynamics_displacement_pred||`
-  - [ ] `dyn_better_rate = mean(dyn_center_err + margin < obs_center_err)`
-  - [ ] 按 `current_delta_t_ratio / num_points_in_search / mean_fg_score / valid_history_ratio` 分桶。
-- [ ] 如果 dyn 只在 long-gap、sparse、low-fg-score 桶里更好，说明 residual/gate 方向成立；如果 dyn 在大部分桶都更差，先修 dynamics label / candidate 污染，不急着上 uncertainty head。
-
-第二阶段 U1：新增轻量 `obs_uncertainty_head`，只作为 observation 可靠性估计。
-
-- [ ] 在 `SEQTRACK3D.__init__` 增加独立 head，输入优先用 `point_feature`，不要用 concat 后的 dyn feature：
-
-```text
-obs_log_sigma = obs_uncertainty_head(point_feature)  # B,3
-obs_log_sigma = clamp(obs_log_sigma, min=-5, max=2)
-obs_uncertainty = exp(mean(obs_log_sigma))
-obs_confidence = sigmoid(-mean(obs_log_sigma))
-```
-
-- [ ] 在 loss 里加很小权重的 heteroscedastic NLL 辅助项，第一版不替换原来的 `smooth_l1_loss`：
-
-```text
-err = obs_motion[:3] - center_label_motion
-obs_log_var = 2 * obs_log_sigma
-loss_obs_unc = 0.5 * err^2 * exp(-obs_log_var) + 0.5 * obs_log_var
-loss_total += obs_uncertainty_loss_weight * mean(loss_obs_unc)
-```
-
-- [ ] 初始配置建议：
-
-```text
-use_obs_uncertainty: true
-obs_uncertainty_loss_weight: 0.01 / 0.03 / 0.05
-obs_uncertainty_warmup_epoch: 5
-obs_uncertainty_log_sigma_min: -5
-obs_uncertainty_log_sigma_max: 2
-obs_uncertainty_detach_for_gate: true
-```
-
-- [ ] 验收：`obs_log_sigma` 不能全贴边，`obs_confidence` 与 `obs_center_err` 应该负相关；如果只学到常数 sigma，先保留日志，不进入 gate。
-
-第三阶段 U2：先用 dynamics 不确定度 proxy，再考虑 dyn uncertainty head。
-
-- [ ] 第一版不要急着给 `DynamicsEncoder` 加复杂概率头，先用可解释 proxy：
-
-```text
-dyn_unc_proxy =
-  norm(obs_motion[:3] - dynamics_displacement_pred)
-  + long_gap_penalty(current_delta_t_ratio)
-  + invalid_history_penalty(1 - valid_history_ratio)
-dyn_confidence = exp(-normalized_dyn_unc_proxy)
-```
-
-- [ ] 如果 U0 诊断证明 dyn 在某些桶里确实更准，再给 `DynamicsEncoder` 加 `dynamics_log_sigma_head(z_dyn)`：
-  - [ ] 输出 `dyn_log_sigma`，监督目标仍是 `center_label_motion`。
-  - [ ] 权重小于 observation uncertainty，避免 dynamics 为了降 NLL 只放大 sigma。
-  - [ ] `dynamics_valid=0` 时不计算 dyn uncertainty loss。
-
-第四阶段 U3：把 uncertainty / confidence 接入现有 `confidence_residual` gate。
-
-- [ ] 保留当前 `obs_gate_fusion_mode=confidence_residual` 思路，不回到 `feature` 融合。
-- [ ] 将 `obs_gate_num_stats` 从 5 扩到 8 或 9：
-
-```text
-已有 5 维:
-  log1p(num_points_in_search)
-  log1p(estimated_fg_points)
-  mean_fg_score
-  valid_history_ratio
-  current_delta_t_ratio
-
-新增候选:
-  obs_confidence 或 mean(obs_log_sigma)
-  dyn_confidence 或 dyn_unc_proxy
-  obs_dyn_center_gap
-  motion_cls_confidence
-```
-
-- [ ] gate 约束保持保守：
-
-```text
-0 <= alpha_dyn <= obs_gate_max_dyn_alpha
-obs_gate_max_dyn_alpha: 0.1 / 0.2
-obs_gate_residual_scale: 0.05 / 0.1
-obs_gate_init_obs_bias: 3.0
-dynamics_valid=0 -> alpha_dyn=0
-warmup 前 alpha_dyn=0 或 residual_scale=0
-```
-
-- [ ] 预期行为：`obs_uncertainty` 高、`dyn_uncertainty` 低、`delta_t` 长、前景点稀疏时，`alpha_dyn` 可以略高；正常密集样本中 observation 仍占主导。
-
-第五阶段 U4：实验顺序和论文表述边界。
-
-- [ ] 实验顺序：
-  - [ ] `A1-order`
-  - [ ] `A2-order-dyn`
-  - [ ] `A2-residual-dyn`
-  - [ ] `A2-residual-dyn + obs_uncertainty_aux`
-  - [ ] `A2-residual-dyn + uncertainty-gate-stats`
-- [ ] 只在 `gap1124 / burst_drop` 先跑，不先扩到所有 protocol。
-- [ ] 如果 uncertainty 只改善 calibration / 分桶解释，但 overall metric 不涨，论文中只写成“stability analysis / reliability-aware diagnostic”，不要写成主贡献。
-- [ ] 如果 uncertainty-gate 在 long-gap / sparse bins 明显提升且 late checkpoint 更稳，才把它升级为 CT-SeqTrack 的稳定性模块。
-
-实现优先级：
-
-```text
-P0: U0 diagnostics，最低风险，先证明 dyn 什么时候值得信。
-P1: U1 obs_uncertainty_head，只做辅助 NLL 和日志。
-P2: U3 gate stats 扩维，把 uncertainty 接进 confidence_residual。
-P3: U2 dynamics_log_sigma_head，仅在 proxy 有效果后再加。
-```
-
-### 3.1d TrajTrack 的其他启发（非第一优先级）
-
-这些启发不替代 `A2-residual-dyn` 主线，只作为后续诊断、轻量模块和论文叙事的参考。
-
-- [ ] 困难子集评测优先级：TrajTrack 强调 sparse / occlusion 场景收益；CT-SeqTrack 后续结果也要优先汇报 long-gap、sparse point count、large displacement、re-appearance 子集，而不是只看 overall。
-- [ ] 置信度来源不要依赖真值：TrajTrack 论文里用 local/global proposal 一致性做 refinement 依据；CT-SeqTrack 可借鉴 `obs_dyn_center_gap`、`mean_fg_score`、`num_points_in_search`、`motion_cls_confidence`、`obs_uncertainty`，但不要使用当前帧 GT IoU 做选择。
-- [ ] bbox-only trajectory prior 可作为轻量备选：如果 `A2-residual-dyn` 稳定但收益有限，再尝试只用历史 bbox center + real `delta_t` 的小 MLP / GRU / Transformer-lite；不要一开始上完整 TrajFormer-VAE。
-- [ ] proposal/refinement 要做成可插拔模块：保持 `A1-order` observation branch 可单独运行；dyn / trajectory prior 只通过 residual、fallback 或 confidence gate 接入，方便做 ablation。
-- [ ] 不确定度可先从 head 诊断做起：TrajTrack 的 RLE head 输出 `sigma`，说明定位不确定度可以辅助判断 prediction 是否可靠；CT-SeqTrack 第一版只记录/辅助监督 `obs_uncertainty`，不要直接替换主损失。
-- [ ] fair comparison 警惕：本地 TrajTrack 代码的 refinement 路径存在 GT-assisted 选择风险；引用它时只借鉴思想，不把当前代码结果直接作为公平强 baseline。
-- [ ] 论文表述边界：TrajTrack 可作为“低维轨迹先验有效”的动机，但 CT-SeqTrack 的区别要写清楚：TrajTrack 是 frame-index trajectory prior，CT-SeqTrack 主打 real `delta_t/current_delta_t` 的 variable-rate dynamics prior。
-
-### 3.2 timestamp negative controls
-
-- [ ] `true-dt`：使用原始 timestamp，CT dynamics 能看到真实 gap。
-- [ ] `fixed-dt`：同一 virtual-rate 帧序列上强制 `delta_t=dt_ref`。
-- [ ] `jittered-dt`：对 timestamp 加小扰动，检查测量噪声鲁棒性。
-- [ ] `shuffled-dt`：batch 内打乱 `delta_t/current_delta_t`，检查收益是否真的依赖时间。
-
-### 3.3 formal manifest
-
-- [ ] 为正式评测生成 train / val manifest，而不是只依赖 config seed 在线生成。
-- [ ] manifest 文件名包含 split、category、mode、seed、max_gap。
-- [ ] 所有模型复用同一 manifest，保证 protocol 完全一致。
-
-## 4. 诊断日志待办
-
-- [ ] dynamics candidate 诊断：
-  - [ ] candidate0 与 nonzero candidate 的 velocity label 分布。
-  - [ ] candidate0 与 nonzero candidate 的 residual / displacement error。
-  - [ ] 判断 `num_candidates=4` 是否污染 dynamics 监督。
-- [ ] dynamics 数值日志：
-  - [ ] `dynamics_valid_ratio`
-  - [ ] `velocity_label_norm`
-  - [ ] `velocity_pred_norm`
-  - [ ] `dynamics_displacement_norm`
-  - [ ] `residual_norm`
-  - [ ] `residual_scale_effective`
-  - [ ] `alpha_dyn_mean / min / max`
-  - [ ] `obs_dyn_center_gap_mean / p75 / p95`
-  - [ ] `dyn_disp_clamp_ratio`
-  - [ ] `dyn_residual_applied_ratio`
-- [ ] search difficulty 日志：
-  - [ ] `target_center_displacement mean / p75 / p95`
-  - [ ] `out_of_search_ratio`
-  - [ ] `num_points_in_search` sparse bins
-  - [ ] re-appearance 片段统计
-- [ ] TrajTrack-style proposal 诊断：
-  - [ ] observation-only prediction 与 dyn proposal 的中心距离。
-  - [ ] sparse / long-gap / low-foreground-confidence 样本中的 `alpha_dyn` 是否更高。
-  - [ ] dyn residual 是否主要在困难样本启用，而不是全样本平均接管。
-  - [ ] best checkpoint 与 final checkpoint 的 `alpha_dyn / residual_norm / obs_dyn_gap` 是否发生漂移。
-- [ ] uncertainty / confidence 诊断：
-  - [ ] `obs_log_sigma_mean / min / max`
-  - [ ] `obs_confidence_mean`
-  - [ ] `obs_center_err_mean`
-  - [ ] `dyn_center_err_mean`
-  - [ ] `dyn_better_rate`
-  - [ ] `obs_uncertainty_error_corr`
-  - [ ] `dyn_unc_proxy_mean`
-  - [ ] long-gap / sparse / low-fg-score 桶内的 `alpha_dyn` 与 error 变化。
-
-## 5. 后续决策树
-
-### 5.1 如果 A2-order-dyn 在 HTV 上明显优于 A1-order
-
-- [ ] 先补 best / final / late mean，确认不是单 checkpoint 偶然。
-- [ ] 做 `fixed-dt` / `shuffled-dt` negative control。
-- [ ] 做 long-gap / sparse / displacement 分桶，支撑论文叙事。
-- [ ] 再上 `A2-residual-dyn`，检查是否能保留收益并提升稳定性；不要直接叠 TWC / gate。
-- [ ] 如果 residual 版本稳定，继续做 `A2-dyn-proposal` 对照，确认是否比 feature-concat 更可控。
-
-### 5.2 如果 A2-order-dyn 只在 random20 或普通整体上持平
-
-- [ ] 优先看 burst_drop / gap1124 的 long-gap bins。
-- [ ] 检查 search crop 是否过小导致所有方法一起退化。
-- [ ] 不急着否定真实时间；先实现 residual-limited dynamics。
-- [ ] 对 residual 版本优先启用 `long_gap_only` 或 `sparse_only`，用困难子集收益支撑 timestamp-native 叙事。
-
-### 5.3 如果 A2-order-dyn 在三种 protocol 都明显退化
-
-- [ ] 检查 dynamics 输入是否受 nonzero candidates 污染。
-- [ ] 检查 velocity label / prediction norm 是否异常。
-- [ ] 尝试 residual-only、long-gap-only 或 candidate0-only dynamics。
-- [ ] 暂停 feature-concat dynamics；优先做 TrajTrack-style 低维 proposal / fallback。
-- [ ] 若 proposal 仍无效，再判断真实 `delta_t` 在当前 nuScenes-mini 设置下是否信号不足。
-- [ ] 暂停 TWC / gate 叠加。
-
-## 6. 暂缓方向
-
-- [ ] 暂不把 TWC / gate 放入第一批 HTV 主表。
-- [ ] 暂不切换到 MambaTrack3D / TrackM3D / TrajTrack 作为主 baseline；TrajTrack 仅作为 dyn 设计参考。
-- [ ] 暂不上 Neural ODE / SDE / CDE。
-- [ ] 暂不主打任意时间查询或多传感器异步融合。
-- [ ] 频域 / 谱域方向只保留为后续诊断候选。
+- [ ] 时间分布：`delta_t/current_delta_t mean, std, p50, p75, p95, max`。
+- [ ] 分桶指标：short/medium/long gap、sparse/medium/dense points、small/large displacement、full/incomplete history、re-appearance。
+- [ ] crop 可达性：target-in-crop recall、out-of-search ratio，并按 gap 分桶。
+- [ ] residual：alpha mean/min/max、raw/clamped norm、clamp/applied ratio、`obs_dyn_center_gap`。
+- [ ] oracle 诊断：`obs_center_err`、`dyn_center_err`、`dyn_better_rate`；oracle 只能分析，不能进入推理 gate。
+- [ ] candidate 诊断：candidate0 与 nonzero candidate 的 velocity label、dyn error 和 residual error。
+- [ ] 稳定性：best/final/late-mean、3 seed mean±std、tracklet bootstrap CI。
+- [ ] 效率：参数量、FLOPs、FPS、residual 分支额外开销。
+
+### 3.3 Formal manifest 与 checkpoint 规则
+
+- [ ] 为 train/val/test 生成 split-specific manifest，文件名包含 dataset、split、category、protocol、seed、max-gap。
+- [ ] A1、feature dyn、residual dyn 和 TWC 复用同一份 manifest。
+- [ ] 预先规定 checkpoint 选择规则，不能看 test 后选择 epoch。
+- [ ] mini_val 只用于开发；正式数据需要独立 val 选 checkpoint、held-out test 一次评测。
+
+## 4. Go / Stop 门槛
+
+### 4.1 Go 到完整数据
+
+mini 阶段需同时满足：
+
+- [ ] residual true-dt 在 `gap1124`、`burst_drop` 至少两项中，相对配对 A1 和 fixed/shuffled-dt 平均约提升 `>= +1.5 Success / +2 Precision`。
+- [ ] 3 seed 无单 seed 大崩溃，配对置信区间不跨 0。
+- [ ] regular fixed-step 退化不超过约 `0.5 Success / 1 Precision`。
+- [ ] shuffled/fixed 时间后收益明显消失。
+- [ ] 收益不能由更大 crop、更多参数、更多 optimizer steps 或不同 checkpoint 规则解释。
+
+通过后再做：
+
+- [ ] 完整 nuScenes trainval，至少两个类别，最好官方全部类别。
+- [ ] 第二数据集或官方 KITTI-HV/nuScenes-HTV 协议。
+- [ ] 与 SeqTrack3D、HVTrack、StreamTrack、Motion-to-Matching/trajectory baseline 和简单 constant-velocity/Kalman baseline 公平比较。
+- [ ] 测试未见过的 cadence/drop schedule，证明一个模型跨采样率泛化，而非每个 stride 单独训练。
+
+### 4.2 Stop / Pivot
+
+满足任一项则停止把真实 `delta_t` 作为主算法贡献：
+
+- 连续两轮配对 3-seed 中，`true-dt - fixed/shuffled-dt < 0.5 Success / 1 Precision`。
+- 收益只来自扩大 crop、额外参数、更多训练步或 protocol-specific retraining。
+- full data 的方向与 mini 正信号相反。
+- corrected-TWC 不降低同 endpoint 的路径预测方差。
+
+Pivot 选项：
+
+- 把项目转成 variable-rate 3D SOT benchmark / diagnosis 工作。
+- 把 dynamics 降级为可靠 trajectory proposal 或 constant-velocity/Kalman fallback。
+- 只有 residual 明确有效后，才尝试 bbox-only MLP/GRU/Transformer-lite；不上完整 TrajFormer、ODE/SDE/CDE。
+
+## 5. 暂缓项
+
+- [ ] Observability gate、uncertainty head 和 residual 不同时开发；等待 residual 因果结果。
+- [ ] 不把 corrected-TWC 接入 A2/residual，直到 corrected A1+TWC 有三 seed 干净证据。
+- [ ] 不切换到 Mamba/SSM、Neural ODE/SDE/CDE 或多传感器异步融合。
+- [ ] 不使用无法核验的 `TrackM3D` 名称；相关思路统一写作 Kalman/continuous-time state estimation。
+- [ ] 不把 TrajTrack-style GT-assisted proposal selection 当作公平 baseline；推理 gate 只能使用测试时可得统计量。

@@ -96,7 +96,6 @@ def main():
         cfg.use_real_time = False
     if args.twc:
         cfg.use_twc = True
-        cfg.twc_candidate_zero_only = True
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
 

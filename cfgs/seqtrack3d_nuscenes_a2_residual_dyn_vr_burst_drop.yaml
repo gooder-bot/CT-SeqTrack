@@ -7,10 +7,7 @@ bb_offset: 2
 point_sample_size: 1024
 degrees: false
 coordinate_mode: velodyne
-up_axis:
-- 0
-- 0
-- 1
+up_axis: [0, 0, 1]
 preload_offset: 10
 data_limit_box: true
 key_frame_only: true
@@ -25,8 +22,16 @@ hist_num: 3
 empty_box_limit: 3
 limit_num_points_in_prev_box: 1
 
-# A2-order-dyn+TWC: order-time main branch, real-time dynamics prior,
-# and paired historical views for time-resampling consistency.
+virtual_rate_mode: burst_drop
+virtual_rate_burst_keep_lengths: [3, 2, 3]
+virtual_rate_burst_skip_lengths: [2, 3, 3]
+virtual_rate_seed: 42
+virtual_rate_max_gap: 5
+virtual_rate_manifest: ""
+virtual_rate_keep_first: true
+virtual_rate_keep_last: true
+virtual_rate_min_tracklet_len: 6
+
 use_real_time: true
 main_time_source: order
 main_time_current: 0.1
@@ -42,10 +47,22 @@ use_dynamics_encoder: true
 dynamics_hidden_dim: 128
 dynamics_eps: 0.001
 dynamics_use_query_gap: true
-dynamics_motion_mode: feature
+dynamics_motion_mode: residual_limited
 dynamics_displacement_weight: 0.0
 velocity_weight: 0.05
 dynamics_use_acceleration: false
+dynamics_residual_scale: 0.1
+dynamics_max_residual_norm: 1.0
+dynamics_warmup_epoch: 5
+dynamics_long_gap_only: false
+dynamics_min_delta_t: 1.0
+dynamics_sparse_only: false
+dynamics_sparse_point_threshold: 128
+dynamics_max_alpha: 0.2
+dynamics_residual_gate_hidden_dim: 16
+dynamics_residual_init_alpha: 0.0
+dynamics_residual_detach_stats: true
+
 use_observability_gate: false
 obs_gate_hidden_dim: 64
 obs_gate_num_stats: 5
@@ -54,17 +71,12 @@ obs_gate_init_obs_bias: 1.0
 obs_gate_min_dyn_valid: 0.5
 obs_gate_log_stats: true
 obs_stats_detach_seg: true
-use_twc: true
+
+use_twc: false
 twc_weight: 0.05
 twc_theta_weight: 0.5
-twc_view_a_offsets:
-- 1
-- 2
-- 3
-twc_view_b_offsets:
-- 1
-- 3
-- 5
+twc_view_a_offsets: [1, 2, 3]
+twc_view_b_offsets: [1, 3, 5]
 twc_full_history_only: true
 twc_candidate_zero_only: false
 twc_warmup_epoch: 0

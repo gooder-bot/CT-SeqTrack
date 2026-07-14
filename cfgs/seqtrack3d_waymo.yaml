@@ -35,10 +35,21 @@ use_dynamics_encoder: False # Enable timestamp-conditioned dynamics branch for P
 dynamics_hidden_dim: 128
 dynamics_eps: 0.001
 dynamics_use_query_gap: True # Feed current_delta_t into the dynamics prior.
-dynamics_motion_mode: feature # feature | residual. residual adds velocity*current_delta_t to motion residual.
+dynamics_motion_mode: feature # feature | residual_limited (observation-only bounded residual).
 dynamics_displacement_weight: 0.0 # Optional auxiliary displacement loss for dynamics_displacement_pred.
 velocity_weight: 0.05
 dynamics_use_acceleration: False
+dynamics_residual_scale: 0.1
+dynamics_max_residual_norm: 1.0
+dynamics_warmup_epoch: 5
+dynamics_long_gap_only: False
+dynamics_min_delta_t: 0.2
+dynamics_sparse_only: False
+dynamics_sparse_point_threshold: 128
+dynamics_max_alpha: 0.2
+dynamics_residual_gate_hidden_dim: 16
+dynamics_residual_init_alpha: 0.0
+dynamics_residual_detach_stats: True
 use_observability_gate: False # Enable P5 observation/dynamics fusion gate. Requires use_dynamics_encoder=True.
 obs_gate_hidden_dim: 64
 obs_gate_num_stats: 5
@@ -58,6 +69,11 @@ twc_warmup_epoch: 0
 twc_timestamp_eps: 0.000001
 twc_anchor_eps: 0.0001
 twc_delta_eps: 0.00001
+twc_require_coordinate_anchor: True
+twc_fail_on_anchor_mismatch: True
+twc_require_shared_current_points: True
+twc_fail_on_current_point_mismatch: True
+twc_point_eps: 0.000001
 
 
 box_aware: True

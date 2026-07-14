@@ -181,7 +181,6 @@ def main():
         cfg.use_real_time = False
     if args.twc:
         cfg.use_twc = True
-        cfg.twc_candidate_zero_only = True
     if args.obs_gate:
         cfg.use_dynamics_encoder = True
         cfg.use_observability_gate = True

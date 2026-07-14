@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：P0-P5 的工程链路已经实现并通过 smoke test；已有实验显示，直接把真实时间替换进 SeqTrack3D 主干时间 token 并不稳定，更稳的设计仍是保留 order-time 主干语义，并把真实 `delta_t/current_delta_t` 作为 `DynamicsEncoder` 的运动先验。最新 5 次复核显示：`A2-order-dyn` 存在明显 seed sensitivity，`A2-order-dyn+TWC w0.01` 仍崩坏，`A3-conf-res` best checkpoint 复测没有复现旧的 62.04 / 76.30 高点。因此当前重点不再是继续堆 TWC / gate，而是转向 **variable-rate / high-temporal-variation 评测协议、保守 residual dynamics、seed 统计和困难子集分桶诊断**。已完成记录见 `done.md`，简洁实验结论见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
+当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-11 新增了 **observation-first bounded residual dynamics**，并修复了 TWC 在 nonzero candidate 下两路 view 使用不同 crop / 局部坐标系的问题。旧 active-TWC 实验的 supervised loss 仍有效，但 TWC 效果受到坐标系污染，相关正负结论已撤回，必须用修复后的 sampler 重跑。当前最优先工作是服务器真实数据验收、`true-dt/fixed-dt/shuffled-dt` 因果对照、多 seed 和困难子集分桶，而不是继续叠加 gate。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -34,8 +34,8 @@ state = f(observations, real delta_t)
 当前论文边界应收窄为：
 
 ```text
-CT-SeqTrack converts SeqTrack3D from fixed-step frame sequence learning
-to timestamp-native variable-rate state estimation.
+CT-SeqTrack studies within-track variable-rate 3D SOT by conditioning
+SeqTrack3D on physical elapsed time.
 ```
 
 也就是说，本项目当前不主打更大的 backbone，也不宣称完整 Neural ODE / SDE / CDE tracker，更不把普通 fixed-step benchmark 的全局涨点作为唯一目标。更稳的论文路线是：先构造 variable-rate / long-gap / sparse 子集，证明 fixed-step 3D SOT 的时间契约存在问题，再用保守的 timestamp-conditioned dynamics prior 给出改进。
@@ -88,7 +88,15 @@ dynamics_valid
 use_dynamics_encoder: False
 ```
 
-当前结果提示，直接把 `z_dyn` 拼接进 motion feature 仍可能带来 seed collapse。后续更稳的主线是 residual 版本：先让 observation branch 给出主预测，再用 `velocity_pred * current_delta_t` 或 `dynamics_displacement_pred` 做小幅、可 clamp、可 warmup 的运动修正。
+当前结果提示，直接把 `z_dyn` 拼接进 motion feature 仍可能带来 seed collapse。仓库已实现 `dynamics_motion_mode: residual_limited`：motion head 只读取 observation point feature，真实时间分支输出 `dynamics_displacement_pred`，再经过 norm clamp、近零初始化的小门控、`max_alpha`、全局 scale 和 warmup 后，只修正中心坐标：
+
+```text
+obs_motion = motion_mlp(point_feature)
+dyn_disp = clamp_norm(dynamics_displacement_pred, max_residual_norm)
+final_center = obs_center + residual_scale * alpha_dyn * dyn_disp
+```
+
+该实现默认不与旧 `ObservabilityGate` 混用，并输出 alpha、raw/clamped norm、clamp ratio、applied ratio 和 `obs_dyn_center_gap` 等诊断量。工程实现和纯逻辑 smoke test 已完成，真实 nuScenes forward/loss/2-step 仍需在服务器环境验收；目前没有 residual 正向实验结论。
 
 ### 3. Time-resampling Consistency
 
@@ -110,6 +118,10 @@ L = 0.5 * (L_a + L_b) + lambda_twc * L_twc
 ```yaml
 use_twc: False
 ```
+
+共享实现以绝对 `frame_id` 为键，只采样一次 candidate perturbation 和点云 regularization seed，再映射到 A/B 两路；因此共同历史帧和当前帧不仅 crop / 坐标系相同，最终抽取的 XYZ 点也相同。预归一化的 `coordinate_anchor` 会随 batch 输出，TWC loss 对 anchor 和当前帧 sampled XYZ 都做 fail-fast 检查。`twc_candidate_zero_only` 不再把 `num_candidates` 和每 epoch optimizer steps 缩成四分之一。
+
+重要：旧实现分别为 A/B 采样 nonzero candidate offset，而旧检查又比较归一化后恒接近零的 `ref_boxs[:, 0]`，因此会误判“坐标共享”。旧 TWC 数值只保留为历史记录，不能用于证明 TWC 有效或无效。
 
 ### 4. Observability-aware Fusion
 
@@ -141,6 +153,7 @@ use_observability_gate: False
 | --- | --- |
 | `A1-order` | 主干使用 SeqTrack3D order-time，关闭 dynamics / TWC / gate |
 | `A2-order-dyn` | 主干使用 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder` |
+| `A2-residual-dyn` | observation-only motion head + 真实时间驱动的有界小残差；已实现，待服务器验收和实验 |
 | `cand1` | `num_candidates=1`，不是 `candidate_id=1` |
 | `cand4` | 默认多 candidate，包含 `candidate_id=0/1/2/3` |
 | `disp` | 在 dynamics 上增加小权重 displacement 监督 |
@@ -157,8 +170,8 @@ use_observability_gate: False
 | P0 | 真实时间字段主链路 | 已完成 |
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
-| P3 | Dynamics / Velocity Branch | 已实现，默认关闭；60ep seed42 有 precision-positive 信号，但最新 seed43/44 显示稳定性仍未解决；下一步优先改成更保守的 residual dynamics |
-| P4 | Time-resampling Consistency | 已实现，默认关闭；A1+TWC 有 precision-positive 信号，A2+TWC 在 0.05 和 0.01 下都不稳定 |
+| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；residual 本地纯逻辑检查通过，待服务器真实 batch 验收和因果实验 |
+| P4 | Time-resampling Consistency | 共享 candidate perturbation / crop / `coordinate_anchor` 已修复；旧 active-TWC 实验受坐标污染，结论撤回，待重跑 |
 | P5 | Observability Gate | 已实现，默认关闭；gate-safe 低于 A2，conf-res rerun / best 复测都不支持当前接入主线 |
 | Evaluation | cand1 / disp / active TWC / gate-safe / conf-res / latest 5 runs | 已完成本轮整理 |
 
@@ -167,8 +180,8 @@ use_observability_gate: False
 ```text
 1. A2-order-dyn-cand1
 2. A2-order-dyn-disp
-3. A1-order+TWC（validity-fixed active TWC）
-4. A2-order-dyn+TWC（validity-fixed active TWC）
+3. A1-order+TWC（历史实验；后发现 nonzero candidate 坐标污染，不作为有效 TWC 证据）
+4. A2-order-dyn+TWC（历史实验；同上）
 5. A3-order-gate-safe
 6. A3-order-conf-res-gate
 7. A3-order-conf-res best-e14 checkpoint retest
@@ -180,12 +193,11 @@ use_observability_gate: False
 当前下一步：
 
 ```text
-1. 等待并整理第一批 nuScenes-mini-HTV 6 组 60ep：gap1124 / burst_drop / random20 下的 A1-order vs A2-order-dyn。
-2. 按同一 protocol 计算 A2 - A1，并补 delta_t / sparse / displacement 分桶。
-3. 实现 A2-residual-dyn，对比 feature-concat dynamics 是否降低 seed collapse。
-4. 暂停把 TWC 接入 A2 主配置；0.01 / 0.05 都已显示 A2+dynamics 组合不稳定。
-5. 暂停把 conf-res 写成正向模块；先对 checkpoint / 评测路径 / alpha-residual 行为做诊断。
-6. 补 dynamics candidate 分桶和困难子集分桶，解释 seed collapse / late collapse 的机制。
+1. 在服务器执行 corrected-TWC 的 candidate0/1/2/3 paired-batch、forward/loss 和 2-step train 验收。
+2. 在服务器执行 A2-residual-dyn 的 standard/gap1124/burst_drop forward/loss 和 2-step train 验收。
+3. 只在验收通过后重跑 corrected A1+TWC；旧 TWC 结果不参与新结论。
+4. 对 residual 做同容量、同 protocol、同 seed 的 true-dt/fixed-dt/shuffled-dt 对照。
+5. 整理 HTV 现有运行状态，并补 multi-seed、delta_t/sparse/displacement/crop-recall 分桶。
 ```
 
 ---
@@ -201,6 +213,8 @@ cfgs/
   seqtrack3d_nuscenes_a1_order_twc.yaml
   seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
   seqtrack3d_nuscenes_a2_order_dyn_twc_w001.yaml
+  seqtrack3d_nuscenes_a2_residual_dyn.yaml
+  seqtrack3d_nuscenes_a2_residual_dyn_vr_*.yaml
   seqtrack3d_nuscenes_a3_order_gate_safe.yaml
   seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
   seqtrack3d_waymo.yaml                 # Waymo 配置
@@ -212,14 +226,19 @@ datasets/
 models/
   seqtrack3d.py                         # 主模型、TWC loss、P3/P5 接入
   time_encoding.py                      # raw / mlp / fourier 时间编码
-  dynamics.py                           # P3 DynamicsEncoder
+  dynamics.py                           # P3 DynamicsEncoder、residual gate 与 norm clamp
   observability.py                      # P5 ObservabilityGate
+
+utils/
+  twc_utils.py                          # 跨 view 共享 candidate offset 与点采样 seed
 
 tools/
   check_time_batch.py
   check_forward_batch.py
   check_train_steps.py
   check_twc_batch.py
+  check_twc_shared_coordinates.py       # 无数据集依赖的共享 offset/seed smoke test
+  check_residual_dynamics.py            # 无数据集依赖的 residual clamp/gate smoke test
   check_observability_gate.py
 
 compare_results/
@@ -302,12 +321,32 @@ python tools/check_forward_batch.py \
 检查 TWC paired view：
 
 ```bash
+python tools/check_twc_shared_coordinates.py
+
 python tools/check_twc_batch.py \
-  --cfg cfgs/seqtrack3d_nuscenes.yaml \
+  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
   --version v1.0-mini \
   --split mini_train \
-  --batch-size 2 \
+  --batch-size 4 \
+  --workers 0 \
+  --require-full-history
+```
+
+不要传 `--candidate-zero-only`。验收必须覆盖 candidate 1/2/3，并确认 `coordinate_anchor`、共享帧 candidate offset、point-sampling seed / XYZ、search crop 点数和数据集长度都一致。
+
+检查 bounded residual：
+
+```bash
+python tools/check_residual_dynamics.py
+
+CUDA_VISIBLE_DEVICES=0 \
+python tools/check_forward_batch.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
+  --path /home/lishengjie/data/nuscenes-mini \
+  --version v1.0-mini \
+  --split mini_train \
+  --batch-size 1 \
   --workers 0 \
   --require-full-history
 ```
@@ -333,7 +372,7 @@ python tools/check_train_steps.py \
 
 ## 训练与测试
 
-当前正式复跑命令以 `need_to_do.md` 为准。历史固定消融常用参数如下；当前 HTV 6 组已按 `workers=4` 在服务器后台运行：
+当前服务器运行状态和正式复跑命令以 `need_to_do.md` 为准。不要根据旧 PID 或本地文档直接认定历史 HTV 任务仍在运行。
 
 ```text
 --batch_size 16
@@ -387,8 +426,8 @@ output/<time>-<config>-<tag>/
 | CT-SeqTrack P5 full | 31.19 | 31.89 | 混入 raw real-time 主干、dynamics、gate，不能单独归因 |
 | A1-order | 51.23 | 57.86 | 恢复 order-time 主干后基本修复 A1 崩坏 |
 | A2-order-dyn | 50.96 | 63.31 | 60ep seed42 最强正向信号；最新 seed43/44 显示稳定性不足 |
-| A1-order+TWC | 51.16 | 61.10 | TWC 已激活；success 持平，precision 相对 A1-order +3.24 |
-| A2-order-dyn+TWC | 28.23 | 32.04 | TWC 已激活但与 dynamics 组合后期崩坏 |
+| A1-order+TWC（旧） | 51.16 | 61.10 | nonzero candidate 下两路坐标系不共享；数值保留，TWC 归因撤回 |
+| A2-order-dyn+TWC（旧） | 28.23 | 32.04 | 同样受坐标污染；不能据此判断 TWC 与 dynamics 是否冲突 |
 | A3-order-gate-safe | 48.32 | 54.87 | 比旧 P5 full 安全，但仍低于 A2-order-dyn |
 | A3-order-conf-res-gate | 31.17 | 30.92 | 旧 best 很高但最新 best-e14 复测只有 28.06 / 37.70，暂不能作为收益证据 |
 
@@ -399,7 +438,7 @@ output/<time>-<config>-<tag>/
 | A3-conf-res best-e14 retest | 28.06 | 37.70 | 单 checkpoint 测试，未复现旧 62.04 / 76.30 best 信号 |
 | A2-order-dyn seed43 | 23.64 | 23.77 | seed 崩坏，说明 A2 稳定性风险很大 |
 | A2-order-dyn seed44 | 46.90 | 52.62 | 明显好于 seed43，但仍低于旧 seed42 60ep 汇总 |
-| A2-order-dyn+TWC w0.01 seed42 | 22.88 | 24.27 | 降低 TWC 权重仍未救回 A2+dynamics 组合 |
+| A2-order-dyn+TWC w0.01 seed42（旧） | 22.88 | 24.27 | 同样受 nonzero candidate 坐标污染，仅保留历史数值 |
 | A3-conf-res rerun seed42 | 32.11 | 31.87 | rerun 仍低，gate/conf-res 应转诊断而不是继续堆结构 |
 
 解释：
@@ -407,7 +446,8 @@ output/<time>-<config>-<tag>/
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - 当前不应继续把 raw / MLP / Fourier real-time token 作为主干主线。
 - 在普通 fixed-step 设置上追求全局稳定涨点的把握不高；更合理的主战场是 variable-rate、long-gap、sparse / re-appearance 子集。
-- `A2-order-dyn` 仍是最值得诊断的真实时间使用方式，但现在不能再直接说它稳定；TWC / gate / conf-res 暂不接入主线。
+- `A2-order-dyn` 仍是最值得诊断的真实时间使用方式，但现在不能再直接说它稳定；新 residual 只有工程结果，尚无性能结果。
+- 旧 TWC 结果同时混入历史路径差异和坐标/crop 差异，修复前的 precision-positive 与崩坏都不能归因给 TWC。
 
 简洁实验结论和后续计划见：
 
@@ -439,8 +479,8 @@ compare_results/reports/related_comparisons.md
 更稳的贡献表述是：
 
 ```text
-We convert SeqTrack3D from fixed-step frame sequence learning
-to timestamp-native variable-rate state estimation.
+We study within-track variable-rate LiDAR 3D SOT and condition a
+Seq2Seq tracker on physical timestamps.
 ```
 
 当前更具体的实验表述是：
@@ -455,9 +495,9 @@ directly replacing the main branch time tokens with raw timestamps.
 
 ```text
 Fixed-step 3D SOT hides the physical meaning of irregular frame intervals.
-CT-SeqTrack first exposes this problem with variable-rate evaluation, then
-uses a conservative timestamp-conditioned dynamics prior to improve tracking
-under long gaps and sparse observations.
+CT-SeqTrack studies this problem with within-track variable-rate evaluation
+and a bounded timestamp-conditioned dynamics residual. Whether it improves
+long-gap and sparse tracking remains an experimental hypothesis.
 ```
 
 ---

@@ -13,6 +13,14 @@ from datasets.misc_utils import get_history_frame_ids_and_masks, \
     generate_virtual_points, \
     build_time_fields, \
     build_main_time_fields
+from utils.twc_utils import (
+    build_shared_candidate_offset_map,
+    build_shared_point_sampling_seed_map,
+    candidate_offsets_for_frame_ids,
+    point_sampling_seeds_for_frame_ids,
+    sample_candidate_offset,
+    sample_point_sampling_seed,
+)
 
 
 def no_processing(data, *args):
@@ -217,6 +225,33 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_frame_ids = data.get('prev_frame_ids')
     this_frame_id = data.get('this_frame_id')
     history_offsets = data.get('history_offsets')
+    candidate_offsets = data.get('candidate_offsets')
+    if candidate_offsets is not None:
+        candidate_offsets = np.asarray(candidate_offsets, dtype=np.float32)
+        if candidate_offsets.shape != (num_hist, 3):
+            raise ValueError(
+                f"candidate_offsets must have shape {(num_hist, 3)}, "
+                f"got {candidate_offsets.shape}.")
+        if not np.isfinite(candidate_offsets).all():
+            raise ValueError("candidate_offsets contains non-finite values.")
+    else:
+        candidate_offsets = np.stack(
+            [sample_candidate_offset(candidate_id, config) for _ in range(num_hist)],
+            axis=0,
+        )
+    point_sampling_seeds = data.get('point_sampling_seeds')
+    if point_sampling_seeds is not None:
+        point_sampling_seeds = np.asarray(point_sampling_seeds, dtype=np.int64)
+        if point_sampling_seeds.shape != (num_hist,):
+            raise ValueError(
+                f"point_sampling_seeds must have shape {(num_hist,)}, "
+                f"got {point_sampling_seeds.shape}.")
+        prev_sampling_seeds = [int(seed) for seed in point_sampling_seeds]
+    else:
+        prev_sampling_seeds = [None] * num_hist
+    current_sampling_seed = data.get('current_sampling_seed')
+    if current_sampling_seed is not None:
+        current_sampling_seed = int(current_sampling_seed)
 
     # Check the number of empty boxes
     for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
@@ -227,11 +262,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
 
     ref_boxs = []
     for i, prev_box in enumerate(prev_boxs): # Apply a random offset to each box, not uniformly
-        if candidate_id == 0:
-            sample_offsets = np.zeros(3)
-        else:
-            sample_offsets = np.random.uniform(low=-0.3, high=0.3, size=3)
-            sample_offsets[2] = sample_offsets[2] * (5 if config.degrees else np.deg2rad(5))
+        sample_offsets = candidate_offsets[i]
         ref_box = points_utils.getOffsetBB(prev_box, sample_offsets, limit_box=config.data_limit_box,
                                         degrees=config.degrees)
         ref_boxs.append(ref_box)
@@ -249,14 +280,34 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                                                     offset=config.bb_offset)
     num_points_in_search = this_frame_pc.nbr_points()
 
+    # Preserve the pre-normalization anchor: ref_boxs[0] becomes approximately
+    # zero after transform_box(), so the normalized tensor cannot prove that
+    # paired views shared the same crop and local coordinate system.
+    coordinate_anchor_box = ref_boxs[0]
+    coordinate_anchor_theta = (
+        coordinate_anchor_box.orientation.degrees * coordinate_anchor_box.orientation.axis[-1]
+        if config.degrees else coordinate_anchor_box.orientation.radians
+        * coordinate_anchor_box.orientation.axis[-1]
+    )
+    coordinate_anchor = np.append(
+        coordinate_anchor_box.center, coordinate_anchor_theta).astype('float32')
+
     this_box    = points_utils.transform_box(this_box, ref_boxs[0]) 
     prev_boxs   = [points_utils.transform_box(prev_box, ref_boxs[0]) for prev_box in prev_boxs] 
     ref_boxs    = [points_utils.transform_box(ref_box, ref_boxs[0]) for ref_box in ref_boxs]    
     motion_boxs = [points_utils.transform_box(this_box, prev_box) for prev_box in prev_boxs]  
 
     # Resample each frame of the point cloud to a specific number
-    prev_points_list = [points_utils.regularize_pc(prev_frame_pc.points.T, config.point_sample_size)[0] for prev_frame_pc in prev_frame_pcs] 
-    this_points = points_utils.regularize_pc(this_frame_pc.points.T, config.point_sample_size)[0] 
+    prev_points_list = [
+        points_utils.regularize_pc(
+            prev_frame_pc.points.T, config.point_sample_size, seed=seed)[0]
+        for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
+    ]
+    this_points = points_utils.regularize_pc(
+        this_frame_pc.points.T,
+        config.point_sample_size,
+        seed=current_sampling_seed,
+    )[0]
 
     seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
@@ -368,6 +419,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'current_delta_t': np.float32(current_delta_t),
         'num_points_in_search': np.float32(num_points_in_search),
         'velocity_label': velocity_label,
+        'candidate_id': np.int64(candidate_id),
+        'coordinate_anchor': coordinate_anchor,
+        'candidate_offsets': candidate_offsets.astype('float32'),
     }
     if prev_frame_ids is not None:
         data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
@@ -375,6 +429,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         data_dict['this_frame_id'] = np.int64(this_frame_id)
     if history_offsets is not None:
         data_dict['history_offsets'] = np.array(history_offsets, dtype=np.int64)
+    if point_sampling_seeds is not None:
+        data_dict['point_sampling_seeds'] = point_sampling_seeds
+    if current_sampling_seed is not None:
+        data_dict['current_sampling_seed'] = np.int64(current_sampling_seed)
 
     if getattr(config, 'box_aware', False):
         stack_points_split = np.split(stack_points, num_hist + 1, axis=0)
@@ -525,8 +583,13 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                                default_twc_b_offsets))
         if self.use_twc and getattr(self.config, "use_augmentation", False):
             raise ValueError("P4 TWC paired views require shared transforms; keep use_augmentation=False for now.")
-        if self.use_twc and self.twc_candidate_zero_only:
-            self.num_candidates = 1
+        if self.use_twc:
+            if (len(self.twc_view_a_offsets) != self.dataset.hist_num
+                    or len(self.twc_view_b_offsets) != self.dataset.hist_num):
+                raise ValueError("Each TWC view must provide exactly hist_num history offsets.")
+            if self.twc_view_a_offsets[0] != 1 or self.twc_view_b_offsets[0] != 1:
+                raise ValueError(
+                    "TWC views must share the nearest t-1 anchor as their first history frame.")
 
     def _locate_tracklet(self, anno_id):
         for i in range(0, self.dataset.get_num_tracklets()):
@@ -535,7 +598,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         raise IndexError(f"anno_id {anno_id} is outside tracklet ranges.")
 
     def _build_view(self, tracklet_id, this_frame_id, first_frame, this_frame,
-                    candidate_id, offsets):
+                    candidate_id, offsets, candidate_offset_map=None,
+                    point_sampling_seed_map=None, current_sampling_seed=None):
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
@@ -550,6 +614,14 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             "this_frame_id": this_frame_id,
             "history_offsets": offsets,
         }
+        if candidate_offset_map is not None:
+            data["candidate_offsets"] = candidate_offsets_for_frame_ids(
+                prev_frame_ids, candidate_offset_map)
+        if point_sampling_seed_map is not None:
+            data["point_sampling_seeds"] = point_sampling_seeds_for_frame_ids(
+                prev_frame_ids, point_sampling_seed_map)
+        if current_sampling_seed is not None:
+            data["current_sampling_seed"] = current_sampling_seed
         return self.processing(data, self.config,
                                template_transform=self.transform,
                                search_transform=self.transform)
@@ -563,10 +635,31 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             first_frame, this_frame = self.dataset.get_frames(tracklet_id, frame_ids=frame_ids)
             if self.use_twc:
                 paired_candidate_id = 0 if self.twc_candidate_zero_only else candidate_id
+                prev_frame_ids_a, _ = get_history_frame_ids_and_masks(
+                    this_frame_id, self.dataset.hist_num, offsets=self.twc_view_a_offsets)
+                prev_frame_ids_b, _ = get_history_frame_ids_and_masks(
+                    this_frame_id, self.dataset.hist_num, offsets=self.twc_view_b_offsets)
+                # Sample perturbations and regularization seeds once per absolute
+                # frame id. Any physical history frame appearing in both paths,
+                # especially t-1, must share crop, coordinates, and sampled XYZ.
+                candidate_offset_map = build_shared_candidate_offset_map(
+                    paired_candidate_id,
+                    list(prev_frame_ids_a) + list(prev_frame_ids_b),
+                    self.config,
+                )
+                point_sampling_seed_map = build_shared_point_sampling_seed_map(
+                    list(prev_frame_ids_a) + list(prev_frame_ids_b))
+                current_sampling_seed = sample_point_sampling_seed()
                 view_a = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                          paired_candidate_id, self.twc_view_a_offsets)
+                                          paired_candidate_id, self.twc_view_a_offsets,
+                                          candidate_offset_map=candidate_offset_map,
+                                          point_sampling_seed_map=point_sampling_seed_map,
+                                          current_sampling_seed=current_sampling_seed)
                 view_b = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                          paired_candidate_id, self.twc_view_b_offsets)
+                                          paired_candidate_id, self.twc_view_b_offsets,
+                                          candidate_offset_map=candidate_offset_map,
+                                          point_sampling_seed_map=point_sampling_seed_map,
+                                          current_sampling_seed=current_sampling_seed)
                 return {"view_a": view_a, "view_b": view_b}
 
             offsets = list(range(1, self.dataset.hist_num + 1))

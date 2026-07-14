@@ -1,9 +1,63 @@
+import math
+
 import torch
 from torch import nn
 
 
 def wrap_angle(angle):
     return torch.atan2(torch.sin(angle), torch.cos(angle))
+
+
+def clamp_vector_norm(vectors, max_norm, eps=1e-6):
+    """Clamp the L2 norm of the last dimension without changing direction."""
+    if max_norm is None or float(max_norm) <= 0:
+        norms = torch.linalg.norm(vectors, dim=-1, keepdim=True)
+        clamp_mask = torch.zeros_like(norms, dtype=torch.bool)
+        return vectors, norms, clamp_mask
+
+    max_norm = float(max_norm)
+    norms = torch.linalg.norm(vectors, dim=-1, keepdim=True)
+    scale = torch.clamp(max_norm / norms.clamp_min(float(eps)), max=1.0)
+    clamped = vectors * scale
+    clamp_mask = norms > max_norm
+    return clamped, norms, clamp_mask
+
+
+class DynamicsResidualGate(nn.Module):
+    """Small bounded gate for an observation-first dynamics residual.
+
+    The last layer is initialized so that the initial alpha is close to
+    ``init_alpha``. This keeps a freshly enabled dynamics branch from taking
+    over the observation prediction before the reliability signal is learned.
+    """
+
+    def __init__(self, stats_dim=6, hidden_dim=16, max_alpha=0.2, init_alpha=0.0):
+        super().__init__()
+        self.max_alpha = float(max_alpha)
+        if not 0.0 < self.max_alpha <= 1.0:
+            raise ValueError("max_alpha must be in (0, 1].")
+
+        hidden_dim = int(hidden_dim)
+        self.net = nn.Sequential(
+            nn.Linear(int(stats_dim), hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, 1),
+        )
+
+        output = self.net[-1]
+        nn.init.zeros_(output.weight)
+        init_ratio = float(init_alpha) / self.max_alpha
+        init_ratio = min(max(init_ratio, 1e-4), 1.0 - 1e-4)
+        nn.init.constant_(output.bias, math.log(init_ratio / (1.0 - init_ratio)))
+
+    def forward(self, stats, dynamics_valid):
+        alpha = self.max_alpha * torch.sigmoid(self.net(stats))
+        if dynamics_valid is not None:
+            dynamics_valid = dynamics_valid.to(device=alpha.device, dtype=alpha.dtype)
+            if dynamics_valid.dim() == 1:
+                dynamics_valid = dynamics_valid.unsqueeze(1)
+            alpha = alpha * dynamics_valid
+        return alpha
 
 
 class DynamicsEncoder(nn.Module):

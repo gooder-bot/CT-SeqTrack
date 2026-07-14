@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-08
+更新时间：2026-07-11
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -16,7 +16,7 @@
 - [x] P1：真实时间 batch 字段、CPU forward、GPU loss、2-step train smoke test 通过。
 - [x] P2：scalar-preserving `TimeEncoding` 已实现，`raw / mlp / fourier` smoke test 通过。
 - [x] P3：`DynamicsEncoder` / Velocity Branch 已实现，forward / loss / 2-step train smoke test 通过。
-- [x] P4：Time-resampling Consistency 已实现，paired batch / forward / loss / 2-step train smoke test 通过。
+- [x] P4：Time-resampling Consistency 已实现；2026-07-11 已修复 nonzero candidate 的共享坐标系缺陷并增加 fail-fast 检查，本地纯逻辑 smoke test 通过，服务器真实数据回归待办见 `need_to_do.md`。
 - [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
 - [x] nuScenes-mini-HTV / virtual-rate 数据层、检查脚本和 6 个 A1/A2 smoke 配置已实现。
 - [x] 当前六组新消融 YAML 已创建：
@@ -28,6 +28,10 @@ cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml
 cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_gate_safe.yaml
 cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn.yaml
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_burst_drop.yaml
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 ```
 
 ### 已完成实验
@@ -41,7 +45,7 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 - [x] `A1-order / A2-order-dyn`：恢复 order-time 主干后，A1-order 基本修复 A1 崩坏；A2-order-dyn final precision 高于 baseline，是当前最强正向信号。
 - [x] `A2-order-dyn-cand1 / A2-order-dyn-disp`：cand1 在 60 epoch 协议下明显退化但 step 未对齐；disp 与 A2-order-dyn 基本持平，precision 小幅更高。
 - [x] 旧 `A1-order+TWC / A2-order-dyn+TWC`：两组已跑完并整理，但 `twc_valid_ratio=0`，说明 TWC 项未激活；这些结果不能作为 TWC 有效或无效的最终结论。
-- [x] validity-fixed active `A1-order+TWC / A2-order-dyn+TWC`：TWC 已激活；A1 上 precision 有正向信号，A2+dynamics 组合后期崩坏。
+- [x] validity-fixed active `A1-order+TWC / A2-order-dyn+TWC`：实验已完成，但 2026-07-11 发现 nonzero candidate 坐标污染；旧 A1 正向与 A2 负向归因均已撤回。
 - [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res 旧 best 很高但 final 崩坏。
 - [x] 2026-07-08 五次稳定性复核：A3 best-e14 retest、A2 seed43、A2 seed44、A2+TWC w0.01、A3 conf-res rerun 均已整理到 `compare_results/reports/latest_5runs_comparison.md`。
 
@@ -54,10 +58,67 @@ cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml
 但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
 普通 fixed-step 全局涨点把握不高；
 后续应转向 variable-rate / HTV 协议、困难子集分桶和 residual dynamics。
-TWC / gate / conf-res 目前都不能作为稳定主配置。
+旧 TWC 实验受 nonzero candidate 坐标系污染，效果归因已撤回；
+gate / conf-res 目前也不能作为稳定主配置。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-07-11：TWC 共享坐标修复与 bounded residual 实现
+
+### TWC 根因与修复
+
+旧 paired sampler 分别调用 A/B 两路预处理。candidate 1/2/3 会各自随机扰动最近历史框，而这个框同时决定当前帧 search crop 和全部输出框的局部坐标系。旧检查比较的是归一化后的 `ref_boxs[:, 0]`；每一路 anchor 相对自身变换后都接近零，所以不同坐标系也会误判为共享成功。
+
+已完成：
+
+- 新增 `utils/twc_utils.py`，以绝对 `frame_id` 为键为 paired sample 只采样一次 candidate perturbation。
+- A/B 两路按各自 `prev_frame_ids` 从同一 offset map 取值；共同历史帧，尤其 `t-1` anchor，使用完全相同的 offset、crop 和局部坐标系。
+- A/B 共同绝对帧还共享 point regularization seed，避免相同 raw crop 被独立随机抽成不同的 1024 点；检查工具会直接核对共同历史帧与当前帧 XYZ。
+- sampler 在坐标归一化前输出 `coordinate_anchor`，并输出 `candidate_id / candidate_offsets` 供回归检查。
+- `compute_twc_loss()` 改为检查未归一化的 `coordinate_anchor` 和当前帧 sampled XYZ；字段缺失或 gap 超阈值默认直接报错。
+- `twc_candidate_zero_only=True` 不再把 `num_candidates` 改成 1，因此不会把每 epoch 样本数和 optimizer steps 缩成四分之一。
+- `check_twc_batch.py` 新增 candidate 1/2/3、dataset length、共享 frame offset、sampling seed / XYZ、anchor、search crop 点数等硬断言。
+- `check_forward_batch.py / check_train_steps.py / check_time_batch.py` 不再在 TWC 模式下偷偷强制 candidate0。
+
+结论边界：旧 TWC run 的两路 supervised loss 仍然有效，但 nonzero candidate 的跨 view consistency loss 混入了坐标/crop 差异。旧 A1 precision-positive 和 A2 崩坏都不能继续归因给 TWC，必须修复后重跑。
+
+### Observation-first bounded residual
+
+已实现 `dynamics_motion_mode: residual_limited`：
+
+```text
+obs_motion = motion_mlp(point_feature)
+dyn_disp = clamp_norm(dynamics_displacement_pred, max_residual_norm)
+alpha_dyn = max_alpha * sigmoid(small_gate(stats)) * dynamics_valid
+final_center = obs_center + residual_scale * alpha_dyn * dyn_disp
+```
+
+实现约束：
+
+- residual 模式不再把 `z_dyn` 拼接进 observation motion head。
+- gate 末层零权重、近零 alpha 初始化，训练开始时接近原 observation 解。
+- 支持 norm clamp、warmup、long-gap-only、sparse-only 和 `dynamics_valid` mask。
+- residual 只修改中心，角度仍由 observation branch 给出。
+- residual 模式禁止和旧 `ObservabilityGate` 同时开启，避免两套 gate 语义混杂。
+- 记录 alpha、raw/clamped norm、clamp/applied ratio、effective scale 和 `obs_dyn_center_gap`。
+
+新增 standard、`gap1124`、`burst_drop`、`random20` 四个 residual 配置。当前只完成工程实现，不记录任何性能正结论。
+
+### 本地验收
+
+```text
+python -m py_compile ...                         PASS
+python tools/check_twc_shared_coordinates.py    PASS
+python tools/check_residual_dynamics.py          PASS
+SEQTRACK3D residual method-level smoke           PASS
+TWC anchor/current-XYZ positive + negative guard PASS
+git diff --check                                PASS
+```
+
+本机 Python 缺少 `easydict / nuscenes-devkit`，因此真实 nuScenes paired batch、完整 model forward/loss 和 2-step backward 留到服务器环境执行，具体命令与门槛见 `need_to_do.md`。
 
 ---
 
@@ -182,8 +243,8 @@ need_to_do.md
 - 普通 fixed-step benchmark 上追求整体 final 稳定涨点的把握不高。
 - 更稳的论文主战场是 variable-rate / high-temporal-variation / long-gap / sparse 子集。
 - `A2-order-dyn` 仍是最有价值的真实时间线索，但 feature-concat dynamics 已暴露 seed sensitivity。
-- 下一步优先实现保守 residual dynamics，而不是继续叠加 TWC 或 gate。
-- TWC 当前只能作为 A1-order 上的 precision-positive 候选信号；gate / conf-res 先转向分桶诊断和评测路径核对。
+- 当时计划优先实现保守 residual dynamics；该实现已于 2026-07-11 完成，服务器验收仍待办。
+- 当时把 TWC 视为 A1-order 上的 precision-positive 候选；2026-07-11 坐标审计后该判断已撤回。
 
 ### 文档口径
 
@@ -287,7 +348,7 @@ A3-conf-res rerun:
 
 - `A3-conf-res best-e14 retest` 没有复现旧汇总里的 62.04 / 76.30，高 best 暂时不能作为确认收益。
 - `A2-order-dyn` seed43 / seed44 差异很大，旧 seed42 的 precision-positive 信号需要多 seed 统计支撑。
-- `A2-order-dyn+TWC w0.01` 在 TWC 有效时仍明显退化，说明问题不只是 `twc_weight=0.05` 太大。
+- 当时认为 `A2-order-dyn+TWC w0.01` 的退化不只是权重问题；2026-07-11 坐标审计后，该 TWC 归因已失效。
 - `A3-conf-res rerun` 仍低，后续应先做评测路径核对和 gate 行为分桶。
 
 归档文件：
@@ -308,7 +369,7 @@ compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
 
 ## 2026-06-03：active TWC / gate-safe / conf-res 结果整理
 
-### active TWC
+### active TWC（历史记录；2026-07-11 后归因失效）
 
 关键结果：
 
@@ -328,9 +389,8 @@ A2-order-dyn+TWC twc_valid_ratio mean 0.750, tail1000 0.750
 
 判断：
 
-- TWC validity 已修复；这轮不再是 `twc_valid_ratio=0` 的 inactive 结果。
-- `A1-order+TWC` 相对 A1-order final success 基本持平（-0.07），final precision 提升 +3.24。
-- `A2-order-dyn+TWC` 在 TWC 有效时仍明显退化，说明当前 `twc_weight=0.05` / paired-view 协议与 dynamics prior 组合不稳定。
+- 当时只确认 validity mask 已激活；后续证明 nonzero candidate 的 A/B 坐标仍不共享。
+- A1 的 +3.24 precision 和 A2 的退化均保留为历史观测，但不能归因给 TWC 或它与 dynamics 的兼容性。
 
 ### gate-safe / conf-res
 

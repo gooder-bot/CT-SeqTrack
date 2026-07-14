@@ -71,6 +71,11 @@ twc_warmup_epoch: 0
 twc_timestamp_eps: 1.0e-06
 twc_anchor_eps: 0.0001
 twc_delta_eps: 1.0e-05
+twc_require_coordinate_anchor: true
+twc_fail_on_anchor_mismatch: true
+twc_require_shared_current_points: true
+twc_fail_on_current_point_mismatch: true
+twc_point_eps: 1.0e-06
 
 net_model: seqtrack3d
 box_aware: true

@@ -11,7 +11,7 @@ from torchmetrics import Accuracy
 
 from datasets.misc_utils import get_tensor_corners_batch
 from datasets.misc_utils import create_corner_timestamps_from_deltas
-from models.dynamics import DynamicsEncoder
+from models.dynamics import DynamicsEncoder, DynamicsResidualGate, clamp_vector_norm
 from models.observability import ObservabilityGate
 from models.time_encoding import TimeEncoding
 
@@ -36,17 +36,37 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.obs_gate_residual_scale = float(getattr(config, 'obs_gate_residual_scale', 0.1))
         self.obs_gate_max_dyn_alpha = float(getattr(config, 'obs_gate_max_dyn_alpha', 0.2))
         self.dynamics_motion_mode = str(getattr(config, 'dynamics_motion_mode', 'feature')).lower()
+        self.dynamics_motion_mode = self.dynamics_motion_mode.replace('-', '_')
+        if self.dynamics_motion_mode in ('residual_limited', 'bounded_residual'):
+            self.dynamics_motion_mode = 'residual'
         if self.dynamics_motion_mode not in ('feature', 'residual'):
-            raise ValueError("dynamics_motion_mode must be 'feature' or 'residual'.")
+            raise ValueError(
+                "dynamics_motion_mode must be 'feature', 'residual', or 'residual_limited'.")
+        if self.dynamics_motion_mode == 'residual' and not self.use_dynamics_encoder:
+            raise ValueError("dynamics_motion_mode='residual' requires use_dynamics_encoder=True.")
         if self.use_observability_gate and not self.use_dynamics_encoder:
             raise ValueError("use_observability_gate=True requires use_dynamics_encoder=True.")
-        if (self.use_observability_gate
-                and self.obs_gate_fusion_mode == 'confidence_residual'
-                and self.dynamics_motion_mode == 'residual'):
+        if self.use_observability_gate and self.dynamics_motion_mode == 'residual':
             raise ValueError(
-                "confidence_residual gate already applies a dynamics residual; "
-                "keep dynamics_motion_mode='feature'.")
+                "The bounded residual path is observation-only and cannot be combined with "
+                "ObservabilityGate. Keep dynamics_motion_mode='feature' for gate experiments.")
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
+        self.dynamics_residual_scale = float(getattr(config, 'dynamics_residual_scale', 0.1))
+        self.dynamics_max_residual_norm = float(
+            getattr(config, 'dynamics_max_residual_norm', 1.0))
+        self.dynamics_warmup_epoch = int(getattr(config, 'dynamics_warmup_epoch', 0))
+        self.dynamics_long_gap_only = bool(getattr(config, 'dynamics_long_gap_only', False))
+        self.dynamics_min_delta_t = float(getattr(config, 'dynamics_min_delta_t', 0.0))
+        self.dynamics_sparse_only = bool(getattr(config, 'dynamics_sparse_only', False))
+        self.dynamics_sparse_point_threshold = float(
+            getattr(config, 'dynamics_sparse_point_threshold', 128.0))
+        self.dynamics_max_alpha = float(getattr(config, 'dynamics_max_alpha', 0.2))
+        self.dynamics_residual_detach_stats = bool(
+            getattr(config, 'dynamics_residual_detach_stats', True))
+        if self.dynamics_residual_scale < 0:
+            raise ValueError("dynamics_residual_scale must be non-negative.")
+        if self.dynamics_max_residual_norm <= 0:
+            raise ValueError("dynamics_max_residual_norm must be positive.")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -82,7 +102,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 eps=getattr(config, 'dynamics_eps', 1e-3),
                 use_query_gap=getattr(config, 'dynamics_use_query_gap', True),
             )
-            if self.use_observability_gate:
+            if self.dynamics_motion_mode == 'residual':
+                self.dynamics_residual_gate = DynamicsResidualGate(
+                    stats_dim=6,
+                    hidden_dim=getattr(config, 'dynamics_residual_gate_hidden_dim', 16),
+                    max_alpha=self.dynamics_max_alpha,
+                    init_alpha=getattr(config, 'dynamics_residual_init_alpha', 0.0),
+                )
+            elif self.use_observability_gate:
                 self.observability_gate = ObservabilityGate(
                     feature_dim=256,
                     dynamics_dim=self.dynamics_hidden_dim,
@@ -169,6 +196,68 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         }
         return obs_stats, obs_aux
 
+    def apply_bounded_dynamics_residual(self, motion_obs_pred, dynamics_displacement_pred,
+                                        dynamics_valid, obs_stats, obs_aux, input_dict):
+        displacement_clamped, raw_norm, clamp_mask = clamp_vector_norm(
+            dynamics_displacement_pred,
+            self.dynamics_max_residual_norm,
+            eps=getattr(self.config, 'dynamics_eps', 1e-3),
+        )
+        clamped_norm = torch.linalg.norm(displacement_clamped, dim=1, keepdim=True)
+        obs_dyn_gap = torch.linalg.norm(
+            motion_obs_pred[:, :3] - displacement_clamped, dim=1, keepdim=True)
+
+        gate_stats = torch.cat((obs_stats, torch.log1p(obs_dyn_gap)), dim=1)
+        gate_stats = torch.nan_to_num(gate_stats, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.dynamics_residual_detach_stats:
+            gate_stats = gate_stats.detach()
+        alpha_dyn = self.dynamics_residual_gate(gate_stats, dynamics_valid)
+
+        condition_mask = torch.ones_like(alpha_dyn)
+        current_delta_t = input_dict.get('current_delta_t')
+        if current_delta_t is None:
+            default_step = getattr(
+                self.config, 'default_time_step', getattr(self.config, 'time_step', 0.5))
+            current_delta_t = alpha_dyn.new_full((alpha_dyn.shape[0],), float(default_step))
+        else:
+            current_delta_t = current_delta_t.to(
+                device=alpha_dyn.device, dtype=alpha_dyn.dtype).reshape(alpha_dyn.shape[0])
+        if self.dynamics_long_gap_only:
+            condition_mask = condition_mask * (
+                current_delta_t.unsqueeze(1) >= self.dynamics_min_delta_t).to(alpha_dyn.dtype)
+        if self.dynamics_sparse_only:
+            num_points = obs_aux['obs_num_points_search'].to(
+                device=alpha_dyn.device, dtype=alpha_dyn.dtype).reshape(alpha_dyn.shape[0], 1)
+            condition_mask = condition_mask * (
+                num_points <= self.dynamics_sparse_point_threshold).to(alpha_dyn.dtype)
+        alpha_dyn = alpha_dyn * condition_mask
+
+        effective_scale = self.dynamics_residual_scale
+        if self.training and getattr(self, 'current_epoch', 0) < self.dynamics_warmup_epoch:
+            effective_scale = 0.0
+        effective_scale_tensor = motion_obs_pred.new_tensor(effective_scale)
+        dynamics_residual = effective_scale_tensor * alpha_dyn * displacement_clamped
+        motion_pred = torch.cat((
+            motion_obs_pred[:, :3] + dynamics_residual,
+            motion_obs_pred[:, 3:4],
+        ), dim=1)
+
+        applied_mask = torch.linalg.norm(
+            dynamics_residual, dim=1, keepdim=True) > 1e-8
+        aux = {
+            'motion_obs_pred': motion_obs_pred,
+            'motion_dynamics_residual': dynamics_residual,
+            'dynamics_displacement_clamped': displacement_clamped,
+            'dynamics_residual_alpha': alpha_dyn.squeeze(1),
+            'dynamics_residual_scale_effective': effective_scale_tensor,
+            'dynamics_residual_raw_norm': raw_norm.squeeze(1),
+            'dynamics_residual_clamped_norm': clamped_norm.squeeze(1),
+            'dynamics_residual_clamp_mask': clamp_mask.squeeze(1).to(motion_obs_pred.dtype),
+            'dynamics_residual_applied_mask': applied_mask.squeeze(1).to(motion_obs_pred.dtype),
+            'obs_dyn_center_gap': obs_dyn_gap.squeeze(1),
+        }
+        return motion_pred, aux
+
 
     def forward(self, input_dict):
         """
@@ -238,7 +327,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output_dict["velocity_pred"] = velocity_pred
             output_dict["dynamics_displacement_pred"] = dynamics_displacement_pred
             output_dict["dynamics_valid"] = dynamics_valid
-            if self.use_observability_gate:
+            if self.dynamics_motion_mode == 'residual':
+                motion_feature = point_feature
+            elif self.use_observability_gate:
                 if self.obs_gate_fusion_mode == 'feature':
                     motion_feature, gate_aux = self.observability_gate(
                         point_feature, z_dyn, obs_stats, dynamics_valid)
@@ -277,11 +368,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 motion_pred[:, 3:4],
             ), dim=1)
         if self.use_dynamics_encoder and self.dynamics_motion_mode == 'residual':
-            output_dict["motion_residual_pred"] = motion_pred
-            motion_pred = torch.cat((
-                motion_pred[:, :3] + output_dict["dynamics_displacement_pred"],
-                motion_pred[:, 3:4],
-            ), dim=1)
+            motion_pred, residual_aux = self.apply_bounded_dynamics_residual(
+                motion_pred,
+                output_dict['dynamics_displacement_pred'],
+                output_dict['dynamics_valid'],
+                obs_stats,
+                obs_aux,
+                input_dict,
+            )
+            output_dict.update(residual_aux)
 
         if self.use_motion_cls:
             motion_state_logits = self.motion_state_mlp(point_feature)  # B,2
@@ -366,13 +461,54 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     - data_b["current_timestamp"].to(box_a.device))
             valid = valid & (current_gap.view(-1) <= eps)
 
-        if "ref_boxs" in data_a and "ref_boxs" in data_b:
+        anchor_gap = torch.zeros_like(loss_twc_per_sample)
+        if "coordinate_anchor" in data_a and "coordinate_anchor" in data_b:
+            anchor_gap = torch.max(
+                torch.abs(data_a["coordinate_anchor"].to(box_a.device, dtype=box_a.dtype)
+                          - data_b["coordinate_anchor"].to(box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+            if (getattr(self.config, "twc_fail_on_anchor_mismatch", True)
+                    and bool(torch.any(anchor_gap > anchor_eps).item())):
+                raise RuntimeError(
+                    "TWC paired views do not share the same coordinate_anchor. "
+                    f"max gap={float(anchor_gap.max().item()):.6g}, eps={anchor_eps:.6g}.")
+            valid = valid & (anchor_gap <= anchor_eps)
+        elif getattr(self.config, "twc_require_coordinate_anchor", True):
+            raise KeyError(
+                "TWC requires the unnormalized coordinate_anchor in both views. "
+                "Rebuild paired batches with the shared-coordinate sampler.")
+        elif "ref_boxs" in data_a and "ref_boxs" in data_b:
             anchor_gap = torch.max(
                 torch.abs(data_a["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)
                           - data_b["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)),
                 dim=1,
             ).values
             valid = valid & (anchor_gap <= anchor_eps)
+
+        current_point_gap = torch.zeros_like(loss_twc_per_sample)
+        point_eps = getattr(self.config, "twc_point_eps", 1e-6)
+        if "points" in data_a and "points" in data_b:
+            point_sample_size = int(getattr(self.config, "point_sample_size", 0))
+            if point_sample_size <= 0:
+                raise ValueError(
+                    "TWC shared-current-point check requires point_sample_size > 0.")
+            current_xyz_a = data_a["points"][:, -point_sample_size:, :3].to(
+                box_a.device, dtype=box_a.dtype)
+            current_xyz_b = data_b["points"][:, -point_sample_size:, :3].to(
+                box_a.device, dtype=box_a.dtype)
+            current_point_gap = torch.amax(
+                torch.abs(current_xyz_a - current_xyz_b), dim=(1, 2))
+            if (getattr(self.config, "twc_fail_on_current_point_mismatch", True)
+                    and bool(torch.any(current_point_gap > point_eps).item())):
+                raise RuntimeError(
+                    "TWC paired views do not share the same sampled current XYZ points. "
+                    f"max gap={float(current_point_gap.max().item()):.6g}, "
+                    f"eps={point_eps:.6g}.")
+            valid = valid & (current_point_gap <= point_eps)
+        elif getattr(self.config, "twc_require_shared_current_points", True):
+            raise KeyError(
+                "TWC requires points in both views to verify shared current-frame sampling.")
 
         history_gap = None
         if "history_offsets" in data_a and "history_offsets" in data_b:
@@ -421,6 +557,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "twc_valid_ratio": valid_float.mean(),
             "twc_center_gap": center_gap,
             "twc_angle_gap": angle_gap,
+            "twc_anchor_gap": anchor_gap.mean(),
+            "twc_anchor_gap_max": anchor_gap.max(),
+            "twc_current_point_gap": current_point_gap.mean(),
+            "twc_current_point_gap_max": current_point_gap.max(),
         }
 
     def compute_paired_loss(self, data, output):
@@ -610,6 +750,26 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if "motion_dyn_residual" in output:
             loss_dict["obs_dyn_residual_norm"] = torch.linalg.norm(
                 output["motion_dyn_residual"], dim=1).mean()
+
+        if "motion_dynamics_residual" in output:
+            loss_dict.update({
+                "dynamics_residual_norm": torch.linalg.norm(
+                    output["motion_dynamics_residual"], dim=1).mean(),
+                "dynamics_residual_alpha_mean": output["dynamics_residual_alpha"].mean(),
+                "dynamics_residual_alpha_min": output["dynamics_residual_alpha"].min(),
+                "dynamics_residual_alpha_max": output["dynamics_residual_alpha"].max(),
+                "dynamics_residual_scale_effective": output[
+                    "dynamics_residual_scale_effective"],
+                "dynamics_residual_raw_norm": output[
+                    "dynamics_residual_raw_norm"].mean(),
+                "dynamics_residual_clamped_norm": output[
+                    "dynamics_residual_clamped_norm"].mean(),
+                "dynamics_residual_clamp_ratio": output[
+                    "dynamics_residual_clamp_mask"].mean(),
+                "dynamics_residual_applied_ratio": output[
+                    "dynamics_residual_applied_mask"].mean(),
+                "obs_dyn_center_gap": output["obs_dyn_center_gap"].mean(),
+            })
 
         return loss_dict
 
