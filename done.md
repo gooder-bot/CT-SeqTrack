@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-11
+更新时间：2026-07-16
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -16,7 +16,7 @@
 - [x] P1：真实时间 batch 字段、CPU forward、GPU loss、2-step train smoke test 通过。
 - [x] P2：scalar-preserving `TimeEncoding` 已实现，`raw / mlp / fourier` smoke test 通过。
 - [x] P3：`DynamicsEncoder` / Velocity Branch 已实现，forward / loss / 2-step train smoke test 通过。
-- [x] P4：Time-resampling Consistency 已实现；2026-07-11 已修复 nonzero candidate 的共享坐标系缺陷并增加 fail-fast 检查，本地纯逻辑 smoke test 通过，服务器真实数据回归待办见 `need_to_do.md`。
+- [x] P4：Time-resampling Consistency 已实现；2026-07-11 修复 nonzero candidate 的共享坐标系缺陷，2026-07-16 已完成 corrected A1/A2 seed42 训练，anchor/current XYZ gap max 均为 0。
 - [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
 - [x] nuScenes-mini-HTV / virtual-rate 数据层、检查脚本和 6 个 A1/A2 smoke 配置已实现。
 - [x] 当前六组新消融 YAML 已创建：
@@ -48,6 +48,10 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 - [x] validity-fixed active `A1-order+TWC / A2-order-dyn+TWC`：实验已完成，但 2026-07-11 发现 nonzero candidate 坐标污染；旧 A1 正向与 A2 负向归因均已撤回。
 - [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res 旧 best 很高但 final 崩坏。
 - [x] 2026-07-08 五次稳定性复核：A3 best-e14 retest、A2 seed43、A2 seed44、A2+TWC w0.01、A3 conf-res rerun 均已整理到 `compare_results/reports/latest_5runs_comparison.md`。
+- [x] corrected A1/A2+TWC seed42：A1 相对配置级 baseline final `+1.49/+5.03`，A2 `-0.93/-2.07`；完整结果见 `compare_results/reports/corrected_twc_seed42_comparison.md`。
+- [x] gap1124 / burst-drop / random20 的 A1/A2 六组 HTV 筛选：A2 只在 random20 为正，在两个强不规则协议为负；见 `compare_results/reports/htv_6runs_comparison.md`。
+- [x] TrajTrack aligned seed42 训练完整性与 evaluator 审计：确认当前高分路径使用 GT-assisted refinement，不能作为公平在线排名；见 `compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
+- [x] 逐页视觉核查 SeqTrack3D 与 TrajTrack 本地论文，并用 HVTrack、StreamTrack、MambaTrack3D、ChronoTrack 的官方论文页面收窄 related-work 边界。
 
 ### 当前结论
 
@@ -58,11 +62,47 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
 普通 fixed-step 全局涨点把握不高；
 后续应转向 variable-rate / HTV 协议、困难子集分桶和 residual dynamics。
-旧 TWC 实验受 nonzero candidate 坐标系污染，效果归因已撤回；
+corrected-TWC 的 A1 seed42 有正信号，但只有单 seed且 baseline 不是同提交；
+HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
+TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
 gate / conf-res 目前也不能作为稳定主配置。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-07-16：最新数据整理、论文核查与路线收敛
+
+### Corrected-TWC seed42
+
+- A1 baseline 51.23 / 57.86，corrected-TWC 52.72 / 62.89，final delta 为 +1.49 / +5.03。
+- A2 baseline 50.96 / 63.31，corrected-TWC 50.04 / 61.25，final delta 为 -0.93 / -2.07。
+- 两个 corrected run 均有 12 个评测点、epoch60 checkpoint、75720 optimizer steps；anchor gap max 与 current XYZ gap max 都为 0。
+- baseline 是旧 run 且没有 commit 记录，所以当前只记录为配置级参考。A1 需要 seed43/44 和同提交 paired baseline；A2 不进入 TWC 主线。
+
+### HTV 六组
+
+- gap1124：A2-A1 final 为 -4.01 / -9.55；A2 epoch10 早期高点后明显回落。
+- burst-drop：A2-A1 final 为 -7.45 / -14.40。
+- random20：A2-A1 final 为 +9.09 / +14.23，late mean 同样为正。
+- 六组均是 seed42、mini_val 开发证据，virtual-rate seed 固定但未冻结 manifest。
+- 当前数据不支持旧 feature-concat dynamics 作为强 gap 主方法，支持继续测试 observation-first bounded residual、candidate 伪速度和 search-crop 上限。
+
+### TrajTrack 公平性审计
+
+- aligned run 完成 60 epoch，训练预算与 plain SeqTrack3D 基本对齐。
+- 当前 `pre_w_refine()` 使用当前帧 GT overlap 决定是否 refinement，并按 GT overlap 从 trajectory proposals 中选最大者。
+- 64.94 / 79.07 与 plain SeqTrack3D 50.99 / 59.96 的差值混合了模型和 evaluator oracle，不能写成方法增益。
+- 下一步公平参考固定 epoch60 checkpoint，分别运行 `pre_wo_refine()`、GT-free paper-aligned refinement 和 oracle upper bound。
+
+### 文献核查后的方向
+
+- SeqTrack3D 的固定历史窗口消融已经暴露长历史误差累积，提示必须诊断 candidate 扰动对速度的污染。
+- TrajTrack 证明低维 bbox trajectory proposal 值得研究，但 CT 只借鉴 GT-free local/global proposal agreement。
+- HVTrack/MambaTrack3D 已覆盖 fixed-interval HTV 和 SSM-HTV；CT 必须强调 tracklet 内不规则物理 `delta_t`、一个模型跨 unseen cadence。
+- ChronoTrack 已覆盖泛化的 temporal consistency 叙事；TWC 必须限定为不同采样路径到同一物理 endpoint 的一致性。
+- 下一方法方向收敛为 observation-first timestamp-conditioned dual-proposal residual，不转向完整 TrajFormer、Mamba 或 ODE/CDE。
 
 ---
 

@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-11 新增了 **observation-first bounded residual dynamics**，并修复了 TWC 在 nonzero candidate 下两路 view 使用不同 crop / 局部坐标系的问题。旧 active-TWC 实验的 supervised loss 仍有效，但 TWC 效果受到坐标系污染，相关正负结论已撤回，必须用修复后的 sampler 重跑。当前最优先工作是服务器真实数据验收、`true-dt/fixed-dt/shuffled-dt` 因果对照、多 seed 和困难子集分桶，而不是继续叠加 gate。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
+当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-16 的最新证据包括：corrected-TWC 已完成 seed42 重跑并确认两路 anchor/current XYZ gap 均为 0；A1 上出现 `+1.49 Success / +5.03 Precision` 的单 seed 配置级正信号，A2 上则为负。HTV 六组实验也已完成，旧 feature-concat dynamics 只在温和 random20 上受益，在 gap1124 和 burst-drop 上明显退化。当前最优先工作是固定 manifest 的 residual `true-dt/fixed-dt/shuffled-dt` 因果矩阵、corrected-TWC 的多 seed 复现，以及 TrajTrack 的 GT-free 公平评测，而不是继续叠加 gate。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -170,34 +170,36 @@ use_observability_gate: False
 | P0 | 真实时间字段主链路 | 已完成 |
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
-| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；residual 本地纯逻辑检查通过，待服务器真实 batch 验收和因果实验 |
-| P4 | Time-resampling Consistency | 共享 candidate perturbation / crop / `coordinate_anchor` 已修复；旧 active-TWC 实验受坐标污染，结论撤回，待重跑 |
+| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；HTV 六组筛选显示 feature-concat 只在 random20 为正，residual 待真实 batch 验收和因果实验 |
+| P4 | Time-resampling Consistency | 共享 candidate perturbation / crop / `coordinate_anchor` 已修复；corrected seed42 已完成，A1 为正、A2 为负，仍需同提交 baseline 与 seed43/44 |
 | P5 | Observability Gate | 已实现，默认关闭；gate-safe 低于 A2，conf-res rerun / best 复测都不支持当前接入主线 |
-| Evaluation | cand1 / disp / active TWC / gate-safe / conf-res / latest 5 runs | 已完成本轮整理 |
+| Evaluation | cand1 / disp / active/corrected TWC / gate / stability / HTV / TrajTrack reference | 最新数据和公平性边界已整理到 `compare_results/reports/` |
 
 当前已完成的关键消融：
 
 ```text
 1. A2-order-dyn-cand1
 2. A2-order-dyn-disp
-3. A1-order+TWC（历史实验；后发现 nonzero candidate 坐标污染，不作为有效 TWC 证据）
-4. A2-order-dyn+TWC（历史实验；同上）
+3. corrected A1-order+TWC seed42（坐标修复后；单 seed 配置级正信号）
+4. corrected A2-order-dyn+TWC seed42（坐标修复后；不支持接入 A2 主线）
 5. A3-order-gate-safe
 6. A3-order-conf-res-gate
 7. A3-order-conf-res best-e14 checkpoint retest
 8. A2-order-dyn seed43 / seed44
 9. A2-order-dyn+TWC w0.01
 10. A3-order-conf-res rerun seed42
+11. gap1124 / burst-drop / random20 的 A1/A2 六组 HTV 筛选
+12. TrajTrack aligned seed42 参考运行与 evaluator oracle 审计
 ```
 
 当前下一步：
 
 ```text
-1. 在服务器执行 corrected-TWC 的 candidate0/1/2/3 paired-batch、forward/loss 和 2-step train 验收。
-2. 在服务器执行 A2-residual-dyn 的 standard/gap1124/burst_drop forward/loss 和 2-step train 验收。
-3. 只在验收通过后重跑 corrected A1+TWC；旧 TWC 结果不参与新结论。
-4. 对 residual 做同容量、同 protocol、同 seed 的 true-dt/fixed-dt/shuffled-dt 对照。
-5. 整理 HTV 现有运行状态，并补 multi-seed、delta_t/sparse/displacement/crop-recall 分桶。
+1. 用 TrajTrack 固定 epoch60 checkpoint 跑 `pre_wo_refine()`，并实现不读取当前帧 GT 的 paper-aligned refinement，先建立公平外部参考。
+2. 在服务器完成 A2-residual-dyn 的 standard/gap1124/burst-drop 真实 batch、forward/loss 和 2-step 验收。
+3. 冻结 virtual-rate manifest，对 residual 做同容量、同 protocol、seed42/43/44 的 true-dt/fixed-dt/shuffled-dt 对照。
+4. 补跑 corrected A1+TWC seed43/44，并用同一代码提交重跑配对 A1 baseline；A2+TWC 暂停。
+5. 补 candidate、crop-recall、delta_t/sparse/displacement、observation-vs-dynamics proposal 分桶；只有 residual 成立后才扩展 GT-free trajectory-proposal agreement。
 ```
 
 ---
@@ -374,6 +376,27 @@ python tools/check_train_steps.py \
 
 当前服务器运行状态和正式复跑命令以 `need_to_do.md` 为准。不要根据旧 PID 或本地文档直接认定历史 HTV 任务仍在运行。
 
+### 服务器训练线程限制（必须）
+
+服务器上的用户进程受到 32 CPU 核的 cgroup 配额限制。使用多个
+DataLoader worker 时，NumPy、SciPy、OpenCV 和 PyTorch 可能分别创建
+OpenBLAS/OpenMP 线程池，造成严重的线程过量、CPU throttling 和 GPU 空转。
+2026-07-14 的 HTV 训练排障中，补回以下限制后 epoch 时长恢复正常。
+
+所有服务器正式训练命令都必须在启动 Python 前设置：
+
+```bash
+OMP_NUM_THREADS=1 \
+MKL_NUM_THREADS=1 \
+OPENBLAS_NUM_THREADS=1 \
+NUMEXPR_NUM_THREADS=1 \
+python -u main.py ...
+```
+
+后台训练同样必须把这四个变量写入每一条 `nohup` 命令。它们只限制底层
+数学库的内部并行线程，不改变模型、数据、batch size、DataLoader worker
+数量或其他训练参数。
+
 ```text
 --batch_size 16
 --epoch 60
@@ -387,8 +410,8 @@ python tools/check_train_steps.py \
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-python main.py \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+python -u main.py \
   --cfg cfgs/seqtrack3d_nuscenes_a2_order_dyn_cand1.yaml \
   --batch_size 16 \
   --epoch 60 \
@@ -426,6 +449,8 @@ output/<time>-<config>-<tag>/
 | CT-SeqTrack P5 full | 31.19 | 31.89 | 混入 raw real-time 主干、dynamics、gate，不能单独归因 |
 | A1-order | 51.23 | 57.86 | 恢复 order-time 主干后基本修复 A1 崩坏 |
 | A2-order-dyn | 50.96 | 63.31 | 60ep seed42 最强正向信号；最新 seed43/44 显示稳定性不足 |
+| corrected A1-order+TWC seed42 | 52.72 | 62.89 | 相对旧配置对齐 A1 为 +1.49/+5.03；只有单 seed，baseline 还不是同提交因果配对 |
+| corrected A2-order-dyn+TWC seed42 | 50.04 | 61.25 | 相对 A2 为 -0.93/-2.07；暂不接入 dynamics 主线 |
 | A1-order+TWC（旧） | 51.16 | 61.10 | nonzero candidate 下两路坐标系不共享；数值保留，TWC 归因撤回 |
 | A2-order-dyn+TWC（旧） | 28.23 | 32.04 | 同样受坐标污染；不能据此判断 TWC 与 dynamics 是否冲突 |
 | A3-order-gate-safe | 48.32 | 54.87 | 比旧 P5 full 安全，但仍低于 A2-order-dyn |
@@ -441,13 +466,24 @@ output/<time>-<config>-<tag>/
 | A2-order-dyn+TWC w0.01 seed42（旧） | 22.88 | 24.27 | 同样受 nonzero candidate 坐标污染，仅保留历史数值 |
 | A3-conf-res rerun seed42 | 32.11 | 31.87 | rerun 仍低，gate/conf-res 应转诊断而不是继续堆结构 |
 
+最新 variable-rate 筛选（`A2-order-dyn - A1-order`，seed42）：
+
+| protocol | Success final delta | Precision final delta | 判断 |
+| --- | ---: | ---: | --- |
+| gap1124 | -4.01 | -9.55 | 早期高点后明显回落，不是稳定收益 |
+| burst-drop | -7.45 | -14.40 | 强不规则间隔下明显退化 |
+| random20 | +9.09 | +14.23 | 温和随机丢帧下形成一致正信号 |
+
+TrajTrack 的 aligned seed42 运行得到 64.94 / 79.07，但本地 evaluator 使用当前帧 GT overlap 触发 refinement，并用 GT overlap 选择 proposal。这一结果只作为 oracle-assisted 实现诊断，不能与 GT-free SeqTrack3D 或 CT-SeqTrack 做公平在线排名；详见 `compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
+
 解释：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - 当前不应继续把 raw / MLP / Fourier real-time token 作为主干主线。
 - 在普通 fixed-step 设置上追求全局稳定涨点的把握不高；更合理的主战场是 variable-rate、long-gap、sparse / re-appearance 子集。
-- `A2-order-dyn` 仍是最值得诊断的真实时间使用方式，但现在不能再直接说它稳定；新 residual 只有工程结果，尚无性能结果。
-- 旧 TWC 结果同时混入历史路径差异和坐标/crop 差异，修复前的 precision-positive 与崩坏都不能归因给 TWC。
+- `A2-order-dyn` 的真实时间信号具有 protocol dependence：温和 random20 为正，强 gap/burst 为负；新 residual 只有工程结果，尚无性能结果。
+- corrected-TWC 已消除坐标/crop 污染，A1 seed42 为正，但只有单 seed且 baseline 不是同代码提交；它目前是候选稳定性贡献，不是已确认主增益。
+- TrajTrack 的可借鉴点是 bbox-only trajectory proposal 与 local/global proposal agreement，不是当前 GT-assisted evaluator 的高分。
 
 简洁实验结论和后续计划见：
 
@@ -475,6 +511,7 @@ compare_results/reports/related_comparisons.md
 - P5 full 已经取得最终正向结果
 - CT-SeqTrack full model 已经稳定超过 SeqTrack3D
 - 标准 fixed-step benchmark 上已经稳定全面涨点
+- TrajTrack 当前本地结果相对 SeqTrack3D 提升了 13.96 / 19.11（该差值包含 GT oracle 信息）
 
 更稳的贡献表述是：
 

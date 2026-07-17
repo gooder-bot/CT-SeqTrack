@@ -1,30 +1,34 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-11
+更新时间：2026-07-16
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 0. 当前总判断
 
-### 2026-07-11 结果口径更正
+### 2026-07-16 最新证据与结果口径
 
 代码审查发现，旧 active-TWC sampler 在 candidate 1/2/3 下分别为 A/B 两路采样最近历史框扰动，导致两路 current search crop 和局部坐标系不同；旧检查比较归一化后天然接近零的 `ref_boxs[:, 0]`，没有发现这个问题。因此：
 
 - 旧 A1+TWC 的 precision-positive 信号暂时撤回，不能归因给 TWC。
 - 旧 A2+TWC 的退化也暂时撤回，不能据此判断 TWC 与 dynamics 冲突。
 - 两路各自的 supervised loss 仍有效，但跨 view TWC loss 不是干净的一致性约束。
-- 共享 candidate offset、`coordinate_anchor` 和 point-sampling seed 的修复已经完成；修复后真实数据验收和重跑尚未完成。
+- 共享 candidate offset、`coordinate_anchor` 和 point-sampling seed 的修复已经完成；修复后的 A1/A2 seed42 训练均已完成，anchor gap max 与 current XYZ gap max 都为 0。
 - `A2-residual-dyn` 已完成工程实现和纯逻辑 smoke test，但尚无性能结果。
 
-本文件下方 TWC 数值作为历史记录保留；凡基于旧 active-TWC 数值的“有效/有害”解释，均以本更正为准。
+修复后的 seed42 结果显示：A1+corrected-TWC 相对旧配置对齐 baseline 的 final 为 `+1.49 Success / +5.03 Precision`，late mean 为 `+0.99 / +2.67`；A2+corrected-TWC 的 final 为 `-0.93 / -2.07`。前者是值得复现的单 seed 正信号，后者不支持把 TWC 接入当前 A2 主线。由于 baseline 来自旧 run、没有 git commit，二者仍只是配置级参考，不能视为严格同提交因果结果。
+
+HTV 六组 seed42 筛选也已完成：旧 feature-concat `A2-order-dyn` 在 random20 上相对 A1 final 为 `+9.09 / +14.23`，但在 gap1124 为 `-4.01 / -9.55`、burst-drop 为 `-7.45 / -14.40`。这不支持“时间间隔越不规则，旧 A2 越有效”，而支持继续验证 observation-first bounded residual、candidate 运动监督和 crop 可达性。
+
+TrajTrack aligned seed42 run 虽得到 64.94 / 79.07，但当前本地 evaluator 使用当前帧 GT overlap 触发 refinement，并用 GT overlap 选择 proposal。该数值只能作为 oracle-assisted 实现诊断，不能作为对 SeqTrack3D 或 CT-SeqTrack 的公平在线增益。
 
 目前结果不支持继续把真实时间直接塞进 SeqTrack3D 主干时间 token。更稳的方向是：
 
 ```text
 主干保留 SeqTrack3D 的 order-time 语义；
 真实 delta_t 主要作为保守 residual dynamics prior；
-先补 variable-rate / HTV 评测协议，再追求困难子集稳定收益；
-corrected TWC 和 gate 暂时作为候选诊断模块，不接入当前主配置。
+用固定 manifest 的 variable-rate / HTV 因果矩阵验证 residual；
+corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free evaluator。
 ```
 
 旧 60ep seed42 汇总里，`A2-order-dyn` 的 final success 基本追平 SeqTrack baseline，final precision 高于 baseline，因此它曾是最清楚的真实时间正向信号。但 2026-07-08 整理的 5 次复核改变了当前判断力度：`A2-order-dyn` seed43 崩坏到 23.64 / 23.77，seed44 只有 46.90 / 52.62；`A2-order-dyn+TWC w0.01` 仍只有 22.88 / 24.27；`A3-conf-res` best-e14 复测只有 28.06 / 37.70，没有复现旧 62.04 / 76.30 高点。现在的主线应从“证明 A2 已稳定有效”改为“先建立 variable-rate 问题设置，再围绕 residual dynamics 做 seed 稳定性、checkpoint 对齐和机制诊断”。
@@ -43,16 +47,20 @@ corrected TWC 和 gate 暂时作为候选诊断模块，不接入当前主配置
 - 旧 active `A2-order-dyn+TWC` 及 `twc_weight=0.01` 曾明显退化，但同样受坐标污染，不能作为 TWC 与 dynamics 冲突的证据。
 - `A3-order-gate-safe` 比旧 P5 full 安全，但相对 A2-order-dyn final success / precision 仍下降 -2.64 / -8.45。
 - `A3-order-conf-res-gate` 旧汇总 best checkpoint 很高（success 62.04 / precision 76.30），但最新 best-e14 复测只有 28.06 / 37.70，暂时不能把旧 best 当作确认收益。
+- corrected A1+TWC seed42 在坐标修复后形成 +1.49/+5.03 的配置级正信号，且两路 anchor/current XYZ gap 均为 0。
+- HTV 六组说明旧 feature-concat dynamics 的效果依赖 protocol：random20 为正，gap1124/burst-drop 为负。
+- TrajTrack 论文的“历史轨迹 proposal + local/global proposal agreement”值得借鉴，但当前本地 GT-assisted evaluator 的高分不能进入公平主表。
 
 当前不能说：
 
 - 不能说完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 不能说 TWC 有效或有害；修复后的 corrected-TWC 尚未重跑。
+- 不能说 corrected-TWC 已稳定有效；当前只有 A1 seed42，且 baseline 不是同代码提交的严格配对。
 - 不能说 gate 已经无效，因为 gate-safe 比旧 P5 full 安全，conf-res 又出现很高 best；但也不能说 gate 已经稳定有效。
 - 不能按 `A3-order-conf-res-gate` 旧 best 下正向结论，因为最新复测未复现。
 - 不能说 candidate noise 已被彻底排除，因为 `cand1` 只有 `num_candidates=4` 实验约 1/4 的 optimizer step，且还缺少 candidate 分桶日志。
 - 不能说 displacement 监督已经是必要模块；目前它只是一个小幅、温和的正向/不伤信号。
 - 不能只靠普通 fixed-step benchmark 讲论文成功；如果没有 variable-rate / HTV 协议和分桶收益，真实时间贡献会显得证据不足。
+- 不能把 TrajTrack 本地 64.94 / 79.07 写成公平结果，也不能把其与 SeqTrack3D 的算术差值写成方法增益。
 
 ## 1. 第一轮：Baseline vs P5 full
 
@@ -467,40 +475,78 @@ compare_results/figures/bar_charts/latest_5runs_best_final_summary.svg
 compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
 ```
 
-## 10. 当前各实验共同说明了什么
+## 10. 2026-07-16：corrected-TWC、HTV 与 TrajTrack 参考
+
+### 10.1 Corrected-TWC seed42
+
+| family | baseline final | corrected-TWC final | final delta | late-mean delta |
+| --- | --- | --- | --- | --- |
+| A1 | 51.23 / 57.86 | 52.72 / 62.89 | +1.49 / +5.03 | +0.99 / +2.67 |
+| A2 | 50.96 / 63.31 | 50.04 / 61.25 | -0.93 / -2.07 | -1.33 / -2.53 |
+
+两组 corrected run 均完成 60 epoch、75720 optimizer steps，TWC anchor gap max 和 current XYZ gap max 都为 0。A1 值得补 seed43/44；A2 不建议继续组合 TWC。旧 baseline 没有 commit 记录，因此下一轮必须在同一提交上重跑 paired baseline。
+
+完整报告：`compare_results/reports/corrected_twc_seed42_comparison.md`。
+
+### 10.2 HTV 六组 seed42
+
+| protocol | A2-A1 Success final | A2-A1 Precision final | 解释 |
+| --- | ---: | ---: | --- |
+| gap1124 | -4.01 | -9.55 | epoch10 曾有高点，后期明显崩落 |
+| burst-drop | -7.45 | -14.40 | 强不规则条件下稳定低于 A1 |
+| random20 | +9.09 | +14.23 | 温和随机丢帧下 final/late mean 都为正 |
+
+六组都是确定性 seed42 配对，但没有冻结 manifest，且只在 mini_val 上评估。它们适合筛选假设，不适合统计性结论。最重要的机制问题不是继续扩大 feature concat，而是检查：nonzero candidate 是否制造伪速度、目标是否离开 search crop、dynamics proposal 何时优于 observation proposal。
+
+完整报告：`compare_results/reports/htv_6runs_comparison.md`。
+
+### 10.3 TrajTrack evaluator 边界
+
+aligned seed42 运行预算与 plain SeqTrack3D 基本一致，但 evaluator 并不等价：TrajTrack 当前 `pre_w_refine()` 读取当前帧 GT，先用 GT overlap 判断是否 refinement，再用 GT overlap 从 proposals 中选最大者。因此 64.94 / 79.07 是 GT-assisted 参考，不是公平在线结果。
+
+下一步应固定 epoch60 checkpoint，分别评测：
+
+1. `pre_wo_refine()`：GT-free local proposal baseline。
+2. paper-aligned GT-free refinement：只用 local/global proposal IoU、预测置信度、点数等推理时可得量。
+3. 当前 `pre_w_refine()`：只保留为 oracle upper-bound 诊断。
+
+完整报告：`compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
+
+## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 仍是当前最有潜力的真实时间使用方式，但旧 60ep seed42 正向信号需要多 seed 复核支撑。
+- DynamicsEncoder 仍是当前最有潜力的真实时间使用方式，但 feature-concat 在强 gap/burst 下失败；下一轮应验证 observation-first residual，而不是把旧 A2 当主方法。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
-- corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现，但还没有新的实验结果。
+- corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；A1 seed42 为正、A2 为负，但仍缺同提交 baseline 与多 seed。
 - P5 full 旧结果不能作为最终 gate 结论；gate-safe 比旧 P5 full 安全，但仍低于 A2-order-dyn。
 - conf-res 旧 best checkpoint 未被最新 best-e14 复测确认；当前不能按旧 best 写正向收益。
 - corrected-TWC 如果继续，应先只在 `A1-order` 上做最小重跑；gate 仍只做诊断，不与 residual 同时启用。
+- TrajTrack 当前高分含 GT oracle；它只能提示 trajectory proposal 的潜力，不能证明公平收益。
 
 还不能说明的事情：
 
 - 还不能说完整 CT-SeqTrack 已经稳定超过 SeqTrack3D。
-- 还不能说 TWC 有效、无效或能与 dynamics 组合，因为 corrected-TWC 尚未重跑。
+- 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只有 A1 seed42 正信号，而 A2 seed42 为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 还不能彻底解释非 0 candidate 是否污染 dynamics，因为 cand1 没有与原 A2 做 optimizer-step 对齐，也缺少 candidate 分桶日志。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 
-## 11. 接下来应该做什么
+## 12. 接下来应该做什么
 
 当前优先顺序：
 
 ```text
-1. 先在服务器完成 corrected-TWC 和 bounded residual 的真实 batch / forward / loss / 2-step 验收。
-2. 核对第一批 nuScenes-mini-HTV 6 组的真实服务器状态，完成后按同一 protocol 整理 A2 - A1。
-3. 对 residual 做 true-dt / fixed-dt / shuffled-dt 的同容量、同 seed 因果对照。
-4. corrected-TWC 先只重跑 A1-order；结果成立后才考虑 A2 或权重网格。
-5. 补 delta_t / sparse / displacement / out-of-search 分桶和 multi-seed 统计。
-6. conf-res / uncertainty / 更复杂 trajectory proposal 暂缓。
+1. 固定 TrajTrack epoch60 checkpoint，先完成 `pre_wo_refine()` 和 paper-aligned GT-free refinement，消除外部参考中的 evaluator 混杂。
+2. 在服务器完成 bounded residual 的 standard/gap1124/burst-drop 真实 batch / forward / loss / 2-step 验收。
+3. 冻结 manifest，对 residual 做 true-dt / fixed-dt / shuffled-dt、seed42/43/44 的同容量因果对照。
+4. corrected A1+TWC 补 seed43/44，并用同一代码提交重跑 paired A1 baseline；不继续 A2+TWC。
+5. 补 candidate0/nonzero、target-in-crop、delta_t/sparse/displacement 和 observation-vs-dynamics proposal 分桶。
+6. 只有 residual 的 true-dt 因果证据成立后，才升级为轻量 bbox-only time-conditioned trajectory proposal + GT-free proposal agreement。
 ```
 
 可选复核：
@@ -511,7 +557,7 @@ A2-order-dyn-cand1-240ep
 
 作用是让 `num_candidates=1` 的 cand1 与 `num_candidates=4` 的 A2-order-dyn 做 optimizer-step 对齐。只有这个版本也退化，才能更干净地说明移除非 0 candidate 本身有问题。
 
-### 11.1 A1-order+TWC
+### 12.1 A1-order+TWC
 
 目的：
 
@@ -525,7 +571,7 @@ A2-order-dyn-cand1-240ep
 - 先用 corrected sampler、candidate 1/2/3 和相同 optimizer steps 重跑原权重；不要先做权重网格。
 - 同时直接报告同一 endpoint 下不同采样路径的预测方差是否下降。
 
-### 11.2 A2-order-dyn+TWC
+### 12.2 A2-order-dyn+TWC
 
 目的：
 
@@ -538,7 +584,7 @@ A2-order-dyn-cand1-240ep
 - 旧 active / w0.01 退化都受坐标污染，不能判断 TWC 与 dynamics 是否互补。
 - corrected A1+TWC 没有形成稳定证据前，不重跑 A2+TWC，也不与 gate/residual 混合。
 
-### 11.2b A2-residual-dyn
+### 12.2b A2-residual-dyn
 
 目的：
 
@@ -560,7 +606,7 @@ A2-order-dyn-cand1-240ep
 - 如果普通 final 只持平，但 long-gap / sparse bin 稳定提升，可以作为更强论文证据。
 - 如果 residual 仍 seed collapse，问题更可能在 dynamics 监督质量、candidate history 或真实 `delta_t` 信号不足。
 
-### 11.3 A3-order-gate-safe / conf-res
+### 12.3 A3-order-gate-safe / conf-res
 
 目的：
 
@@ -574,7 +620,7 @@ A2-order-dyn-cand1-240ep
 - conf-res best-e14 复测没有复现旧 best；先核对旧汇总路径，再回到更保守的 alpha / residual 约束。
 - 分桶分析仍有价值，但它现在用于解释 gate 行为，而不是证明 gate 已经有效。
 
-## 12. 后续需要补的诊断
+## 13. 后续需要补的诊断
 
 建议增加 dynamics 诊断日志：
 
@@ -594,7 +640,7 @@ dynamics_valid_ratio
 - 判断 velocity prediction 是否爆炸、塌缩或量级不匹配。
 - 给 cand1 / disp 的结果提供机制解释，而不是只看 success 和 precision。
 
-## 13. 当前论文叙事建议
+## 14. 当前论文叙事建议
 
 暂时不要写：
 

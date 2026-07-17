@@ -1,270 +1,191 @@
 # CT-SeqTrack 当前执行清单
 
-更新时间：2026-07-11
+更新时间：2026-07-17
 
-本文只维护尚未完成的任务。已完成工程改动见 `done.md`，历史与当前结果口径见 `sum_results.md`，研究定位和论文边界见 `refined_plan.md`。
+本文只维护会影响论文结论的未完成工作，并按重要性排序。已完成内容见 `done.md`，结果口径见 `sum_results.md`，研究定位见 `refined_plan.md`。
 
 ## 0. 当前主线与结论边界
 
+论文主线暂定为：
+
+> 面向不规则采样和变帧率 3D 单目标跟踪，在 SeqTrack3D 的 observation 主干上，引入只使用历史框与真实时间戳的有界 dynamics residual，并验证物理时间在未见采样节奏下是否具有因果收益。
+
+目前只能确认：时间戳、virtual-rate、TWC、feature dynamics 和 bounded residual 已有不同程度的工程实现或实验信号；还不能声称真实 `delta_t` 稳定提分，也不能声称模型已经具备跨采样率泛化能力。
+
+现有结果的使用边界：
+
+- corrected A1+TWC seed42 为 `+1.49 Success / +5.03 Precision`，但 baseline 来自旧提交且只有一个 seed。
+- corrected A2+TWC seed42 为 `-0.93 / -2.07`，暂不继续组合 A2+TWC。
+- feature-concat A2 在 random20 为正，在 gap1124 和 burst-drop 为负，不能作为主创新结论。
+- residual A2 只有逻辑 smoke，没有真实 batch、梯度和跟踪性能证据。
+- TrajTrack 的 `64.94 / 79.07` 来自 GT-assisted evaluator，只能作为 oracle 诊断。
+
+## 1. 四个最高优先级问题
+
+前三项直接决定 residual 主线是否成立；第四项决定 TWC 能否保留为论文贡献。先解决前三项，再启动主线大规模训练；TWC 控制组可后置。
+
+### P0-A：bounded residual 可能小得几乎不起作用
+
+**问题**：当前默认最大修正量仅为 `0.1 × 0.2 × 1.0 = 0.02 m`，而 gate 近零初始化。若真实 observation error 明显大于 2 cm，或 alpha/梯度长期接近零，该分支即使存在也几乎不改变预测。
+
+- [ ] 在 standard、gap1124、burst-drop 的真实 full-history batch 上完成 forward/loss/backward 和 2-step train。
+- [ ] 确认 warmup 前 residual 为 0，warmup 后 alpha、raw/clamped/applied residual 与 gradient 全部 finite。
+- [ ] 确认 `dynamics_valid=0` 时 residual 严格为 0，observation head 不额外拼接 `z_dyn`。
+- [ ] 统计训练 split 的 `||GT motion - observation proposal||` P50/P75/P95，与 2 cm 上限比较。
+- [ ] 记录 gate bias、gate gradient norm、alpha 分位数、applied ratio、saturation ratio 和 applied norm。
+- [ ] 若 2 cm 覆盖不了主要误差，只依据训练 split 误差预先校准 scale/bound；不得根据 test/mini_val 涨跌反复调参。
+
+**验收**：residual 在有效样本上有非平凡 applied ratio 和可见修正幅度，且仍保持有界、稳定、可归因。
+
+### P0-B：长 gap 的失败可能发生在 search crop 之前
+
+**问题**：当前 search crop 围绕最近历史框生成。长间隔或 burst-drop 下，目标可能在进入网络前已经离开 crop；此时无论最终 residual 多准确，2 cm 级后处理都无法追回目标。
+
+- [ ] 在模型 forward 前统计 target-in-base-crop recall 和 out-of-search ratio。
+- [ ] 按 `current_delta_t`、真实位移、点数和遮挡状态分桶，定位 gap1124/burst-drop 的主要失败区间。
+- [ ] 比较 base crop、2x expanded crop、trajectory-recentered crop 的 oracle recall；先只做可达性诊断。
+- [ ] 对 gap1124 早期高点、后期回落样本检查 recursive error 是否将目标逐步推离 crop。
+- [ ] 若 out-of-crop 是主要瓶颈，先实现 GT-free coarse trajectory recenter/uncertainty-aware expand，再由 SeqTrack3D observation refinement。
+- [ ] expanded/recentered crop 必须保持相同训练步和模型容量，不能把更大搜索区收益写成真实时间收益。
+
+**验收**：明确误差主要发生在 crop 前还是 proposal 后；只有 proposal 后误差占主导时，才继续以最终 bounded residual 为核心修正位置。
+
+### P0-C：当前 HTV 实验还不是“未见 cadence 泛化”
+
+**问题**：train/val 目前复用同一组 `virtual_rate_*`，已有六组结果更接近“分别在各协议上训练和评测”。这不能支持“一个模型跨采样率泛化”的论文主张；现有 manifest 的 split 内序号建键也不适合正式冻结协议。
+
+- [ ] 拆分 `train_virtual_rate_*` 和 `eval_virtual_rate_*`，允许 standard-train、variable-rate-test。
+- [ ] 增加 `virtual_rate_manifest_train / val / test`；使用 dataset version + split + scene/instance/tracklet token 稳定建键。
+- [ ] manifest 记录 protocol、seed、endpoint 数、代码 commit 和 SHA256；不匹配时 fail fast。
+- [ ] 在同一代码路径实现 `dynamics_time_mode: true | fixed | shuffled`。
+- [ ] `fixed/shuffled` 只改变 dynamics effective time，不改变 main order-time、frames、crop、candidate、标签或 optimizer steps。
+- [ ] batch 同时保留 `delta_t_real/effective`；shuffled 使用离线冻结、split 内 permutation 和 mapping hash。
+- [ ] 增加回归测试，证明 true/fixed/shuffled 除 dynamics effective time 外完全一致。
+- [ ] 删除或明确禁用未接入模型的 `dynamics_use_acceleration`。
+- [ ] 每个 run 保存 commit、dirty status、cfg hash、manifest hash、seed 和 checkpoint 规则。
+
+**验收**：一个 standard-only 或 mixed-cadence checkpoint 可在不重训、不改 threshold 的条件下测试 held-out schedule；所有方法共享相同 endpoints。
+
+### P1-D：TWC 缺少 `paired-view + twc_weight=0` 控制组
+
+**问题**：当前 TWC 目标同时包含两条历史视图的 supervised loss，因此单 seed 提升可能来自 paired-view 数据增强，而不一定来自 consistency loss。
+
 ```text
-P0 先完成 corrected-TWC 与 bounded residual 的服务器真实数据验收；
-P1 再做最小、配对、可归因的 corrected-TWC 和 residual 实验；
-P2 用 true-dt / fixed-dt / shuffled-dt、多 seed 和困难分桶决定是否进入 full data；
-P3 只有因果证据成立后，才考虑 gate、uncertainty 或更复杂 trajectory prior。
+A. single-view A1
+B. paired views + twc_weight=0
+C. paired views + corrected-TWC
 ```
 
-当前必须遵守：
+- [ ] A/B/C 必须来自同一提交，使用相同 seed、candidate4、optimizer steps 和 checkpoint 规则。
+- [ ] 用 `B-A` 衡量 paired-view augmentation，用 `C-B` 衡量 TWC 净贡献。
+- [ ] evaluation-only 测试同一 endpoint 的多条合法历史路径，报告 center/angle gap 和 prediction variance。
+- [ ] 先跑 seed42；只有 `C-B` 为正且路径方差下降，才补 seed43/44。
+- [ ] 若 B 已解释全部收益，TWC 不作为主贡献；若只降方差不涨指标，只写作稳定性 regularizer。
+- [ ] 不再启动 A2/residual+TWC 组合，直到 A1 上的净贡献得到三 seed 支持。
 
-- 旧 active-TWC 的 nonzero candidate 两路坐标系不同，旧正向与负向效果归因全部撤回；不能把旧 A1 precision 增益或 A2 崩坏写进新结论。
-- `A2-residual-dyn` 已实现，但只有本地纯逻辑 smoke test；不能写成“已有效”。
-- mini 数据只用于筛选假设和排错，不能作为正式论文主结果。
-- 同一对照必须使用相同 protocol、manifest、candidate 数、optimizer steps、checkpoint 选择规则和 seed。
-- 不再同时叠加 TWC、residual 和 gate。一次只回答一个因果问题。
-- 先检查 target-in-crop recall / out-of-search ratio；目标已离开固定 search crop 时，dynamics 再强也无法恢复。
+**验收**：能够把 paired augmentation 和 consistency loss 的收益分开，并在同提交配对实验中证明 `C-B`。
 
-术语：
+## 2. 立即执行的最小实验
 
-| 名称 | 当前含义 |
+完成 P0-A、P0-B 和 P0-C 的工程验收后再启动训练。第一轮只用 seed42 做机制筛选，优先 `gap1124` 和 `burst-drop`，standard 只检查正常节奏是否明显退化。
+
+实际执行顺序：
+
+1. 先完成 P0-C 的 split-specific 配置、manifest 和 causal time switch，冻结比较协议。
+2. 不训练新模型，先用现有数据完成 P0-A residual 幅度/梯度统计和 P0-B crop recall 统计。
+3. 根据训练 split 统计一次性确定 residual bound，然后运行下表的 seed42 最小矩阵。
+4. 只有出现因果正信号才补 seed43/44、未见 cadence 和完整数据。
+5. P1-D TWC 控制组与 GT-free TrajTrack 放在主线正信号之后，不抢占当前算力。
+
+| 方法 | 目的 |
 | --- | --- |
-| `A1-order` | order-time 主干，无 dynamics / TWC / gate |
-| `A2-order-dyn` | 旧 feature-concat dynamics，真实时间只进入 `DynamicsEncoder` |
-| `A2-residual-dyn` | observation-only motion head + 有界、近零初始化、真实时间驱动的中心 residual |
-| `corrected-TWC` | 共享绝对 frame candidate offset、crop、`coordinate_anchor` 和训练步数的 TWC |
-| `gap1124` | gap pattern `[1,1,2,4]` |
-| `burst_drop` | 连续保留与连续丢帧交替的强 variable-rate 协议 |
-| `random20` | 固定 seed 随机丢 20%，相对温和 |
+| A1-order | observation baseline |
+| A2 feature-concat true-dt | 旧时间接入方式参考 |
+| A2 residual true-dt | 主假设 |
+| A2 residual fixed-dt | 同容量时间负对照 |
+| A2 residual shuffled-dt | 物理时间对应关系负对照 |
+| constant-velocity/Kalman | 无学习、GT-free 低复杂度轨迹基线 |
 
-## 1. P0：服务器工程验收
+统一要求：
 
-本机缺少 `easydict / nuscenes-devkit`，以下真实数据检查必须在服务器 `/home/lishengjie/study/lcyu/CT-SeqTrack` 环境完成。任何正式训练都以本节全部通过为前提。
+- [ ] 所有学习方法使用同一 commit、candidate4、manifest、batch 规则、optimizer steps 和预先规定的 checkpoint 口径。
+- [ ] 主结果优先使用预先固定的 final epoch；如使用 best，只能由独立 validation metric 选择。
+- [ ] 报告逐 tracklet paired delta，不从多个 epoch 中事后挑最高 test 结果。
+- [ ] 第一轮不扫大网格；若 true-dt 没有同时优于 A1、fixed-dt 和 shuffled-dt，先定位机制，不补 seed43/44。
+- [ ] 只有 seed42 出现因果正信号，才补 seed43/44，并报告 mean±std 与 tracklet-level paired bootstrap CI。
 
-### 1.1 Corrected-TWC paired batch
+### 第一轮 Go 条件
 
-```bash
-cd /home/lishengjie/study/lcyu/CT-SeqTrack
+- residual true-dt 同时优于 A1、fixed-dt 和 shuffled-dt。
+- standard 上不出现明显退化，强 gap 上的收益不只来自单个 tracklet。
+- residual 具有非平凡 applied ratio，收益不能由 crop、参数量、训练步或 checkpoint 选择解释。
 
-python tools/check_twc_batch.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 4 \
-  --workers 0 \
-  --require-full-history
-```
+若不满足，按第 4 节诊断，不立即增加网络复杂度。
 
-不要传 `--candidate-zero-only`。验收项：
+## 3. 因果正信号后再做的论文实验
 
-- [ ] batch 明确覆盖 `candidate_id=0/1/2/3`，A/B candidate id 完全一致。
-- [ ] `sampler.num_candidates == cfg.num_candidates == 4`。
-- [ ] `len(dataset) == base_frames * num_candidates`，开启 TWC 不减少 steps per epoch。
-- [ ] `coordinate_anchor` A/B gap 不超过 `twc_anchor_eps=1e-4`。
-- [ ] A/B 共同绝对历史帧的 `candidate_offsets` 完全共享。
-- [ ] A/B 共同绝对历史帧和当前帧的 point-sampling seed 共享，最终 XYZ gap 不超过 `1e-6`。
-- [ ] candidate 1/2/3 的 anchor offset 非零，但 A/B gap 为零。
-- [ ] `num_points_in_search` A/B 相同；`current_timestamp` 相同；历史路径确实不同。
-- [ ] 所有 full-history 样本 `twc_valid=True`。
+### P1：未见 cadence 泛化
 
-负例保护：
+- [ ] Standard-only train：一个 checkpoint 直接测试 standard、gap1124、burst-drop 和未见 fixed gap。
+- [ ] Mixed-cadence train：训练时故意留出至少一种 gap pattern 和一种 drop probability。
+- [ ] Unseen-schedule test：不重训、不改 threshold，直接测试 held-out schedule。
+- [ ] 分开报告 in-domain、seen-cadence 和 unseen-cadence；只有最后一项成立，才写“跨采样率泛化”。
 
-- [ ] 在临时测试中给 view B 的 `coordinate_anchor[:, 0] += 0.01`，`compute_twc_loss()` 必须报错。
-- [ ] 临时删除 `coordinate_anchor`，默认配置必须报 `KeyError`，不能退回旧的归一化 `ref_boxs[0]` 检查。
+### P1：完整数据与统计
 
-### 1.2 Corrected-TWC forward/loss/backward
+- [ ] mini 通过后迁移到完整 nuScenes trainval，先完成 Car，再决定是否扩展类别。
+- [ ] 至少补一个第二数据集或官方 HTV 协议；Waymo 需要先补齐等价 virtual-rate manifest 支持。
+- [ ] 三个 seed 报逐 seed、paired mean±std、final/late mean 和 tracklet-level bootstrap；不能把序列帧当独立样本 bootstrap。
+- [ ] 公平基线至少包含同提交 SeqTrack3D/A1、feature A2、CV/Kalman 和 TrajTrack GT-free。
+- [ ] 最终再报告参数量、FLOPs、FPS、显存和新增分支开销。
 
-```bash
-CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 2 \
-  --workers 0 \
-  --require-full-history
+### P1：TrajTrack GT-free 公平对照
 
-CUDA_VISIBLE_DEVICES=0 python tools/check_train_steps.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a1_order_twc.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 2 \
-  --workers 0 \
-  --max-steps 2 \
-  --require-full-history \
-  --seed 42 \
-  --grad-clip 1.0 \
-  --tag corrected_twc_smoke
-```
+- [ ] 固定现有 epoch60 checkpoint，评测 `pre_wo_refine()` 与只依赖 local/global proposal agreement 的 GT-free hard switch。
+- [ ] `pre_w_refine()` 只作为 GT-assisted oracle，不能进入主表排名。
+- [ ] proposal 选择函数不得接收当前 GT、`this_bb` 或 GT-derived mask。
+- [ ] 增加 GT 独立性测试：只改变当前 GT、保持输入和 proposals 不变，GT-free 输出必须不变。
+- [ ] 固定 checkpoint、tracklet 顺序、evaluator、threshold，并报告 Success/Precision 与 FPS。
 
-- [ ] forward、supervised loss、`loss_twc`、gradient 全部 finite。
-- [ ] `twc_valid_ratio=1`（full-history smoke batch）。
-- [ ] `twc_anchor_gap_max <= 1e-4`。
-- [ ] `twc_current_point_gap_max <= 1e-6`。
-- [ ] 两步训练没有 OOM、NaN、递归重采样异常。
+## 4. 失败时的额外诊断
 
-### 1.3 A2-residual-dyn forward/loss/backward
+P0-A/P0-B/P0-C 已覆盖 residual、crop 和协议检查；这里只保留会影响下一步模型设计的额外诊断，并按实验失败类型触发。
 
-先验收 standard 和最强 variable-rate 两个配置：
+### 若 dynamics 在强 gap 退化：检查 candidate 伪速度
 
-```bash
-CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 2 \
-  --workers 0 \
-  --require-full-history
+- [ ] 比较 candidate0 与 candidate1/2/3 的 velocity/dynamics proposal error。
+- [ ] 用共享刚体扰动或时间相关轨迹扰动，对照当前逐历史框独立扰动。
+- [ ] 从 A1 递归预测误差拟合更真实的 candidate 噪声，再判断是否需要 reliability weight。
 
-CUDA_VISIBLE_DEVICES=0 python tools/check_forward_batch.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 2 \
-  --workers 0 \
-  --require-full-history
+### 若 true/fixed/shuffled 差异异常：检查时间与样本质量
 
-CUDA_VISIBLE_DEVICES=0 python tools/check_train_steps.py \
-  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
-  --path /home/lishengjie/data/nuscenes-mini \
-  --version v1.0-mini \
-  --split mini_train \
-  --batch-size 2 \
-  --workers 0 \
-  --max-steps 2 \
-  --require-full-history \
-  --seed 42 \
-  --grad-clip 1.0 \
-  --tag a2_residual_gap1124_smoke
-```
+- [ ] 统计 timestamp 缺失、fallback、重复、非单调、单位异常和 `delta_t` 分布。
+- [ ] 检查协议过滤后的 tracklet 数、endpoint 数、类别和轨迹长度，排除样本难度变化。
+- [ ] 检查 real/effective time 日志与 hash，确认没有读取错字段或 permutation 泄漏。
 
-- [ ] `motion_mlp` 输入仍为 256 维，residual 模式没有 concat `z_dyn`。
-- [ ] epoch 0 warmup 时 `dynamics_residual_scale_effective=0`。
-- [ ] 临时令 `current_epoch >= 5` 后，alpha 有界于 `[0, 0.2]`。
-- [ ] `dynamics_residual_clamped_norm <= 1.0`。
-- [ ] 最终 residual norm 不超过 `scale * max_alpha * max_norm = 0.02`。
-- [ ] `dynamics_valid=0` 时 residual 严格为零。
-- [ ] loss、gradient 和全部诊断量 finite。
+## 5. 暂缓模型扩展
 
-## 2. P1：最小可归因实验
+- [ ] 不上 Mamba、复杂 Transformer、ODE/SDE/CDE 或多传感器异步融合。
+- [ ] 不同时开发 gate、uncertainty head、TWC 和大 trajectory encoder。
+- [ ] 只有 true-dt 在强 gap 与 unseen cadence 上通过三 seed 验证，才实现轻量 dual proposal。
+- [ ] 若 crop 是主要瓶颈，trajectory proposal 优先用于 GT-free recenter/expand，再考虑最终 residual fusion。
 
-### 2.1 Corrected A1-order+TWC
+## 6. 复现与论文交付底线
 
-只有 P0 全部通过后才启动：
+- [ ] 从实际训练服务器导出锁定环境，修正 `requirement.txt` 中注释 torch、`tdqm` 拼写、松散版本和停用依赖问题。
+- [ ] 最小测试覆盖：manifest split、time switch、residual bound/gradient、GT-free evaluator 和 TWC shared coordinates。
+- [ ] 每个论文数字绑定 cfg、manifest、checkpoint、CSV/report 和 commit；README 不作为最终数据源。
+- [ ] 主表使用 GT-free、公平训练预算和预先固定的 checkpoint 规则。
+- [ ] 不使用“完整 continuous-time tracker”“首次 HTV”“首次使用历史 trajectory”或“full model 稳定超过 SeqTrack3D”等超出证据的表述。
 
-- [ ] 用修复后的代码原样重跑 `A1-order` 与 `A1-order+TWC`，保持 candidate4、总 optimizer steps、seed 和 checkpoint 规则一致。
-- [ ] 第一轮只用 `twc_weight=0.05`，不要先扫权重。
-- [ ] 至少 seed 42/43/44 三个配对 seed，报告 mean±std 和 tracklet-level bootstrap CI。
-- [ ] 除 Success/Precision 外，直接报告同一 endpoint 下 A/B `center_gap / angle_gap / prediction variance`。
-- [ ] 若 corrected-TWC 不能显著降低路径方差，不再做 A2+TWC。
-- [ ] 若降低方差但不涨 tracking metric，只把 TWC 写成稳定性分析，不写成主增益模块。
+## 7. Stop / Pivot
 
-### 2.2 Residual mini 筛选矩阵
+满足任一项则停止继续堆时间模块：
 
-先只跑 `gap1124` 与 `burst_drop`，每个协议使用完全相同的 virtual-rate manifest：
+- 连续两轮配对实验中，`true-dt - fixed/shuffled-dt < 0.5 Success / 1 Precision`。
+- residual 在合理校准后仍长期梯度、alpha 或 applied ratio 接近零。
+- 收益只来自扩大 crop、更多参数、更多训练步、checkpoint 选择或按 protocol 分别重训。
+- unseen cadence 不成立，或 full data 与 mini 的方向相反。
+- corrected-TWC 的 `C-B` 不复现，或只证明 paired-view augmentation 有效。
 
-| 模型/时间条件 | seed | 目的 |
-| --- | --- | --- |
-| A1-order | 42/43/44 | observation baseline |
-| A2 feature-concat true-dt | 42/43/44 | 旧 dynamics 方式 |
-| A2 residual true-dt | 42/43/44 | 主假设 |
-| A2 residual fixed-dt | 42/43/44 | 同容量时间负对照 |
-| A2 residual shuffled-dt | 42/43/44 | 检查物理时间是否真正被使用 |
-
-待新增配置/开关：
-
-- [ ] `fixed-dt`：帧序列保持不变，只把 dynamics 的 `delta_t/current_delta_t` 固定为 reference step。
-- [ ] `shuffled-dt`：使用固定 manifest 离线打乱时间字段，不能让每个 epoch 随机变化。
-- [ ] `frame-index-dt`：可选，使用离散 offset 作为时间，区分帧序与物理秒数。
-- [ ] 所有对照保持模型参数量、训练帧、crop 和 optimizer steps 完全相同。
-
-第一轮不要扫大网格。默认只测：
-
-```yaml
-dynamics_residual_scale: 0.1
-dynamics_max_residual_norm: 1.0
-dynamics_max_alpha: 0.2
-dynamics_warmup_epoch: 5
-dynamics_long_gap_only: false
-dynamics_sparse_only: false
-```
-
-只有默认设置出现跨 seed 正信号，才补 `scale=0.05/0.2` 或 `long_gap_only/sparse_only`。
-
-## 3. P2：协议、诊断与公平性
-
-### 3.1 核对历史 HTV 任务状态
-
-旧文档记录过 6 个后台任务，但本地无法确认 2026-07-11 的服务器进程状态。不要沿用旧 PID 推断“仍在运行”。
-
-```bash
-cd /home/lishengjie/study/lcyu/CT-SeqTrack
-ps -ef | grep "htv_" | grep -v grep
-nvidia-smi
-grep -iE "error|exception|traceback|cuda out|nan|killed" logs/vr_htv/*.log
-```
-
-- [ ] 核对 gap1124/burst_drop/random20 的 A1/A2 六组是否完成、失败或只有 partial checkpoint。
-- [ ] 为每个 run 记录 git commit、cfg hash、manifest hash、seed、样本数、steps/epoch、best/final checkpoint。
-- [ ] 完成的历史 run 只作为筛选证据；新 residual 因果矩阵必须使用冻结 manifest 重跑。
-
-### 3.2 必须补的诊断
-
-- [ ] 时间分布：`delta_t/current_delta_t mean, std, p50, p75, p95, max`。
-- [ ] 分桶指标：short/medium/long gap、sparse/medium/dense points、small/large displacement、full/incomplete history、re-appearance。
-- [ ] crop 可达性：target-in-crop recall、out-of-search ratio，并按 gap 分桶。
-- [ ] residual：alpha mean/min/max、raw/clamped norm、clamp/applied ratio、`obs_dyn_center_gap`。
-- [ ] oracle 诊断：`obs_center_err`、`dyn_center_err`、`dyn_better_rate`；oracle 只能分析，不能进入推理 gate。
-- [ ] candidate 诊断：candidate0 与 nonzero candidate 的 velocity label、dyn error 和 residual error。
-- [ ] 稳定性：best/final/late-mean、3 seed mean±std、tracklet bootstrap CI。
-- [ ] 效率：参数量、FLOPs、FPS、residual 分支额外开销。
-
-### 3.3 Formal manifest 与 checkpoint 规则
-
-- [ ] 为 train/val/test 生成 split-specific manifest，文件名包含 dataset、split、category、protocol、seed、max-gap。
-- [ ] A1、feature dyn、residual dyn 和 TWC 复用同一份 manifest。
-- [ ] 预先规定 checkpoint 选择规则，不能看 test 后选择 epoch。
-- [ ] mini_val 只用于开发；正式数据需要独立 val 选 checkpoint、held-out test 一次评测。
-
-## 4. Go / Stop 门槛
-
-### 4.1 Go 到完整数据
-
-mini 阶段需同时满足：
-
-- [ ] residual true-dt 在 `gap1124`、`burst_drop` 至少两项中，相对配对 A1 和 fixed/shuffled-dt 平均约提升 `>= +1.5 Success / +2 Precision`。
-- [ ] 3 seed 无单 seed 大崩溃，配对置信区间不跨 0。
-- [ ] regular fixed-step 退化不超过约 `0.5 Success / 1 Precision`。
-- [ ] shuffled/fixed 时间后收益明显消失。
-- [ ] 收益不能由更大 crop、更多参数、更多 optimizer steps 或不同 checkpoint 规则解释。
-
-通过后再做：
-
-- [ ] 完整 nuScenes trainval，至少两个类别，最好官方全部类别。
-- [ ] 第二数据集或官方 KITTI-HV/nuScenes-HTV 协议。
-- [ ] 与 SeqTrack3D、HVTrack、StreamTrack、Motion-to-Matching/trajectory baseline 和简单 constant-velocity/Kalman baseline 公平比较。
-- [ ] 测试未见过的 cadence/drop schedule，证明一个模型跨采样率泛化，而非每个 stride 单独训练。
-
-### 4.2 Stop / Pivot
-
-满足任一项则停止把真实 `delta_t` 作为主算法贡献：
-
-- 连续两轮配对 3-seed 中，`true-dt - fixed/shuffled-dt < 0.5 Success / 1 Precision`。
-- 收益只来自扩大 crop、额外参数、更多训练步或 protocol-specific retraining。
-- full data 的方向与 mini 正信号相反。
-- corrected-TWC 不降低同 endpoint 的路径预测方差。
-
-Pivot 选项：
-
-- 把项目转成 variable-rate 3D SOT benchmark / diagnosis 工作。
-- 把 dynamics 降级为可靠 trajectory proposal 或 constant-velocity/Kalman fallback。
-- 只有 residual 明确有效后，才尝试 bbox-only MLP/GRU/Transformer-lite；不上完整 TrajFormer、ODE/SDE/CDE。
-
-## 5. 暂缓项
-
-- [ ] Observability gate、uncertainty head 和 residual 不同时开发；等待 residual 因果结果。
-- [ ] 不把 corrected-TWC 接入 A2/residual，直到 corrected A1+TWC 有三 seed 干净证据。
-- [ ] 不切换到 Mamba/SSM、Neural ODE/SDE/CDE 或多传感器异步融合。
-- [ ] 不使用无法核验的 `TrackM3D` 名称；相关思路统一写作 Kalman/continuous-time state estimation。
-- [ ] 不把 TrajTrack-style GT-assisted proposal selection 当作公平 baseline；推理 gate 只能使用测试时可得统计量。
+Pivot：把工作收敛为 variable-rate 3D SOT benchmark/diagnosis，或使用可解释的 constant-velocity/Kalman trajectory fallback；不再通过增加复杂时序模块追分。
