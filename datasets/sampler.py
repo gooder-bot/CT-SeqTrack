@@ -12,7 +12,9 @@ from datasets.misc_utils import get_history_frame_ids_and_masks, \
     create_history_frame_dict, \
     generate_virtual_points, \
     build_time_fields, \
-    build_main_time_fields
+    build_main_time_fields, \
+    build_effective_time_fields, \
+    normalize_dynamics_time_mode
 from utils.twc_utils import (
     build_shared_candidate_offset_map,
     build_shared_point_sampling_seed_map,
@@ -328,6 +330,24 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         use_real_time=use_real_time,
         default_step=default_time_step,
         pseudo_step=pseudo_time_step)
+    dynamics_time_mode = normalize_dynamics_time_mode(
+        this_frame.get('_ct_dynamics_time_mode',
+                       getattr(config, 'dynamics_time_mode', 'true')))
+    effective_time_fields = build_effective_time_fields(
+        dynamics_time_mode,
+        (relative_timestamps, delta_t_list, local_timestamps, current_timestamp),
+        effective_frame_timestamps=[
+            prev_frames[key].get('_ct_effective_timestamp') for key in sorted_prev_keys
+        ],
+        effective_current_timestamp=this_frame.get('_ct_effective_timestamp'),
+        frame_ids=prev_frame_ids,
+        current_frame_id=this_frame_id,
+        default_step=float(getattr(
+            config, 'dynamics_fixed_delta_t', default_time_step)),
+        pseudo_step=pseudo_time_step,
+    )
+    (effective_relative_timestamps, effective_delta_t_list,
+     effective_local_timestamps, effective_current_timestamp) = effective_time_fields
     main_current_value = float(getattr(config, 'main_time_current', 0.0))
     point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
         valid_mask,
@@ -397,8 +417,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         np.sqrt(np.sum((this_box.center - prev_box.center)**2))
         > config.motion_threshold for prev_box in prev_boxs
     ]
-    current_delta_t = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
-    velocity_label = (motion_label_list[0][:3] / max(current_delta_t, 1e-3)).astype('float32')
+    current_delta_t_real = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
+    current_delta_t_effective = (
+        effective_delta_t_list[0] if len(effective_delta_t_list) > 0
+        else float(getattr(config, 'dynamics_fixed_delta_t', default_time_step)))
+    # Supervision is always defined in physical time. A fixed/shuffled negative
+    # control may alter only the time consumed by DynamicsEncoder.
+    velocity_label = (
+        motion_label_list[0][:3] / max(current_delta_t_real, 1e-3)
+    ).astype('float32')
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -412,11 +439,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'valid_mask': np.array(valid_mask).astype('int'), 
         'timestamps': main_timestamps,
         'delta_t': np.array(delta_t_list, dtype=np.float32),
+        'delta_t_real': np.array(delta_t_list, dtype=np.float32),
+        'delta_t_effective': np.array(effective_delta_t_list, dtype=np.float32),
         'delta_T': np.array(corner_timestamps, dtype=np.float32),
         'timestamps_real': local_timestamps,
         'delta_T_real': np.array(relative_timestamps, dtype=np.float32),
+        'timestamps_effective': np.asarray(effective_local_timestamps, dtype=np.float32),
+        'delta_T_effective': np.array(effective_relative_timestamps, dtype=np.float32),
         'current_timestamp': np.float64(current_timestamp if current_timestamp is not None else 0.0),
-        'current_delta_t': np.float32(current_delta_t),
+        'current_effective_timestamp': np.float64(effective_current_timestamp),
+        'current_delta_t': np.float32(current_delta_t_real),
+        'current_delta_t_real': np.float32(current_delta_t_real),
+        'current_delta_t_effective': np.float32(current_delta_t_effective),
+        'dynamics_time_mode_id': np.int64(
+            {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]),
         'num_points_in_search': np.float32(num_points_in_search),
         'velocity_label': velocity_label,
         'candidate_id': np.int64(candidate_id),

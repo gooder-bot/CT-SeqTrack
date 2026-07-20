@@ -19,6 +19,7 @@ from pytorch_lightning import seed_everything
 
 from datasets import get_dataset
 from models import get_model
+from utils.run_provenance import write_run_provenance
 
 torch.set_float32_matmul_precision("high")
 
@@ -60,6 +61,16 @@ def parse_config():
     parser.add_argument('--preloading', action='store_true', default=False, help='preload dataset into memory')
     parser.add_argument('--tag', type=str, default="", help='an extra tag appended on output folder name')
     parser.add_argument('--seed', type=int, help='random_seed')
+    parser.add_argument(
+        '--dynamics_time_mode', choices=('true', 'fixed', 'shuffled'),
+        default=argparse.SUPPRESS,
+        help='P0-C dynamics-only physical-time control.')
+    parser.add_argument(
+        '--dynamics_time_manifest', default=argparse.SUPPRESS,
+        help='Offline split permutation manifest required by shuffled mode.')
+    parser.add_argument(
+        '--dynamics_fixed_delta_t', type=float, default=argparse.SUPPRESS,
+        help='Constant adjacent-observation step used by fixed mode.')
 
     args = parser.parse_args()
     config = load_yaml(args.cfg)
@@ -73,6 +84,8 @@ if cfg.seed is not None:
     seed_everything(cfg.seed)
     
 env_cp = os.environ.copy()
+project_root = os.path.dirname(os.path.abspath(__file__))
+run_root_dir = generate_log_folder_name(cfg)
 
 try:
     node_rank, local_rank, world_size = env_cp['NODE_RANK'], env_cp['LOCAL_RANK'], env_cp['WORLD_SIZE']
@@ -89,11 +102,16 @@ except KeyError:
 
 if not cfg.test:
     # dataset and dataloader
-    train_data = get_dataset(cfg, type=cfg.train_type, split=cfg.train_split)
-    val_data = get_dataset(cfg, type='test', split=cfg.val_split)
+    train_data = get_dataset(
+        cfg, type=cfg.train_type, split=cfg.train_split, protocol_role='train')
+    val_data = get_dataset(
+        cfg, type='test', split=cfg.val_split, protocol_role='val')
     train_loader = DataLoader(train_data, batch_size=cfg.batch_size, num_workers=cfg.workers, shuffle=True,drop_last=True,
                               pin_memory=True)
     val_loader = DataLoader(val_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
+    write_run_provenance(
+        run_root_dir, cfg, {"train": train_data, "val": val_data},
+        mode="train", root=project_root)
     checkpoint_callback = ModelCheckpoint(monitor='precision/test', mode='max', save_last=True,
                                           save_top_k=cfg.save_top_k)
     learningrate_callback = LearningRateMonitor(logging_interval="step")
@@ -101,7 +119,7 @@ if not cfg.test:
     # init trainer
     trainer = pl.Trainer(devices=-1, accelerator='auto', max_epochs=cfg.epoch,
                          callbacks=[checkpoint_callback,learningrate_callback],
-                         default_root_dir=generate_log_folder_name(cfg),
+                         default_root_dir=run_root_dir,
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,
                          num_sanity_val_steps=0,
                          gradient_clip_val=cfg.gradient_clip_val,
@@ -115,10 +133,13 @@ if not cfg.test:
 
     trainer.fit(net, train_loader, val_loader, ckpt_path=cfg.checkpoint)
 else:
-    test_data = get_dataset(cfg, type='test', split=cfg.test_split)
+    test_data = get_dataset(
+        cfg, type='test', split=cfg.test_split, protocol_role='test')
     test_loader = DataLoader(test_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
+    write_run_provenance(
+        run_root_dir, cfg, {"test": test_data}, mode="test", root=project_root)
 
-    trainer = pl.Trainer(devices=-1, accelerator='auto', default_root_dir=generate_log_folder_name(cfg))
+    trainer = pl.Trainer(devices=-1, accelerator='auto', default_root_dir=run_root_dir)
 
     if cfg.checkpoint is None:
         net = get_model(cfg.net_model)(cfg)

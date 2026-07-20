@@ -1643,3 +1643,12 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 默认关闭路径回归检查已取消，不再作为后续计划任务；下一步重点转向困难子集评估、
 正式消融，以及观察训练后 alpha 是否随 sparse / gap / fg score 分桶发生合理变化。
 ```
+---
+
+## 2026-07-20：P0-C 冻结协议工程入口完成（待服务器真实数据验收）
+
+- `datasets/__init__.py` 已支持 train 与 val/test/eval cadence 字段分离，并保留旧无前缀配置的兼容回退。
+- nuScenes virtual-rate manifest 升级为 stable-token v2：以 version/split/scene/instance 建键，记录 protocol、endpoint、commit 与多层 SHA256，并对错 split/role/protocol/tracklet/hash fail fast。
+- 新增离线 split-wide shuffled-dt manifest；batch 与递归评测同时保留 real/effective time，且模型只有 `DynamicsEncoder` 读取 effective time。
+- 新增 `tools/check_p0c_time_controls.py`、`tools/build_dynamics_time_manifest.py`、P0-C gap1124 配置和 `protocols/README.md`；`main.py` 会写 `run_provenance.json`。
+- 本地已通过相关 Python 文件 `py_compile`、split-aware config/hash 自测和 synthetic effective-time 自测。由于本地 Windows 环境缺少 nuScenes devkit，真实 manifest 构建、真实 batch invariance 与冻结 checkpoint 三路评测留给服务器执行，不能提前记为 P0-C 实验验收完成。

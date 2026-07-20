@@ -497,7 +497,8 @@ def main():
         )
         return
 
-    sampler = rec_diag.get_dataset(cfg, type="test", split=split)
+    sampler = rec_diag.get_dataset(
+        cfg, type="test", split=split, protocol_role="test")
     dataset = getattr(sampler, "dataset", sampler)
     reference_path = (
         Path(args.reference_endpoints_csv).resolve()

@@ -202,8 +202,8 @@ use_observability_gate: False
 
 ```text
 1. 将 P0-B4 verdict、关键脚本和文档提交到 clean GitHub commit；后续服务器关键脚本不得只存在于 dirty/untracked 工作树。
-2. 完成 P0-C：拆分 train/eval virtual-rate、稳定 token manifest、held-out cadence，并实现统一 `true/fixed/shuffled-dt` effective-time 开关和一致性测试。
-3. 用冻结 checkpoint 做未见 cadence benchmark/diagnosis，不按 protocol 重训或改 threshold；报告 reachability、首次失控和连续失败。
+2. P0-C 本地工程已完成：train/eval cadence 分离、稳定 token v2 manifest、离线 shuffled-time mapping、`true/fixed/shuffled-dt` effective-time 字段和 run provenance 已接通；现在先在服务器 clean commit 上生成 manifests，并让真实 batch invariance 通过。
+3. 用同一个冻结 A2 checkpoint 做 gap1124 `true/fixed/shuffled-dt`，不按 protocol 重训或改 threshold；通过后再扩展 burst/未见 fixed-gap，并报告 reachability、首次失控和连续失败。具体命令见 `protocols/README.md`。
 4. P0-A 只做一次 crop-reachable mini_train 机制收尾；先确认 residual correction 定义，再一次性预注册 init/scale/bound，不扫参数网格。
 5. corrected-TWC 只做同提交 `single-view / paired-view weight0 / corrected-TWC` seed42 控制；`C-B` 不成立就停止。
 6. 不实现当前 reliability-controlled anchor、active dual-anchor、学习式 uncertainty gate 或复杂 memory/SSM。

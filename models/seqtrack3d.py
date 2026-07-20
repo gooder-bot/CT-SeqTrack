@@ -26,6 +26,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
         self.use_dynamics_encoder = getattr(config, 'use_dynamics_encoder', False)
+        if bool(getattr(config, 'dynamics_use_acceleration', False)):
+            raise ValueError(
+                "dynamics_use_acceleration is not implemented or consumed by "
+                "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
         self.obs_gate_fusion_mode = str(getattr(config, 'obs_gate_fusion_mode', 'feature')).lower()
         self.obs_gate_fusion_mode = self.obs_gate_fusion_mode.replace('-', '_')
@@ -320,9 +324,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_dynamics_encoder:
             z_dyn, velocity_pred, dynamics_displacement_pred, dynamics_valid = self.dynamics_encoder(
                 input_dict["ref_boxs"],
-                input_dict["delta_t"],
+                input_dict.get("delta_t_effective", input_dict["delta_t"]),
                 input_dict["valid_mask"],
-                input_dict.get("current_delta_t"),
+                input_dict.get(
+                    "current_delta_t_effective",
+                    input_dict.get("current_delta_t")),
             )
             output_dict["velocity_pred"] = velocity_pred
             output_dict["dynamics_displacement_pred"] = dynamics_displacement_pred

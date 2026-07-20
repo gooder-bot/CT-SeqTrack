@@ -17,7 +17,12 @@ import numpy as np
 from nuscenes.utils import geometry_utils
 
 from datasets.misc_utils import get_history_frame_ids_and_masks,get_last_n_bounding_boxes
-from datasets.misc_utils import build_time_fields, build_main_time_fields
+from datasets.misc_utils import (
+    build_effective_time_fields,
+    build_main_time_fields,
+    build_time_fields,
+    normalize_dynamics_time_mode,
+)
 
 import time
 
@@ -275,6 +280,24 @@ class MotionBaseModelMF(BaseModelMF):
             use_real_time=use_real_time,
             default_step=default_time_step,
             pseudo_step=pseudo_time_step)
+        dynamics_time_mode = normalize_dynamics_time_mode(
+            this_frame.get('_ct_dynamics_time_mode',
+                           getattr(self.config, 'dynamics_time_mode', 'true')))
+        effective_time_fields = build_effective_time_fields(
+            dynamics_time_mode,
+            (relative_timestamps, delta_t_list, local_timestamps, current_timestamp),
+            effective_frame_timestamps=[
+                frame.get('_ct_effective_timestamp') for frame in prev_frames
+            ],
+            effective_current_timestamp=this_frame.get('_ct_effective_timestamp'),
+            frame_ids=prev_frame_ids,
+            current_frame_id=frame_id,
+            default_step=float(getattr(
+                self.config, 'dynamics_fixed_delta_t', default_time_step)),
+            pseudo_step=pseudo_time_step,
+        )
+        (effective_relative_timestamps, effective_delta_t_list,
+         effective_local_timestamps, effective_current_timestamp) = effective_time_fields
         main_current_value = float(getattr(self.config, 'main_time_current', 0.0))
         point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
             valid_mask,
@@ -315,6 +338,9 @@ class MotionBaseModelMF(BaseModelMF):
         ref_boxs_np = np.stack(ref_box_list, axis=0)
 
         current_delta_t = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
+        current_delta_t_effective = (
+            effective_delta_t_list[0] if len(effective_delta_t_list) > 0
+            else float(getattr(self.config, 'dynamics_fixed_delta_t', default_time_step)))
 
         data_dict = {"points": torch.tensor(stack_points[None, :], device=self.device, dtype=torch.float32), 
                      "ref_boxs":torch.tensor(ref_boxs_np[None, :], device=self.device, dtype=torch.float32), 
@@ -322,11 +348,21 @@ class MotionBaseModelMF(BaseModelMF):
                      "bbox_size":torch.tensor(bbox_size[None, :],device=self.device, dtype=torch.float32),
                      "timestamps": torch.tensor(main_timestamps[None, :], device=self.device, dtype=torch.float32),
                      "delta_t": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "delta_t_real": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "delta_t_effective": torch.tensor(np.array(effective_delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "delta_T": torch.tensor(np.array(corner_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "timestamps_real": torch.tensor(local_timestamps[None, :], device=self.device, dtype=torch.float32),
                      "delta_T_real": torch.tensor(np.array(relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "timestamps_effective": torch.tensor(np.asarray(effective_local_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
+                     "delta_T_effective": torch.tensor(np.array(effective_relative_timestamps, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "current_timestamp": torch.tensor([current_timestamp], device=self.device, dtype=torch.float64),
+                     "current_effective_timestamp": torch.tensor([effective_current_timestamp], device=self.device, dtype=torch.float64),
                      "current_delta_t": torch.tensor([current_delta_t], device=self.device, dtype=torch.float32),
+                     "current_delta_t_real": torch.tensor([current_delta_t], device=self.device, dtype=torch.float32),
+                     "current_delta_t_effective": torch.tensor([current_delta_t_effective], device=self.device, dtype=torch.float32),
+                     "dynamics_time_mode_id": torch.tensor([
+                         {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]
+                     ], device=self.device, dtype=torch.int64),
                      "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
                      }
 

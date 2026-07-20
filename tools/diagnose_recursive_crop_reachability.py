@@ -314,7 +314,8 @@ def main():
             f"device={device} parameters={parameter_count} weights_sha256={sha256_file(weights_path)}"
         )
         return
-    sampler = get_dataset(cfg, type="test", split=split)
+    sampler = get_dataset(
+        cfg, type="test", split=split, protocol_role="test")
     dataset = getattr(sampler, "dataset", sampler)
 
     reference_path = (

@@ -54,7 +54,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 ```text
 1. P0-B4 已完成并 No-Go：不实现当前 observation calibrator 控制的 Kalman/frozen-state，不做 active dual-anchor，不在 mini_val 上重调。
 2. 先把当前脚本、verdict 和文档绑定到 clean GitHub commit；服务器输出继续保存 script/data/config/checkpoint hashes。
-3. 研究主线转向 P0-C frozen protocol：train/eval cadence 分离、稳定 token manifest、held-out schedule 和通用 `true/fixed/shuffled-dt` 因果控制。
+3. P0-C frozen protocol 的本地工程入口已完成：train/eval cadence 分离、stable-token v2 manifest、离线 shuffled mapping、real/effective time 双字段和 provenance 已接通；当前先在服务器 clean commit 上完成真实 batch invariance，再用同一冻结 checkpoint 做 held-out `true/fixed/shuffled-dt`。
 4. P0-A 只保留一次 crop-reachable subset 机制收尾；先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册参数。
 5. corrected-TWC 只做同提交 single-view / paired-view weight0 / corrected-TWC seed42 控制；若无净一致性收益，与 residual 一起降级为负结果或诊断。
 ```

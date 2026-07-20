@@ -52,3 +52,7 @@ run_logs/
 output/
 lightning_logs/
 events.out.tfevents*
+
+# Dataset-derived frozen protocol artifacts are archived with experiment results,
+# not committed into the source tree. Their SHA256 values are recorded per run.
+protocols/manifests/*.json

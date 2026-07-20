@@ -50,6 +50,11 @@ def print_summary(dataset):
             print(f"  {key}: {value}")
     print("num_tracklets:", dataset.get_num_tracklets())
     print("num_frames_total:", dataset.get_num_frames_total())
+    print("virtual_rate_selection_sha256:", getattr(
+        dataset, "virtual_rate_selection_sha256", ""))
+    print("virtual_rate_manifest_content_sha256:", getattr(
+        dataset, "virtual_rate_manifest_content_sha256", ""))
+    print("dynamics_time_summary:", getattr(dataset, "dynamics_time_summary", {}))
 
 
 def print_tracklets(dataset, limit):
@@ -92,8 +97,9 @@ def has_full_history(batch, hist_num):
     return valid_mask[0].sum() >= int(hist_num)
 
 
-def print_loaded_batch(cfg, split, args):
-    dataset = get_dataset(cfg, type=cfg.train_type, split=split)
+def print_loaded_batch(cfg, split, role, args):
+    dataset = get_dataset(
+        cfg, type=cfg.train_type, split=split, protocol_role=role)
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -118,7 +124,10 @@ def print_loaded_batch(cfg, split, args):
 
     print("loaded_batch:")
     for key in ("prev_frame_ids", "history_offsets", "valid_mask", "timestamps_real",
-                "delta_T_real", "delta_t", "current_delta_t", "current_timestamp"):
+                "delta_T_real", "delta_t_real", "current_delta_t_real",
+                "timestamps_effective", "delta_T_effective", "delta_t_effective",
+                "current_delta_t_effective", "dynamics_time_mode_id",
+                "current_timestamp"):
         if key not in batch:
             print(f"  {key}: <missing>")
             continue
@@ -133,6 +142,7 @@ def main():
     parser.add_argument("--path", default=None)
     parser.add_argument("--version", default=None)
     parser.add_argument("--split", default=None)
+    parser.add_argument("--role", choices=("train", "val", "test"), default=None)
     parser.add_argument("--type", default="test",
                         help="Use test for metadata-only inspection; train_motion_mf for train sampler.")
     parser.add_argument("--limit", type=int, default=5)
@@ -156,14 +166,16 @@ def main():
     if split is None:
         split = cfg.test_split if args.type == "test" else cfg.train_split
 
-    wrapped = get_dataset(cfg, type=args.type, split=split)
+    role = args.role or ('train' if args.type.startswith('train') else 'test')
+    wrapped = get_dataset(
+        cfg, type=args.type, split=split, protocol_role=role)
     dataset = get_raw_dataset(wrapped)
     print(f"cfg: {args.cfg}")
     print(f"split: {split}")
     print_summary(dataset)
     print_tracklets(dataset, args.limit)
     if args.load_batch:
-        print_loaded_batch(cfg, split, args)
+        print_loaded_batch(cfg, split, role, args)
 
 
 if __name__ == "__main__":

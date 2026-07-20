@@ -79,17 +79,19 @@ P0-B 已在独立验证入口处 No-Go，不能再作为当前方法主线。接
 
 **问题**：train/val 目前复用同一组 `virtual_rate_*`，已有六组结果更接近“分别在各协议上训练和评测”。这不能支持“一个模型跨采样率泛化”的论文主张；现有 manifest 的 split 内序号建键也不适合正式冻结协议。
 
-- [ ] 拆分 `train_virtual_rate_*` 和 `eval_virtual_rate_*`，允许 standard-train、variable-rate-test。
-- [ ] 增加 `virtual_rate_manifest_train / val / test`；使用 dataset version + split + scene/instance/tracklet token 稳定建键。
-- [ ] manifest 记录 protocol、seed、endpoint 数、代码 commit 和 SHA256；不匹配时 fail fast。
-- [ ] 在同一代码路径实现 `dynamics_time_mode: true | fixed | shuffled`。
-- [ ] `fixed/shuffled` 只改变 dynamics effective time，不改变 main order-time、frames、crop、candidate、标签或 optimizer steps。
-- [ ] batch 同时保留 `delta_t_real/effective`；shuffled 使用离线冻结、split 内 permutation 和 mapping hash。
-- [ ] 增加回归测试，证明 true/fixed/shuffled 除 dynamics effective time 外完全一致。
-- [ ] 删除或明确禁用未接入模型的 `dynamics_use_acceleration`。
-- [ ] 每个 run 保存 commit、dirty status、cfg hash、manifest hash、seed 和 checkpoint 规则。
+- [x] 工程上拆分 `train_virtual_rate_*` 与 `val/test/eval_virtual_rate_*`，允许 standard-train、variable-rate-test；旧配置仍回退到无前缀字段。
+- [x] 增加 `virtual_rate_manifest_train / val / test`；v2 manifest 使用 dataset version + split + scene token + instance/tracklet token 稳定建键。
+- [x] v2 manifest 记录 protocol、seed、endpoint 数、代码 commit、selection/content/file SHA256；schema、split、role、protocol、tracklet set、长度或 hash 不匹配时 fail fast。
+- [x] 在训练采样和递归评测的同一字段契约中实现 `dynamics_time_mode: true | fixed | shuffled`。
+- [x] `fixed/shuffled` 只改变 dynamics effective time；旧 `delta_t/current_delta_t` 明确保留为 real-time alias，主干 order-time、frames、crop、candidate、标签和 real-time velocity supervision 不变。
+- [x] batch 同时保留 `delta_t_real/effective`；shuffled 使用离线冻结、split 内一一 permutation、累计 effective timestamp 和 mapping hash。
+- [x] 增加 `tools/check_p0c_time_controls.py`：纯函数 self-test 与真实 batch 三路不变量检查已实现。
+- [x] 明确禁用未接入模型的 `dynamics_use_acceleration=true`，避免产生伪消融。
+- [x] `main.py` 每个 run 写出 `run_provenance.json`，保存 commit、dirty status、原始/解析后 cfg hash、manifest/mapping hash、seed、checkpoint hash 和 checkpoint 规则。
+- [ ] 在服务器 clean commit 上生成 val/test cadence manifest 和 test shuffled-time manifest，跑真实 nuScenes batch invariance；本地因没有 nuScenes 开发包只能完成 `py_compile`、config/hash 与 effective-time 纯函数测试。
+- [ ] 用同一个冻结 A2 checkpoint 完成 gap1124 `true/fixed/shuffled-dt` 三次评测并核对三份 `run_provenance.json`；之后才扩展 burst-drop 和未见 fixed-gap。
 
-**验收**：一个 standard-only 或 mixed-cadence checkpoint 可在不重训、不改 threshold 的条件下测试 held-out schedule；所有方法共享相同 endpoints。
+**验收**：一个 standard-only 或 mixed-cadence checkpoint 可在不重训、不改 threshold 的条件下测试 held-out schedule；所有方法共享相同 endpoints。工程入口已完成，服务器 manifest/batch smoke 和第一组三路冻结评测尚未完成；命令见 `protocols/README.md`。
 
 ### P1-D：TWC 缺少 `paired-view + twc_weight=0` 控制组
 
@@ -117,8 +119,8 @@ P0-B 已 No-Go，当前不启动新的主线训练。先完成 P0-C 的协议工
 实际执行顺序：
 
 1. 将当前脚本、文档和 P0-B4 verdict 提交到 clean GitHub commit；后续服务器运行必须使关键脚本来自该 commit，避免再次只留下 dirty hash。
-2. 立即完成 P0-C：拆分 train/eval virtual-rate 字段，使用稳定 scene/instance/tracklet token 生成 manifest，并实现通用 `true/fixed/shuffled-dt` effective-time 开关与一致性回归测试。
-3. 用冻结 A1/A2 checkpoint 做 held-out cadence 评测和 reachability/递归失败报告；不重训、不改 threshold，不把按 protocol 分别训练写成泛化。
+2. 将本轮 P0-C 工程提交到 clean GitHub commit；在服务器按 `protocols/README.md` 生成 role-specific cadence/time manifests，并先让真实 batch invariance 输出 PASS。
+3. 用同一个冻结 A2 checkpoint 做 gap1124 `true/fixed/shuffled-dt` held-out cadence 评测；不重训、不改 threshold，核对 endpoints/manifest/checkpoint hash 后再做 reachability/递归失败报告。
 4. 只做一次 P0-A 收尾：在 mini_train crop-reachable subset 统计 `GT motion - observation proposal`，先核对 residual 目标/公式，再一次性预注册 init/scale/bound；不直接调大 `max_residual_norm`，不扫网格。
 5. 若仍需要方法贡献，优先做同提交的 `single-view A1 / paired-view weight0 / corrected-TWC` seed42 控制；只有 `C-B` 为正且路径方差下降才补 seed43/44。
 6. 若 P0-C、residual 或 TWC 的因果控制仍无正信号，正式 Pivot 为 variable-rate 3D SOT benchmark/diagnosis，不再增加时序模块。

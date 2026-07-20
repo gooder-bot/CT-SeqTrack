@@ -243,7 +243,8 @@ def main():
     args = parse_args()
     dataset_cfg = apply_dataset_overrides(load_config(args.cfg), args)
     split = args.split if args.split is not None else dataset_cfg.test_split
-    test_dataset = get_dataset(dataset_cfg, type="test", split=split)
+    test_dataset = get_dataset(
+        dataset_cfg, type="test", split=split, protocol_role="test")
     sequence = test_dataset[args.tracklet]
 
     end_frame = min(args.end_frame, len(sequence) - 1)

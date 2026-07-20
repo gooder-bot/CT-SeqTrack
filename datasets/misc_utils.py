@@ -221,6 +221,56 @@ def build_time_fields(frame_timestamps, current_timestamp, frame_ids=None, curre
     return relative_timestamps, delta_t, local_timestamps, float(current_timestamp)
 
 
+def normalize_dynamics_time_mode(mode):
+    mode = str(mode or "true").strip().lower().replace("-", "_")
+    aliases = {
+        "real": "true",
+        "true_dt": "true",
+        "fixed_dt": "fixed",
+        "constant": "fixed",
+        "shuffled_dt": "shuffled",
+        "shuffle": "shuffled",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in ("true", "fixed", "shuffled"):
+        raise ValueError(
+            "dynamics_time_mode must be one of: true, fixed, shuffled")
+    return mode
+
+
+def build_effective_time_fields(
+        mode, real_time_fields, effective_frame_timestamps=None,
+        effective_current_timestamp=None, frame_ids=None, current_frame_id=None,
+        default_step=0.1, pseudo_step=0.1):
+    """Return the time fields consumed only by ``DynamicsEncoder``.
+
+    ``true`` aliases physical time. ``fixed`` and ``shuffled`` require the
+    dataset to attach an offline effective timestamp to every frame. Keeping
+    this function separate prevents a negative control from changing point
+    time tokens, crops, labels, candidates, or the physical-time supervision.
+    """
+    mode = normalize_dynamics_time_mode(mode)
+    if mode == "true":
+        relative, delta_t, local, current = real_time_fields
+        return list(relative), list(delta_t), np.asarray(local).copy(), float(current)
+
+    values = list(effective_frame_timestamps or [])
+    if effective_current_timestamp is None or any(value is None for value in values):
+        raise ValueError(
+            f"dynamics_time_mode={mode} requires frozen effective timestamps "
+            "for the current frame and every history frame")
+
+    return build_time_fields(
+        values,
+        effective_current_timestamp,
+        frame_ids=frame_ids,
+        current_frame_id=current_frame_id,
+        use_real_time=True,
+        default_step=default_step,
+        pseudo_step=pseudo_step,
+    )
+
+
 def generate_timestamp_prev_list(valid_mask_or_timestamps, point_sample_size, current_timestamp=None):
     values = list(valid_mask_or_timestamps)
     if current_timestamp is not None or any(value is None for value in values):

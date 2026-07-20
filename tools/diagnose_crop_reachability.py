@@ -437,7 +437,8 @@ def main():
         cfg.version = args.version
     cfg.preloading = bool(args.preloading)
     split = args.split if args.split is not None else cfg.train_split
-    sampler = get_dataset(cfg, type="test", split=split)
+    sampler = get_dataset(
+        cfg, type="test", split=split, protocol_role="test")
     dataset = getattr(sampler, "dataset", sampler)
 
     base_scale = float(cfg.bb_scale)

@@ -659,8 +659,8 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 
 ```text
 1. 把当前 P0-B4 verdict、脚本和文档提交到 clean GitHub commit；后续服务器运行不得再让关键脚本只存在于 dirty/untracked 状态。
-2. 优先完成 P0-C 的 train/eval virtual-rate 分离、稳定 token manifest、held-out cadence 与通用 `true/fixed/shuffled-dt` 一致性测试，正式转向 benchmark/diagnosis。
-3. 用冻结 checkpoint 做未见 cadence 评测，不重训、不改 threshold，并报告 reachability、首次失控和连续失败，而不是只报总体 Success/Precision。
+2. P0-C 本地协议工程已完成；下一步在服务器 clean commit 上生成 role-specific cadence manifest 与 shuffled mapping，并让真实 batch `true/fixed/shuffled-dt` 不变量检查通过。
+3. 用同一个冻结 A2 checkpoint 做 gap1124 三路评测，不重训、不改 threshold；核对 provenance/hash 后再报告 reachability、首次失控和连续失败，而不是只报总体 Success/Precision。
 4. P0-A 只做一次 crop-reachable mini_train 机制收尾：先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册 init/scale/bound；不扫网格。
 5. corrected-TWC 若继续，只做同提交 `single-view / paired-view weight0 / corrected-TWC` seed42；只有 `C-B` 为正且路径方差下降才补多 seed。
 6. 上述控制仍无因果正信号时，正式收敛为 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
