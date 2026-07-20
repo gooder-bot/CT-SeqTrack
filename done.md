@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-17
+更新时间：2026-07-20
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -21,6 +21,8 @@
 - [x] nuScenes-mini-HTV / virtual-rate 数据层、检查脚本和 6 个 A1/A2 smoke 配置已实现。
 - [x] P0-B standard/gap1124/burst-drop full-history crop oracle 已完成；强协议 base recall 为 76.78%/77.72%，GT-history CV 为 98.96%/99.05%。
 - [x] P0-B2 三协议 recursive predicted-history 已完成；endpoints 完全匹配同一 checkpoint，always-on raw CV recenter 按预注册门槛判定 No-Go。
+- [x] P0-B3 passive reliability 三协议 full 已完成并在本地独立复核：reference endpoints/checkpoint hash 完全一致，预注册结论为 `RELIABILITY_GO_RAW_CV_ANCHOR_NO_GO`；可靠性信号只能收窄为 observation-quality proxy，raw-CV anchor 与当前 selector 均为 No-Go。
+- [x] P0-B4 10-tracklet smoke 与完整 mini_val 冻结验证已完成并本地复算：gap/burst AUROC `0.680/0.712`、固定阈值 recall `0.568/0.609`，正式结论为 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`；reliability-controlled anchor 在实现前停止。
 - [x] P0-A standard warmup/active 真实 batch 诊断已完成：默认 residual 数值稳定但实际修正约 `1e-7 m`，未通过非平凡幅度验收。
 - [x] 当前六组新消融 YAML 已创建：
 
@@ -61,18 +63,57 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 ```text
 真实时间方向没有被否定；
 当前最稳论文边界仍是保留 SeqTrack3D 主干的 order-time 语义，
-把真实 delta_t 优先用于受测试时可靠性约束的第二 trajectory proposal，
-末端 bounded residual 暂时只保留为待重新校准的 refinement 对照。
+把真实 delta_t 的主张收窄为冻结协议下的因果消融，
+末端 bounded residual 暂时只保留为一次性机制收尾。
 但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
 普通 fixed-step 全局涨点把握不高；
-递归 predicted-history 已证明 raw CV 恒开启不足；
-后续应先验证 reliability proxy 与无训练 active dual-anchor，
-再完成 frozen protocol 与 reachable-subset residual 诊断。
+递归 predicted-history 已证明 raw CV 恒开启不足；P0-B3 又证明 raw-CV 被动互补增益不足 5 pp，
+而当前 post-crop selector 在强协议接近或差于随机；两条路径都不进入 active 闭环。
+P0-B4 独立验证进一步显示 observation-only trigger 的强协议 AUROC 与 recall 均未过线，
+同批 raw-CV 第二 crop 在强协议没有任何 trajectory-only endpoint，
+因此 reliability-updated Kalman/frozen-state 与 active dual-anchor 在实现前停止；
+下一步转向 frozen variable-rate protocol/benchmark，再做 reachable-subset residual 与 TWC 的窄控制。
 corrected-TWC 的 A1 seed42 有正信号，但只有单 seed且 baseline 不是同提交；
 HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
 TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
 gate / conf-res 目前也不能作为稳定主配置。
 ```
+
+## 2026-07-20：P0-B3 reliability 三协议回传与复核
+
+新增 `tools/diagnose_reliability_signals.py`，保持 P0-B2 脚本与输出不变。正常 observation candidate 是唯一递归更新，raw real-dt predicted-history CV 只作为 passive 第二 crop forward；工具记录 foreground probability/count/entropy/margin、motion-state probability、crop points、empty fallback、CV speed/shift、anchor/candidate agreement、稳定 tracklet key、cfg/checkpoint/reference hash 和离线 GT 标签。
+
+新增 `tools/summarize_reliability_signals.py`，不引入 scikit-learn 依赖。汇总器使用 `sha256(seed|tracklet_key)` 固定分折，只在 standard fold 上拟合 NumPy logistic calibrator 和运行阈值，再不改阈值评估 gap1124/burst-drop；分别输出 pre-crop trigger、current-crop evidence、post-crop selector、Brier/ECE 和 passive raw-CV crop complementarity。
+
+2026-07-20 进一步新增 `tools/validate_observation_reliability.py` 与 `tools/run_p0b4_observation_validation.sh`。前者固定 `observation_v1` 的5个非冗余上一观测特征，fit/eval tracklet 有交集时 fail fast，evaluation 阶段严格复用 training median/mean/scale、logistic 权重与 threshold；后者串联 mini_val 三协议 reference endpoint、P0-B3 passive logger、exact-match/checkpoint hash 检查和 frozen validation，并将10-tracklet smoke 与 full confirmatory tag 分开。两个文件已通过本地 `py_compile`/`--self-test` 与 Bash `-n`，服务器 smoke 与 full 均已完成。
+
+服务器已完成 standard/gap1124/burst-drop 三协议 full passive diagnostic，本地下载后完成以下复核：
+
+- endpoints 为 `4246 / 2127 / 2098`，其中 current target visible 且历史完整的评估样本为 `2996 / 1503 / 1478`；tracklet 为 `260 / 243 / 243`。
+- 三协议无重复 endpoint、关键字段缺失、非有限值、非正 `delta_t` 或标签/union/selector 逻辑矛盾；reference endpoint exact match，checkpoint SHA256 均为 `a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82`。
+- 原始 CSV SHA256 与 summary 一致；用现有汇总器重新计算后，报告指标最大绝对差约 `5.3e-16`。
+- 前景统计缺失率为 `14.79% / 15.37% / 16.24%`，与 `prev_obs_empty_fallback=True` 完全对应，是工具定义下的结构性缺失，不是数据损坏。
+
+预注册的 13 特征 pre-crop trigger 在 standard/gap/burst 上 AUROC 为 `0.857/0.787/0.785`，AUPRC 为 `0.742/0.660/0.671`，通过 reliability 判据；但强协议 ECE 升至 `0.134/0.155`、FPR 升至 `0.472/0.425`。passive raw-CV 与 observation crop 的 target-point union recall 只提高 `3.04/2.88/3.15 pp`，低于强协议 `5 pp` 门槛，因此正式决定为 **`RELIABILITY_GO_RAW_CV_ANCHOR_NO_GO`**。
+
+post-crop selector 在 standard/gap/burst 的 AUROC 为 `0.729/0.605/0.433`，强协议 FPR 为 `0.750/0.826`，不能用于 active proposal selection。进一步的诊断性特征消融发现：
+
+- 只用 9 个 `prev_obs_*` 特征时，gap/burst AUROC 为 `0.867/0.873`，明显优于全 13 特征。
+- 删除 raw `current_delta_t` 后，gap/burst AUROC 为 `0.865/0.872`、ECE 为 `0.061/0.060`、FPR 为 `0.171/0.159`。
+- 只用 time/CV geometry 时 AUROC 仅 `0.529/0.553/0.557`；把 raw `current_delta_t` 加回 observation 特征会显著恶化强协议校准和误报。
+
+因此 P0-B3 支持的是“开发集上上一 observation 质量可预测”，不是“物理时间已经提供可靠性因果信号”。raw-CV active anchor 与当前 selector 停止；其当时保留的 independent frozen-state 候选随后已被 P0-B4 No-Go 取消。详细复核见 `compare_results/reports/p0b3_reliability_validation_20260720.md`，特征消融见 `compare_results/data/p0b3_reliability_feature_ablation_20260720.csv`；运行和判定口径见 `tools/P0_AB_DIAGNOSTICS.md` 第 5 节。
+
+## 2026-07-20：P0-B4 independent mini_val 冻结验证
+
+- 压缩包 `transfer/p0b4_full_results.tar.gz` 的 SHA256 为 `f4d06bb1116080850155595b6180dcc560d291323ed1d5526132dac21d3bca57`，包含三协议 reference、原始 CSV/summary、最终 calibrator/report 和日志。
+- evaluation CSV 为 `1979/984/978` 行，正式 visible+labeled 行为 `1623/829/815`；无重复 endpoint，fit/eval tracklet 无交集，reference exact match，三协议 checkpoint hash 一致。
+- gap1124/burst-drop AUROC 为 `0.680/0.712`，运行点 recall 为 `0.568/0.609`，没有通过预注册的 `0.75/0.70`；AUPRC margin、ECE、FPR 通过也不能覆盖失败项。
+- 强协议 Brier 略差于 prevalence 常数基线；mini_train fit prevalence `0.283` 降到 mini_val 的 `0.089/0.085`，表明明显 split/难度漂移。
+- raw-CV passive second crop 在 gap/burst 的 trajectory-only endpoint 均为 0，union gain 均为 `0.00 pp`。
+- 用当前本地验证器独立重跑得到相同 calibrator、指标和 verdict，只有约 `1e-15` 浮点差；服务器运行仍记录为 dirty `f28f495`，exact server script 未随包回传，因此正式复现保留 provenance caveat。
+
+最终决定为 **`NO_GO_OBSERVATION_RELIABILITY_VALIDATION`**：不实现当前 calibrator 控制的 Kalman/frozen-state 或 active dual-anchor，不在 mini_val 上重调。完整报告见 `compare_results/reports/p0b4_observation_reliability_validation_20260720.md`。
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
 

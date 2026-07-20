@@ -1,6 +1,6 @@
 # CT-SeqTrack 研究计划与论文定位
 
-更新时间：2026-07-17
+更新时间：2026-07-20
 
 这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。
 
@@ -20,7 +20,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 一句话主线：
 
-**真实 timestamp 改变了历史状态的物理含义；CT-SeqTrack 研究序列内部不规则采样，并用物理 `delta_t` 条件化轻量运动先验与重采样一致性。**
+**真实 timestamp 改变了历史状态的物理含义；CT-SeqTrack 当前先用冻结的 variable-rate / held-out-cadence 协议诊断这一变化，再要求轻量运动先验与重采样一致性通过物理时间负对照。**
 
 可考虑标题：
 
@@ -44,16 +44,19 @@ timestamp-native / variable-rate / time-aware 3D SOT
 - bounded residual 已完成 standard 真实 batch 回归：warmup 与 active forward/loss/backward finite，但默认实际 correction 只有约 `1e-7 m`、gate 梯度极小，未通过功能验收，也没有性能结果。
 - HTV 六组筛选显示旧 feature-concat A2 只在 random20 上为正，在 gap1124/burst-drop 上明显退化。因此“真实时间分支已解决强不规则跟踪”不成立，必须先验证 residual、candidate 监督与 crop 可达性。
 - standard/gap1124/burst-drop crop oracle 显示 previous-GT base recall 为 85.41%/76.78%/77.72%；强协议下 2x expanded 也只有 89.08%/87.65%，GT-history CV recenter 则为 98.96%/99.05% 且不增加背景点。当前最直接的机制瓶颈已经从“末端如何融合”前移到“目标能否进入 search crop”。
-- P0-B2 recursive predicted-history 显示 raw CV 相对 previous-A1 只提高 2.65–3.03 pp，未通过预注册门槛；但预测历史可靠时 pred-CV recall 可达 97.34%–98.64%。因此恒开启单锚点 recenter 已 No-Go，可靠性控制的预防性第二锚点仍值得验证。
+- P0-B2 recursive predicted-history 显示 raw CV 相对 previous-A1 只提高 2.65–3.03 pp，未通过预注册门槛；但预测历史可靠时 pred-CV recall 可达 97.34%–98.64%。这一步否定了恒开启单锚点 recenter，并把问题推进到 P0-B3 的 reliability/互补性验证。
+- P0-B3 三协议 full 进一步收窄了结论：预注册 13 特征 trigger AUROC 为 0.857/0.787/0.785，但 passive raw-CV union gain 只有 3.04/2.88/3.15 pp，当前 selector 在 gap/burst AUROC 只有 0.605/0.433。`prev_obs_only` 在 gap/burst 的 AUROC 反而为 0.867/0.873，删除 raw `current_delta_t` 后为 0.865/0.872；因此目前成立的是 observation-quality reliability proxy，不是 timestamp-aware reliability，也不是可用的 active raw-CV dual-anchor。
+- P0-B4 把上述开发集信号放到 disjoint mini_val 冻结验证后，gap/burst AUROC 降为 `0.680/0.712`，固定阈值 recall 只有 `0.568/0.609`，正式得到 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`；同批 raw-CV 第二 crop 在两个强协议没有 trajectory-only endpoint。当前 reliability-controlled independent state 与 active dual-anchor 在实现前停止。
 - TrajTrack 本地 aligned run 的 evaluator 使用当前帧 GT 触发和选择 refinement；64.94 / 79.07 只能作为 oracle-assisted 诊断，不能进入公平主表。
 
 当前执行策略：
 
 ```text
-1. 扩展递归诊断，验证测试时 confidence/foreground/empty/CV shift/agreement 能否预测漂移与 next-crop failure。
-2. 只有可靠性代理有效时，固定 A1 checkpoint 做无训练 active dual-anchor，优先减少首次失控与连续失败。
-3. active 机制通过后冻结 HTV manifest，实现 true/fixed/shuffled-dt；只在 crop-reachable subset 重新校准 residual。
-4. corrected-TWC、GT-free TrajTrack、学习式 gate/trajectory encoder 与多 seed 后置。
+1. P0-B4 已完成并 No-Go：不实现当前 observation calibrator 控制的 Kalman/frozen-state，不做 active dual-anchor，不在 mini_val 上重调。
+2. 先把当前脚本、verdict 和文档绑定到 clean GitHub commit；服务器输出继续保存 script/data/config/checkpoint hashes。
+3. 研究主线转向 P0-C frozen protocol：train/eval cadence 分离、稳定 token manifest、held-out schedule 和通用 `true/fixed/shuffled-dt` 因果控制。
+4. P0-A 只保留一次 crop-reachable subset 机制收尾；先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册参数。
+5. corrected-TWC 只做同提交 single-view / paired-view weight0 / corrected-TWC seed42 控制；若无净一致性收益，与 residual 一起降级为负结果或诊断。
 ```
 
 当前最可防御的新颖性不是单独的“timestamp”“HTV”“运动先验”或“temporal consistency”，而是它们的窄组合：**同一 tracklet 内不规则物理时间间隔、同一模型对未见 cadence/drop schedule 的泛化、有界 observation-first time-conditioned trajectory correction，以及同一 endpoint 的历史重采样一致性**。
@@ -96,7 +99,7 @@ CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而�
 
 这仍然是 timestamp-native 的地基：真实时间进入数据、监督和评价协议。论文叙事要避免把失败的 raw main-branch 注入方式写成最终方法，也不要只在普通 fixed-step final 上判断方向成败。
 
-### 贡献 2：Timestamp-conditioned trajectory guidance and bounded refinement
+### 候选贡献 2：Timestamp-conditioned trajectory guidance and bounded refinement
 
 当前更稳的模型主线是：主干保持 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder`。历史框差分按真实 `delta_t` 计算速度和角速度，形成 timestamp-conditioned dynamics prior。
 
@@ -109,24 +112,24 @@ dyn_disp = clamp_norm(dyn_disp, max_norm)
 final_center = obs_center + scale * alpha * dyn_disp
 ```
 
-2026-07-17 的诊断改变了接入优先级：上述末端 residual 默认实际修正只有约 `7e-8 m`，而 previous-GT base crop 在 standard 高速样本上已经丢失目标。输出端 correction 无法恢复从未进入网络的点，因此第一修正位置应前移到 search crop：
+2026-07-17 的诊断显示上述末端 residual 默认实际修正只有约 `7e-8 m`，而部分失败发生在 search crop 之前。P0-B2/P0-B3 因而尝试把第一修正位置前移到 search crop；P0-B4 的 independent mini_val 冻结验证随后否定了当前 reliability-controlled state anchor 的入口：gap/burst AUROC 和固定阈值 recall 均未达标，raw-CV 第二 crop 也没有强协议互补 endpoint。
 
 ```text
-previous predicted box        -> observation anchor c_prev
-history boxes + real delta_t  -> clipped trajectory anchor c_traj
-test-time reliability         -> choose / conservatively fuse two crops
-SeqTrack3D observation branch -> local refinement c_obs
+P0-B2/P0-B3 raw-CV candidate       -> No-Go
+P0-B4 observation reliability      -> No-Go
+reliability-controlled state       -> stop before implementation
+bounded residual                   -> one reachable-subset kill-test only
 ```
 
-第一版 `c_traj` 仍应使用 clipped constant-velocity/Kalman，而不是直接增加大网络。P0-B2 已否定把它恒开启为唯一 anchor；只有测试时可靠性代理和无训练 active dual-anchor 均有效，才能升级为正式模块。GT-history CV 只保留为 oracle upper bound。
+因此不再实现第一版 `c_traj`，也不上 tiny MLP/GRU、Mamba、ODE/CDE 或 learned uncertainty gate。GT-history CV 只保留为 oracle upper bound；P0-B2–B4 作为“为什么简单 trajectory anchor 不能直接工作”的机制证据。
 
-这个设计的好处是：
+如果保留 bounded residual 作为一次性消融，必须先解决两个定义问题：
 
-- observation branch 仍是主预测，避免 dynamics feature 过早接管。
-- `scale / alpha / clamp / warmup` 都可控，便于解释 seed collapse。
-- 可以只在 long-delta_t / sparse / low-confidence 分桶启用或报告收益。
+- 当前代码把完整 `dyn_disp` 加到已经预测完整 displacement 的 `obs_center` 上，可能重复计算运动；需要先判断应改为 `dyn_disp - obs_disp` correction，还是让 dynamics head 直接预测 observation error。
+- 只有 crop-reachable mini_train subset 才能用于一次性校准；`max_residual_norm` 当前从未触发，不能把“调大 bound”当作下一步。
+- `scale / alpha / clamp / warmup` 必须一次性预注册，并用 `true/fixed/shuffled-dt` 检查因果性。
 
-当前论文里应把候选 dynamics 写成 **reliability-aware timestamp-conditioned trajectory guidance with observation refinement**，而不是完整连续动力学求解器。HTV 六组已说明 feature concat 在强 gap/burst 下不稳定；P0-B2 又说明 raw CV 不能独立恢复漂移。只有 active dual-anchor、因果时间对照和多 seed 通过后，才能升级为论文贡献。现有末端 residual 继续作为消融。
+当前论文不能再把 **observation-reliability-updated timestamp-conditioned trajectory guidance** 写成已成立方法。更可防御的表述是：feature concat、raw-CV anchor 和 frozen observation reliability 在不同入口依次失败；现有末端 residual 只保留为可解释的 negative/kill-test 消融，除非它在冻结协议和时间负对照下给出新的因果正信号。
 
 ### 贡献 3：Time-resampling Consistency
 
@@ -278,7 +281,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 当前仓库已经完成 P0-P5 工程链路，并新增 bounded residual 与 corrected-TWC。corrected-TWC 已完成服务器 seed42 训练，证明坐标修复路径生效；bounded residual 已完成 standard 真实 batch warmup/active forward-loss-backward，但默认量级近乎为零，尚未完成强 gap、完整 split、2-step optimizer 或性能验证。各模块仍通过显式 YAML 开关启用。
 
-已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏；feature-concat `A2-order-dyn` 不仅有 seed sensitivity，也有明显 protocol dependence。crop oracle 证明高速目标会在模型 forward 前离开 base crop，P0-B2 又否定 raw predicted-history CV 恒开启。后续主线不再继续堆主干时间编码或学习式 gate，而是先完成测试时可靠性诊断、无训练 active dual-anchor、冻结 variable-rate 协议和 reachable-subset residual 诊断。
+已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏；feature-concat `A2-order-dyn` 不仅有 seed sensitivity，也有明显 protocol dependence。crop oracle 证明高速目标会在模型 forward 前离开 base crop，P0-B2 又否定 raw predicted-history CV 恒开启。P0-B3 确认 observation-quality risk signal 存在，但 raw-CV passive union gain 不足且 selector 跨强协议失效；后续主线不再继续堆主干时间编码或学习式 gate，而是先验证独立 reliability-updated state anchor 的被动互补性和物理时间因果性，再决定是否进入 active inference。
 
 ### P0-P2：已完成地基
 
@@ -291,7 +294,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。正式实验中，`A2-order-dyn` 仍只是值得诊断的真实时间使用方式，不是稳定结论。P0-B2 已证明 dynamics proposal 不能恒开启替换 previous anchor；下一步先验证它能否作为可靠性控制的第二 crop 假设预防首次漂移，再在冻结协议下做同容量 true/fixed/shuffled-dt 对照。
+feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。正式实验中，`A2-order-dyn` 仍只是值得诊断的真实时间使用方式，不是稳定结论。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。下一步先把 `true/fixed/shuffled-dt` 固化为 P0-C benchmark 的通用控制，再决定 residual 是否值得一次性收尾。
 
 第一版只做真实时间差分动力学：
 
@@ -358,30 +361,27 @@ P5 的核心验收不只是 loss finite，而是 gate 行为可解释：稀疏�
 
 ## 5. 实验设计
 
-### 5.0 下一步方法决策：Reliability-aware dual-anchor trajectory guidance
+### 5.0 P0-B4 决策与 benchmark pivot
 
-下一阶段先验证一个无需训练、可解释的双锚点主动推理机制：
+P0-B4 已完成 independent mini_val frozen evaluation：
 
 ```text
-observation anchor c_prev = previous A1 predicted box
-trajectory anchor c_dyn   = clipped CV/Kalman(predicted history, real delta_t)
-two search crops          = forward around c_prev and c_dyn
-test-time reliability     = confidence / foreground / empty / agreement
-final observation         = select or conservatively fuse GT-free proposals
+gap1124 AUROC / recall    = 0.680 / 0.568
+burst AUROC / recall      = 0.712 / 0.609
+required                  = 0.750 / 0.700
+verdict                   = NO_GO_OBSERVATION_RELIABILITY_VALIDATION
 ```
 
-设计约束：
+路线约束：
 
-- observation branch 仍负责最终 refinement；trajectory proposal 只作为第二个预防性搜索假设。
-- 第一版先用 constant-velocity/Kalman，输入只含递归预测 bbox center/heading 和真实 `delta_t`；不上 tiny MLP/GRU、VAE、Mamba、ODE/CDE。
-- 选择/融合规则只能使用推理时可得量，不读取当前 GT；GT 只用于离线标签、loss 和 oracle 分析。
-- base、expanded、recentered 必须共享 endpoint、训练步、模型容量和 checkpoint 规则；expanded 只作为 crop-size 控制组。
-- P0-B2 已完成 previous-A1-pred 与 A1-pred-history-CV reachability，并判定 always-on raw CV No-Go。
-- 先验证测试时 reliability proxy，再做无训练 active dual-anchor；任一失败都不升级学习式 gate/trajectory encoder。
-- active dual-anchor 通过后再完成 true/fixed/shuffled-dt；末端 residual 只在 reachable subset 重新校准。
-- 与 TrajTrack 的区别必须落在真实物理时间、同一 tracklet 内不规则 cadence、unseen schedule 泛化和 bounded observation-first correction 上。
+- 不在 mini_val 上重调 feature、L2、threshold 或 crop scale；P0-B4 No-Go 永久保留。
+- 不实现当前 calibrator 控制的 frozen-state、active dual-anchor 或 learned selector。
+- 先完成 P0-C 的 stable manifest、train/eval cadence 分离和 held-out schedule；所有方法共享 endpoint/checkpoint/预算。
+- `true/fixed/shuffled-dt` 改为通用 benchmark 因果控制，不再作为复活当前 reliability anchor 的工具。
+- residual 和 TWC 各只允许一次预注册、同提交的 seed42 机制控制；失败即停止。
+- 选择/融合规则仍只能使用推理时可得量；GT 只用于离线标签、loss 和 oracle 分析。
 
-这个方向同时解释当前数据：random20 的正信号说明低维运动先验可能有用；三协议 crop oracle 证明 target-out-of-crop，固定 2x expanded 仍不足；P0-B2 则显示预测历史可靠时 CV 很强、漂移后几乎无效。因而目标不是让 CV 从灾难性漂移中恢复，而是在漂移前通过双锚点和 observation confidence 保持可达性。若测试时信号不能区分这两个状态，应停止该方向。
+当前更稳的论文价值是把失败路径系统化：强 gap 会改变 crop reachability，raw prediction history 会形成灾难性长尾；开发集上的 risk proxy 未能独立泛化，raw-CV candidate 也没有稳定互补性。项目应先把这些现象固化为可复现的 variable-rate 3D SOT benchmark/diagnosis，再让任何时间模块在 held-out cadence 和负对照下证明自己。
 
 ### 主表
 
@@ -427,16 +427,15 @@ A3-conf-res rerun seed42
 下一步优先复核：
 
 ```text
-test-time reliability signals -> drift / next-crop-failure AUROC、AUPRC、calibration
-previous-anchor vs clipped-CV/Kalman dual-anchor active inference（同 endpoint/checkpoint）
-dual-anchor true-dt vs fixed-dt vs shuffled-dt
+P0-C stable train/eval manifest 与 held-out cadence
+通用 true-dt vs fixed-dt vs shuffled-dt 一致性回归
 reachable-subset bounded residual vs no-residual
 corrected A1-order+TWC vs paired-view weight0 vs single-view A1-order
 TrajTrack pre_wo_refine vs GT-free paper-aligned refine vs oracle-assisted refine
 candidate-wise dynamics 与 target-in-crop diagnostics
 ```
 
-这些实验的作用不是重复证明 raw real-time 主干失败，而是回答：测试时信号能否在首次漂移前识别风险、dual-anchor 能否维持可达性、收益是否真的来自物理时间、residual 在 reachable subset 是否仍有必要，以及 TWC 是否降低同一 endpoint 的采样路径方差。当前 corrected-TWC 只有不完全配对的单 seed 信号，residual 没有性能正结论，dual-anchor 也尚无 active 在线证据。
+这些实验的作用不是复活已经 No-Go 的 reliability anchor，而是回答：未见 cadence 评测是否公平、任何剩余收益是否真的依赖物理时间、residual 在 reachable subset 是否有必要，以及 TWC 是否提供超出 paired-view augmentation 的净一致性收益。当前 corrected-TWC 只有不完全配对的单 seed 信号，residual 没有性能正结论，dual-anchor 已停止。
 
 ### 困难子集
 

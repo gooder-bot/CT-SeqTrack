@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-17 的最新机制证据显示：GT-history CV 的 crop recall 接近 99%，但 A1 predicted-history CV 相对 previous-A1 anchor 只提高 2.65–3.03 pp，未达到预注册的 5 pp 总体门槛；在预测历史仍可靠（上一预测误差不超过 4 m）时 recall 可达 97.34%–98.64%，漂移后则几乎无法恢复。因此，always-on raw predicted-history recenter 已判定 No-Go，当前最优先工作收敛为测试时可靠性诊断与无训练 dual-anchor 主动推理，再决定是否进入 `true-dt/fixed-dt/shuffled-dt` 因果协议。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
+当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地，但主要时间接入方式尚无稳定因果正结论。2026-07-20 的 P0-B4 independent mini_val 冻结验证得到 **`NO_GO_OBSERVATION_RELIABILITY_VALIDATION`**：5特征 `observation_v1` 在 gap/burst 的 AUROC 只有 `0.680/0.712`，固定阈值 recall 只有 `0.568/0.609`；同批 raw-CV 第二 crop 在两个强协议都没有 trajectory-only endpoint。因此当前 reliability-controlled Kalman/frozen-state、active dual-anchor 和 learned gate 路线停止，不允许在 mini_val 上重调后复活。下一步转向冻结的 variable-rate / held-out-cadence benchmark 与 `true/fixed/shuffled-dt` 因果协议，并只保留一次 reachable-subset residual 和同提交 TWC 控制。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -170,10 +170,12 @@ use_observability_gate: False
 | P0 | 真实时间字段主链路 | 已完成 |
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
-| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；feature-concat 在强 gap/burst 下退化，residual 的 standard 真实 batch 数值稳定但修正近乎为零；当前先验证 pre-crop trajectory guidance |
+| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；feature-concat 在强 gap/burst 下退化，residual 近乎为零；P0-B4 已停止 pre-crop reliability anchor，当前只保留一次 reachable-subset kill-test |
 | P4 | Time-resampling Consistency | 共享 candidate perturbation / crop / `coordinate_anchor` 已修复；corrected seed42 已完成，A1 为正、A2 为负，仍需同提交 baseline 与 seed43/44 |
 | P5 | Observability Gate | 已实现，默认关闭；gate-safe 低于 A2，conf-res rerun / best 复测都不支持当前接入主线 |
 | Evaluation | cand1 / disp / active/corrected TWC / gate / stability / HTV / TrajTrack reference | 最新数据和公平性边界已整理到 `compare_results/reports/` |
+| P0-B3 | 测试时可靠性与 passive dual-forward | 开发集 observation proxy 为正，但 raw-CV anchor 与 selector No-Go；后续 P0-B4 未独立复现 |
+| P0-B4 | independent observation reliability | mini_val 冻结验证 No-Go；当前 calibrator 与 dual-anchor 停止，详见 `p0b4_observation_reliability_validation_20260720.md` |
 
 当前已完成的关键消融：
 
@@ -192,16 +194,19 @@ use_observability_gate: False
 12. TrajTrack aligned seed42 参考运行与 evaluator oracle 审计
 13. P0-B standard/gap1124/burst-drop crop reachability 与 P0-A standard residual 量级诊断
 14. P0-B2 A1 recursive predicted-history 三协议诊断与预注册 No-Go 判断
+15. P0-B3 standard/gap1124/burst-drop full passive diagnostic、grouped reliability 复算与 feature ablation
+16. P0-B4 10-tracklet smoke、完整 mini_val 冻结验证、原始 CSV/哈希与本地独立复算
 ```
 
 当前下一步：
 
 ```text
-1. 扩展递归诊断，记录 confidence、foreground、empty fallback、`||c_cv-c_prev||`、速度和双 proposal agreement 等测试时可靠性信号。
-2. 用离线 GT 标签评估这些信号预测 `previous_prediction_error > 4 m` 和 next-crop failure 的 AUROC、AUPRC 与 calibration；GT 不进入推理规则。
-3. 只有可靠性代理有效时，固定同一 A1 checkpoint 做无训练 active dual-anchor：previous-pred crop 与 clipped-CV/Kalman crop 各 forward 一次，再按 confidence/agreement 选择或保守融合。
-4. active 机制必须优先减少首次失控和连续失败；通过后才冻结 virtual-rate manifest 并进入 `true/fixed/shuffled-dt` 因果矩阵。
-5. bounded residual、corrected A1+TWC 多 seed、TrajTrack GT-free 公平参考和复杂 memory/SSM 均后置。
+1. 将 P0-B4 verdict、关键脚本和文档提交到 clean GitHub commit；后续服务器关键脚本不得只存在于 dirty/untracked 工作树。
+2. 完成 P0-C：拆分 train/eval virtual-rate、稳定 token manifest、held-out cadence，并实现统一 `true/fixed/shuffled-dt` effective-time 开关和一致性测试。
+3. 用冻结 checkpoint 做未见 cadence benchmark/diagnosis，不按 protocol 重训或改 threshold；报告 reachability、首次失控和连续失败。
+4. P0-A 只做一次 crop-reachable mini_train 机制收尾；先确认 residual correction 定义，再一次性预注册 init/scale/bound，不扫参数网格。
+5. corrected-TWC 只做同提交 `single-view / paired-view weight0 / corrected-TWC` seed42 控制；`C-B` 不成立就停止。
+6. 不实现当前 reliability-controlled anchor、active dual-anchor、学习式 uncertainty gate 或复杂 memory/SSM。
 ```
 
 ---
@@ -478,6 +483,28 @@ output/<time>-<config>-<tag>/
 | burst-drop | -7.45 | -14.40 | 强不规则间隔下明显退化 |
 | random20 | +9.09 | +14.23 | 温和随机丢帧下形成一致正信号 |
 
+最新 P0-B3 reliability 诊断（standard-only grouped calibrator，固定评估强协议）：
+
+| diagnostic | standard | gap1124 | burst-drop | 判断 |
+| --- | ---: | ---: | ---: | --- |
+| all-13 trigger AUROC / AUPRC | 0.857 / 0.742 | 0.787 / 0.660 | 0.785 / 0.671 | 通过原预注册 reliability 门槛，但不是时间因果证据 |
+| previous-observation-only AUROC / AUPRC | 0.853 / 0.728 | 0.867 / 0.778 | 0.873 / 0.789 | 更强且校准更稳，说明可靠性主要来自上一观测质量 |
+| raw-CV dual-oracle recall gain | +3.04 pp | +2.88 pp | +3.15 pp | 强协议低于 +5 pp，raw-CV anchor No-Go |
+| post-crop selector AUROC | 0.729 | 0.605 | 0.433 | 不能跨协议用于 candidate 选择 |
+
+完整数据质量核查、复算和 feature ablation 见 `compare_results/reports/p0b3_reliability_validation_20260720.md`。raw `current_delta_t` 在 standard-only calibrator 中会造成 gap/burst 过度触发；删除它后强协议 AUROC 恢复到 0.865/0.872。因此当前只能说 observation reliability 可预测 crop miss，不能说 physical timestamp 已提高 reliability prediction。
+
+P0-B4 随后在 disjoint mini_val 上冻结验证精简 `observation_v1`：
+
+| metric | standard | gap1124 | burst-drop | 判定 |
+| --- | ---: | ---: | ---: | --- |
+| AUROC | 0.794 | 0.680 | 0.712 | 强协议均低于 0.75 |
+| AUPRC-prevalence | 0.414 | 0.282 | 0.328 | 通过 |
+| operating recall | 0.711 | 0.568 | 0.609 | 强协议均低于 0.70 |
+| raw-CV union gain | +0.06 pp | +0.00 pp | +0.00 pp | 强协议没有互补 endpoint |
+
+最终为 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`。这说明 P0-B3 的 observation-only 正信号不能升级为独立验证的方法贡献；当前 calibrator、raw-CV candidate 和 selector 均停止。完整复核见 `compare_results/reports/p0b4_observation_reliability_validation_20260720.md`。
+
 TrajTrack 的 aligned seed42 运行得到 64.94 / 79.07，但本地 evaluator 使用当前帧 GT overlap 触发 refinement，并用 GT overlap 选择 proposal。这一结果只作为 oracle-assisted 实现诊断，不能与 GT-free SeqTrack3D 或 CT-SeqTrack 做公平在线排名；详见 `compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
 
 解释：
@@ -488,7 +515,9 @@ TrajTrack 的 aligned seed42 运行得到 64.94 / 79.07，但本地 evaluator �
 - `A2-order-dyn` 的真实时间信号具有 protocol dependence：温和 random20 为正，强 gap/burst 为负；新 residual 已通过 standard 真实 batch 数值检查，但默认修正近乎为零，尚无性能结果。
 - corrected-TWC 已消除坐标/crop 污染，A1 seed42 为正，但只有单 seed且 baseline 不是同代码提交；它目前是候选稳定性贡献，不是已确认主增益。
 - TrajTrack 的可借鉴点是 bbox-only trajectory proposal 与 local/global proposal agreement，不是当前 GT-assisted evaluator 的高分。
-- standard/gap/burst 的递归诊断已证明：raw predicted-history CV 只有在历史仍可靠时有效，漂移后无法单独恢复；正式方法应使用测试时可靠性控制的 dual-anchor 预防首次失控，而不是恒开启替换搜索中心。
+- standard/gap/burst 的递归和 P0-B3/P0-B4 已证明：raw predicted-history CV 与 observation anchor 的失败高度重叠，mini_val 强协议甚至没有 trajectory-only endpoint；它不进入 active tracker。
+- P0-B3 的 observation-quality 正信号在 P0-B4 独立 split 上未通过排序和固定阈值 recall 门槛；当前 reliability-controlled state anchor 在实现前停止，不能通过重调 mini_val 继续推进。
+- 研究重心改为冻结 variable-rate protocol、held-out cadence 与可解释 failure diagnosis；真实时间模块必须通过 `true/fixed/shuffled-dt` 才能恢复方法主张。
 
 简洁实验结论和后续计划见：
 
@@ -517,6 +546,8 @@ compare_results/reports/related_comparisons.md
 - CT-SeqTrack full model 已经稳定超过 SeqTrack3D
 - 标准 fixed-step benchmark 上已经稳定全面涨点
 - TrajTrack 当前本地结果相对 SeqTrack3D 提升了 13.96 / 19.11（该差值包含 GT oracle 信息）
+- P0-B3 已证明 timestamp-aware reliability 或 active dual-anchor 有效
+- raw predicted-history CV 可以作为正式第二搜索锚点
 
 更稳的贡献表述是：
 

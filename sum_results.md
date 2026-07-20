@@ -1,10 +1,36 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-17
+更新时间：2026-07-20
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 0. 当前总判断
+
+### 2026-07-20 P0-B4 independent validation
+
+固定5特征 `observation_v1` calibrator 只在 mini_train standard 上拟合一次，然后在 disjoint mini_val standard/gap1124/burst-drop 上原样评估。gap/burst 的 AUROC 为 `0.680/0.712`，固定阈值 recall 为 `0.568/0.609`，均未通过预注册的 `0.75/0.70` 门槛；正式判定为：
+
+```text
+NO_GO_OBSERVATION_RELIABILITY_VALIDATION
+```
+
+强协议 AUPRC margin、ECE 和 FPR 虽通过，但 precision 只有 `0.177/0.185`，Brier 还略差于本协议 prevalence 常数基线。mini_train fit prevalence 为 `0.283`，mini_val 强协议只有 `0.089/0.085`，说明存在明显 split/难度漂移；正例还只分布在 10/9 个 tracklet，不能把结果扩写成“所有 observation reliability 都无效”，但当前冻结 calibrator 不能部署，也不能在 mini_val 上重调。
+
+同批 passive raw-CV 第二 crop 在 gap/burst 的 trajectory-only endpoint 都为 0，oracle union gain 都是 `0.00 pp`。因此 P0-B3 的 observation-quality Conditional-Go 未通过独立验证升级，reliability-controlled Kalman/frozen-state anchor、active dual-anchor 和 learned gate 全部停止。完整复核见 `compare_results/reports/p0b4_observation_reliability_validation_20260720.md`。
+
+### 2026-07-20 P0-B3 reliability 三协议结果
+
+standard/gap1124/burst-drop full passive diagnostic 已下载并完成本地复核，endpoint 数为 4246/2127/2098，均与 P0-B/P0-B2 reference exact match，使用同一 A1 checkpoint hash。三份 CSV 无重复 endpoint、关键字段缺失或数值范围异常；现有 summary 的全部核心指标已从原始 CSV 独立复算，最大绝对误差小于 `6e-16`。
+
+预注册 all-13 trigger 在 gap1124/burst-drop 得到 AUROC `0.787/0.785`、AUPRC `0.660/0.671`，达到原定 reliability Go 门槛；但 raw-CV dual crop 的 oracle recall 增益只有 `+2.88/+3.15 pp`，低于两协议均 `+5 pp` 的要求。因此正式判定为：
+
+```text
+RELIABILITY_GO_RAW_CV_ANCHOR_NO_GO
+```
+
+这个名称不能解释成“timestamp-aware reliability 已验证”。同一 grouped 流程的 post-hoc feature ablation 显示，previous-observation-only trigger 在 gap/burst 反而达到 AUROC `0.867/0.873`、AUPRC `0.778/0.789`；time/CV geometry-only 只有 AUROC `0.553/0.557`。加入 raw `current_delta_t` 是跨协议退化的主要来源：删除它后 AUROC 恢复到 `0.865/0.872`，ECE 从 `0.134/0.155` 降到 `0.061/0.060`。这说明当前可复现的正信号是 **上一 observation 质量预测下一 crop 风险**，真实时间对 reliability 的独立增量仍未成立。
+
+当前 post-crop selector 也不能进入 active tracker：standard/gap/burst AUROC 为 `0.729/0.605/0.433`，强协议 ECE 为 `0.401/0.490`。P0-B3 当时只允许在 P0-B4 通过后测试一次独立 state anchor；P0-B4 现已失败，因此该候选不再实现。完整 P0-B3 验证见 `compare_results/reports/p0b3_reliability_validation_20260720.md`。
 
 ### 2026-07-17 P0-A / P0-B 诊断
 
@@ -12,9 +38,9 @@ P0-B oracle 与 P0-B2 recursive predicted-history 均已完成。oracle 表明 G
 
 bounded residual 的 standard 真实 batch 也已完成第一轮诊断。warmup 内 residual/gate gradient 严格为 0；active 64-batch 中 observation error P50/P75/P95 为 `0.213 / 0.577 / 3.838 m`，默认 2 cm 理论上限已明显偏小。更关键的是 gate alpha 约 `2e-5`，实际 applied residual P50 只有 `7.25e-8 m`，gate gradient P50 只有 `4.00e-10` 且 31/64 batch 为 0。默认路径数值稳定但在功能上接近关闭，未通过“非平凡修正幅度”验收。
 
-这些 observation error 混入了 out-of-crop 失败，不能据此直接把 residual bound 调到几十厘米或数米。递归结果进一步显示：上一预测误差不超过 4 m 时 pred-CV recall 为 97.34%–98.64%，超过 4 m 后只有 0.80%–1.61%。下一步应先寻找测试时可得的可靠性代理，并验证无训练 dual-anchor 能否预防首次漂移，再在 crop-reachable subset 上校准末端 residual。完整报告见 `compare_results/reports/p0_ab_diagnostics_20260717.md` 与 `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`。
+这些 observation error 混入了 out-of-crop 失败，不能据此直接把 residual bound 调到几十厘米或数米。递归结果进一步显示：上一预测误差不超过 4 m 时 pred-CV recall 为 97.34%–98.64%，超过 4 m 后只有 0.80%–1.61%。后续 P0-B4 已否定当前 reliability-controlled dual-anchor 入口；若继续 residual，只能在 crop-reachable mini_train subset 上做一次预注册机制收尾。完整报告见 `compare_results/reports/p0_ab_diagnostics_20260717.md` 与 `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`。
 
-当前 P0-B/P0-B2 回传已经完整；仍不完整的是 P0-A，它只有 standard 64-batch，没有完整 split、强 gap 或真正 2-step optimizer 结果。P0-B2 是被动 counterfactual reachability，不是 active dual-anchor 跟踪性能；当前关键缺口是测试时 reliability proxy 与主动双锚点验收。
+当前 P0-B/P0-B2/P0-B3/P0-B4 已形成完整的 oracle、recursive、开发集与独立验证链；P0-B4 在 active 之前 No-Go，所以不存在 active dual-anchor 跟踪结果。仍不完整的是 P0-A，它只有 standard 64-batch，没有完整 split、强 gap 或真正 2-step optimizer 结果。
 
 ### 2026-07-16 corrected-TWC、HTV 与 TrajTrack 结果口径
 
@@ -565,13 +591,45 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 - `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`
 - `compare_results/data/p0b2_recursive_crop_reachability_20260717_summary.csv`
 
+### 10.6 P0-B3 reliability 与 passive complementarity
+
+| diagnostic | standard | gap1124 | burst-drop | 判断 |
+| --- | ---: | ---: | ---: | --- |
+| all-13 trigger AUROC | 0.857 | 0.787 | 0.785 | 通过原预注册 threshold |
+| all-13 trigger AUPRC | 0.742 | 0.660 | 0.671 | 高于 prevalence 0.459/0.311/0.313 |
+| observation-only trigger AUROC | 0.853 | 0.867 | 0.873 | 跨协议更强，主要 reliability 信号来自上一 observation |
+| no-raw-dt trigger AUROC | 0.857 | 0.865 | 0.872 | raw current delta_t 是 OOD 退化来源 |
+| raw-CV dual recall gain | +3.04 pp | +2.88 pp | +3.15 pp | 强协议均低于 +5 pp，anchor No-Go |
+| selector AUROC | 0.729 | 0.605 | 0.433 | post-crop 选择规则不泛化 |
+
+数据完整性、分组、标签边界和 headline 指标均通过复核。结构性缺失只出现在上一 observation empty fallback 行，并由显式 indicator 与 fold 内 imputation 处理。当前服务器运行记录为 dirty `f28f495`，所以可用于机制决策，但正式复现必须冻结 clean commit 与 diagnostic script hash。
+
+完整验证与 feature ablation：
+
+- `compare_results/reports/p0b3_reliability_validation_20260720.md`
+- `compare_results/data/p0b3_reliability_feature_ablation_20260720.csv`
+
+### 10.7 P0-B4 independent observation reliability
+
+| protocol | N | prevalence | AUROC | AUPRC-prev | Brier / prevalence baseline | ECE | recall | FPR | 判定 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| standard | 1623 | 0.111 | 0.794 | 0.414 | 0.0795 / 0.0986 | 0.073 | 0.711 | 0.220 | report-only |
+| gap1124 | 829 | 0.089 | 0.680 | 0.282 | 0.0859 / 0.0813 | 0.093 | 0.568 | 0.258 | Fail AUROC/recall |
+| burst_drop | 815 | 0.085 | 0.712 | 0.328 | 0.0780 / 0.0775 | 0.089 | 0.609 | 0.248 | Fail AUROC/recall |
+
+四份输入 CSV hash、reference exact-match、checkpoint hash、fit/eval tracklet disjoint 和标签过滤均通过检查。本地验证器独立重跑得到相同 calibrator、指标和 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`，只有约 `1e-15` 浮点差。
+
+同批 raw-CV passive crop 在 standard/gap/burst 的 union gain 为 `+0.06/0.00/0.00 pp`；强协议没有 trajectory-only endpoint。当前 calibrator 和 raw-CV candidate 均不进入 frozen-state/active anchor。
+
+完整报告：`compare_results/reports/p0b4_observation_reliability_validation_20260720.md`。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 仍是值得保留的真实时间入口，但 feature-concat 在强 gap/burst 下失败，默认末端 residual 又近乎关闭；下一轮优先验证测试时可靠性与无训练 dual-anchor，再决定是否进入训练式 trajectory guidance。
+- DynamicsEncoder 仍可作为时间接入消融，但 feature-concat 在强 gap/burst 下失败、默认末端 residual 近乎关闭，P0-B4 又否定当前 reliability-controlled anchor 入口；下一轮不再增加 trajectory/gate 结构。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
@@ -581,6 +639,8 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 - corrected-TWC 如果继续，应先只在 `A1-order` 上做最小重跑；gate 仍只做诊断，不与 residual 同时启用。
 - TrajTrack 当前高分含 GT oracle；它只能提示 trajectory proposal 的潜力，不能证明公平收益。
 - standard/gap1124/burst-drop oracle 均证明高速位移下 search crop 本身会丢目标；recursive 诊断进一步说明 raw predicted CV 只能在历史可靠时改善，不能从已漂移状态独立恢复。
+- P0-B3 开发集曾显示 previous-observation quality 可以预测可见目标的下一 crop miss，但 P0-B4 独立验证未达到预注册排序和运行点召回门槛；该信号只能保留为开发集诊断，不能升级为方法贡献。
+- raw-CV 第二 crop 与 observation 失败高度重叠，mini_val 强协议的 trajectory-only endpoint 为 0；当前 calibrator、candidate 和 selector 均不进入 active tracker。
 
 还不能说明的事情：
 
@@ -588,19 +648,22 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 - 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只有 A1 seed42 正信号，而 A2 seed42 为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
-- 已能判断 gap1124/burst-drop 的 oracle 上限和被动 recursive reachability，但还不能判断 active dual-anchor 的在线收益或强协议 residual 量级；前者缺主动闭环，后者缺 P0-A 强协议回归。
+- active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；仍未知的是强协议 residual 量级与正确 correction 定义。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
+- 还不能说 physical `delta_t` 提高了 reliability prediction；raw `current_delta_t` 在当前 standard-only calibrator 中反而造成强协议过触发。
+- 不能把 observation-only trigger 写成最终 uncertainty model；P0-B4 独立 mini_val 已 No-Go，且标签只覆盖 target visible 条件下的 crop miss。
 
 ## 12. 接下来应该做什么
 
 当前优先顺序：
 
 ```text
-1. 扩展 recursive diagnostic，记录测试时 confidence、foreground、empty fallback、CV shift 和 proposal agreement。
-2. 用离线 GT 标签评估 drift/next-crop-failure 预测的 AUROC、AUPRC 与 calibration，并检查跨协议稳定性。
-3. 只有可靠性代理有效时，固定 A1 checkpoint 做无训练 active dual-anchor，优先减少首次失控和连续失败。
-4. active 机制通过后再完成 P0-C 稳定 manifest 与 true/fixed/shuffled-dt；同时补 P0-A reachable-subset 统计。
-5. 只在主动闭环与时间因果性均通过后启动训练和多 seed；默认 residual、TWC、复杂 memory 均后置。
+1. 把当前 P0-B4 verdict、脚本和文档提交到 clean GitHub commit；后续服务器运行不得再让关键脚本只存在于 dirty/untracked 状态。
+2. 优先完成 P0-C 的 train/eval virtual-rate 分离、稳定 token manifest、held-out cadence 与通用 `true/fixed/shuffled-dt` 一致性测试，正式转向 benchmark/diagnosis。
+3. 用冻结 checkpoint 做未见 cadence 评测，不重训、不改 threshold，并报告 reachability、首次失控和连续失败，而不是只报总体 Success/Precision。
+4. P0-A 只做一次 crop-reachable mini_train 机制收尾：先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册 init/scale/bound；不扫网格。
+5. corrected-TWC 若继续，只做同提交 `single-view / paired-view weight0 / corrected-TWC` seed42；只有 `C-B` 为正且路径方差下降才补多 seed。
+6. 上述控制仍无因果正信号时，正式收敛为 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```
 
 可选复核：
@@ -658,7 +721,7 @@ A2-order-dyn-cand1-240ep
 
 判断标准：
 
-- 只有 reliability-aware active dual-anchor 改善在线 crop 可达性后，末端 residual 才有资格进入正式比较。
+- P0-B4 已停止 reliability-aware active dual-anchor；末端 residual 现在只允许在 crop-reachable mini_train subset 做一次预注册 kill-test，不能自动升级为正式方法。
 - 如果普通 final 只持平，但 long-gap / sparse bin 稳定提升，可以作为更强论文证据。
 - 如果 reachable subset 中 residual 仍长期近零，应停止该 gate/bound 设计，而不是继续扩大网络。
 
