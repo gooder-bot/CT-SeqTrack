@@ -8,7 +8,7 @@
 
 论文主线暂定为：
 
-> 面向不规则采样和变帧率 3D 单目标跟踪，在 SeqTrack3D 的 observation 主干上，引入只使用历史框与真实时间戳的有界 dynamics residual，并验证物理时间在未见采样节奏下是否具有因果收益。
+> 面向不规则采样和变帧率 3D 单目标跟踪，用测试时可靠性信号协调 observation anchor 与真实时间驱动的 trajectory anchor，在首次漂移前维持搜索可达性，再由 SeqTrack3D observation 主干完成 refinement，并验证物理时间在未见采样节奏下是否具有因果收益。
 
 目前只能确认：时间戳、virtual-rate、TWC、feature dynamics 和 bounded residual 已有不同程度的工程实现或实验信号；还不能声称真实 `delta_t` 稳定提分，也不能声称模型已经具备跨采样率泛化能力。
 
@@ -17,38 +17,49 @@
 - corrected A1+TWC seed42 为 `+1.49 Success / +5.03 Precision`，但 baseline 来自旧提交且只有一个 seed。
 - corrected A2+TWC seed42 为 `-0.93 / -2.07`，暂不继续组合 A2+TWC。
 - feature-concat A2 在 random20 为正，在 gap1124 和 burst-drop 为负，不能作为主创新结论。
-- residual A2 只有逻辑 smoke，没有真实 batch、梯度和跟踪性能证据。
+- residual A2 已完成 standard 的真实 batch warmup/active forward-loss-backward 诊断，但默认实际修正仅约 `1e-7 m`、gate 梯度极小，尚未完成 2-step optimizer、完整 split、强 gap 或跟踪性能验证。
+- P0-B2 三协议递归诊断已完成：predicted-history CV 相对 previous-A1 只提高 2.65–3.03 pp，未达到预注册门槛；它在可靠历史桶达到 97.34%–98.64% recall，但在上一预测误差超过 4 m 后两者都近乎失效。always-on raw CV recenter 已 No-Go。
 - TrajTrack 的 `64.94 / 79.07` 来自 GT-assisted evaluator，只能作为 oracle 诊断。
 
 ## 1. 四个最高优先级问题
 
-前三项直接决定 residual 主线是否成立；第四项决定 TWC 能否保留为论文贡献。先解决前三项，再启动主线大规模训练；TWC 控制组可后置。
+前三项依次决定末端 residual 是否还有价值、pre-crop trajectory guidance 是否成立，以及物理时间收益能否被因果归因；第四项决定 TWC 能否保留为论文贡献。先解决前三项，再启动主线大规模训练；TWC 控制组可后置。
 
 ### P0-A：bounded residual 可能小得几乎不起作用
 
 **问题**：当前默认最大修正量仅为 `0.1 × 0.2 × 1.0 = 0.02 m`，而 gate 近零初始化。若真实 observation error 明显大于 2 cm，或 alpha/梯度长期接近零，该分支即使存在也几乎不改变预测。
 
-- [ ] 在 standard、gap1124、burst-drop 的真实 full-history batch 上完成 forward/loss/backward 和 2-step train。
-- [ ] 确认 warmup 前 residual 为 0，warmup 后 alpha、raw/clamped/applied residual 与 gradient 全部 finite。
-- [ ] 确认 `dynamics_valid=0` 时 residual 严格为 0，observation head 不额外拼接 `z_dyn`。
-- [ ] 统计训练 split 的 `||GT motion - observation proposal||` P50/P75/P95，与 2 cm 上限比较。
-- [ ] 记录 gate bias、gate gradient norm、alpha 分位数、applied ratio、saturation ratio 和 applied norm。
-- [ ] 若 2 cm 覆盖不了主要误差，只依据训练 split 误差预先校准 scale/bound；不得根据 test/mini_val 涨跌反复调参。
+**2026-07-17 状态**：standard active 64-batch 的 observation error P50/P75/P95 为 `0.213 / 0.577 / 3.838 m`；alpha 固定约 `2e-5`，实际 residual P50 仅 `7.25e-8 m`，gate grad P50 仅 `4.00e-10` 且 31/64 batch 为 0。默认配置数值稳定，但没有通过“非平凡修正幅度”验收。完整证据见 `compare_results/reports/p0_ab_diagnostics_20260717.md`。
 
-**验收**：residual 在有效样本上有非平凡 applied ratio 和可见修正幅度，且仍保持有界、稳定、可归因。
+- [x] 在 standard 真实 full-history batch 上完成 warmup 2-batch 与 active 64-batch forward/loss/backward。
+- [ ] 补 gap1124、burst-drop 的 forward/loss/backward，并在三协议完成真正的 2-step optimizer smoke。
+- [x] 确认 warmup 内 residual/gate gradient 为 0；active 的 alpha、raw/clamped/applied residual 与 gradient 全部 finite。
+- [ ] 在真实 invalid-history batch 上确认 `dynamics_valid=0` residual 严格为 0；standard full-history 运行的 valid ratio 为 1，没有覆盖该条件。
+- [x] 确认 residual observation head 输入仍为 256 维，没有额外拼接 `z_dyn`。
+- [ ] 遍历完整训练 split，并只在 crop-reachable subset 统计 `||GT motion - observation proposal||` P50/P75/P95；当前 1024 样本混入 out-of-crop error，不能直接用于调 bound。
+- [x] 记录 gate bias、gate gradient norm、alpha 分位数、applied ratio、clamp ratio 和 applied norm；注意当前 `applied_ratio=1` 只表示 norm 大于 `1e-8`，不表示修正有实际作用。
+- [ ] 预裁剪可达性解决后，再依据训练 split reachable subset 一次性预注册 gate init/scale/bound；不得根据 test/mini_val 涨跌反复调参。
+
+**验收**：当前默认配置未通过。后续版本必须在有效样本上同时具有非平凡 gate gradient、可见修正幅度和预注册上界，且仍保持稳定、可归因。
 
 ### P0-B：长 gap 的失败可能发生在 search crop 之前
 
 **问题**：当前 search crop 围绕最近历史框生成。长间隔或 burst-drop 下，目标可能在进入网络前已经离开 crop；此时无论最终 residual 多准确，2 cm 级后处理都无法追回目标。
 
-- [ ] 在模型 forward 前统计 target-in-base-crop recall 和 out-of-search ratio。
-- [ ] 按 `current_delta_t`、真实位移、点数和遮挡状态分桶，定位 gap1124/burst-drop 的主要失败区间。
-- [ ] 比较 base crop、2x expanded crop、trajectory-recentered crop 的 oracle recall；先只做可达性诊断。
-- [ ] 对 gap1124 早期高点、后期回落样本检查 recursive error 是否将目标逐步推离 crop。
-- [ ] 若 out-of-crop 是主要瓶颈，先实现 GT-free coarse trajectory recenter/uncertainty-aware expand，再由 SeqTrack3D observation refinement。
+**2026-07-17 状态**：oracle 与 recursive predicted-history 均已完成。GT-history CV 在三协议约为 99% recall，但 predicted-history CV 相对 previous-A1 仅提高 2.91/2.65/3.03 pp，低于总体 +5 pp 门槛；强协议 `>4 m` 位移桶只提高 8.45/9.96 pp，也未同时达到 +10 pp。上一预测误差不超过 4 m 时 pred-CV recall 为 98.59%/97.34%/98.64%，超过 4 m 后只有 0.80%/1.21%/1.61%。完整证据见 `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`。
+
+- [x] 在 standard 模型 forward 前统计 target-in-base-crop recall、center-outside 和目标点保留率。
+- [x] 补齐 gap1124、burst-drop 的 summary/CSV，并按 `current_delta_t`、真实位移和目标点数分桶。
+- [x] 在 standard 比较 base、2x expanded、GT-history constant-velocity recentered crop 的 oracle recall 与背景点开销。
+- [x] 新增独立 `diagnose_recursive_crop_reachability.py`，被动比较四种 anchor，并记录 endpoint/hash/连续失败信息。
+- [x] 对三协议递归误差、连续失败、empty fallback 和可靠/失控分桶完成检查，确认预测历史存在灾难性长尾漂移。
+- [x] 在服务器运行 predicted-history 诊断：四种 anchor 使用完全一致 endpoints、同一 checkpoint，missing/unexpected 均为 0。
+- [x] 按预注册门槛判定 always-on raw predicted-history CV recenter 为 No-Go，不接成唯一 search anchor。
+- [ ] 扩展递归日志，记录测试时 confidence/foreground/crop points/empty fallback/CV shift/speed/proposal agreement，并评估故障预测 AUROC、AUPRC 与 calibration。
+- [ ] 仅当可靠性代理有效时，实现无训练 active dual-anchor；用同一 A1 checkpoint 检查首次失控、连续失败和在线跟踪指标。
 - [ ] expanded/recentered crop 必须保持相同训练步和模型容量，不能把更大搜索区收益写成真实时间收益。
 
-**验收**：明确误差主要发生在 crop 前还是 proposal 后；只有 proposal 后误差占主导时，才继续以最终 bounded residual 为核心修正位置。
+**验收**：P0-B2 被动诊断已完成并判定 raw always-on CV No-Go。下一阶段不再问“单一 CV anchor 能否恢复已漂移目标”，而是验证测试时信号能否在 GT-free 条件下识别风险，以及 dual-anchor 是否能预防首次失控、缩短连续失败。最终 bounded residual 仍不作为当前第一修正位置。
 
 ### P0-C：当前 HTV 实验还不是“未见 cadence 泛化”
 
@@ -91,17 +102,19 @@ C. paired views + corrected-TWC
 
 实际执行顺序：
 
-1. 先完成 P0-C 的 split-specific 配置、manifest 和 causal time switch，冻结比较协议。
-2. 不训练新模型，先用现有数据完成 P0-A residual 幅度/梯度统计和 P0-B crop recall 统计。
-3. 根据训练 split 统计一次性确定 residual bound，然后运行下表的 seed42 最小矩阵。
-4. 只有出现因果正信号才补 seed43/44、未见 cadence 和完整数据。
-5. P1-D TWC 控制组与 GT-free TrajTrack 放在主线正信号之后，不抢占当前算力。
+1. 扩展 recursive diagnostic，收集只依赖测试时信息的 reliability signals，并用离线 GT 标注建立 drift/next-crop-failure 评估表。
+2. 预注册信号筛选口径，报告 AUROC、AUPRC、calibration 和按协议稳定性；禁止把 `previous_prediction_error <= 4 m` 本身用于在线 gate。
+3. 只有可靠性代理有效时，固定 A1 checkpoint 实现无训练 dual-anchor active inference，优先验证首次失控时间和连续失败长度。
+4. active dual-anchor 通过后，完成 P0-C 的稳定 manifest 与 `true/fixed/shuffled` causal time switch；同时补 P0-A reachable-subset 统计。
+5. 只有 active 机制和时间因果性均为正，才进入训练、seed43/44、未见 cadence 和完整数据。
 
 | 方法 | 目的 |
 | --- | --- |
 | A1-order | observation baseline |
 | A2 feature-concat true-dt | 旧时间接入方式参考 |
-| A2 residual true-dt | 主假设 |
+| reliability-aware dual-anchor true-dt | 当前主假设；先做无训练主动推理 |
+| reliability-aware dual-anchor fixed/shuffled-dt | 物理时间负对照 |
+| A2 residual true-dt | reachable-subset refinement 消融 |
 | A2 residual fixed-dt | 同容量时间负对照 |
 | A2 residual shuffled-dt | 物理时间对应关系负对照 |
 | constant-velocity/Kalman | 无学习、GT-free 低复杂度轨迹基线 |
@@ -167,8 +180,8 @@ P0-A/P0-B/P0-C 已覆盖 residual、crop 和协议检查；这里只保留会影
 
 - [ ] 不上 Mamba、复杂 Transformer、ODE/SDE/CDE 或多传感器异步融合。
 - [ ] 不同时开发 gate、uncertainty head、TWC 和大 trajectory encoder。
-- [ ] 只有 true-dt 在强 gap 与 unseen cadence 上通过三 seed 验证，才实现轻量 dual proposal。
-- [ ] 若 crop 是主要瓶颈，trajectory proposal 优先用于 GT-free recenter/expand，再考虑最终 residual fusion。
+- [ ] 只有测试时 reliability proxy 与无训练 dual-anchor 先通过，才实现学习式 gate 或轻量 dual proposal。
+- [ ] trajectory proposal 只作为预防性第二搜索假设；raw always-on recenter 与已漂移后的单锚点恢复均停止。
 
 ## 6. 复现与论文交付底线
 

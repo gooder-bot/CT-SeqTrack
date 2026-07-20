@@ -1,12 +1,22 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-16
+更新时间：2026-07-17
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 0. 当前总判断
 
-### 2026-07-16 最新证据与结果口径
+### 2026-07-17 P0-A / P0-B 诊断
+
+P0-B oracle 与 P0-B2 recursive predicted-history 均已完成。oracle 表明 GT-history CV 可将强协议 recall 恢复到 98.96%/99.05%，但真实 A1 预测历史下，CV 相对 previous-A1 只提高 2.91/2.65/3.03 pp，未达到预注册的总体 +5 pp 门槛；gap/burst 的 `>4 m` 位移桶提高 8.45/9.96 pp，也未同时达到 +10 pp。结论是 **always-on raw predicted-history CV recenter No-Go**。
+
+bounded residual 的 standard 真实 batch 也已完成第一轮诊断。warmup 内 residual/gate gradient 严格为 0；active 64-batch 中 observation error P50/P75/P95 为 `0.213 / 0.577 / 3.838 m`，默认 2 cm 理论上限已明显偏小。更关键的是 gate alpha 约 `2e-5`，实际 applied residual P50 只有 `7.25e-8 m`，gate gradient P50 只有 `4.00e-10` 且 31/64 batch 为 0。默认路径数值稳定但在功能上接近关闭，未通过“非平凡修正幅度”验收。
+
+这些 observation error 混入了 out-of-crop 失败，不能据此直接把 residual bound 调到几十厘米或数米。递归结果进一步显示：上一预测误差不超过 4 m 时 pred-CV recall 为 97.34%–98.64%，超过 4 m 后只有 0.80%–1.61%。下一步应先寻找测试时可得的可靠性代理，并验证无训练 dual-anchor 能否预防首次漂移，再在 crop-reachable subset 上校准末端 residual。完整报告见 `compare_results/reports/p0_ab_diagnostics_20260717.md` 与 `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`。
+
+当前 P0-B/P0-B2 回传已经完整；仍不完整的是 P0-A，它只有 standard 64-batch，没有完整 split、强 gap 或真正 2-step optimizer 结果。P0-B2 是被动 counterfactual reachability，不是 active dual-anchor 跟踪性能；当前关键缺口是测试时 reliability proxy 与主动双锚点验收。
+
+### 2026-07-16 corrected-TWC、HTV 与 TrajTrack 结果口径
 
 代码审查发现，旧 active-TWC sampler 在 candidate 1/2/3 下分别为 A/B 两路采样最近历史框扰动，导致两路 current search crop 和局部坐标系不同；旧检查比较归一化后天然接近零的 `ref_boxs[:, 0]`，没有发现这个问题。因此：
 
@@ -14,7 +24,7 @@
 - 旧 A2+TWC 的退化也暂时撤回，不能据此判断 TWC 与 dynamics 冲突。
 - 两路各自的 supervised loss 仍有效，但跨 view TWC loss 不是干净的一致性约束。
 - 共享 candidate offset、`coordinate_anchor` 和 point-sampling seed 的修复已经完成；修复后的 A1/A2 seed42 训练均已完成，anchor gap max 与 current XYZ gap max 都为 0。
-- `A2-residual-dyn` 已完成工程实现和纯逻辑 smoke test，但尚无性能结果。
+- `A2-residual-dyn` 已完成 standard 真实 batch 的 warmup/active forward-loss-backward 诊断；默认量级近乎为零，尚无完整 split、强 gap、2-step optimizer 或跟踪性能结果。
 
 修复后的 seed42 结果显示：A1+corrected-TWC 相对旧配置对齐 baseline 的 final 为 `+1.49 Success / +5.03 Precision`，late mean 为 `+0.99 / +2.67`；A2+corrected-TWC 的 final 为 `-0.93 / -2.07`。前者是值得复现的单 seed 正信号，后者不支持把 TWC 接入当前 A2 主线。由于 baseline 来自旧 run、没有 git commit，二者仍只是配置级参考，不能视为严格同提交因果结果。
 
@@ -26,8 +36,9 @@ TrajTrack aligned seed42 run 虽得到 64.94 / 79.07，但当前本地 evaluator
 
 ```text
 主干保留 SeqTrack3D 的 order-time 语义；
-真实 delta_t 主要作为保守 residual dynamics prior；
-用固定 manifest 的 variable-rate / HTV 因果矩阵验证 residual；
+真实 delta_t 优先驱动受可靠性约束的第二 trajectory proposal；
+当前末端 bounded residual 只保留为待校准 refinement 对照；
+用固定 manifest 的 variable-rate / HTV 因果矩阵验证时间因果性；
 corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free evaluator。
 ```
 
@@ -49,6 +60,9 @@ corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free 
 - `A3-order-conf-res-gate` 旧汇总 best checkpoint 很高（success 62.04 / precision 76.30），但最新 best-e14 复测只有 28.06 / 37.70，暂时不能把旧 best 当作确认收益。
 - corrected A1+TWC seed42 在坐标修复后形成 +1.49/+5.03 的配置级正信号，且两路 anchor/current XYZ gap 均为 0。
 - HTV 六组说明旧 feature-concat dynamics 的效果依赖 protocol：random20 为正，gap1124/burst-drop 为负。
+- 三协议 crop oracle 说明高速位移失败会发生在模型 forward 前；强 gap/burst 下固定 2x expanded 也明显不足，而 GT-history CV recenter 仍接近 99% recall 且没有额外背景点代价。
+- 三协议递归诊断否定了 raw CV 恒开启替换 anchor，但确认可靠预测历史下的 CV recall 可达 97%–99%，支持“可靠性控制的预防性第二锚点”这一更窄假设。
+- 默认 bounded residual 的实际修正约为 `1e-7 m`，gate 梯度极小；它目前是稳定但近乎关闭的路径，不是可直接训练的主配置。
 - TrajTrack 论文的“历史轨迹 proposal + local/global proposal agreement”值得借鉴，但当前本地 GT-assisted evaluator 的高分不能进入公平主表。
 
 当前不能说：
@@ -61,6 +75,7 @@ corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free 
 - 不能说 displacement 监督已经是必要模块；目前它只是一个小幅、温和的正向/不伤信号。
 - 不能只靠普通 fixed-step benchmark 讲论文成功；如果没有 variable-rate / HTV 协议和分桶收益，真实时间贡献会显得证据不足。
 - 不能把 TrajTrack 本地 64.94 / 79.07 写成公平结果，也不能把其与 SeqTrack3D 的算术差值写成方法增益。
+- 不能把 GT-history CV 的约 99% recall 或被动 pred-CV 的 2.65–3.03 pp 写成 active 在线增益；当前还没有 dual-anchor 实际跟踪结果。
 
 ## 1. 第一轮：Baseline vs P5 full
 
@@ -512,13 +527,51 @@ aligned seed42 运行预算与 plain SeqTrack3D 基本一致，但 evaluator 并
 
 完整报告：`compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
 
+### 10.4 P0-A / P0-B 机制诊断
+
+| diagnostic | base/current | alternative | 当前判断 |
+| --- | ---: | ---: | --- |
+| standard center outside | base 15.97% | CV recenter 0.12% | crop 前瓶颈明确存在 |
+| standard mean target-point recall | base 85.41% | CV recenter 99.95% | 移动中心比扩大 crop 更合理 |
+| standard crop points mean | base 285 | expanded 1622 / CV 290 | expanded 背景代价过大 |
+| gap1124 mean target-point recall | base 76.78% | expanded 89.08% / CV 98.96% | 2x 扩区仍不足，CV oracle 强 |
+| burst-drop mean target-point recall | base 77.72% | expanded 87.65% / CV 99.05% | 结论与 gap1124 一致 |
+| strong-protocol crop points mean | base 312/331 | expanded 1650/1719 / CV 286/290 | CV 收益不是来自更多背景点 |
+| observation error | P50 0.213 m | current cap 0.02 m | 2 cm 覆盖不了主要误差 |
+| actual residual | P50 7.25e-8 m | alpha 2e-5 | 默认 gate 近乎关闭 |
+| gate gradient | P50 4.00e-10 | 31/64 batch 为 0 | 当前初始化难以有效学习 |
+
+standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P0-B2 已补齐 A1 recursive predicted history，并否定 raw CV 恒开启接入；P0-A 的误差又混入 out-of-crop failure，所以仍不能在当前统计上直接调大 bound。
+
+完整报告与派生表：
+
+- `compare_results/reports/p0_ab_diagnostics_20260717.md`
+- `compare_results/data/p0_ab_diagnostics_20260717_summary.csv`
+
+### 10.5 P0-B2 recursive predicted-history 诊断
+
+| diagnostic | previous-A1 | pred-history CV | 判断 |
+| --- | ---: | ---: | --- |
+| standard overall recall | 69.69% | 72.61% | +2.91 pp，安全但低于 +5 pp 门槛 |
+| gap1124 overall recall | 63.73% | 66.38% | +2.65 pp，No-Go |
+| burst-drop overall recall | 63.24% | 66.27% | +3.03 pp，No-Go |
+| gap1124 `>4 m` recall | 1.68% | 10.13% | +8.45 pp，低于 +10 pp |
+| burst-drop `>4 m` recall | 1.81% | 11.76% | +9.96 pp，接近但未达到门槛 |
+| reliable history (`prev error <=4 m`) | 93.56%–94.76% | 97.34%–98.64% | 时间外推在漂移前有效 |
+| drifted history (`prev error >4 m`) | 0.28%–0.93% | 0.80%–1.61% | 漂移后两锚点近乎同时失效 |
+
+三协议 checkpoint SHA256 相同，reference endpoints exact match，missing/unexpected 均为 0。A1 previous prediction error P95 为 78.33/89.25/94.84 m，说明平均 recall 背后存在灾难性递归长尾。结论不是放弃真实时间，而是把 trajectory proposal 从唯一重定心 anchor 改为由测试时可靠性控制的第二搜索假设。完整报告与派生表：
+
+- `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`
+- `compare_results/data/p0b2_recursive_crop_reachability_20260717_summary.csv`
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 仍是当前最有潜力的真实时间使用方式，但 feature-concat 在强 gap/burst 下失败；下一轮应验证 observation-first residual，而不是把旧 A2 当主方法。
+- DynamicsEncoder 仍是值得保留的真实时间入口，但 feature-concat 在强 gap/burst 下失败，默认末端 residual 又近乎关闭；下一轮优先验证测试时可靠性与无训练 dual-anchor，再决定是否进入训练式 trajectory guidance。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
@@ -527,13 +580,15 @@ aligned seed42 运行预算与 plain SeqTrack3D 基本一致，但 evaluator 并
 - conf-res 旧 best checkpoint 未被最新 best-e14 复测确认；当前不能按旧 best 写正向收益。
 - corrected-TWC 如果继续，应先只在 `A1-order` 上做最小重跑；gate 仍只做诊断，不与 residual 同时启用。
 - TrajTrack 当前高分含 GT oracle；它只能提示 trajectory proposal 的潜力，不能证明公平收益。
+- standard/gap1124/burst-drop oracle 均证明高速位移下 search crop 本身会丢目标；recursive 诊断进一步说明 raw predicted CV 只能在历史可靠时改善，不能从已漂移状态独立恢复。
 
 还不能说明的事情：
 
 - 还不能说完整 CT-SeqTrack 已经稳定超过 SeqTrack3D。
 - 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只有 A1 seed42 正信号，而 A2 seed42 为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
-- 还不能彻底解释非 0 candidate 是否污染 dynamics，因为 cand1 没有与原 A2 做 optimizer-step 对齐，也缺少 candidate 分桶日志。
+- 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
+- 已能判断 gap1124/burst-drop 的 oracle 上限和被动 recursive reachability，但还不能判断 active dual-anchor 的在线收益或强协议 residual 量级；前者缺主动闭环，后者缺 P0-A 强协议回归。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 
 ## 12. 接下来应该做什么
@@ -541,12 +596,11 @@ aligned seed42 运行预算与 plain SeqTrack3D 基本一致，但 evaluator 并
 当前优先顺序：
 
 ```text
-1. 固定 TrajTrack epoch60 checkpoint，先完成 `pre_wo_refine()` 和 paper-aligned GT-free refinement，消除外部参考中的 evaluator 混杂。
-2. 在服务器完成 bounded residual 的 standard/gap1124/burst-drop 真实 batch / forward / loss / 2-step 验收。
-3. 冻结 manifest，对 residual 做 true-dt / fixed-dt / shuffled-dt、seed42/43/44 的同容量因果对照。
-4. corrected A1+TWC 补 seed43/44，并用同一代码提交重跑 paired A1 baseline；不继续 A2+TWC。
-5. 补 candidate0/nonzero、target-in-crop、delta_t/sparse/displacement 和 observation-vs-dynamics proposal 分桶。
-6. 只有 residual 的 true-dt 因果证据成立后，才升级为轻量 bbox-only time-conditioned trajectory proposal + GT-free proposal agreement。
+1. 扩展 recursive diagnostic，记录测试时 confidence、foreground、empty fallback、CV shift 和 proposal agreement。
+2. 用离线 GT 标签评估 drift/next-crop-failure 预测的 AUROC、AUPRC 与 calibration，并检查跨协议稳定性。
+3. 只有可靠性代理有效时，固定 A1 checkpoint 做无训练 active dual-anchor，优先减少首次失控和连续失败。
+4. active 机制通过后再完成 P0-C 稳定 manifest 与 true/fixed/shuffled-dt；同时补 P0-A reachable-subset 统计。
+5. 只在主动闭环与时间因果性均通过后启动训练和多 seed；默认 residual、TWC、复杂 memory 均后置。
 ```
 
 可选复核：
@@ -598,13 +652,15 @@ A2-order-dyn-cand1-240ep
 - `DynamicsEncoder` 继续预测 `velocity_pred / dynamics_displacement_pred`。
 - 最终中心预测采用小幅 residual：`center = obs_center + scale * alpha * clamp(dyn_disp)`。
 - 已支持 `scale / max_norm / max_alpha / warmup / long_gap_only / sparse_only`，gate 近零初始化且受 `dynamics_valid` 约束。
-- 先验收默认 `scale=0.1, max_norm=1.0, max_alpha=0.2, warmup=5`；默认配置没有稳定信号前不做大网格。
+- standard 真实 batch 已证明默认 `scale=0.1, max_norm=1.0, max_alpha=0.2, warmup=5` 数值稳定但功能上近乎关闭：实际 residual P50 仅 `7.25e-8 m`。
+- 不在混入 out-of-crop error 的统计上调大 bound；先解决 pre-crop reachability，再在 reachable subset 预注册 gate init/scale/bound。
 - 与当前 `A2-order-dyn` feature-concat 版本做同 seed 对照。
 
 判断标准：
 
+- 只有 reliability-aware active dual-anchor 改善在线 crop 可达性后，末端 residual 才有资格进入正式比较。
 - 如果普通 final 只持平，但 long-gap / sparse bin 稳定提升，可以作为更强论文证据。
-- 如果 residual 仍 seed collapse，问题更可能在 dynamics 监督质量、candidate history 或真实 `delta_t` 信号不足。
+- 如果 reachable subset 中 residual 仍长期近零，应停止该 gate/bound 设计，而不是继续扩大网络。
 
 ### 12.3 A3-order-gate-safe / conf-res
 

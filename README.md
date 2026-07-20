@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-16 的最新证据包括：corrected-TWC 已完成 seed42 重跑并确认两路 anchor/current XYZ gap 均为 0；A1 上出现 `+1.49 Success / +5.03 Precision` 的单 seed 配置级正信号，A2 上则为负。HTV 六组实验也已完成，旧 feature-concat dynamics 只在温和 random20 上受益，在 gap1124 和 burst-drop 上明显退化。当前最优先工作是固定 manifest 的 residual `true-dt/fixed-dt/shuffled-dt` 因果矩阵、corrected-TWC 的多 seed 复现，以及 TrajTrack 的 GT-free 公平评测，而不是继续叠加 gate。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
+当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地。2026-07-17 的最新机制证据显示：GT-history CV 的 crop recall 接近 99%，但 A1 predicted-history CV 相对 previous-A1 anchor 只提高 2.65–3.03 pp，未达到预注册的 5 pp 总体门槛；在预测历史仍可靠（上一预测误差不超过 4 m）时 recall 可达 97.34%–98.64%，漂移后则几乎无法恢复。因此，always-on raw predicted-history recenter 已判定 No-Go，当前最优先工作收敛为测试时可靠性诊断与无训练 dual-anchor 主动推理，再决定是否进入 `true-dt/fixed-dt/shuffled-dt` 因果协议。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -96,7 +96,7 @@ dyn_disp = clamp_norm(dynamics_displacement_pred, max_residual_norm)
 final_center = obs_center + residual_scale * alpha_dyn * dyn_disp
 ```
 
-该实现默认不与旧 `ObservabilityGate` 混用，并输出 alpha、raw/clamped norm、clamp ratio、applied ratio 和 `obs_dyn_center_gap` 等诊断量。工程实现和纯逻辑 smoke test 已完成，真实 nuScenes forward/loss/2-step 仍需在服务器环境验收；目前没有 residual 正向实验结论。
+该实现默认不与旧 `ObservabilityGate` 混用，并输出 alpha、raw/clamped norm、clamp ratio、applied ratio 和 `obs_dyn_center_gap` 等诊断量。standard 真实 batch 的 warmup 与 active forward/loss/backward 已完成且数值有限，但默认 gate alpha 约为 `2e-5`，实际修正 P50 仅 `7.25e-8 m`；它尚未完成真正的 2-step optimizer、完整 split、强 gap 或跟踪性能验证。当前实现是安全但功能上近乎关闭的消融，不是可直接进入正式训练的主配置。
 
 ### 3. Time-resampling Consistency
 
@@ -153,7 +153,7 @@ use_observability_gate: False
 | --- | --- |
 | `A1-order` | 主干使用 SeqTrack3D order-time，关闭 dynamics / TWC / gate |
 | `A2-order-dyn` | 主干使用 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder` |
-| `A2-residual-dyn` | observation-only motion head + 真实时间驱动的有界小残差；已实现，待服务器验收和实验 |
+| `A2-residual-dyn` | observation-only motion head + 真实时间驱动的有界小残差；standard 真实 batch 数值通过，但默认修正约 `1e-7 m`，未通过功能验收 |
 | `cand1` | `num_candidates=1`，不是 `candidate_id=1` |
 | `cand4` | 默认多 candidate，包含 `candidate_id=0/1/2/3` |
 | `disp` | 在 dynamics 上增加小权重 displacement 监督 |
@@ -170,7 +170,7 @@ use_observability_gate: False
 | P0 | 真实时间字段主链路 | 已完成 |
 | P1 | 真实时间 baseline smoke test | 已完成 |
 | P2 | scalar-preserving `TimeEncoding` | 已完成 |
-| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；HTV 六组筛选显示 feature-concat 只在 random20 为正，residual 待真实 batch 验收和因果实验 |
+| P3 | Dynamics / Velocity Branch | feature-concat 与 bounded residual 两种路径均已实现，默认关闭；feature-concat 在强 gap/burst 下退化，residual 的 standard 真实 batch 数值稳定但修正近乎为零；当前先验证 pre-crop trajectory guidance |
 | P4 | Time-resampling Consistency | 共享 candidate perturbation / crop / `coordinate_anchor` 已修复；corrected seed42 已完成，A1 为正、A2 为负，仍需同提交 baseline 与 seed43/44 |
 | P5 | Observability Gate | 已实现，默认关闭；gate-safe 低于 A2，conf-res rerun / best 复测都不支持当前接入主线 |
 | Evaluation | cand1 / disp / active/corrected TWC / gate / stability / HTV / TrajTrack reference | 最新数据和公平性边界已整理到 `compare_results/reports/` |
@@ -190,16 +190,18 @@ use_observability_gate: False
 10. A3-order-conf-res rerun seed42
 11. gap1124 / burst-drop / random20 的 A1/A2 六组 HTV 筛选
 12. TrajTrack aligned seed42 参考运行与 evaluator oracle 审计
+13. P0-B standard/gap1124/burst-drop crop reachability 与 P0-A standard residual 量级诊断
+14. P0-B2 A1 recursive predicted-history 三协议诊断与预注册 No-Go 判断
 ```
 
 当前下一步：
 
 ```text
-1. 用 TrajTrack 固定 epoch60 checkpoint 跑 `pre_wo_refine()`，并实现不读取当前帧 GT 的 paper-aligned refinement，先建立公平外部参考。
-2. 在服务器完成 A2-residual-dyn 的 standard/gap1124/burst-drop 真实 batch、forward/loss 和 2-step 验收。
-3. 冻结 virtual-rate manifest，对 residual 做同容量、同 protocol、seed42/43/44 的 true-dt/fixed-dt/shuffled-dt 对照。
-4. 补跑 corrected A1+TWC seed43/44，并用同一代码提交重跑配对 A1 baseline；A2+TWC 暂停。
-5. 补 candidate、crop-recall、delta_t/sparse/displacement、observation-vs-dynamics proposal 分桶；只有 residual 成立后才扩展 GT-free trajectory-proposal agreement。
+1. 扩展递归诊断，记录 confidence、foreground、empty fallback、`||c_cv-c_prev||`、速度和双 proposal agreement 等测试时可靠性信号。
+2. 用离线 GT 标签评估这些信号预测 `previous_prediction_error > 4 m` 和 next-crop failure 的 AUROC、AUPRC 与 calibration；GT 不进入推理规则。
+3. 只有可靠性代理有效时，固定同一 A1 checkpoint 做无训练 active dual-anchor：previous-pred crop 与 clipped-CV/Kalman crop 各 forward 一次，再按 confidence/agreement 选择或保守融合。
+4. active 机制必须优先减少首次失控和连续失败；通过后才冻结 virtual-rate manifest 并进入 `true/fixed/shuffled-dt` 因果矩阵。
+5. bounded residual、corrected A1+TWC 多 seed、TrajTrack GT-free 公平参考和复杂 memory/SSM 均后置。
 ```
 
 ---
@@ -242,6 +244,8 @@ tools/
   check_twc_shared_coordinates.py       # 无数据集依赖的共享 offset/seed smoke test
   check_residual_dynamics.py            # 无数据集依赖的 residual clamp/gate smoke test
   check_observability_gate.py
+  diagnose_crop_reachability.py         # previous-GT / expanded / GT-history-CV oracle
+  diagnose_recursive_crop_reachability.py # baseline A1 预测历史的 GT-free 被动可达性诊断
 
 compare_results/
   experiment_comparison.md
@@ -481,9 +485,10 @@ TrajTrack 的 aligned seed42 运行得到 64.94 / 79.07，但本地 evaluator �
 - 真实时间方向没有被否定，失败主要来自不合适的注入方式。
 - 当前不应继续把 raw / MLP / Fourier real-time token 作为主干主线。
 - 在普通 fixed-step 设置上追求全局稳定涨点的把握不高；更合理的主战场是 variable-rate、long-gap、sparse / re-appearance 子集。
-- `A2-order-dyn` 的真实时间信号具有 protocol dependence：温和 random20 为正，强 gap/burst 为负；新 residual 只有工程结果，尚无性能结果。
+- `A2-order-dyn` 的真实时间信号具有 protocol dependence：温和 random20 为正，强 gap/burst 为负；新 residual 已通过 standard 真实 batch 数值检查，但默认修正近乎为零，尚无性能结果。
 - corrected-TWC 已消除坐标/crop 污染，A1 seed42 为正，但只有单 seed且 baseline 不是同代码提交；它目前是候选稳定性贡献，不是已确认主增益。
 - TrajTrack 的可借鉴点是 bbox-only trajectory proposal 与 local/global proposal agreement，不是当前 GT-assisted evaluator 的高分。
+- standard/gap/burst 的递归诊断已证明：raw predicted-history CV 只有在历史仍可靠时有效，漂移后无法单独恢复；正式方法应使用测试时可靠性控制的 dual-anchor 预防首次失控，而不是恒开启替换搜索中心。
 
 简洁实验结论和后续计划见：
 
@@ -532,9 +537,9 @@ directly replacing the main branch time tokens with raw timestamps.
 
 ```text
 Fixed-step 3D SOT hides the physical meaning of irregular frame intervals.
-CT-SeqTrack studies this problem with within-track variable-rate evaluation
-and a bounded timestamp-conditioned dynamics residual. Whether it improves
-long-gap and sparse tracking remains an experimental hypothesis.
+CT-SeqTrack studies this problem with within-track variable-rate evaluation,
+timestamp-conditioned trajectory guidance before search cropping, and bounded
+observation refinement. GT-free long-gap gains remain an experimental hypothesis.
 ```
 
 ---

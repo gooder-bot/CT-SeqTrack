@@ -1,0 +1,84 @@
+group,setting,metric,value,unit,scope
+P0-B,standard_protocol,current_delta_t_p95,0.5491299629,s,mini_train full-history
+P0-B,standard_protocol,displacement_p95,7.1566511802,m,mini_train full-history
+P0-B,standard_protocol,displacement_max,15.5928711275,m,mini_train full-history
+P0-B,standard_base,endpoint_count,4246,count,mini_train full-history
+P0-B,standard_base,target_visible_endpoint_count,2996,count,current GT box contains at least one point
+P0-B,standard_base,center_outside_rate,0.1596796985,ratio,previous-GT anchor oracle
+P0-B,standard_base,all_corners_inside_rate,0.6912388130,ratio,previous-GT anchor oracle
+P0-B,standard_base,has_target_point_rate,0.9072096128,ratio,conditional on visible target
+P0-B,standard_base,target_point_recall_mean,0.8540549581,ratio,conditional on visible target
+P0-B,standard_base,crop_point_count_mean,285.4149788,points,previous-GT anchor oracle
+P0-B,standard_base,crop_point_count_p50,16,points,previous-GT anchor oracle
+P0-B,standard_base,crop_point_count_p95,1864,points,previous-GT anchor oracle
+P0-B,standard_expanded,center_outside_rate,0.0014130947,ratio,2x scale and offset oracle
+P0-B,standard_expanded,target_point_recall_mean,0.9957320215,ratio,conditional on visible target
+P0-B,standard_expanded,crop_point_count_mean,1621.7538860,points,2x scale and offset oracle
+P0-B,standard_expanded,crop_point_count_p50,123,points,2x scale and offset oracle
+P0-B,standard_cv_recenter,center_outside_rate,0.0011775789,ratio,GT-history constant-velocity oracle
+P0-B,standard_cv_recenter,target_point_recall_mean,0.9995309061,ratio,conditional on visible target
+P0-B,standard_cv_recenter,crop_point_count_mean,289.8184173,points,GT-history constant-velocity oracle
+P0-B,standard_cv_recenter,crop_point_count_p50,17,points,GT-history constant-velocity oracle
+P0-B,standard_displacement_gt4,endpoint_count,960,count,displacement greater than 4 m
+P0-B,standard_displacement_gt4,center_outside_rate,0.70625,ratio,previous-GT anchor oracle
+P0-B,standard_displacement_gt4,target_point_recall_mean,0.4519981300,ratio,conditional on visible target
+P0-B,gap1124_protocol,endpoint_count,2127,count,mini_train full-history
+P0-B,gap1124_protocol,target_visible_endpoint_count,1503,count,current GT box contains at least one point
+P0-B,gap1124_protocol,current_delta_t_mean,0.9869962595,s,gap_pattern
+P0-B,gap1124_protocol,current_delta_t_p50,0.9500119686,s,gap_pattern
+P0-B,gap1124_protocol,current_delta_t_p95,2.0011968613,s,gap_pattern
+P0-B,gap1124_protocol,displacement_p95,16.8915407139,m,gap_pattern
+P0-B,gap1124_protocol,displacement_max,36.6149133960,m,gap_pattern
+P0-B,gap1124_base,center_outside_rate,0.2519981194,ratio,previous-GT anchor oracle
+P0-B,gap1124_base,has_target_point_rate,0.8043912176,ratio,conditional on visible target
+P0-B,gap1124_base,target_point_recall_mean,0.7678071201,ratio,conditional on visible target
+P0-B,gap1124_base,crop_point_count_mean,312.1974612,points,previous-GT anchor oracle
+P0-B,gap1124_base,crop_point_count_p50,15,points,previous-GT anchor oracle
+P0-B,gap1124_base,crop_point_count_p95,1952,points,previous-GT anchor oracle
+P0-B,gap1124_expanded,center_outside_rate,0.1227080395,ratio,2x scale and offset oracle
+P0-B,gap1124_expanded,target_point_recall_mean,0.8907956808,ratio,conditional on visible target
+P0-B,gap1124_expanded,crop_point_count_mean,1649.9633286,points,2x scale and offset oracle
+P0-B,gap1124_cv_recenter,center_outside_rate,0.0117536436,ratio,GT-history constant-velocity oracle
+P0-B,gap1124_cv_recenter,target_point_recall_mean,0.9896291438,ratio,conditional on visible target
+P0-B,gap1124_cv_recenter,crop_point_count_mean,286.1748942,points,GT-history constant-velocity oracle
+P0-B,gap1124_displacement_gt4,endpoint_count,617,count,displacement greater than 4 m
+P0-B,gap1124_displacement_gt4,base_center_outside_rate,0.8687196110,ratio,previous-GT anchor oracle
+P0-B,gap1124_displacement_gt4,base_target_point_recall_mean,0.2310421941,ratio,conditional on visible target
+P0-B,gap1124_displacement_gt4,expanded_target_point_recall_mean,0.6209374325,ratio,conditional on visible target
+P0-B,gap1124_displacement_gt4,cv_target_point_recall_mean,0.9640013927,ratio,conditional on visible target
+P0-B,burst_drop_protocol,endpoint_count,2098,count,mini_train full-history
+P0-B,burst_drop_protocol,target_visible_endpoint_count,1478,count,current GT box contains at least one point
+P0-B,burst_drop_protocol,current_delta_t_mean,1.0006392011,s,burst_drop
+P0-B,burst_drop_protocol,current_delta_t_p50,0.5004541874,s,burst_drop
+P0-B,burst_drop_protocol,current_delta_t_p95,2.0011689663,s,burst_drop
+P0-B,burst_drop_protocol,displacement_p95,18.6132806243,m,burst_drop
+P0-B,burst_drop_protocol,displacement_max,37.6681423619,m,burst_drop
+P0-B,burst_drop_base,center_outside_rate,0.2383222116,ratio,previous-GT anchor oracle
+P0-B,burst_drop_base,has_target_point_rate,0.8119079838,ratio,conditional on visible target
+P0-B,burst_drop_base,target_point_recall_mean,0.7772356705,ratio,conditional on visible target
+P0-B,burst_drop_base,crop_point_count_mean,331.3012393,points,previous-GT anchor oracle
+P0-B,burst_drop_base,crop_point_count_p50,16,points,previous-GT anchor oracle
+P0-B,burst_drop_base,crop_point_count_p95,1993.45,points,previous-GT anchor oracle
+P0-B,burst_drop_expanded,center_outside_rate,0.1229742612,ratio,2x scale and offset oracle
+P0-B,burst_drop_expanded,target_point_recall_mean,0.8764627155,ratio,conditional on visible target
+P0-B,burst_drop_expanded,crop_point_count_mean,1718.7735939,points,2x scale and offset oracle
+P0-B,burst_drop_cv_recenter,center_outside_rate,0.0090562440,ratio,GT-history constant-velocity oracle
+P0-B,burst_drop_cv_recenter,target_point_recall_mean,0.9904500248,ratio,conditional on visible target
+P0-B,burst_drop_cv_recenter,crop_point_count_mean,290.0905624,points,GT-history constant-velocity oracle
+P0-B,burst_drop_displacement_gt4,endpoint_count,592,count,displacement greater than 4 m
+P0-B,burst_drop_displacement_gt4,base_center_outside_rate,0.8445945946,ratio,previous-GT anchor oracle
+P0-B,burst_drop_displacement_gt4,base_target_point_recall_mean,0.2684620298,ratio,conditional on visible target
+P0-B,burst_drop_displacement_gt4,expanded_target_point_recall_mean,0.5652664132,ratio,conditional on visible target
+P0-B,burst_drop_displacement_gt4,cv_target_point_recall_mean,0.9669222831,ratio,conditional on visible target
+P0-A,standard_active,observation_error_p50,0.2125839889,m,64 batches 1024 samples
+P0-A,standard_active,observation_error_p75,0.5770992041,m,64 batches 1024 samples
+P0-A,standard_active,observation_error_p95,3.8379874229,m,64 batches 1024 samples
+P0-A,standard_active,configured_max_residual_norm,0.02,m,theoretical cap
+P0-A,standard_active,alpha_p50,0.00002,ratio,near-zero initialization
+P0-A,standard_active,applied_residual_p50,0.0000000724675,m,64 batches 1024 samples
+P0-A,standard_active,applied_residual_p95,0.0000000824523,m,64 batches 1024 samples
+P0-A,standard_active,gate_grad_norm_p50,0.0000000004005,norm,64 backward passes
+P0-A,standard_active,gate_zero_grad_batches,31,count,out of 64 backward passes
+P0-A,standard_active,encoder_grad_norm_p50,0.0022998350,norm,64 backward passes
+P0-A,standard_active,clamp_ratio,0,ratio,untrained dynamics branch
+P0-A,standard_active,dynamics_valid_ratio,1,ratio,all samples full-history

@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-16
+更新时间：2026-07-17
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -19,6 +19,9 @@
 - [x] P4：Time-resampling Consistency 已实现；2026-07-11 修复 nonzero candidate 的共享坐标系缺陷，2026-07-16 已完成 corrected A1/A2 seed42 训练，anchor/current XYZ gap max 均为 0。
 - [x] P5：Observability Gate 已实现，forward / loss / 2-step train smoke test 通过。
 - [x] nuScenes-mini-HTV / virtual-rate 数据层、检查脚本和 6 个 A1/A2 smoke 配置已实现。
+- [x] P0-B standard/gap1124/burst-drop full-history crop oracle 已完成；强协议 base recall 为 76.78%/77.72%，GT-history CV 为 98.96%/99.05%。
+- [x] P0-B2 三协议 recursive predicted-history 已完成；endpoints 完全匹配同一 checkpoint，always-on raw CV recenter 按预注册门槛判定 No-Go。
+- [x] P0-A standard warmup/active 真实 batch 诊断已完成：默认 residual 数值稳定但实际修正约 `1e-7 m`，未通过非平凡幅度验收。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text
@@ -58,10 +61,13 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 ```text
 真实时间方向没有被否定；
 当前最稳论文边界仍是保留 SeqTrack3D 主干的 order-time 语义，
-把真实 delta_t 放进保守 residual dynamics prior。
+把真实 delta_t 优先用于受测试时可靠性约束的第二 trajectory proposal，
+末端 bounded residual 暂时只保留为待重新校准的 refinement 对照。
 但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
 普通 fixed-step 全局涨点把握不高；
-后续应转向 variable-rate / HTV 协议、困难子集分桶和 residual dynamics。
+递归 predicted-history 已证明 raw CV 恒开启不足；
+后续应先验证 reliability proxy 与无训练 active dual-anchor，
+再完成 frozen protocol 与 reachable-subset residual 诊断。
 corrected-TWC 的 A1 seed42 有正信号，但只有单 seed且 baseline 不是同提交；
 HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
 TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
@@ -69,6 +75,89 @@ gate / conf-res 目前也不能作为稳定主配置。
 ```
 
 后续要做的事情不要写在本文件，统一放到 `need_to_do.md`。
+
+---
+
+## 2026-07-17：P0-B2 recursive predicted-history 回传
+
+### 已完成输出
+
+- `output/diagnostics/recursive_crop_reachability/standard_a1_recursive/`
+- `output/diagnostics/recursive_crop_reachability/gap1124_a1_recursive/`
+- `output/diagnostics/recursive_crop_reachability/burst_drop_a1_recursive/`
+- `logs/diagnostics/p0b2_standard_a1_recursive.log`
+- `logs/diagnostics/p0b2_gap1124_a1_recursive.log`
+- `logs/diagnostics/p0b2_burst_drop_a1_recursive.log`
+- `compare_results/reports/p0b2_recursive_crop_reachability_20260717.md`
+- `compare_results/data/p0b2_recursive_crop_reachability_20260717_summary.csv`
+
+### 完整性
+
+- 三协议 endpoints 为 4246/2127/2098，均与 oracle reference exact match，missing/unexpected 为 0。
+- 三组使用相同 checkpoint SHA256 `a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82`；日志无 traceback。
+
+### 结果与决定
+
+- previous-A1 recall 为 69.69%/63.73%/63.24%，pred-history CV 为 72.61%/66.38%/66.27%，只提高 2.91/2.65/3.03 pp。
+- gap1124/burst-drop 的 `>4 m` 位移桶提高 8.45/9.96 pp；点数比为 0.98x/0.91x，standard 没有退化。
+- 总体 +5 pp 与强协议 `>4 m` +10 pp 门槛未同时通过，故 **always-on raw predicted-history CV recenter No-Go**。
+- 上一预测误差不超过 4 m 时，pred-CV recall 为 98.59%/97.34%/98.64%；超过 4 m 后只有 0.80%/1.21%/1.61%。CV 在漂移前有用，但不能从错误历史中恢复绝对位置。
+- 下一方法假设改为 reliability-aware dual-anchor preventive search；`previous_prediction_error <= 4 m` 仅为离线 GT 分桶，不能用于在线 gate。
+
+---
+
+## 2026-07-17：P0-A / P0-B 第一批服务器诊断
+
+### 已完成输出
+
+- `output/diagnostics/crop_reachability/standard_smoke/`
+- `output/diagnostics/crop_reachability/standard_train/`
+- `output/diagnostics/crop_reachability/gap1124_train/`
+- `output/diagnostics/crop_reachability/burst_drop_train/`
+- `output/diagnostics/p0a_standard_warmup_summary.json`
+- `output/diagnostics/p0a_standard_active_summary.json`
+- `compare_results/reports/p0_ab_diagnostics_20260717.md`
+- `compare_results/data/p0_ab_diagnostics_20260717_summary.csv`
+
+### P0-B standard 结论
+
+- 4246 个 full-history endpoint 中，base crop 即使使用 previous-GT anchor，center outside 仍为 15.97%，all-corners-inside 仅 69.12%。
+- 对当前 GT 框内有点的 2996 个 endpoint，base crop 的 any-target-point rate 为 90.72%，mean target-point recall 为 85.41%。
+- 位移 `>4 m` 的 960 个 endpoint 中，base center outside 为 70.63%，mean recall 只有 45.20%。
+- 2x expanded 将 mean recall 提升到 99.57%，但平均点数增至 base 的 5.68 倍。
+- GT-history constant-velocity recenter 将 mean recall 提升到 99.95%，平均点数仅为 base 的 1.02 倍。
+- center-outside 发生在 75/260 条 tracklet；最多的 10 条只解释 43.66%，不是单条异常序列造成。
+
+结论边界：CV 使用 GT history，只是 oracle reachability。它证明“移动搜索中心”值得做，不证明 GT-free 在线收益。
+
+### P0-B gap1124 / burst-drop 结论
+
+- gap1124/burst-drop 分别有 2127/2098 个 full-history endpoint，位移 P95 为 16.89/18.61 m，明显高于 standard 的 7.16 m。
+- base center-outside 为 25.20%/23.83%，mean target-point recall 为 76.78%/77.72%。
+- 2x expanded 的 recall 只有 89.08%/87.65%，平均点数增至 base 的 5.29/5.19 倍；固定扩大 crop 在强协议下既昂贵又不足。
+- GT-history CV recenter 的 recall 为 98.96%/99.05%，平均点数为 base 的 0.92/0.88 倍。
+- 位移 `>4 m` 时，base recall 只剩 23.10%/26.85%，expanded 为 62.09%/56.53%，CV oracle 仍为 96.40%/96.69%。
+- base 越界覆盖 106/243 和 105/243 条 tracklet，top-10 失败序列只解释 29.10%/32.40%，不是少数异常 tracklet。
+
+结论边界：这是 GT-history oracle，不能写成在线收益。后续 P0-B2 已补齐递归预测误差，并判定 raw predicted-history CV 恒开启 No-Go。
+
+### P0-A standard 结论
+
+- A1 checkpoint 有 320 个 observation key 匹配；新增 dynamics/gate 的 14 个 missing key 符合预期。
+- warmup 2-batch 中 residual 与 gate gradient 严格为 0，loss/backward finite。
+- active 64-batch 的 observation error P50/P75/P95 为 `0.213 / 0.577 / 3.838 m`。
+- 默认理论上限为 0.02 m，但 alpha 约 `2e-5`，实际 residual P50 仅 `7.25e-8 m`。
+- gate gradient P50 为 `4.00e-10`，31/64 batch 为 0；encoder gradient finite。
+- `applied_ratio=1` 只来自 `norm > 1e-8` 的布尔阈值，不代表 correction 有实际作用。
+- candidate0 的 observation P50 为 0.193 m，candidate1/2/3 为 0.217/0.215/0.216 m；四组都有数米级 P95 长尾。
+
+默认 residual 通过数值 smoke，但未通过功能验收。当前不根据这些混入 out-of-crop failure 的误差直接放大 bound。
+
+### 当时未完成部分（P0-B2 已在上节补齐）
+
+- P0-A 尚未运行完整训练 split、gap1124/burst-drop 和真正的 2-step optimizer smoke。
+- full-history batch 的 `dynamics_valid_ratio=1`，没有覆盖真实 `dynamics_valid=0` 样本。
+- previous-A1-prediction 与 A1-prediction-history-CV 已于 P0-B2 完成；当前剩余缺口是 active dual-anchor 在线闭环，而不是被动 reachability。
 
 ---
 
