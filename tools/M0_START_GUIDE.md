@@ -31,6 +31,52 @@ utils/metrics.py
 
 ## 2. 同步与 Formal run 前的版本要求
 
+### 推荐：使用冻结 source bundle
+
+本地已把 M0 endpoint 工具与 P0-C-D1 归档冻结到分支
+`m0-frozen-20260721`。优先上传 source bundle，而不是再次手工覆盖服务器文件：
+
+```text
+output/diagnostics/m0_transfers/m0_frozen_source_20260721.bundle
+output/diagnostics/m0_transfers/m0_frozen_source_20260721.bundle.sha256
+```
+
+从本地 PowerShell 上传：
+
+```powershell
+scp .\output\diagnostics\m0_transfers\m0_frozen_source_20260721.bundle `
+    .\output\diagnostics\m0_transfers\m0_frozen_source_20260721.bundle.sha256 `
+    lishengjie@<SERVER_HOST>:/home/lishengjie/study/lcyu/
+```
+
+服务器端先验证 checksum 和 bundle prerequisite，再从 bundle 建立 detached clean
+worktree；这不会切换或覆盖原 `CT-SeqTrack` 工作目录：
+
+```bash
+SOURCE_REPO=/home/lishengjie/study/lcyu/CT-SeqTrack
+M0_WORKTREE=/home/lishengjie/study/lcyu/CT-SeqTrack-m0-20260721
+M0_BUNDLE=/home/lishengjie/study/lcyu/m0_frozen_source_20260721.bundle
+
+cd /home/lishengjie/study/lcyu
+sha256sum -c m0_frozen_source_20260721.bundle.sha256
+git bundle verify "$M0_BUNDLE"
+git -C "$SOURCE_REPO" cat-file -e 65c2420^{commit}
+
+git -C "$SOURCE_REPO" fetch "$M0_BUNDLE" \
+  refs/heads/m0-frozen-20260721:refs/m0/m0-frozen-20260721
+git -C "$SOURCE_REPO" worktree add --detach \
+  "$M0_WORKTREE" refs/m0/m0-frozen-20260721
+
+cd "$M0_WORKTREE"
+git status --short
+git rev-parse HEAD
+```
+
+`sha256sum -c` 必须输出 `OK`，`git status --short` 必须为空。随后从本指南
+第 5 节开始构建绑定该 commit 的 strong/unseen cadence manifests。
+
+### 备选：手工同步工具并提交
+
 如果同一 Linux 账户或同一仓库目录还有别人正在使用，推荐先在服务器建立专用 worktree。它不会切换原 `CT-SeqTrack` 目录的分支，也不会改动其他终端中的环境变量：
 
 ```bash
