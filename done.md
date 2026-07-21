@@ -1726,3 +1726,17 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - 确认 `getOffsetBB` 在每个框的局部坐标解释平移；M1 必须实现围绕共同 anchor 的 world-SE(2)，不能只重复同一 offset 数组。
 - 确认旧 `residual_limited` 是 full-displacement addition，且 `init_alpha=0` 实际约为 `2e-5`；M2 必须新增显式 proposal-innovation mode 与 strict-zero/invalid A1 回退，旧路径仅保留作负对照。
 - M0-2 可与工程并行，不阻塞写代码，但仍阻塞 M0 整体完成；M3/M4 与多 seed 继续锁定。
+
+## 2026-07-21：M1/M2 第一代码切片与 dataset-free 验收完成
+
+- 新增 `utils/candidate_utils.py`：独立保留 legacy `independent`，新增围绕最近历史 anchor 的 sample-level shared world-SE(2)，包含显式 identity 快路、world translation、anchor-normalized trajectory 和等价 local-offset 审计。
+- `datasets/sampler.py` 已接入 `candidate_trajectory_mode`；shared 模式对整条历史候选轨迹只采样一次变换，TWC A/B 共用该变换。batch 新增 mode/transform/canonical refs 字段。
+- dynamics displacement/velocity label 改为从未扰动 canonical GT trajectory 与真实 `delta_t` 显式计算；`compute_loss` 优先读取新的 `dynamics_displacement_label`。
+- 新增 zero-output `ZeroInitPhysicalTimeAdapter`，保留 SeqTrack3D order clock；输出层权重和 bias 均为 0，disabled/zero-scale 是显式严格回退。
+- 新增独立 `proposal_innovation`：`clip(d_dyn-stopgrad(d_obs), R(delta_t))`，只使用一个 `[0,1]` effective alpha；旧 `residual_limited` 未改义。
+- 新增 raw/clamped/applied innovation、`R(delta_t)`、alpha、clamp/applied/invalid fallback 和 adapter/encoder gradient 诊断；`check_train_steps.py` 支持 `--innovation-diagnostics`。
+- 新增 A1 model-only 初始化入口 `--init_checkpoint`，与 resume/test `--checkpoint` 互斥；provenance 记录 init checkpoint path/SHA256，并写匹配 tensor 报告。
+- 新增 `tools/run_m1_m2_gates_gpu23.sh`：服务器 GPU 2/3 并行执行 shared-SE(2) loader/TWC、A1 等价、standard fallback、gap1124 与 burst-drop E0–E5 smoke；脚本不启动正式训练。
+- `tools/check_candidate_shared_se2.py` 的 radians/degrees、identity、共同刚体、canonical label 和双路径共享自测通过。
+- `tools/check_m1_m2_invariants.py` 的 adapter exact identity、zero/disabled/invalid fallback、time-dependent bound 和 2-step optimizer 自测通过；旧 residual 与 observability dataset-free smoke 回归通过。
+- 真实 nuScenes loader/TWC、同权重 A1 output/loss 等价、三协议 forward/backward 与服务器 2-step 尚未完成，所以本节不改变 `Formal-training HOLD`。

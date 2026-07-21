@@ -28,6 +28,22 @@ def load_config(path):
     return cfg
 
 
+def overlay_virtual_rate_protocol(cfg, protocol_cfg_path):
+    """Copy only virtual-rate sampling fields from an existing protocol config."""
+    if protocol_cfg_path is None:
+        return []
+    protocol_cfg = load_config(protocol_cfg_path)
+    copied = []
+    for key, value in protocol_cfg.items():
+        if str(key).startswith("virtual_rate_"):
+            setattr(cfg, key, value)
+            copied.append(str(key))
+    if not copied:
+        raise ValueError(
+            f"Protocol config has no virtual_rate_* fields: {protocol_cfg_path}")
+    return sorted(copied)
+
+
 def to_numpy(value):
     if torch.is_tensor(value):
         return value.detach().cpu().numpy()
@@ -339,6 +355,73 @@ def build_residual_diagnostics(batch, output, model):
     return diagnostics
 
 
+def build_innovation_diagnostics(batch, output):
+    if is_paired_batch(batch) or is_paired_batch(output):
+        return None
+    required = (
+        "motion_obs_pred",
+        "dynamics_displacement_pred",
+        "dynamics_innovation_applied",
+        "dynamics_innovation_alpha",
+        "dynamics_innovation_radius",
+        "dynamics_valid",
+    )
+    if any(key not in output for key in required):
+        return None
+    target = batch.get(
+        "dynamics_displacement_label", batch["motion_label"][:, 0, :3])
+    target = target.to(
+        device=output["motion_obs_pred"].device,
+        dtype=output["motion_obs_pred"].dtype,
+    )
+    observation = output["motion_obs_pred"][:, :3]
+    dynamics = output["dynamics_displacement_pred"]
+    applied = output["dynamics_innovation_applied"]
+    dynamics_valid = output["dynamics_valid"].reshape(-1)
+    innovation_valid = output.get(
+        "dynamics_innovation_valid", output["dynamics_valid"]).reshape(-1)
+    invalid_applied = torch.linalg.norm(applied, dim=1)[innovation_valid <= 0]
+    search_points = batch.get("num_points_in_search")
+    if search_points is not None:
+        search_points = search_points.detach().reshape(-1)
+        empty_search_ratio = float((search_points <= 0).float().mean().item())
+        empty_applied = torch.linalg.norm(applied, dim=1)[search_points <= 0]
+    else:
+        empty_search_ratio = None
+        empty_applied = applied.new_zeros((0,))
+    diagnostics = {
+        "observation_error_norm": tensor_summary(
+            torch.linalg.norm(observation - target, dim=1)),
+        "dynamics_error_norm": tensor_summary(
+            torch.linalg.norm(dynamics - target, dim=1)),
+        "raw_innovation_norm": tensor_summary(
+            output.get("dynamics_innovation_raw_norm")),
+        "clamped_innovation_norm": tensor_summary(
+            output.get("dynamics_innovation_clamped_norm")),
+        "applied_innovation_norm": tensor_summary(
+            output.get("dynamics_innovation_applied_norm")),
+        "radius": tensor_summary(output["dynamics_innovation_radius"]),
+        "alpha": tensor_summary(output["dynamics_innovation_alpha"]),
+        "applied_ratio": float(
+            output["dynamics_innovation_applied_mask"].detach().float().mean().item()),
+        "clamp_ratio": float(
+            output["dynamics_innovation_clamp_mask"].detach().float().mean().item()),
+        "invalid_applied_innovation_norm": tensor_summary(invalid_applied),
+        "empty_applied_innovation_norm": tensor_summary(empty_applied),
+        "dynamics_valid_ratio": float(
+            dynamics_valid.detach().float().mean().item()),
+        "innovation_valid_ratio": float(
+            innovation_valid.detach().float().mean().item()),
+        "empty_search_ratio": empty_search_ratio,
+        "adapter_norm": tensor_summary(output.get("physical_time_adapter_norm")),
+        "current_delta_t_effective": tensor_summary(
+            batch.get("current_delta_t_effective", batch.get("current_delta_t"))),
+        "candidate_trajectory_mode_id": tensor_summary(
+            batch.get("candidate_trajectory_mode_id")),
+    }
+    return diagnostics
+
+
 def load_weights(model, path):
     try:
         payload = torch.load(path, map_location="cpu", weights_only=False)
@@ -455,6 +538,14 @@ def main():
     parser.add_argument("--path", default=None)
     parser.add_argument("--version", default=None)
     parser.add_argument("--split", default=None)
+    parser.add_argument(
+        "--protocol-cfg",
+        default=None,
+        help=(
+            "Optional existing config whose virtual_rate_* fields are overlaid "
+            "onto the M1/M2 config for gap/burst smoke tests."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument(
@@ -494,10 +585,21 @@ def main():
         help="Require and log P0-A bounded-residual proposal, magnitude, and gate diagnostics.",
     )
     parser.add_argument(
+        "--innovation-diagnostics",
+        action="store_true",
+        help="Require and log M1/M2 adapter and bounded proposal-innovation diagnostics.",
+    )
+    parser.add_argument(
         "--residual-warmup-epoch",
         type=int,
         default=None,
         help="Override dynamics_warmup_epoch for this diagnostic run; use 0 to exercise the residual immediately.",
+    )
+    parser.add_argument(
+        "--innovation-warmup-epoch",
+        type=int,
+        default=None,
+        help="Override dynamics_innovation_warmup_epoch; use 0 for active M2 smoke.",
     )
     parser.add_argument(
         "--no-optimizer-step",
@@ -531,6 +633,7 @@ def main():
     np.random.seed(args.seed)
 
     cfg = load_config(args.cfg)
+    protocol_overlay_keys = overlay_virtual_rate_protocol(cfg, args.protocol_cfg)
     if args.path is not None:
         cfg.path = args.path
     if args.version is not None:
@@ -546,6 +649,10 @@ def main():
         if args.residual_warmup_epoch < 0:
             raise ValueError("--residual-warmup-epoch must be non-negative.")
         cfg.dynamics_warmup_epoch = args.residual_warmup_epoch
+    if args.innovation_warmup_epoch is not None:
+        if args.innovation_warmup_epoch < 0:
+            raise ValueError("--innovation-warmup-epoch must be non-negative.")
+        cfg.dynamics_innovation_warmup_epoch = args.innovation_warmup_epoch
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
     cfg.tag = args.tag
@@ -567,6 +674,9 @@ def main():
     print(f"use_observability_gate: {getattr(cfg, 'use_observability_gate', False)}")
     print(f"dynamics_motion_mode: {getattr(cfg, 'dynamics_motion_mode', 'feature')}")
     print(f"dynamics_warmup_epoch: {getattr(cfg, 'dynamics_warmup_epoch', 0)}")
+    if args.protocol_cfg is not None:
+        print(f"virtual-rate protocol config: {args.protocol_cfg}")
+        print(f"virtual-rate overlay keys: {','.join(protocol_overlay_keys)}")
     print(f"optimizer_step_enabled: {not args.no_optimizer_step}")
     if args.memory_fraction is not None:
         print(f"cuda memory fraction limit: {args.memory_fraction}")
@@ -587,6 +697,17 @@ def main():
         if motion_head_input_dim != 256:
             raise RuntimeError(
                 "Residual diagnostics require an observation-only 256-D motion head; "
+                f"got {motion_head_input_dim}."
+            )
+    if args.innovation_diagnostics:
+        motion_head_input_dim = int(model.motion_mlp[0].in_features)
+        if getattr(model, "dynamics_motion_mode", None) != "proposal_innovation":
+            raise RuntimeError(
+                "--innovation-diagnostics requires dynamics_motion_mode=proposal_innovation."
+            )
+        if motion_head_input_dim != 256:
+            raise RuntimeError(
+                "Proposal innovation requires an observation-first 256-D motion head; "
                 f"got {motion_head_input_dim}."
             )
     model.train()
@@ -686,6 +807,42 @@ def main():
                     residual_gradients["encoder"]["grad_norm"]
                 )
 
+            innovation_diagnostics = build_innovation_diagnostics(batch, output)
+            if args.innovation_diagnostics and innovation_diagnostics is None:
+                raise RuntimeError(
+                    "--innovation-diagnostics requires a non-TWC M1/M2 proposal batch."
+                )
+            innovation_gradients = None
+            if innovation_diagnostics is not None:
+                invalid_innovation = innovation_diagnostics[
+                    "invalid_applied_innovation_norm"]
+                if invalid_innovation["count"] > 0 and invalid_innovation["max"] > 0.0:
+                    raise RuntimeError(
+                        "dynamics_valid=0 produced a non-zero proposal innovation: "
+                        f"max={invalid_innovation['max']}."
+                    )
+                effective_scale = output.get(
+                    "dynamics_innovation_scale_effective")
+                if effective_scale is not None \
+                        and float(effective_scale.detach().item()) == 0.0:
+                    applied = innovation_diagnostics["applied_innovation_norm"]
+                    if applied["count"] > 0 and applied["max"] > 0.0:
+                        raise RuntimeError(
+                            "zero/warmup innovation scale did not exactly recover "
+                            f"the observation proposal; max={applied['max']}.")
+                if bool(getattr(
+                        model, "dynamics_innovation_disable_on_empty_search", False)):
+                    empty_innovation = innovation_diagnostics[
+                        "empty_applied_innovation_norm"]
+                    if empty_innovation["count"] > 0 and empty_innovation["max"] > 0.0:
+                        raise RuntimeError(
+                            "empty search produced a non-zero proposal innovation: "
+                            f"max={empty_innovation['max']}.")
+                innovation_gradients = {
+                    "encoder": named_grad_stats(model, "dynamics_encoder"),
+                    "adapter": named_grad_stats(model, "physical_time_adapter"),
+                }
+
             if not args.no_optimizer_step:
                 optimizer.step()
                 if scheduler is not None:
@@ -712,6 +869,9 @@ def main():
             if residual_diagnostics is not None:
                 record["residual_diagnostics"] = residual_diagnostics
                 record["residual_gradients"] = residual_gradients
+            if innovation_diagnostics is not None:
+                record["innovation_diagnostics"] = innovation_diagnostics
+                record["innovation_gradients"] = innovation_gradients
             log_file.write(json.dumps(record, ensure_ascii=False) + "\n")
             log_file.flush()
             if (
@@ -745,6 +905,18 @@ def main():
                     f"applied_p50={applied['p50']:.8f} "
                     f"applied_ratio={residual_diagnostics['applied_ratio']:.4f} "
                     f"gate_grad={gate_grad['grad_norm']:.8e}"
+                )
+            if innovation_diagnostics is not None:
+                applied = innovation_diagnostics["applied_innovation_norm"]
+                encoder_grad = innovation_gradients["encoder"]
+                adapter_grad = innovation_gradients["adapter"]
+                print(
+                    "innovation "
+                    f"applied_p50={applied['p50']:.6f} "
+                    f"applied_ratio={innovation_diagnostics['applied_ratio']:.4f} "
+                    f"clamp_ratio={innovation_diagnostics['clamp_ratio']:.4f} "
+                    f"encoder_grad={encoder_grad['grad_norm']:.8e} "
+                    f"adapter_grad={adapter_grad['grad_norm']:.8e}"
                 )
 
             if args.sleep_seconds > 0:

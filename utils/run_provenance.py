@@ -64,6 +64,7 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = Path(str(getattr(cfg, "cfg", "")))
     checkpoint = getattr(cfg, "checkpoint", None)
+    init_checkpoint = getattr(cfg, "init_checkpoint", None)
     resolved_config = dict(cfg)
     resolved_config_json = json.dumps(
         resolved_config, sort_keys=True, separators=(",", ":"), default=str)
@@ -80,6 +81,8 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
         "seed": getattr(cfg, "seed", None),
         "checkpoint_path": checkpoint,
         "checkpoint_sha256": sha256_file(checkpoint),
+        "init_checkpoint_path": init_checkpoint,
+        "init_checkpoint_sha256": sha256_file(init_checkpoint),
         "checkpoint_rule": (
             "train: final/last is primary; precision/test top-k is diagnostic only"
             if mode == "train" else

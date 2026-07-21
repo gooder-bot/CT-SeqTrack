@@ -23,6 +23,15 @@ from utils.twc_utils import (
     sample_candidate_offset,
     sample_point_sampling_seed,
 )
+from utils.candidate_utils import (
+    apply_shared_se2_to_boxes,
+    boxes_to_anchor_parameters,
+    canonical_dynamics_targets,
+    equivalent_local_offsets,
+    normalize_candidate_trajectory_mode,
+    shared_se2_world_translation,
+    validate_shared_se2_transform,
+)
 
 
 def no_processing(data, *args):
@@ -217,6 +226,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_pcs  = [prev_frames[key]['pc'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     prev_boxs = [prev_frames[key]['3d_bbox'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     this_pc, this_box = this_frame['pc'], this_frame['3d_bbox']
+    # Keep the untouched GT trajectory for M1 labels and invariance audits.
+    # ``transform_box`` is non-mutating, but the local variables below are
+    # intentionally rebound to candidate-coordinate boxes.
+    canonical_prev_boxs = list(prev_boxs)
+    canonical_this_box = this_box
     sorted_prev_keys = sorted(prev_frames, key=lambda k: abs(int(k)))
     prev_timestamps = [prev_frames[key].get('timestamp') for key in sorted_prev_keys]
     current_timestamp = this_frame.get('timestamp')
@@ -227,20 +241,39 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_frame_ids = data.get('prev_frame_ids')
     this_frame_id = data.get('this_frame_id')
     history_offsets = data.get('history_offsets')
+    candidate_trajectory_mode = normalize_candidate_trajectory_mode(
+        getattr(config, 'candidate_trajectory_mode', 'independent'))
     candidate_offsets = data.get('candidate_offsets')
-    if candidate_offsets is not None:
-        candidate_offsets = np.asarray(candidate_offsets, dtype=np.float32)
-        if candidate_offsets.shape != (num_hist, 3):
+    candidate_shared_transform = data.get('candidate_shared_transform')
+    if candidate_trajectory_mode == 'shared_se2':
+        if candidate_offsets is not None:
             raise ValueError(
-                f"candidate_offsets must have shape {(num_hist, 3)}, "
-                f"got {candidate_offsets.shape}.")
-        if not np.isfinite(candidate_offsets).all():
-            raise ValueError("candidate_offsets contains non-finite values.")
+                "shared_se2 consumes one candidate_shared_transform, not per-frame "
+                "candidate_offsets")
+        if candidate_shared_transform is None:
+            candidate_shared_transform = sample_candidate_offset(candidate_id, config)
+        candidate_shared_transform = validate_shared_se2_transform(
+            candidate_shared_transform).astype(np.float32)
+        if int(candidate_id) == 0 and not np.array_equal(
+                candidate_shared_transform, np.zeros(3, dtype=np.float32)):
+            raise ValueError("candidate0 must remain the exact identity in shared_se2 mode")
     else:
-        candidate_offsets = np.stack(
-            [sample_candidate_offset(candidate_id, config) for _ in range(num_hist)],
-            axis=0,
-        )
+        if candidate_shared_transform is not None:
+            raise ValueError(
+                "candidate_shared_transform is only valid for shared_se2 mode")
+        if candidate_offsets is not None:
+            candidate_offsets = np.asarray(candidate_offsets, dtype=np.float32)
+            if candidate_offsets.shape != (num_hist, 3):
+                raise ValueError(
+                    f"candidate_offsets must have shape {(num_hist, 3)}, "
+                    f"got {candidate_offsets.shape}.")
+            if not np.isfinite(candidate_offsets).all():
+                raise ValueError("candidate_offsets contains non-finite values.")
+        else:
+            candidate_offsets = np.stack(
+                [sample_candidate_offset(candidate_id, config) for _ in range(num_hist)],
+                axis=0,
+            )
     point_sampling_seeds = data.get('point_sampling_seeds')
     if point_sampling_seeds is not None:
         point_sampling_seeds = np.asarray(point_sampling_seeds, dtype=np.int64)
@@ -262,12 +295,25 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             empty_counter += 1
     assert empty_counter < config.empty_box_limit, 'not enough valid box' 
 
-    ref_boxs = []
-    for i, prev_box in enumerate(prev_boxs): # Apply a random offset to each box, not uniformly
-        sample_offsets = candidate_offsets[i]
-        ref_box = points_utils.getOffsetBB(prev_box, sample_offsets, limit_box=config.data_limit_box,
-                                        degrees=config.degrees)
-        ref_boxs.append(ref_box)
+    if candidate_trajectory_mode == 'shared_se2':
+        ref_boxs = apply_shared_se2_to_boxes(
+            prev_boxs, candidate_shared_transform, degrees=config.degrees)
+        candidate_offsets = equivalent_local_offsets(
+            prev_boxs, ref_boxs, degrees=config.degrees)
+        candidate_shared_world_translation = shared_se2_world_translation(
+            prev_boxs[0], candidate_shared_transform, degrees=config.degrees).astype(np.float32)
+    else:
+        ref_boxs = []
+        for i, prev_box in enumerate(prev_boxs): # Apply a random offset to each box, not uniformly
+            sample_offsets = candidate_offsets[i]
+            ref_box = points_utils.getOffsetBB(prev_box, sample_offsets, limit_box=config.data_limit_box,
+                                            degrees=config.degrees)
+            ref_boxs.append(ref_box)
+        candidate_shared_transform = np.zeros(3, dtype=np.float32)
+        candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
+
+    canonical_ref_boxs = boxes_to_anchor_parameters(
+        canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
 
 
     prev_frame_pcs = []
@@ -423,9 +469,13 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         else float(getattr(config, 'dynamics_fixed_delta_t', default_time_step)))
     # Supervision is always defined in physical time. A fixed/shuffled negative
     # control may alter only the time consumed by DynamicsEncoder.
-    velocity_label = (
-        motion_label_list[0][:3] / max(current_delta_t_real, 1e-3)
-    ).astype('float32')
+    dynamics_displacement_label, velocity_label = canonical_dynamics_targets(
+        canonical_prev_boxs,
+        canonical_this_box,
+        current_delta_t_real,
+        degrees=config.degrees,
+        eps=1e-3,
+    )
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -455,9 +505,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]),
         'num_points_in_search': np.float32(num_points_in_search),
         'velocity_label': velocity_label,
+        'dynamics_displacement_label': dynamics_displacement_label,
+        'canonical_ref_boxs': canonical_ref_boxs,
         'candidate_id': np.int64(candidate_id),
+        'candidate_trajectory_mode_id': np.int64(
+            {'independent': 0, 'shared_se2': 1}[candidate_trajectory_mode]),
         'coordinate_anchor': coordinate_anchor,
         'candidate_offsets': candidate_offsets.astype('float32'),
+        'candidate_shared_transform': np.asarray(
+            candidate_shared_transform, dtype=np.float32),
+        'candidate_shared_world_translation': candidate_shared_world_translation,
     }
     if prev_frame_ids is not None:
         data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
@@ -611,6 +668,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         super().__init__(dataset, random_sample=False, config=config, **kwargs)
         self.processing = motion_processing_mf
         self.use_twc = getattr(self.config, 'use_twc', False)
+        self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
+            getattr(self.config, 'candidate_trajectory_mode', 'independent'))
         self.twc_candidate_zero_only = getattr(self.config, 'twc_candidate_zero_only', True)
         default_twc_b_offsets = [1 + 2 * i for i in range(self.dataset.hist_num)]
         self.twc_view_a_offsets = list(getattr(self.config, 'twc_view_a_offsets',
@@ -635,7 +694,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
 
     def _build_view(self, tracklet_id, this_frame_id, first_frame, this_frame,
                     candidate_id, offsets, candidate_offset_map=None,
-                    point_sampling_seed_map=None, current_sampling_seed=None):
+                    point_sampling_seed_map=None, current_sampling_seed=None,
+                    candidate_shared_transform=None):
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
@@ -653,6 +713,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         if candidate_offset_map is not None:
             data["candidate_offsets"] = candidate_offsets_for_frame_ids(
                 prev_frame_ids, candidate_offset_map)
+        if candidate_shared_transform is not None:
+            data["candidate_shared_transform"] = np.asarray(
+                candidate_shared_transform, dtype=np.float32)
         if point_sampling_seed_map is not None:
             data["point_sampling_seeds"] = point_sampling_seeds_for_frame_ids(
                 prev_frame_ids, point_sampling_seed_map)
@@ -678,11 +741,17 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 # Sample perturbations and regularization seeds once per absolute
                 # frame id. Any physical history frame appearing in both paths,
                 # especially t-1, must share crop, coordinates, and sampled XYZ.
-                candidate_offset_map = build_shared_candidate_offset_map(
-                    paired_candidate_id,
-                    list(prev_frame_ids_a) + list(prev_frame_ids_b),
-                    self.config,
-                )
+                if self.candidate_trajectory_mode == 'shared_se2':
+                    candidate_offset_map = None
+                    candidate_shared_transform = sample_candidate_offset(
+                        paired_candidate_id, self.config)
+                else:
+                    candidate_offset_map = build_shared_candidate_offset_map(
+                        paired_candidate_id,
+                        list(prev_frame_ids_a) + list(prev_frame_ids_b),
+                        self.config,
+                    )
+                    candidate_shared_transform = None
                 point_sampling_seed_map = build_shared_point_sampling_seed_map(
                     list(prev_frame_ids_a) + list(prev_frame_ids_b))
                 current_sampling_seed = sample_point_sampling_seed()
@@ -690,12 +759,14 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                           paired_candidate_id, self.twc_view_a_offsets,
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
-                                          current_sampling_seed=current_sampling_seed)
+                                          current_sampling_seed=current_sampling_seed,
+                                          candidate_shared_transform=candidate_shared_transform)
                 view_b = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
                                           paired_candidate_id, self.twc_view_b_offsets,
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
-                                          current_sampling_seed=current_sampling_seed)
+                                          current_sampling_seed=current_sampling_seed,
+                                          candidate_shared_transform=candidate_shared_transform)
                 return {"view_a": view_a, "view_b": view_b}
 
             offsets = list(range(1, self.dataset.hist_num + 1))

@@ -1,0 +1,170 @@
+"""Physically consistent candidate-trajectory helpers for M1.
+
+The legacy SeqTrack3D sampler perturbs every historical box independently in
+that box's local coordinate system.  That remains the default for backward
+compatibility.  The ``shared_se2`` mode implemented here applies one rigid
+world-frame SE(2) transform to the complete historical candidate trajectory.
+"""
+
+import copy
+
+import numpy as np
+from pyquaternion import Quaternion
+
+
+_CANDIDATE_TRAJECTORY_MODES = {
+    "independent": "independent",
+    "legacy": "independent",
+    "per_frame": "independent",
+    "shared": "shared_se2",
+    "shared_se2": "shared_se2",
+    "shared_world_se2": "shared_se2",
+}
+
+
+def normalize_candidate_trajectory_mode(mode):
+    """Normalize the candidate augmentation mode without changing defaults."""
+    key = str(mode if mode is not None else "independent").lower().replace("-", "_")
+    if key not in _CANDIDATE_TRAJECTORY_MODES:
+        raise ValueError(
+            "candidate_trajectory_mode must be 'independent' or 'shared_se2'")
+    return _CANDIDATE_TRAJECTORY_MODES[key]
+
+
+def box_yaw(box, degrees=False):
+    """Return signed z-axis yaw for a nuScenes-compatible Box."""
+    angle = box.orientation.degrees if degrees else box.orientation.radians
+    return float(angle * box.orientation.axis[-1])
+
+
+def wrap_yaw(angle, degrees=False):
+    period = 360.0 if degrees else 2.0 * np.pi
+    half = period / 2.0
+    return float((float(angle) + half) % period - half)
+
+
+def yaw_rotation_matrix(angle, degrees=False):
+    angle_rad = np.deg2rad(angle) if degrees else float(angle)
+    cosine = np.cos(angle_rad)
+    sine = np.sin(angle_rad)
+    return np.asarray(
+        [[cosine, -sine, 0.0],
+         [sine, cosine, 0.0],
+         [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+
+
+def validate_shared_se2_transform(transform):
+    value = np.asarray(transform, dtype=np.float64)
+    if value.shape != (3,):
+        raise ValueError(f"shared SE(2) transform must have shape (3,), got {value.shape}")
+    if not np.isfinite(value).all():
+        raise ValueError("shared SE(2) transform contains non-finite values")
+    return value
+
+
+def shared_se2_world_translation(anchor_box, transform, degrees=False):
+    """Convert anchor-local ``dx,dy`` into the shared world translation."""
+    transform = validate_shared_se2_transform(transform)
+    anchor_rotation = yaw_rotation_matrix(box_yaw(anchor_box, degrees), degrees)
+    return anchor_rotation @ np.asarray([transform[0], transform[1], 0.0])
+
+
+def apply_shared_se2_to_box(box, anchor_box, transform, degrees=False):
+    """Apply one world SE(2) transform around ``anchor_box`` to ``box``.
+
+    ``dx,dy`` are expressed in the latest-history anchor frame. ``dtheta`` is
+    expressed in degrees or radians according to ``degrees``.  Z, box size and
+    timestamps are unchanged.
+    """
+    transform = validate_shared_se2_transform(transform)
+    if np.array_equal(transform, np.zeros(3, dtype=transform.dtype)):
+        return copy.deepcopy(box)
+    dtheta = float(transform[2])
+    rotation = yaw_rotation_matrix(dtheta, degrees)
+    world_translation = shared_se2_world_translation(anchor_box, transform, degrees)
+    anchor_center = np.asarray(anchor_box.center, dtype=np.float64)
+    center = np.asarray(box.center, dtype=np.float64)
+
+    transformed = copy.deepcopy(box)
+    transformed.center = (
+        anchor_center + rotation @ (center - anchor_center) + world_translation
+    )
+    delta_rotation = (
+        Quaternion(axis=[0, 0, 1], degrees=dtheta)
+        if degrees else Quaternion(axis=[0, 0, 1], radians=dtheta)
+    )
+    transformed.orientation = delta_rotation * transformed.orientation
+    if hasattr(transformed, "velocity"):
+        transformed.velocity = rotation @ np.asarray(transformed.velocity, dtype=np.float64)
+    return transformed
+
+
+def apply_shared_se2_to_boxes(boxes, transform, degrees=False, anchor_index=0):
+    """Apply a single rigid transform to an entire historical trajectory."""
+    if not boxes:
+        raise ValueError("shared SE(2) requires at least one historical box")
+    if not 0 <= int(anchor_index) < len(boxes):
+        raise ValueError("anchor_index is outside the historical box sequence")
+    anchor_box = boxes[int(anchor_index)]
+    return [
+        apply_shared_se2_to_box(box, anchor_box, transform, degrees=degrees)
+        for box in boxes
+    ]
+
+
+def boxes_to_anchor_parameters(boxes, anchor_box, degrees=False):
+    """Express boxes as ``[x,y,z,yaw]`` in a common anchor coordinate frame."""
+    anchor_center = np.asarray(anchor_box.center, dtype=np.float64)
+    anchor_rotation_inv = yaw_rotation_matrix(
+        -box_yaw(anchor_box, degrees), degrees)
+    anchor_yaw = box_yaw(anchor_box, degrees)
+    parameters = []
+    for box in boxes:
+        local_center = anchor_rotation_inv @ (
+            np.asarray(box.center, dtype=np.float64) - anchor_center)
+        local_yaw = wrap_yaw(box_yaw(box, degrees) - anchor_yaw, degrees)
+        parameters.append(np.concatenate((local_center, [local_yaw])))
+    return np.asarray(parameters, dtype=np.float32)
+
+
+def equivalent_local_offsets(boxes, transformed_boxes, degrees=False):
+    """Return per-box local offsets equivalent to an already applied transform.
+
+    This is audit metadata only.  The shared path never replays these offsets
+    independently through ``getOffsetBB``.
+    """
+    if len(boxes) != len(transformed_boxes):
+        raise ValueError("boxes and transformed_boxes must have the same length")
+    offsets = []
+    for box, transformed in zip(boxes, transformed_boxes):
+        rotation_inv = yaw_rotation_matrix(-box_yaw(box, degrees), degrees)
+        local_translation = rotation_inv @ (
+            np.asarray(transformed.center) - np.asarray(box.center))
+        delta_yaw = wrap_yaw(
+            box_yaw(transformed, degrees) - box_yaw(box, degrees), degrees)
+        offsets.append([local_translation[0], local_translation[1], delta_yaw])
+    return np.asarray(offsets, dtype=np.float32)
+
+
+def canonical_dynamics_targets(previous_boxes, current_box, current_delta_t,
+                               degrees=False, eps=1e-3):
+    """Build current displacement/velocity labels from the canonical GT path.
+
+    Targets are computed before candidate perturbation and expressed in the
+    most recent historical GT box frame.  Candidate augmentation therefore
+    cannot manufacture velocity or acceleration supervision.
+    """
+    if not previous_boxes:
+        raise ValueError("canonical dynamics targets require history")
+    current_delta_t = max(float(current_delta_t), float(eps))
+    recent = previous_boxes[0]
+    rotation_inv = yaw_rotation_matrix(-box_yaw(recent, degrees), degrees)
+    displacement = rotation_inv @ (
+        np.asarray(current_box.center, dtype=np.float64)
+        - np.asarray(recent.center, dtype=np.float64)
+    )
+    displacement = displacement.astype(np.float32)
+    velocity = (displacement / current_delta_t).astype(np.float32)
+    return displacement, velocity

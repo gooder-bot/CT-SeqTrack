@@ -11,6 +11,8 @@ import torch
 import yaml
 from easydict import EasyDict
 import os
+import json
+from pathlib import Path
 
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from torch.utils.data import DataLoader
@@ -47,6 +49,66 @@ def load_yaml(file_name):
     return config
 
 
+def load_initial_weights(model, checkpoint_path, report_path=None):
+    """Load matching model tensors without restoring optimizer/trainer state."""
+    try:
+        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        payload = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise TypeError(f"Unsupported init checkpoint payload: {type(payload)}")
+    state_dict = payload.get("state_dict", payload.get("model", payload))
+    if not isinstance(state_dict, dict):
+        raise TypeError("Init checkpoint does not contain a state_dict mapping")
+
+    target_state = model.state_dict()
+    candidates = [("none", state_dict)]
+    for prefix in ("model.", "module."):
+        candidates.append((prefix, {
+            key[len(prefix):] if key.startswith(prefix) else key: value
+            for key, value in state_dict.items()
+        }))
+    selected_prefix, normalized = max(
+        candidates,
+        key=lambda item: sum(
+            key in target_state and target_state[key].shape == value.shape
+            for key, value in item[1].items()),
+    )
+    matched = {
+        key: value for key, value in normalized.items()
+        if key in target_state and target_state[key].shape == value.shape
+    }
+    critical_prefixes = ("seg_pointnet.", "mini_pointnet.", "motion_mlp.",
+                         "feature_pointnet.", "Transformer.")
+    missing_critical = [
+        prefix for prefix in critical_prefixes
+        if not any(key.startswith(prefix) for key in matched)
+    ]
+    if missing_critical:
+        raise RuntimeError(
+            "Init checkpoint is missing baseline model prefixes: "
+            + ", ".join(missing_critical))
+    target_state.update(matched)
+    model.load_state_dict(target_state, strict=True)
+    report = {
+        "checkpoint": str(checkpoint_path),
+        "selected_prefix_strip": selected_prefix,
+        "source_tensor_count": len(normalized),
+        "target_tensor_count": len(target_state),
+        "matched_tensor_count": len(matched),
+        "new_tensor_count": len(target_state) - len(matched),
+    }
+    if report_path is not None:
+        report_path = Path(report_path)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with report_path.open("w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+    print("initialization checkpoint:", checkpoint_path)
+    print("matched tensors:", f"{len(matched)}/{len(target_state)}")
+    return report
+
+
 def parse_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=100, help='input batch size')
@@ -56,6 +118,9 @@ def parse_config():
     parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
     parser.add_argument('--cfg', type=str, help='the config_file')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
+    parser.add_argument(
+        '--init_checkpoint', type=str, default=None,
+        help='model-only initialization; does not restore optimizer/trainer state')
     parser.add_argument('--log_dir', type=str, default=None, help='log location')
     parser.add_argument('--test', action='store_true', default=False, help='test mode')
     parser.add_argument('--preloading', action='store_true', default=False, help='preload dataset into memory')
@@ -80,6 +145,10 @@ def parse_config():
 
 
 cfg = parse_config()
+if cfg.checkpoint is not None and cfg.init_checkpoint is not None:
+    raise ValueError("--checkpoint (resume/test) and --init_checkpoint are mutually exclusive")
+if cfg.test and cfg.init_checkpoint is not None:
+    raise ValueError("--init_checkpoint is training-only; use --checkpoint for evaluation")
 if cfg.seed is not None:
     seed_everything(cfg.seed)
     
@@ -128,6 +197,12 @@ if not cfg.test:
     train_dataloader_length = len(train_loader) #用于设置OneCycle学习率
     if cfg.checkpoint is None:
         net = get_model(cfg.net_model)(cfg,train_dataloader_length=train_dataloader_length)
+        if cfg.init_checkpoint is not None:
+            load_initial_weights(
+                net,
+                cfg.init_checkpoint,
+                report_path=Path(run_root_dir) / "init_checkpoint_report.json",
+            )
     else:
         net = get_model(cfg.net_model).load_from_checkpoint(cfg.checkpoint, config=cfg,train_dataloader_length=train_dataloader_length)
 

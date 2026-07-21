@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。当前判定为 **Engineering GO / Formal-training HOLD**：M1 shared world-SE(2) 数据层和 M2 bounded proposal-innovation 的实现、单测与真实 batch smoke 现在开始；未经严格 A1 等价、2-step、唯一配置和 clean provenance 验收，不启动正式 seed42 训练。以上仍是离线机制证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。当前判定为 **Engineering GO / Formal-training HOLD**。M1/M2 第一代码切片已经落地：新增 shared world-SE(2)、canonical dynamics label、zero-init physical-time adapter、独立 `proposal_innovation` 模式、A1 model-equivalence 入口和 innovation 诊断；dataset-free 几何、strict fallback 与 2-step optimizer 已通过。真实 nuScenes loader、同权重 A1 等价和三协议 forward/backward 仍须在训练服务器验收，未通过前不启动正式 seed42。以上仍是离线机制与工程证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -214,6 +214,8 @@ use_observability_gate: False
 | M0-3 | crop-reachable proposal oracle | `GO_M2_PROPOSAL_INNOVATION`；dynamics-only 与 long-gap tracklet bootstrap 均支持互补性，M2 工程 gate 解锁 |
 | M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
 | M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
+| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | 第一代码切片和 dataset-free 检查已完成；真实 loader/TWC 回归与同权重 A1 output/loss 等价待服务器执行 |
+| M2 engineering | bounded proposal innovation | 独立模式、严格 zero/invalid fallback、`R(delta_t)`、诊断字段和 dataset-free 2-step 已完成；三协议真实 batch 与正式配置仍 HOLD |
 
 当前已完成的关键消融：
 
@@ -244,11 +246,11 @@ use_observability_gate: False
 当前下一步：
 
 ```text
-1. 从 M1 数据层实现真正的 sample-level shared world-SE(2) 与 canonical dynamics label；不能只给每个局部 `getOffsetBB` 复用同一数组，第一版不做 smooth drift。
-2. 新增独立 `proposal_innovation` 模式：`d_dyn-stopgrad(d_obs)`；保留旧 full-displacement residual 仅作负对照，并补 strict-zero/A1 等价、invalid/resample/empty fallback 与 2-step 测试。
-3. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap 输出与 evaluation-only path variance，不重训；它不阻塞代码实现，但阻塞 M0 完成。
-4. E0–E6、clean commit 和唯一配置全部冻结后，只跑一次 seed42 `true/fixed/shuffled`；standard guardrail 与强协议收益同时通过才补 seed43/44。
-5. M2 未形成因果正信号则停止该模块 promotion，转回多模型、多数据集 variable-rate benchmark/diagnosis；不复活旧 Gate/TWC 组合。
+1. 在服务器设置 `A1_CKPT` 后运行 `bash tools/run_m1_m2_gates_gpu23.sh`，并行验收 candidate0/1/2/3、TWC 共享、A1 output/loss 等价及 standard/gap1124/burst-drop 真实 batch。
+2. 检查 `output/m1_m2_gates/gpu2|gpu3` 的日志与 JSONL，确认 invalid/empty fallback、innovation/adapter 梯度和 correction bound，而不是只看命令退出码。
+3. 验收通过后，根据 training oracle 一次性确认工程配置中的 `alpha=0.75` 与 `R(delta_t)`，再冻结唯一正式配置。
+4. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的四协议输出与 evaluation-only path variance，不重训。
+5. E0–E6、clean commit 和唯一配置全部冻结后，只跑一次 seed42 `true/fixed/shuffled`；未形成因果正信号则转回 benchmark/diagnosis。
 ```
 
 ---

@@ -11,7 +11,13 @@ from torchmetrics import Accuracy
 
 from datasets.misc_utils import get_tensor_corners_batch
 from datasets.misc_utils import create_corner_timestamps_from_deltas
-from models.dynamics import DynamicsEncoder, DynamicsResidualGate, clamp_vector_norm
+from models.dynamics import (
+    DynamicsEncoder,
+    DynamicsResidualGate,
+    ZeroInitPhysicalTimeAdapter,
+    apply_proposal_innovation,
+    clamp_vector_norm,
+)
 from models.observability import ObservabilityGate
 from models.time_encoding import TimeEncoding
 
@@ -31,6 +37,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "dynamics_use_acceleration is not implemented or consumed by "
                 "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
+        self.use_physical_time_adapter = bool(
+            getattr(config, 'use_physical_time_adapter', False))
         self.obs_gate_fusion_mode = str(getattr(config, 'obs_gate_fusion_mode', 'feature')).lower()
         self.obs_gate_fusion_mode = self.obs_gate_fusion_mode.replace('-', '_')
         if self.obs_gate_fusion_mode == 'conf_res':
@@ -43,17 +51,32 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.dynamics_motion_mode = self.dynamics_motion_mode.replace('-', '_')
         if self.dynamics_motion_mode in ('residual_limited', 'bounded_residual'):
             self.dynamics_motion_mode = 'residual'
-        if self.dynamics_motion_mode not in ('feature', 'residual'):
+        if self.dynamics_motion_mode in ('innovation', 'bounded_innovation'):
+            self.dynamics_motion_mode = 'proposal_innovation'
+        if self.dynamics_motion_mode not in ('feature', 'residual', 'proposal_innovation'):
             raise ValueError(
-                "dynamics_motion_mode must be 'feature', 'residual', or 'residual_limited'.")
-        if self.dynamics_motion_mode == 'residual' and not self.use_dynamics_encoder:
-            raise ValueError("dynamics_motion_mode='residual' requires use_dynamics_encoder=True.")
+                "dynamics_motion_mode must be 'feature', 'residual', or "
+                "'proposal_innovation'.")
+        if (self.dynamics_motion_mode in ('residual', 'proposal_innovation')
+                and not self.use_dynamics_encoder):
+            raise ValueError(
+                f"dynamics_motion_mode='{self.dynamics_motion_mode}' requires "
+                "use_dynamics_encoder=True.")
         if self.use_observability_gate and not self.use_dynamics_encoder:
             raise ValueError("use_observability_gate=True requires use_dynamics_encoder=True.")
-        if self.use_observability_gate and self.dynamics_motion_mode == 'residual':
+        if (self.use_observability_gate
+                and self.dynamics_motion_mode in ('residual', 'proposal_innovation')):
             raise ValueError(
-                "The bounded residual path is observation-only and cannot be combined with "
+                "Observation-first dynamics correction cannot be combined with "
                 "ObservabilityGate. Keep dynamics_motion_mode='feature' for gate experiments.")
+        if self.use_physical_time_adapter and not self.use_dynamics_encoder:
+            raise ValueError(
+                "use_physical_time_adapter=True requires use_dynamics_encoder=True.")
+        if (self.use_physical_time_adapter
+                and self.dynamics_motion_mode != 'proposal_innovation'):
+            raise ValueError(
+                "The zero-init physical-time adapter is currently isolated to "
+                "dynamics_motion_mode='proposal_innovation'.")
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
         self.dynamics_residual_scale = float(getattr(config, 'dynamics_residual_scale', 0.1))
         self.dynamics_max_residual_norm = float(
@@ -67,10 +90,38 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.dynamics_max_alpha = float(getattr(config, 'dynamics_max_alpha', 0.2))
         self.dynamics_residual_detach_stats = bool(
             getattr(config, 'dynamics_residual_detach_stats', True))
+        self.physical_time_adapter_scale = float(
+            getattr(config, 'physical_time_adapter_scale', 1.0))
+        self.dynamics_innovation_alpha = float(
+            getattr(config, 'dynamics_innovation_alpha', 0.0))
+        self.dynamics_innovation_scale = float(
+            getattr(config, 'dynamics_innovation_scale', 1.0))
+        self.dynamics_innovation_radius_base = float(
+            getattr(config, 'dynamics_innovation_radius_base', 0.5))
+        self.dynamics_innovation_radius_per_second = float(
+            getattr(config, 'dynamics_innovation_radius_per_second', 0.5))
+        self.dynamics_innovation_radius_max = float(
+            getattr(config, 'dynamics_innovation_radius_max', 2.0))
+        self.dynamics_innovation_warmup_epoch = int(getattr(
+            config, 'dynamics_innovation_warmup_epoch', self.dynamics_warmup_epoch))
+        self.dynamics_innovation_disable_on_empty_search = bool(getattr(
+            config, 'dynamics_innovation_disable_on_empty_search', False))
         if self.dynamics_residual_scale < 0:
             raise ValueError("dynamics_residual_scale must be non-negative.")
         if self.dynamics_max_residual_norm <= 0:
             raise ValueError("dynamics_max_residual_norm must be positive.")
+        if not 0.0 <= self.physical_time_adapter_scale <= 1.0:
+            raise ValueError("physical_time_adapter_scale must be in [0, 1].")
+        if not 0.0 <= self.dynamics_innovation_alpha <= 1.0:
+            raise ValueError("dynamics_innovation_alpha must be in [0, 1].")
+        if not 0.0 <= self.dynamics_innovation_scale <= 1.0:
+            raise ValueError("dynamics_innovation_scale must be in [0, 1].")
+        if self.dynamics_innovation_radius_base < 0:
+            raise ValueError("dynamics_innovation_radius_base must be non-negative.")
+        if self.dynamics_innovation_radius_per_second < 0:
+            raise ValueError("dynamics_innovation_radius_per_second must be non-negative.")
+        if self.dynamics_innovation_radius_max <= 0:
+            raise ValueError("dynamics_innovation_radius_max must be positive.")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -106,6 +157,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 eps=getattr(config, 'dynamics_eps', 1e-3),
                 use_query_gap=getattr(config, 'dynamics_use_query_gap', True),
             )
+            if self.use_physical_time_adapter:
+                self.physical_time_adapter = ZeroInitPhysicalTimeAdapter(
+                    feature_dim=256,
+                    dynamics_dim=self.dynamics_hidden_dim,
+                    hidden_dim=getattr(config, 'physical_time_adapter_hidden_dim', 128),
+                    time_scale=getattr(config, 'time_scale', default_time_scale),
+                )
             if self.dynamics_motion_mode == 'residual':
                 self.dynamics_residual_gate = DynamicsResidualGate(
                     stats_dim=6,
@@ -113,6 +171,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     max_alpha=self.dynamics_max_alpha,
                     init_alpha=getattr(config, 'dynamics_residual_init_alpha', 0.0),
                 )
+            elif self.dynamics_motion_mode == 'proposal_innovation':
+                # M2 keeps the observation head at 256-D.  The only permitted
+                # feature change is the separately switchable zero-init M1 adapter.
+                pass
             elif self.use_observability_gate:
                 self.observability_gate = ObservabilityGate(
                     feature_dim=256,
@@ -335,6 +397,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output_dict["dynamics_valid"] = dynamics_valid
             if self.dynamics_motion_mode == 'residual':
                 motion_feature = point_feature
+            elif self.dynamics_motion_mode == 'proposal_innovation':
+                motion_feature = point_feature
+                if self.use_physical_time_adapter:
+                    adapter_gap = input_dict.get(
+                        "current_delta_t_effective",
+                        input_dict.get("current_delta_t"),
+                    )
+                    motion_feature, adapter_aux = self.physical_time_adapter(
+                        point_feature,
+                        z_dyn,
+                        adapter_gap,
+                        dynamics_valid,
+                        enabled_scale=self.physical_time_adapter_scale,
+                    )
+                    output_dict.update(adapter_aux)
             elif self.use_observability_gate:
                 if self.obs_gate_fusion_mode == 'feature':
                     motion_feature, gate_aux = self.observability_gate(
@@ -383,6 +460,40 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 input_dict,
             )
             output_dict.update(residual_aux)
+        if (self.use_dynamics_encoder
+                and self.dynamics_motion_mode == 'proposal_innovation'):
+            innovation_scale = self.dynamics_innovation_scale
+            if (self.training
+                    and getattr(self, 'current_epoch', 0)
+                    < self.dynamics_innovation_warmup_epoch):
+                innovation_scale = 0.0
+            innovation_valid = output_dict['dynamics_valid']
+            if self.dynamics_innovation_disable_on_empty_search:
+                nonempty = (obs_aux['obs_num_points_search'] > 0).to(
+                    device=innovation_valid.device,
+                    dtype=innovation_valid.dtype,
+                ).reshape_as(innovation_valid)
+                innovation_valid = innovation_valid * nonempty
+            output_dict['dynamics_innovation_valid'] = innovation_valid
+            final_center, innovation_aux = apply_proposal_innovation(
+                motion_pred[:, :3],
+                output_dict['dynamics_displacement_pred'],
+                innovation_valid,
+                input_dict.get(
+                    'current_delta_t_effective',
+                    input_dict.get('current_delta_t')),
+                alpha=self.dynamics_innovation_alpha,
+                enabled_scale=innovation_scale,
+                base_radius=self.dynamics_innovation_radius_base,
+                radius_per_second=self.dynamics_innovation_radius_per_second,
+                max_radius=self.dynamics_innovation_radius_max,
+                eps=getattr(self.config, 'dynamics_eps', 1e-3),
+            )
+            output_dict['motion_obs_pred'] = motion_pred
+            output_dict['dynamics_innovation_scale_effective'] = motion_pred.new_tensor(
+                innovation_scale)
+            output_dict.update(innovation_aux)
+            motion_pred = torch.cat((final_center, motion_pred[:, 3:4]), dim=1)
 
         if self.use_motion_cls:
             motion_state_logits = self.motion_state_mlp(point_feature)  # B,2
@@ -690,7 +801,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             })
 
         if self.use_dynamics_encoder and "dynamics_displacement_pred" in output:
-            displacement_label = motion_label[:, 0, :3].to(
+            displacement_label = data.get(
+                "dynamics_displacement_label", motion_label[:, 0, :3])
+            displacement_label = displacement_label.to(
                 device=output["dynamics_displacement_pred"].device,
                 dtype=output["dynamics_displacement_pred"].dtype,
             )

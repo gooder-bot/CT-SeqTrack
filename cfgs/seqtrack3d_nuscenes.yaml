@@ -19,6 +19,8 @@ val_split: val
 test_split: val
 train_type: train_motion_mf
 num_candidates: 4
+# Legacy-safe default. M1 uses one sample-level world SE(2) transform instead.
+candidate_trajectory_mode: independent # independent | shared_se2
 motion_threshold: 0.15
 use_augmentation: False
 hist_num: 3 # Number of historical frames
@@ -51,6 +53,17 @@ dynamics_max_alpha: 0.2
 dynamics_residual_gate_hidden_dim: 16
 dynamics_residual_init_alpha: 0.0
 dynamics_residual_detach_stats: True
+# M1/M2 are opt-in and remain strict no-ops under the default configuration.
+use_physical_time_adapter: False
+physical_time_adapter_hidden_dim: 128
+physical_time_adapter_scale: 0.0
+dynamics_innovation_alpha: 0.0
+dynamics_innovation_scale: 0.0
+dynamics_innovation_radius_base: 0.5
+dynamics_innovation_radius_per_second: 0.5
+dynamics_innovation_radius_max: 2.0
+dynamics_innovation_warmup_epoch: 0
+dynamics_innovation_disable_on_empty_search: False
 use_observability_gate: False # Enable P5 observation/dynamics fusion gate. Requires use_dynamics_encoder=True.
 obs_gate_hidden_dim: 64
 obs_gate_num_stats: 5
