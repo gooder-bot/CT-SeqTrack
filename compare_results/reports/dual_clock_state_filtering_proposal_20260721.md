@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-状态：**候选方法，M 阶段已启动，当前处于 M0。尚未完成性能验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前允许 M1 工程准备，但 M1 正式训练和 M2–M4 必须按本文门槛逐级解锁。
+状态：**候选方法，M 阶段已启动，当前处于 M0；M1/M2 为 Engineering GO，正式训练为 HOLD。尚未完成性能验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前允许 M1/M2 实现、单测和真实 batch smoke；正式 seed42 训练与 M3–M4 必须按本文门槛逐级解锁。
 
 ## 1. 决策摘要
 
@@ -95,7 +95,7 @@ innovation = clip_norm(innovation, R(dt))
 d_final    = d_obs + alpha * innovation
 ```
 
-这等价于在两个完整 proposal 之间做有界移动。`alpha=0` 时严格恢复 A1；`alpha=1` 时到达 dynamics proposal。训练前必须在 crop-reachable endpoint 上计算线段 `d_obs -> d_dyn` 的 oracle 最优点，确认插值确有上限。
+这等价于朝 dynamics proposal 做有界移动。`alpha=0` 时严格恢复 A1；只有 `||d_dyn-d_obs|| <= R(dt)`、clamp 未触发时，`alpha=1` 才到达 dynamics proposal，触发 clamp 时只到达同方向的有界点。训练前必须在 crop-reachable endpoint 上计算未裁剪线段 `d_obs -> d_dyn` 的 oracle 最优点确认方向值得做，再用 training split 一次性冻结 `R(dt)`；正式结果必须同时报告 clamp ratio，不能把未裁剪 oracle 当成实际模块保证达到的上限。
 
 #### 时间驱动的 search support
 
@@ -113,12 +113,16 @@ tube 沿预测运动方向增长，横向保持窄，并固定最终点预算。
 
 #### 训练增强必须保持物理一致
 
-当前 `datasets/sampler.py` 为每个历史框独立采样 offset；这会把不连续随机误差解释为速度/加速度。下一版必须在以下两种方案中二选一：
+当前 `datasets/sampler.py` 为每个历史框独立采样 offset；这会把不连续随机误差解释为速度/加速度。M0-4 已经冻结第一版方案：**整条历史轨迹只施加一个 sample-level shared SE(2)，不实现 smooth drift**。
 
-1. 对整条历史轨迹施加一个共享 SE(2) 刚体扰动；
-2. 从 A1 递归误差拟合时间相关的平滑 drift process。
+这里的 shared 不是“给每个 `getOffsetBB` 传同一个数组”。`getOffsetBB` 在每个框自己的局部朝向中解释平移，相同 `[dx,dy,dtheta]` 仍可能对应不同世界平移。正式定义以最近历史 anchor `(a,yaw_a)` 为公共原点：
 
-Dynamics 的速度/加速度监督从 canonical trajectory 或物理一致扰动后的 trajectory 计算；禁止由逐帧独立 jitter 直接构造导数。
+```text
+c_i'   = a + R(dtheta) (c_i - a) + R(yaw_a) [dx,dy]
+yaw_i' = yaw_i + dtheta
+```
+
+所有历史框共用同一个世界刚体变换，z、尺寸和时间戳不变。验收以几何不变量为准：在增强后的 anchor 坐标中，candidate trajectory 的 pairwise center/yaw 关系应与 canonical trajectory 一致。Dynamics 的速度/加速度监督先从 canonical GT trajectory 和真实 `delta_t` 计算，再一致表达进增强坐标；禁止由 candidate `ref_boxs` 的差分直接构造导数。
 
 ### 贡献 3：Endpoint-consistent asymmetric path distillation
 
@@ -211,11 +215,15 @@ state  = prior + K * innovation
 
 | 文件 | 当前问题 | 候选改造 |
 | --- | --- | --- |
-| `datasets/sampler.py` | 每个历史框独立 offset，可能制造伪速度 | shared SE(2) 或平滑 drift；canonical dynamics label |
+| `utils/twc_utils.py` | 现有共享只按绝对 frame id 服务 TWC；不是整轨迹共同刚体变换 | 保持现有 TWC 跨视图共享语义，不在这里偷换成 M1 整轨迹变换 |
+| 新建 `utils/candidate_utils.py` | 尚无 sample-level trajectory transform | 实现 world-SE(2) 纯函数、mode 归一化和可审计 transform metadata |
+| `datasets/sampler.py` | 每个历史框独立调用局部 `getOffsetBB`，可能制造伪速度 | 独立 `candidate_trajectory_mode`；shared world-SE(2)、canonical dynamics label 和审计字段 |
 | `models/dynamics.py` | 由 pooled transition feature 直接输出 velocity，再乘当前 gap | 显式 `F(dt)` 状态传播 + 有界 acceleration residual；保留轻量实现 |
-| `models/seqtrack3d.py` | 完整 `d_dyn` 加到完整 `d_obs` | proposal innovation；zero-init alpha；oracle 先行 |
+| `models/dynamics.py` gate | `init_alpha=0` 经 sigmoid 后实际约为 `2e-5` | 增加显式 zero-scale/disabled path；近零不能冒充严格 A1 等价 |
+| `models/seqtrack3d.py` | 旧 `residual` clamp 完整 `d_dyn` 再加到完整 `d_obs` | 新增显式 `proposal_innovation` 模式；旧 residual 保留作历史负对照；zero/invalid 严格回退 |
 | `models/seqtrack3d.py` TWC | `0.5(L_A+L_B)` 对称监督 | EMA canonical teacher -> irregular student |
 | `models/observability.py` | 独立 split No-Go | 停止；仅在先验成立后研究 covariance head |
+| 新建 `tools/check_candidate_shared_se2.py` | 现有 smoke 只检查 TWC/shared-frame 和旧 residual | dataset-free 几何单测，再补 loader/candidate0 回归 |
 | dataset/protocol | nuScenes 已有 matched time controls，Waymo 未完全接入 | 统一 manifest、endpoint logger 和 held-out schedule |
 
 ## 5. 最小实现顺序
@@ -225,8 +233,8 @@ state  = prior + K * innovation
 | 阶段 | 当前状态 | 解锁边界 |
 | --- | --- | --- |
 | M0 | **进行中** | 只做冻结输出、离线 oracle、candidate 审计和 provenance 收口 |
-| M1 | **shared SE(2) 已冻结，工程已解锁** | M0-4 排除独立 jitter 与第一版 smooth drift；实现 canonical label、zero-init 和等价性测试 |
-| M2 | **oracle gate 已解锁，待实现** | M0-3 已证明 `d_dyn` 对 `d_obs` 有互补空间；正式训练仍需 M1 数据基础、clean commit 与预注册 controls |
+| M1 | **Engineering GO** | M0-4 排除独立 jitter 与第一版 smooth drift；现在实现 shared world-SE(2)、canonical label、zero-init 和等价性测试 |
+| M2 | **Engineering GO，Formal-training HOLD** | M0-3 已证明 `d_dyn` 对 `d_obs` 有互补空间；M1 不变量后接入新模式，正式训练仍需 E0–E6、clean commit 与预注册 controls |
 | M3 | **锁定** | M1/M2 的 true-dt 必须同时优于 fixed/shuffled，并通过 A1 standard guardrail |
 | M4 | **锁定** | M2 互补性、predicted-history tube oracle 与 uncertainty calibration 必须全部成立 |
 
@@ -243,19 +251,27 @@ state  = prior + K * innovation
 
 M0 的 logger、冻结评测、proposal oracle 与 candidate 审计可以并行，但不得改变 checkpoint 或预测路径。proposal oracle 无空间就停止 M2，不用训练试错替代 oracle。GT-history / predicted-history trajectory-tube crop oracle 作为 M4 的单独前置条件，在 M4 实现前完成，不阻塞 M1/M2。
 
-### M1：物理一致数据与双时钟 adapter（工程准备已解锁）
+### M1：物理一致数据与双时钟 adapter（Engineering GO）
 
 - [x] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中依据 tracking test 涨跌反向改变判据。
 - [x] augmentation 预注册为 shared SE(2)，第一版不实现 smooth drift。
-- [ ] 加入 zero-init physical-time adapter，并验证初始输出与 A1 数值一致。
+- [ ] 新增默认关闭的 candidate trajectory mode；legacy independent 与 shared world-SE(2) 不静默混用。
+- [ ] shared 变换围绕共同 anchor 在世界坐标一次施加；不能把相同局部 offset 重复交给每个 `getOffsetBB`。
+- [ ] canonical GT label 只使用真实 `delta_t`；补 pairwise trajectory、伪导数、candidate0、candidate1/2/3、degrees/radians 和 TWC 回归单测。
+- [ ] 加入显式 zero-scale/disabled physical-time adapter，并验证同权重同 batch 的 motion/output/loss 与 A1 数值一致；sigmoid 近零不算通过。
 - [ ] 同 checkpoint 做 true/fixed/shuffled forward invariance smoke test。
 - [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；第一轮不扫超参数网格。
 
-### M2：proposal innovation（oracle gate 已解锁，待实现）
+### M2：proposal innovation（Engineering GO，Formal-training HOLD）
 
-- [ ] 实现 `d_dyn - stopgrad(d_obs)`，不保留旧完整位移叠加为正式路径。
-- [ ] `alpha` 从 0 或很小的非零值初始化；记录 applied ratio、innovation norm、梯度和 clamp ratio。
+- [ ] 新增显式 `proposal_innovation` mode：实现 `d_dyn - stopgrad(d_obs)`；旧完整位移叠加只保留作可复现负对照。
+- [ ] effective alpha 用单一、可解释的 `[0,1]` 系数；不继承旧 `residual_scale × max_alpha = 0.02` 的线段上限，绝对 correction 由 `R(dt)` 控制。
+- [ ] `alpha=0`、disabled、warmup 或 `dynamics_valid=0` 时严格恢复 observation/A1；不能只要求 alpha 很小。
+- [ ] 记录 raw/clamped/applied innovation norm、applied ratio、alpha、clamp ratio、invalid fallback、gate/encoder gradient。
+- [ ] 完成 standard/gap1124/burst-drop、invalid/resampled/empty fallback 与至少 2-step optimizer smoke。
 - [ ] 只跑 seed42 mini 的 true/fixed/shuffled；不扫大网格。
+
+正式训练必须等待 E0–E6：默认路径回归、shared-SE(2) 几何不变量、canonical-label 不变量、zero/invalid 严格 A1 回退、三协议数值安全、2-step 可训练性，以及唯一配置/同 A1 初始化/clean provenance。M0-2 可与上述工程并行，不阻塞写代码；但它仍是 M0 完成和旧 TWC 解释收口的必要项。
 
 ### M3：asymmetric path distillation（尚未解锁）
 

@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。M1 shared SE(2) 数据层和 M2 bounded proposal-innovation 工程 gate 已解锁，但这仍是离线机制证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。当前判定为 **Engineering GO / Formal-training HOLD**：M1 shared world-SE(2) 数据层和 M2 bounded proposal-innovation 的实现、单测与真实 batch smoke 现在开始；未经严格 A1 等价、2-step、唯一配置和 clean provenance 验收，不启动正式 seed42 训练。以上仍是离线机制证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -244,10 +244,10 @@ use_observability_gate: False
 当前下一步：
 
 ```text
-1. 从 M1 数据层开始实现 sample-level shared SE(2) 与 canonical dynamics label；第一版不做 smooth drift。
-2. 实现 zero-init bounded proposal innovation：`d_dyn-stopgrad(d_obs)`，并补 invalid/resample/empty fallback 与 A1 数值等价性测试。
-3. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap 输出与 evaluation-only path variance，不重训。
-4. clean commit 和唯一配置冻结后，只跑一次 seed42 `true/fixed/shuffled`；standard guardrail 与强协议收益同时通过才补 seed43/44。
+1. 从 M1 数据层实现真正的 sample-level shared world-SE(2) 与 canonical dynamics label；不能只给每个局部 `getOffsetBB` 复用同一数组，第一版不做 smooth drift。
+2. 新增独立 `proposal_innovation` 模式：`d_dyn-stopgrad(d_obs)`；保留旧 full-displacement residual 仅作负对照，并补 strict-zero/A1 等价、invalid/resample/empty fallback 与 2-step 测试。
+3. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap 输出与 evaluation-only path variance，不重训；它不阻塞代码实现，但阻塞 M0 完成。
+4. E0–E6、clean commit 和唯一配置全部冻结后，只跑一次 seed42 `true/fixed/shuffled`；standard guardrail 与强协议收益同时通过才补 seed43/44。
 5. M2 未形成因果正信号则停止该模块 promotion，转回多模型、多数据集 variable-rate benchmark/diagnosis；不复活旧 Gate/TWC 组合。
 ```
 

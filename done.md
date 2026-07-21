@@ -76,7 +76,7 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 P0-B4 独立验证进一步显示 observation-only trigger 的强协议 AUROC 与 recall 均未过线，
 同批 raw-CV 第二 crop 在强协议没有任何 trajectory-only endpoint，
 因此 reliability-updated Kalman/frozen-state 与 active dual-anchor 在实现前停止；
-M0 中的 P0-C-D1 已完成；下一步完成冻结 A/B/C checkpoint 的 strong-cadence/path-variance、reachable-subset proposal oracle 和 candidate 伪速度审计；M1 只并行准备代码骨架与零初始化等价性测试。
+M0 中的 P0-C-D1、proposal oracle 和 candidate 伪速度审计已完成；下一步并行完成冻结 A/B/C checkpoint 的 strong-cadence/path-variance，以及 M1/M2 工程实现与 E0–E6 验收。正式训练仍为 HOLD。
 corrected-TWC 的同提交 `C-B` 有正信号，但 paired-view 退化更大，C 仍低于 A；TWC 主方法 promotion 已 No-Go；
 HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
 TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
@@ -1718,3 +1718,11 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - endpoint-matched 比较包含 `8,515` 对、`235` 个 tracklet；非零 candidate proposal error delta mean `+0.0104 m`，tracklet bootstrap 95% CI `[+0.0093,+0.0155] m`。
 - 正式决定为 `FREEZE_M1_SHARED_SE2`：第一版 M1 只使用 sample-level shared SE(2)，Dynamics label 从 canonical/一致变换轨迹计算，不实现 smooth drift。
 - 完整数据质量、独立复算、限制和下一步见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
+
+## 2026-07-21：M1/M2 工程启动审计完成
+
+- 明确判定为 `Engineering GO / Formal-training HOLD`：M1/M2 的实现、单测和真实 batch smoke 立即开始；seed42 正式训练等待 E0–E6、唯一配置与 clean provenance。
+- 确认 TWC 的 absolute-frame shared offset 只服务跨视图一致性，不等于整条历史轨迹的共同 SE(2)。
+- 确认 `getOffsetBB` 在每个框的局部坐标解释平移；M1 必须实现围绕共同 anchor 的 world-SE(2)，不能只重复同一 offset 数组。
+- 确认旧 `residual_limited` 是 full-displacement addition，且 `init_alpha=0` 实际约为 `2e-5`；M2 必须新增显式 proposal-innovation mode 与 strict-zero/invalid A1 回退，旧路径仅保留作负对照。
+- M0-2 可与工程并行，不阻塞写代码，但仍阻塞 M0 整体完成；M3/M4 与多 seed 继续锁定。

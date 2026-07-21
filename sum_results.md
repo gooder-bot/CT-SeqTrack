@@ -714,7 +714,7 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 由于 oracle gain 按构造非负，又独立计算了非 oracle 对照：`d_dyn` 相对 `d_obs` 的 mean/median gain 为 `1.040/0.175 m`，`81.31%` endpoint 更优；以 tracklet 为 bootstrap 单位，mean gain `0.803 m`、95% CI `[0.633,0.988]`，`87.32%` tracklet 为正。long-gap `417 endpoints / 133 tracklets` 的 oracle gain tracklet bootstrap mean `0.717 m`、CI `[0.493,0.967]`。因此正式决定为 `GO_M2_PROPOSAL_INNOVATION`。
 
-该 Go 只说明 crop-reachable offline proposal 有互补空间，不是 tracking 指标涨点。primary cohort 使用 GT history、candidate0 并排除 18.24% resampled rows；sparse `target_points<=5` 仅 3 个样本，不能作 sparse claim。正式 M2 只能使用 `d_dyn-stopgrad(d_obs)` 的 zero-init bounded innovation，并重新通过 seed42 true/fixed/shuffled 与 standard guardrail。
+该 Go 只说明 crop-reachable offline proposal 有互补空间，不是 tracking 指标涨点。primary cohort 使用 GT history、candidate0 并排除 18.24% resampled rows；sparse `target_points<=5` 仅 3 个样本，不能作 sparse claim。正式 M2 只能新增 `d_dyn-stopgrad(d_obs)` 的 strict-zero bounded innovation mode，旧 full-displacement residual 仅作负对照；旧 `0.1×0.2=0.02` 有效线段上限不应直接继承，并须重新通过 seed42 true/fixed/shuffled 与 standard guardrail。
 
 ### 10.12 M0-4 candidate dynamics audit
 
@@ -724,13 +724,15 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 正式决定为 `FREEZE_M1_SHARED_SE2`：M1 对同一样本全部历史框使用一个 shared SE(2) 变换，Dynamics label 从 canonical/一致变换轨迹计算；第一版不实现 smooth drift，也不允许依据后续 tracking 涨跌反向改判。完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
 
+代码复核进一步确认：`getOffsetBB` 在每个框自身局部朝向中解释平移，因此不能用“对全部历史框重复同一 offset 数组”冒充共同刚体变换；M1 必须围绕共同 anchor 实现 world-SE(2)。当前统一状态为 `Engineering GO / Formal-training HOLD`：M1/M2 实现、单测和真实 batch smoke 可以开始，正式训练等待 E0–E6。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
 - 真实时间方向不能被一个实验普遍否定，但 P0-C 已证明当前 frozen feature-concat A2 的正确 `delta_t` alignment 没有超过 fixed/shuffled 负对照，不能作为方法贡献。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 只保留为失败消融：feature-concat 在强 gap/burst 下不稳且 P0-C promotion No-Go，默认末端 residual 又近乎关闭；下一轮不再增加 trajectory/gate 结构。
+- feature-concat A2 仍是失败消融：它在强 gap/burst 下不稳且 P0-C promotion No-Go；但 M0-3 表明冻结 DynamicsEncoder proposal 在严格 offline cohort 中有明显信息，因此保留它作为 M2 proposal source，不复活旧 feature concat 或 hand-crafted Gate。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
@@ -749,7 +751,7 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 - 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只确认 A1 paired control 内 `C-B` 的单 seed 净效应，端到端 `C-A` 仍明显为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
-- active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；仍未知的是强协议 residual 量级与正确 correction 定义。
+- active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；M0-3 已确认 gap1124 proposal 互补性与 correction 方向，但 online recursive 转化、standard/burst guardrail 仍未知。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 - 还不能说 physical `delta_t` 提高了 reliability prediction；raw `current_delta_t` 在当前 standard-only calibrator 中反而造成强协议过触发。
 - 不能把 observation-only trigger 写成最终 uncertainty model；P0-B4 独立 mini_val 已 No-Go，且标签只覆盖 target visible 条件下的 crop miss。
@@ -760,9 +762,9 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
-2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；现在复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。
-3. M0-3 oracle 已通过，下一步实现 bounded proposal innovation；但必须先落地 M1 shared SE(2) 与 canonical dynamics label，不能在受污染的独立 candidate 轨迹上直接训练新 gate。
-4. 完成 M0-2 A/B/C 四协议冻结输出后，冻结 clean commit 和唯一 seed42 true/fixed/shuffled 配置；只有因果负对照与 standard guardrail 同时通过才补多 seed。
+2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；并行复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。M0-2 不阻塞写代码，但阻塞 M0 完成。
+3. 先实现 M1 shared world-SE(2) 与 canonical dynamics label；`utils/twc_utils.py` 的跨视图共享保持原义，不能用重复局部 offset 冒充整轨迹刚体变换。
+4. 新增独立 M2 bounded proposal-innovation mode，并完成 strict-zero/A1 等价、invalid/resample/empty fallback、三协议 forward/backward 与 2-step；E0–E6 通过后冻结 clean commit 和唯一 seed42 true/fixed/shuffled 配置。
 5. M2 time-control 无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```
 
