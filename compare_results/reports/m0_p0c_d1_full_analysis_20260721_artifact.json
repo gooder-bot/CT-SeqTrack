@@ -1,0 +1,244 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "M0 P0-C-D1 full analysis",
+    "generatedAt": "2026-07-21T07:30:00Z",
+    "charts": [
+      {
+        "id": "paired_delta_chart",
+        "title": "True-time paired deltas versus negative controls",
+        "type": "bar",
+        "dataset": "paired_deltas",
+        "sourceId": "paired_deltas_snapshot",
+        "encodings": {
+          "x": { "field": "comparison", "type": "nominal", "label": "Control" },
+          "y": { "field": "delta_pp", "type": "quantitative", "label": "True − control (percentage points)" },
+          "color": { "field": "metric", "type": "nominal", "label": "Metric" },
+          "tooltip": [
+            { "field": "comparison", "type": "nominal", "label": "Comparison" },
+            { "field": "metric", "type": "nominal", "label": "Metric" },
+            { "field": "delta_pp", "type": "quantitative", "label": "Delta (pp)" },
+            { "field": "gate_pp", "type": "quantitative", "label": "Promotion gate (pp)" },
+            { "field": "ci_low", "type": "quantitative", "label": "Tracklet bootstrap CI low" },
+            { "field": "ci_high", "type": "quantitative", "label": "Tracklet bootstrap CI high" }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "run_metrics_table",
+        "title": "Frozen run metrics",
+        "dataset": "run_metrics",
+        "sourceId": "run_metrics_snapshot",
+        "columns": [
+          { "field": "mode", "label": "Mode" },
+          { "field": "success", "label": "Success" },
+          { "field": "precision", "label": "Precision" },
+          { "field": "mean_error_m", "label": "Mean error (m)" },
+          { "field": "fallback", "label": "Fallback" }
+        ]
+      },
+      {
+        "id": "bootstrap_table",
+        "title": "Tracklet bootstrap robustness",
+        "dataset": "bootstrap_intervals",
+        "sourceId": "bootstrap_snapshot",
+        "columns": [
+          { "field": "comparison_metric", "label": "Comparison / metric" },
+          { "field": "mean", "label": "Mean" },
+          { "field": "ci95", "label": "95% CI" },
+          { "field": "interpretation", "label": "Interpretation" }
+        ]
+      },
+      {
+        "id": "quality_table",
+        "title": "Input and intervention checks",
+        "dataset": "quality_checks",
+        "sourceId": "quality_snapshot",
+        "columns": [
+          { "field": "check", "label": "Check" },
+          { "field": "result", "label": "Result" },
+          { "field": "detail", "label": "Evidence" }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# M0 P0-C-D1 full analysis\n\nGap1124 frozen true / fixed / shuffled endpoint diagnosis · 2026-07-21",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## Technical summary\n\nAll three runs contain the same 91 tracklets and 1,257 ordered endpoints. Only the effective time read by the DynamicsEncoder changes. True time does not pass the preregistered promotion gate: versus fixed it gains only +0.438 Success and +0.523 Precision points; versus shuffled it loses 0.123 Success points and gains only 0.056 Precision points. The frozen feature-concat A2 is therefore **not promoted**.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "run_metrics",
+        "type": "table",
+        "tableId": "run_metrics_table"
+      },
+      {
+        "id": "finding_chart_intro",
+        "type": "markdown",
+        "body": "## Key finding: correct alignment is not better than controls\n\nThe bars show paired aggregate deltas. A promotable result required true time to beat **both** controls by at least +0.5 Success and +1.0 Precision points. Three of four bars miss even their per-metric gate, and true-time Success is negative against shuffled time.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "paired_delta_visual",
+        "type": "chart",
+        "chartId": "paired_delta_chart"
+      },
+      {
+        "id": "bootstrap_robustness",
+        "type": "table",
+        "tableId": "bootstrap_table"
+      },
+      {
+        "id": "mechanism_finding",
+        "type": "markdown",
+        "body": "## Mechanism diagnosis\n\nThe module is responsive, not inert: true versus each control changes the predicted center at 1,079 of 1,257 endpoints. But responsiveness is not correctness. True-time Success never has a positive advantage over shuffled time in any real-gap bin. At GT displacement ≥0.5 m, all four displacement bins have zero Success delta against both controls.\n\nThe apparent 0.191 m mean-error gain over fixed is mostly one already-lost tracklet: fixed drifts farther, while all three modes have IoU 0 from the first predicted frame. Removing it shrinks the error gain to 0.0397 m without changing the Success/Precision verdict.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "scope_definitions",
+        "type": "markdown",
+        "body": "## Scope and metric definitions\n\nDataset: nuScenes v1.0-mini mini_val with the frozen gap1124 selection. Model: one standard-trained A2-order-dyn seed42 60-epoch final checkpoint. Success is the mean 3D-IoU threshold curve ×100; Precision is the mean 0–2 m center-error threshold curve ×100. Bootstrap resampling uses tracklets, not endpoints, as the independent unit.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "quality_checks",
+        "type": "table",
+        "tableId": "quality_table"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "body": "## Methodology\n\nThe archive checksum was verified before extraction. Endpoint identity, ordering, real-time fields, history indices, GT fields, checkpoint/config/selection/manifest hashes, finite values, and time-control semantics were checked across modes. Exporter and summarizer metrics were reproduced from CSV with round-trip float parsing. Paired tracklet deltas, 10,000 seed42 bootstrap samples, leave-one-tracklet-out sensitivity, gap/displacement bins, failure streaks, and fallback localization were then computed.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## Limitations and uncertainty\n\nThe server run records commit 343145d but git_dirty=true because tools and outputs were manually uploaded. Exact exporter, config, checkpoint, manifest, selection, and CSV hashes are preserved, and the paired effects reproduce the prior clean aggregate result. This is sufficient to close the frozen diagnostic, but a paper archive should retain the provenance caveat or rerun from a clean worktree. The result covers one mini split, one checkpoint, and one cadence; it rejects this A2 mechanism, not physical-time modeling in general.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## Next steps\n\n1. Stop extending the current feature-concat A2; do not add burst/fixed-gap/multi-seed runs for it.\n2. Run the frozen A/B/C standard, gap1124, burst-drop, and fixedgap2 endpoint/path-variance matrix.\n3. Complete the crop-reachable d_obs → d_dyn convex-blend oracle; only a positive oracle can unlock M2.\n4. Audit candidate0/1/2/3 pseudo-velocity and freeze one physically consistent M1 augmentation.\n5. Keep M1 limited to zero-init adapter engineering and A1 numerical equivalence until a new true/fixed/shuffled gate is preregistered.",
+        "sourceId": "analysis_report"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## Open questions\n\nDoes corrected TWC reduce multi-path variance under strong cadence? Does d_dyn provide non-outlier-driven oracle complementarity on crop-reachable endpoints? Do independently jittered nonzero candidates create physically inconsistent pseudo-velocity? If these gates also fail, the defensible pivot is a variable-rate 3D SOT benchmark and diagnosis paper.",
+        "sourceId": "analysis_report"
+      }
+    ],
+    "sources": [
+      {
+        "id": "analysis_report",
+        "label": "Full technical analysis",
+        "path": "compare_results/reports/m0_p0c_d1_full_analysis_20260721.md"
+      },
+      {
+        "id": "run_metrics_snapshot",
+        "label": "Frozen run metric snapshot",
+        "path": "output/diagnostics/m0_manual_20260721_v2/analysis/p0c_d1_gap1124_manual_20260721_runs.csv"
+      },
+      {
+        "id": "paired_deltas_snapshot",
+        "label": "Paired delta snapshot",
+        "path": "output/diagnostics/m0_manual_20260721_v2/analysis/p0c_d1_gap1124_manual_20260721_summary.json"
+      },
+      {
+        "id": "bootstrap_snapshot",
+        "label": "Tracklet bootstrap snapshot",
+        "path": "output/diagnostics/m0_manual_20260721_v2/analysis/p0c_d1_gap1124_manual_20260721_summary.json"
+      },
+      {
+        "id": "quality_snapshot",
+        "label": "Endpoint data quality audit",
+        "path": "compare_results/notebooks/m0_p0c_d1_full_analysis_20260721.ipynb"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-21T07:30:00Z",
+    "status": "ready",
+    "datasets": {
+      "run_metrics": [
+        { "mode": "true", "success": 55.2247, "precision": 66.8775, "mean_error_m": 2.2704, "fallback": 94, "endpoints": 1257, "tracklets": 91 },
+        { "mode": "fixed", "success": 54.7872, "precision": 66.3544, "mean_error_m": 2.4614, "fallback": 106, "endpoints": 1257, "tracklets": 91 },
+        { "mode": "shuffled", "success": 55.3481, "precision": 66.8218, "mean_error_m": 2.2496, "fallback": 92, "endpoints": 1257, "tracklets": 91 }
+      ],
+      "paired_deltas": [
+        { "comparison": "true − fixed", "metric": "Success", "delta_pp": 0.43755, "gate_pp": 0.5, "ci_low": -0.004104, "ci_high": 1.055912, "n_tracklets": 91, "n_endpoints": 1257, "verdict": "Fail" },
+        { "comparison": "true − fixed", "metric": "Precision", "delta_pp": 0.523071, "gate_pp": 1.0, "ci_low": -0.103521, "ci_high": 1.286165, "n_tracklets": 91, "n_endpoints": 1257, "verdict": "Fail" },
+        { "comparison": "true − shuffled", "metric": "Success", "delta_pp": -0.123309, "gate_pp": 0.5, "ci_low": -0.598906, "ci_high": 0.290145, "n_tracklets": 91, "n_endpoints": 1257, "verdict": "Fail" },
+        { "comparison": "true − shuffled", "metric": "Precision", "delta_pp": 0.055688, "gate_pp": 1.0, "ci_low": -0.644778, "ci_high": 0.671883, "n_tracklets": 91, "n_endpoints": 1257, "verdict": "Fail" }
+      ],
+      "bootstrap_intervals": [
+        { "comparison_metric": "true−fixed Success (pp)", "mean": 0.4664, "ci95": "[-0.0041, +1.0559]", "interpretation": "Crosses zero" },
+        { "comparison_metric": "true−fixed Precision (pp)", "mean": 0.5209, "ci95": "[-0.1035, +1.2862]", "interpretation": "Crosses zero" },
+        { "comparison_metric": "true−shuffled Success (pp)", "mean": -0.1558, "ci95": "[-0.5989, +0.2901]", "interpretation": "Crosses zero" },
+        { "comparison_metric": "true−shuffled Precision (pp)", "mean": 0.0223, "ci95": "[-0.6448, +0.6719]", "interpretation": "Crosses zero" }
+      ],
+      "quality_checks": [
+        { "check": "Endpoint identity and order", "result": "PASS", "detail": "Exact across all three modes" },
+        { "check": "Duplicate composite keys", "result": "PASS", "detail": "0 in every 1,257-row CSV" },
+        { "check": "Checkpoint/config/selection", "result": "PASS", "detail": "Exact hashes across modes" },
+        { "check": "True-time semantics", "result": "PASS", "detail": "effective − real max abs diff = 0" },
+        { "check": "Fixed-time semantics", "result": "PASS", "detail": "effective Δt = 0.5 s" },
+        { "check": "Shuffled-time semantics", "result": "PASS", "detail": "Same gap multiset, frozen permutation" },
+        { "check": "Finite metrics and times", "result": "PASS", "detail": "No NaN or Infinity" },
+        { "check": "Git provenance", "result": "CAVEAT", "detail": "Dirty worktree; exact file hashes retained" }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "analysis_report",
+      "path": "compare_results/reports/m0_p0c_d1_full_analysis_20260721.md"
+    },
+    {
+      "id": "run_metrics_snapshot",
+      "query": {
+        "engine": "snapshot",
+        "sql": "SELECT mode, success, precision, mean_error_m, fallback, endpoints, tracklets FROM snapshot.run_metrics ORDER BY mode",
+        "description": "Reviewed aggregate metrics from the three frozen endpoint exports."
+      }
+    },
+    {
+      "id": "paired_deltas_snapshot",
+      "query": {
+        "engine": "snapshot",
+        "sql": "SELECT comparison, metric, delta_pp, gate_pp, ci_low, ci_high, n_tracklets, n_endpoints, verdict FROM snapshot.paired_deltas ORDER BY comparison, metric",
+        "description": "Reviewed paired aggregate deltas, preregistered gates, and tracklet-bootstrap bounds."
+      }
+    },
+    {
+      "id": "bootstrap_snapshot",
+      "query": {
+        "engine": "snapshot",
+        "sql": "SELECT comparison_metric, mean, ci95, interpretation FROM snapshot.bootstrap_intervals",
+        "description": "Reviewed seed42 10,000-iteration tracklet-bootstrap intervals."
+      }
+    },
+    {
+      "id": "quality_snapshot",
+      "query": {
+        "engine": "snapshot",
+        "sql": "SELECT check, result, detail FROM snapshot.quality_checks",
+        "description": "Reviewed endpoint identity, intervention, numerical quality, and provenance checks."
+      }
+    }
+  ]
+}

@@ -10,7 +10,7 @@
 
 当前项目仍有论文机会，但不能按“CT-SeqTrack full model 已经成立”继续。完整的 code-to-claim 审计、方法/benchmark 分叉和实验底线见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
 
-**2026-07-21 阶段决定**：前序 P0-B、P0-C 与同提交 TWC A/B/C 已经足以结束旧路线筛选，项目正式进入 M 阶段。当前活动阶段是 M0；M1 只解锁工程准备，M2–M4 仍由 oracle 和因果控制逐级解锁。这表示研究可以转向新方法闭环，不表示 dual-clock 已经涨点或可以写成已验证贡献。
+**2026-07-21 阶段决定**：前序 P0-B、P0-C 与同提交 TWC A/B/C 已经足以结束旧路线筛选，项目正式进入 M 阶段。当前活动阶段是 M0；M1 只解锁工程准备，M2–M4 仍由 oracle 和因果控制逐级解锁。M0 P0-C-D1 的 true/fixed/shuffled full 已完成 endpoint-level 配对诊断：正确时间会改变预测，但没有稳定超过 fixed/shuffled，进一步确认当前 feature-concat A2 promotion No-Go。这表示研究可以转向新的机制闭环，不表示 dual-clock 已经涨点或可以写成已验证贡献。
 
 四个会决定论文名称和贡献形态的事实是：
 
@@ -23,7 +23,7 @@
 
 ```text
 同提交 TWC A/B/C seed42：主方法 promotion No-Go
-    -> M0：冻结 checkpoint 的 strong-cadence/path-variance、P0-C-D1、proposal oracle、candidate 审计
+    -> M0：P0-C-D1 已完成；继续冻结 checkpoint 的 strong-cadence/path-variance、proposal oracle、candidate 审计
         -> M1：物理一致 augmentation + zero-init dual-clock（工程准备可并行）
             -> M2：oracle 通过后做 proposal innovation seed42 true/fixed/shuffled
                 -> M3：因果正信号后做 asymmetric path distillation
@@ -85,7 +85,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 1. P0-B4 已完成并 No-Go：不实现当前 observation calibrator 控制的 Kalman/frozen-state，不做 active dual-anchor，不在 mini_val 上重调。
 2. 当前脚本、verdict 和 P0-C 协议已绑定 clean GitHub commit `343145d`；服务器输出继续保存 script/data/config/checkpoint hashes，旧 stash 不恢复到正式运行路径。
 3. P0-C frozen A2 triplet已得到 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；同提交 TWC A/B/C 也已得到 `NO_GO_TWC_MAIN_METHOD_PROMOTION`，均不扩展训练 seed。
-4. 当前正式进入 M0：复用一个 per-tracklet/endpoint logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，并完成 P0-C-D1 失败定位；不改变预测路径。
+4. M0 P0-C-D1 已完成：三路各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/hash 与时间干预检查通过；true−fixed 为 `+0.438/+0.523`，true−shuffled 为 `-0.123/+0.056`，逐 tracklet Success/Precision bootstrap CI 均跨 0。下一步复用同一 logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，不改变预测路径。
 5. M0 同时完成 crop-reachable proposal oracle 和 candidate0/1/2/3 伪速度审计；前者决定是否解锁 M2，后者决定 M1 使用 shared SE(2) 还是 smooth drift。
 6. M1 的接口、配置、zero-init adapter 和 A1 数值等价性测试可以并行开始，但正式训练必须在 clean commit 上使用唯一预注册配置。
 7. 后续严格按 `M1 physical-consistent augmentation/dual clock -> M2 proposal innovation -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
@@ -403,7 +403,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 当前仓库已经完成 P0-P5 工程链路，并新增 bounded residual 与 corrected-TWC。corrected-TWC 已完成服务器 seed42 训练，证明坐标修复路径生效；bounded residual 已完成 standard 真实 batch warmup/active forward-loss-backward，但默认量级近乎为零，尚未完成强 gap、完整 split、2-step optimizer 或性能验证。各模块仍通过显式 YAML 开关启用。
 
-已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏；feature-concat `A2-order-dyn` 不仅有 seed sensitivity，也有明显 protocol dependence。crop oracle 证明高速目标会在模型 forward 前离开 base crop，P0-B2 又否定 raw predicted-history CV 恒开启。P0-B3 确认 observation-quality risk signal 存在，但 raw-CV passive union gain 不足且 selector 跨强协议失效；后续主线不再继续堆主干时间编码或学习式 gate，而是先验证独立 reliability-updated state anchor 的被动互补性和物理时间因果性，再决定是否进入 active inference。
+已有实验已经完成一轮关键收敛：raw / MLP / Fourier real-time 主干都不稳定；恢复 order-time 主干后，`A1-order` 基本修复崩坏；feature-concat `A2-order-dyn` 不仅有 seed sensitivity，也有明显 protocol dependence。crop oracle 证明高速目标会在模型 forward 前离开 base crop，P0-B2 又否定 raw predicted-history CV 恒开启。P0-B3 的 observation-quality risk signal 未通过 P0-B4 独立验证，raw-CV passive union gain 不足且 selector 跨强协议失效；当前 state anchor 已在实现前停止。后续主线不再堆主干时间编码或学习式 gate，而是先完成 proposal oracle、candidate 伪速度和冻结 path-variance 诊断，再决定是否解锁新的 dual-clock/innovation 机制。
 
 ### P0-P2：已完成地基
 
@@ -416,7 +416,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。P0-C frozen triplet 中，true 相对 fixed 只有 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，未通过 promotion；因此 `A2-order-dyn` 只保留为失败消融，不扩展 cadence/seed。TWC A/B/C 也显示 C 无法恢复到 single-view A，不扩展 seed。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。下一步只做冻结 checkpoint 输出型收尾，并决定 residual oracle 是否值得一次性执行。
+feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。P0-C-D1 full 中，true 相对 fixed 只有 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，Success/Precision 的逐 tracklet bootstrap 95% CI 均跨 0；因此 `A2-order-dyn` 只保留为失败消融，不扩展 cadence/seed。模型对时间有数值响应（相对两个控制各有 `1079/1257` 个 endpoint 的中心改变），但正确对应关系没有稳定收益。TWC A/B/C 也显示 C 无法恢复到 single-view A，不扩展 seed。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。下一步只做冻结 A/B/C 输出、candidate 审计，并决定 residual oracle 是否值得一次性执行。
 
 第一版只做真实时间差分动力学：
 
@@ -498,7 +498,7 @@ verdict                   = NO_GO_OBSERVATION_RELIABILITY_VALIDATION
 
 - 不在 mini_val 上重调 feature、L2、threshold 或 crop scale；P0-B4 No-Go 永久保留。
 - 不实现当前 calibrator 控制的 frozen-state、active dual-anchor 或 learned selector。
-- P0-C 的 stable manifest、输入公平性和同 checkpoint 三路性能已完成；A2 true-dt promotion No-Go，不扩展 schedule/multiseed。
+- P0-C 的 stable manifest、输入公平性、同 checkpoint 三路性能及 endpoint-level D1 已完成；A2 true-dt promotion No-Go，不扩展 schedule/multiseed。D1 还确认 gap/高位移分桶无可推广 physical-time 优势，overall mean-error 表面收益受灾难性长尾驱动。
 - `true/fixed/shuffled-dt` 改为通用 benchmark 因果控制，不再作为复活当前 reliability anchor 的工具。
 - residual 和 TWC 各只允许一次预注册、同提交的 seed42 机制控制；失败即停止。
 - 选择/融合规则仍只能使用推理时可得量；GT 只用于离线标签、loss 和 oracle 分析。
@@ -550,13 +550,11 @@ A3-conf-res rerun seed42
 
 ```text
 A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap endpoint 与 path variance（不重训）
-P0-C-D1 per-tracklet/endpoint paired failure localization（与上一步复用 logger）
 crop-reachable residual oracle convex-blend feasibility
-TrajTrack pre_wo_refine vs GT-free paper-aligned refine vs oracle-assisted refine
 candidate-wise dynamics 与 target-in-crop diagnostics
 ```
 
-这些实验的作用不是复活已经 No-Go 的 reliability anchor，而是回答：未见 cadence 评测是否公平、任何剩余收益是否真的依赖物理时间、residual 在 reachable subset 是否有必要，以及 TWC 的 `C-B` 是否在强协议和 held-out path variance 上仍成立。当前 TWC 已确认 paired control 内的单 seed 净效应但未超过 single-view A，residual 没有性能正结论，dual-anchor 已停止。
+P0-C-D1 已回答旧 feature-concat A2 的 paired failure localization：时间输入会改变预测，但 true alignment 没有超过 shuffled，且均值误差受长尾主导。剩余实验的作用不是复活已经 No-Go 的 reliability anchor，而是回答 residual 在 reachable subset 是否有必要、candidate jitter 是否制造伪速度，以及 TWC 的 `C-B` 是否在强协议和 held-out path variance 上仍成立。当前 TWC 已确认 paired control 内的单 seed 净效应但未超过 single-view A，residual 没有性能正结论，dual-anchor 已停止。
 
 ### 困难子集
 

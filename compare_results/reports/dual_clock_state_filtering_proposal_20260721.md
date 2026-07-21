@@ -233,7 +233,10 @@ state  = prior + K * innovation
 ### M0：冻结输出和 oracle，不训练
 
 - [ ] 固定当前文档、脚本和配置，形成可回查的 clean code/config commit；checkpoint 与大体积结果保存路径和 SHA256 索引即可。正式运行不接受 dirty provenance。
-- [ ] 复用统一 endpoint/per-tracklet logger 完成 P0-C-D1 的 true/fixed/shuffled paired outputs。
+- [x] 复用统一 endpoint/per-tracklet logger 完成 P0-C-D1 的 true/fixed/shuffled paired outputs。
+  - 2026-07-21：三路 full 各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/checkpoint/config/selection/manifest exact match；true−fixed 为 `+0.4376/+0.5231`，true−shuffled 为 `-0.1233/+0.0557`，逐 tracklet Success/Precision bootstrap 95% CI 均跨 0。
+  - true 相对两个控制各有 `1079/1257` 个 endpoint 的预测中心改变，说明旧 DynamicsEncoder 会读取时间；但 true alignment 没有带来稳定正确性优势。long-gap 和高位移分桶也未通过门槛，mean-error 表面改善主要由单条灾难性长尾驱动。
+  - 正式结论仍为 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`。详细证据见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`；旧 2-tracklet smoke 只保留为首帧 CSV/aggregate 口径修复记录。
 - [ ] A/B/C final checkpoint 的 standard、gap1124、burst-drop、unseen schedule 输出，以及 evaluation-only multi-path center/yaw variance。
 - [ ] crop-reachable `d_obs -> d_dyn` oracle convex blend，包含 long-gap/sparse 分桶和明确 Go/No-Go。
 - [ ] candidate0 与 candidate1/2/3 的速度、加速度和 proposal error 审计，为 M1 冻结唯一 augmentation 定义。

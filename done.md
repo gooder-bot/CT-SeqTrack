@@ -26,6 +26,7 @@
 - [x] P0-A standard warmup/active 真实 batch 诊断已完成：默认 residual 数值稳定但实际修正约 `1e-7 m`，未通过非平凡幅度验收。
 - [x] TWC 同提交 A/B/C seed42 已完成并本地复核：Final `B-A=-15.30/-24.18`、`C-B=+8.31/+11.74`、`C-A=-7.00/-12.44`；主方法 promotion No-Go，不补 seed43/44。
 - [x] 2026-07-21 完成旧路线阶段决策：P0-B、P0-C 与 TWC 的核心筛选已足够关闭旧扩展路线，项目转入 M0；这是一项研究阶段决策，不代表 M1–M4 已实现或已获得性能增益。
+- [x] 2026-07-21 完成 M0 P0-C-D1 gap1124 三路 full 冻结诊断：true/fixed/shuffled 各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/checkpoint/config/selection/manifest exact match，时间干预按定义生效；true 相对 fixed 为 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，逐 tracklet bootstrap 不支持稳定 Success/Precision 正效应，再次确认 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`。旧 2-tracklet smoke 只保留为首帧口径修复的工程记录。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text
@@ -75,12 +76,25 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 P0-B4 独立验证进一步显示 observation-only trigger 的强协议 AUROC 与 recall 均未过线，
 同批 raw-CV 第二 crop 在强协议没有任何 trajectory-only endpoint，
 因此 reliability-updated Kalman/frozen-state 与 active dual-anchor 在实现前停止；
-下一步正式进入 M0：完成冻结 A/B/C checkpoint 的 strong-cadence/path-variance、P0-C-D1、reachable-subset proposal oracle 和 candidate 伪速度审计；M1 只并行准备代码骨架与零初始化等价性测试。
+M0 中的 P0-C-D1 已完成；下一步完成冻结 A/B/C checkpoint 的 strong-cadence/path-variance、reachable-subset proposal oracle 和 candidate 伪速度审计；M1 只并行准备代码骨架与零初始化等价性测试。
 corrected-TWC 的同提交 `C-B` 有正信号，但 paired-view 退化更大，C 仍低于 A；TWC 主方法 promotion 已 No-Go；
 HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
 TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
 gate / conf-res 目前也不能作为稳定主配置。
 ```
+
+## 2026-07-21：M0 P0-C-D1 gap1124 三路 full
+
+回传包 `output/diagnostics/m0_transfers/m0_manual_20260721_v2.tar.gz` 的 SHA256 为 `7806ccd3652092aa58aa3047932eed28d1492afed2aaf3e4910fa247b54c45a2`。解包后的 true/fixed/shuffled 各有 `1257` 个 endpoint、`91` 个 tracklet、`102` 个字段；复合键无重复，三路 endpoint key/order、真实时间、GT、checkpoint、source config、selection 和 manifest 全部一致。true effective time 与 real time exact match，fixed 恒为 `0.5 s`，shuffled 使用同一真实 gap 多重集合的冻结置换。
+
+- true：`55.2247 Success / 66.8775 Precision`，mean center error `2.2704 m`，fallback `94`。
+- fixed：`54.7872 / 66.3544`，mean error `2.4614 m`，fallback `106`。
+- shuffled：`55.3481 / 66.8218`，mean error `2.2496 m`，fallback `92`。
+- true−fixed：`+0.4376/+0.5231`；true−shuffled：`-0.1233/+0.0557`。均未通过预注册的 `+0.5 Success / +1.0 Precision`，且逐 tracklet Success/Precision bootstrap 95% CI 均跨 0。
+- true 与两个控制各有 `1079/1257` 个 endpoint 的预测中心改变，说明模块读取了时间；但正确时间没有比打乱时间更可靠。长 gap 分桶也没有显示 true 对 shuffled 的 Success 正优势。
+- true−fixed 的 `0.191 m` mean-error 优势主要由一条三路均已失控的长尾 tracklet 驱动；移除该条后只剩 `0.0397 m`，不能用 overall mean error 讲 promotion。
+
+服务器运行记录为 dirty commit，但 exporter/config/checkpoint/manifest/CSV 精确 hash 已保存，且 paired 效应与此前 clean aggregate 一致。因此该输出足以完成 M0 冻结机制诊断和 No-Go 决策；正式论文归档仍保留 clean-worktree/source-bundle provenance caveat。完整分析见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`，可执行复核见 `compare_results/notebooks/m0_p0c_d1_full_analysis_20260721.ipynb`。
 
 ## 2026-07-21：TWC A/B/C seed42 同提交结果
 

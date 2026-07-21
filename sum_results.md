@@ -682,6 +682,32 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 2026-07-21 已完成同提交 A/B/C 的本地事件复算、checkpoint hash、配置差异和诊断完整性审计。B/C resolved config 除运行元数据外只差 `twc_weight: 0.0 -> 0.05`；三组均有 12 个同步评测点，final 为 step75720。结果表明 `C-B` 在 Final/Best/Late mean 上全部为正，但 `B-A` 的损害更大，使 `C-A` 仍全面为负。该结果结束了“旧 baseline 不同提交”的归因问题，同时触发 TWC 主方法 promotion No-Go。详见 `compare_results/reports/twc_abc_seed42_comparison_20260721.md`。
 
+### 10.10 M0 P0-C-D1 gap1124 三路 full
+
+2026-07-21 回传包已通过 SHA256 校验并解包到 `output/diagnostics/m0_manual_20260721_v2/`。true/fixed/shuffled 各有 `1257` 个 endpoint、`91` 个 tracklet、`102` 个字段；复合键无重复，三路 endpoint key/order、真实时间、GT、checkpoint、source config、selection 和 manifest exact match。true effective time 与 real time 完全相等，fixed 恒为 `0.5 s`，shuffled 的 effective gap 多重集合与 true real gap 完全相同但 endpoint 映射被离线冻结置换。三路 exporter/summarizer summary 与 CSV round-trip 重算完全一致。
+
+| mode | Success | Precision | mean center error | fallback |
+| --- | ---: | ---: | ---: | ---: |
+| true | 55.2247 | 66.8775 | 2.2704 m | 94 |
+| fixed | 54.7872 | 66.3544 | 2.4614 m | 106 |
+| shuffled | 55.3481 | 66.8218 | 2.2496 m | 92 |
+
+配对结果为 true−fixed `+0.4376 Success / +0.5231 Precision`，true−shuffled `-0.1233/+0.0557`。两组 Success/Precision 的逐 tracklet bootstrap 95% CI 均跨 0，且没有同时达到预注册的 `+0.5/+1.0`。true 相对两个控制各有 `1079/1257` 个 endpoint 的预测中心改变，证明模型会响应 time input；但正确物理时间对应关系没有比 shuffled 更可靠。
+
+这里的 Precision 使用 CSV round-trip float 解析，可与 exporter/summarizer 精确复现；pandas 默认解析会在极少数阈值边界上带来约 `+0.008 pp`，解释了第 10.8 节旧 aggregate 表中 `66.8854/66.3624/66.8298` 与本次 `66.8775/66.3544/66.8218` 的细微差异，不改变任何 paired delta 或 verdict。
+
+分桶没有发现隐藏的 long-gap promotion：在 `≥2 s` 的 100 个 transition 上，true−shuffled 只有 `0.000 Success / +0.525 Precision`；所有 real-gap 桶中 true 对 shuffled 的 Success 都没有正优势。GT 位移 `≥0.5 m` 的四个桶中，true 相对两个控制的 Success 差均为 0，说明当前机制没有恢复高运动 endpoint。
+
+true−fixed 的 overall mean error 虽改善 `0.191 m`，但主要由 tracklet `0cfdfb5bbe8a41268271e24f2edefb9c` 驱动；该序列三路从首个预测帧起 IoU 都为 0，只是 fixed 后期漂得更远。移除它后 mean-error 改善缩小到 `0.0397 m`，而 Success/Precision 判定不变。因此不能把长尾减轻写成成功恢复或 promotion。
+
+正式结论仍为：
+
+```text
+NO_GO_P0C_A2_TRUE_DT_PROMOTION
+```
+
+本次 D1 完成了旧 aggregate 判定的 endpoint/tracklet 失败定位，不解锁当前 feature-concat A2 的 burst/fixed-gap/multiseed，也不解锁 M1 正式训练或 M2。服务器 provenance 为 dirty，但 exact exporter/config/checkpoint/manifest/CSV hash 已保存，且 paired 效应复现此前 clean aggregate；足以完成冻结诊断，正式论文归档仍保留 clean-worktree caveat。完整报告见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`，可执行复核见 `compare_results/notebooks/m0_p0c_d1_full_analysis_20260721.ipynb`。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
@@ -718,7 +744,7 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
-2. 复用一个 endpoint/per-tracklet 输出 logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾；同时可完成 P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位，不改模型或 checkpoint。
+2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；现在复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。
 3. P0-A 只先做 crop-reachable `d_obs -> d_dyn` oracle blend；当前完整 displacement 直接相加存在重复运动的定义歧义，oracle 通过才改公式和训练。
 4. TWC 强协议收尾与 residual oracle/time-control 仍无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```

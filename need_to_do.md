@@ -11,7 +11,7 @@
 | 阶段 | 状态 | 当前允许的工作 |
 | --- | --- | --- |
 | 旧路线筛选：P0-B / P0-C / TWC | **已关闭** | 只保留冻结输出和论文失败边界，不再补训练 seed 或复活旧 Gate/TWC 组合 |
-| M0：冻结输出、oracle 与 candidate 审计 | **进行中** | endpoint logger、P0-C-D1、A/B/C strong-cadence/path variance、residual oracle、candidate 伪速度审计 |
+| M0：冻结输出、oracle 与 candidate 审计 | **进行中** | P0-C-D1 已完成；当前做 A/B/C strong-cadence/path variance、residual oracle、candidate 伪速度审计 |
 | M1：物理一致 augmentation + zero-init dual clock | **工程准备可开始** | 可搭接口、配置、单元测试和 A1 数值等价性；完成 M0 关键诊断前不提交正式训练结论 |
 | M2：proposal innovation | **锁定** | 仅在 crop-reachable `d_obs -> d_dyn` oracle 通过后实现和训练 |
 | M3：asymmetric path distillation | **锁定** | 仅在 M1/M2 的 `true-dt` 同时优于 fixed/shuffled 且不破坏 A1 后启动 |
@@ -106,10 +106,14 @@ P0-B 已在独立验证入口处 No-Go，P0-C A2 true-dt 与 P1-D TWC A/B/C 也�
 - [x] `main.py` 每个 run 写出 `run_provenance.json`，保存 commit、dirty status、原始/解析后 cfg hash、manifest/mapping hash、seed、checkpoint hash 和 checkpoint 规则。
 - [x] 在服务器 clean commit `343145d` 上生成 val/test cadence manifest 和 test shuffled-time manifest；gap1124 保留 `91/106` tracklets、`1257/2285` frames，test selection SHA256 为 `85e5603c...f9649f6f`，shuffled mapping 为 `1257 endpoints / 1166 transitions`，真实 nuScenes batch invariance 输出 PASS。
 - [x] 用 standard-trained seed42 A2 60ep `last.ckpt`（SHA256 `b508f958...24ac87ad`）完成 gap1124 `true/fixed/shuffled-dt` 三次评测；三份 provenance 的 commit/config/checkpoint/selection/91 tracklets/1257 frames 一致。true 相对 fixed 为 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，未达到 `+0.5 Success / +1 Precision`。
-- [ ] P0-C-D1 只补一次输出型复跑：保存 per-tracklet/endpoint 指标、gap bin、首次失控、连续失败与 empty fallback，计算三路 paired delta；不改 checkpoint、模型、manifest、seed 或阈值。现有 aggregate outputs 无法完成该诊断。
+- [x] P0-C-D1 三路 full 输出型复跑与失败定位完成：true/fixed/shuffled 各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/checkpoint/config/selection/manifest exact match，real/effective time 干预通过检查；保存了 per-tracklet/endpoint、gap/位移分桶、首次失控、连续失败、fallback、bootstrap 与 leave-one-tracklet-out 结果。
+  - true−fixed 为 `+0.4376 Success / +0.5231 Precision`，true−shuffled 为 `-0.1233/+0.0557`；Success/Precision 的逐 tracklet bootstrap 95% CI 均跨 0，再次确认 promotion No-Go。
+  - true 与两个控制各有 `1079/1257` 个 endpoint 的中心预测改变，说明模型会响应时间；但 true 对 shuffled 没有稳定正确性优势。`≥2 s` 桶 true−shuffled 也只有 `0.000/+0.525`。
+  - true−fixed 的 mean-error 改善主要来自一条三路均已失控的长尾序列；删除该条后 `-0.191 m` 缩小到 `-0.0397 m`，不能据此晋级。
+  - 运行时仓库为 dirty，但 exact exporter/config/checkpoint/manifest/CSV hash 已保存，且 paired 效应复现此前 clean aggregate；足以完成诊断，正式论文归档保留 clean provenance caveat。旧 2-tracklet smoke 只保留作首帧口径修复记录。
 - [x] 根据预注册规则判定 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；不扩展 burst-drop、未见 fixed-gap或多 seed，也不把 A2 gap1124 表现归因于正确 physical-time alignment。
 
-**验收**：协议、公平输入、原始 manifest/hashes、三路 aggregate 性能与 provenance 均已验收；A2 true-dt promotion 为 No-Go。完整报告见 `compare_results/reports/p0c_frozen_protocol_validation_20260720.md`。P0-C 只剩可选但预注册的一次 D1 失败定位，不再是模型扩展入口。
+**验收**：协议、公平输入、原始 manifest/hashes、三路 aggregate 与 endpoint-level paired diagnosis 均已验收；A2 true-dt promotion 为 No-Go，P0-C 不再有待补实验，也不是模型扩展入口。协议报告见 `compare_results/reports/p0c_frozen_protocol_validation_20260720.md`，D1 完整报告见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`。
 
 ### P1-D：TWC A/B/C 已完成，主方法 promotion No-Go
 
@@ -139,19 +143,20 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 1. P0-B4 与 P0-C 已绑定 commit `343145d`；服务器三路结果、原始 manifest、console/events/provenance 已拉回并通过本地 hash/指标复算。
 2. P0-C aggregate 判定为 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；不补 burst、未见 fixed-gap或多 seed。
 3. 同提交 TWC A/B/C standard seed42 已完成并判定 `NO_GO_TWC_MAIN_METHOD_PROMOTION`；不补 seed43/44。
-4. **M0-1/2**：复用一个 endpoint/per-tracklet logger，完成 P0-C-D1；并对冻结 A/B/C final checkpoint 评测 standard、gap1124、burst-drop 和 unseen fixed gap，报告 paired delta、path variance、首次失控、连续失败和 empty fallback，不改变预测路径。
-5. **M0-3**：P0-A 只做 crop-reachable `d_obs -> d_dyn` oracle blend，保存 `d_obs/d_dyn/d_gt`，并报告 long-gap/sparse bins；oracle 不通过即停止 M2。
-6. **M0-4**：离线审计 candidate0/1/2/3 的 velocity、acceleration 和 dynamics proposal error，量化逐历史框独立 jitter 制造的伪速度；该项可与第 4、5 项并行。
-7. **M1 工程准备**：在不启动正式训练的前提下，搭建 physical-consistent augmentation、zero-init dual-clock adapter、配置开关和测试；关闭 adapter 时、以及其零初始化时，输出必须在数值容忍度内恢复同提交 A1。
-8. **M1/M2 训练解锁**：candidate 审计完成后才冻结一种物理一致 augmentation；M2 还必须等待 residual oracle 通过。第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
-9. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
-10. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
-11. 若 M0 oracle/candidate 审计和后续 time-control 都无可推广正信号，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时序模块。
+4. **M0-1 已完成**：P0-C-D1 三路 full endpoint/per-tracklet 诊断再次确认 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`，不再追加该 A2 的 cadence 或 seed。
+5. **M0-2**：用同一 logger 对冻结 A/B/C final checkpoint 评测 standard、gap1124、burst-drop 和 unseen fixed gap，报告 paired delta、path variance、首次失控、连续失败和 empty fallback，不改变预测路径。
+6. **M0-3**：P0-A 只做 crop-reachable `d_obs -> d_dyn` oracle blend，保存 `d_obs/d_dyn/d_gt`，并报告 long-gap/sparse bins；oracle 不通过即停止 M2。
+7. **M0-4**：离线审计 candidate0/1/2/3 的 velocity、acceleration 和 dynamics proposal error，量化逐历史框独立 jitter 制造的伪速度；该项可与第 5、6 项并行。
+8. **M1 工程准备**：在不启动正式训练的前提下，搭建 physical-consistent augmentation、zero-init dual-clock adapter、配置开关和测试；关闭 adapter 时、以及其零初始化时，输出必须在数值容忍度内恢复同提交 A1。
+9. **M1/M2 训练解锁**：candidate 审计完成后才冻结一种物理一致 augmentation；M2 还必须等待 residual oracle 通过。第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
+10. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
+11. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
+12. 若 M0 oracle/candidate 审计和后续 time-control 都无可推广正信号，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时序模块。
 
 ### M0 完成定义
 
 - [ ] 整理当前文档、脚本和配置并建立可回查的 clean code/config commit；大体积结果不要求入库，但必须保存路径与 SHA256 索引。新正式运行不得沿用 dirty provenance。
-- [ ] P0-C-D1 三路 per-tracklet/endpoint 输出完成并通过 endpoint/hash/checkpoint 一致性检查。
+- [x] P0-C-D1 三路 per-tracklet/endpoint 输出完成并通过 endpoint/hash/checkpoint 一致性检查；full paired effect、bootstrap、分桶和长尾敏感性分析已归档，结论为 No-Go。
 - [ ] 冻结 A/B/C 四协议输出和 evaluation-only multi-path variance 完成。
 - [ ] crop-reachable proposal oracle 完成，明确 `GO_M2_PROPOSAL_INNOVATION` 或 `NO_GO_M2_PROPOSAL_INNOVATION`。
 - [ ] candidate 伪速度审计完成，并在 shared SE(2) 与 smooth drift 中只冻结一个 M1 augmentation 方案。
