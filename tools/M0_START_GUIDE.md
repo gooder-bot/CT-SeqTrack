@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-本轮只实现 M0 的统一 endpoint/per-tracklet 输出与离线配对汇总，不修改模型、训练损失或正式递归预测路径。M1 的 augmentation/adapter 训练、M2 proposal innovation、M3 path distillation 仍保持锁定。
+本轮只实现 M0 的统一 endpoint/per-tracklet 输出、离线配对汇总、proposal oracle 与 candidate 审计，不修改模型、训练损失或正式递归预测路径。M1 的 augmentation/adapter 训练、M2 proposal innovation、M3 path distillation 仍保持锁定。
 
 ## 0. 2026-07-21 当前状态
 
@@ -15,6 +15,9 @@ P0-C-D1 已完成，不要再重复跑本节第 4 节的 A2 full：true/fixed/sh
 ```text
 tools/export_m0_endpoints.py
 tools/summarize_m0_endpoints.py
+tools/m0_diagnostic_utils.py
+tools/audit_candidate_dynamics.py
+tools/diagnose_proposal_oracle.py
 tools/M0_START_GUIDE.md
 ```
 
@@ -27,7 +30,7 @@ datasets/protocol_utils.py
 utils/metrics.py
 ```
 
-如果服务器代码已经包含 commit `65c2420` 或其父提交 `343145d` 的完整 P0-C/diagnostic 代码，只同步三个新增文件即可。
+如果服务器代码已经包含 commit `65c2420` 或其父提交 `343145d` 的完整 P0-C/diagnostic 代码，手工备选流程只需同步上面六个新增文件；推荐流程仍是直接使用 source bundle。
 
 ## 2. 同步与 Formal run 前的版本要求
 
@@ -90,18 +93,21 @@ cd "$M0_WORKTREE"
 
 随后把下方 `scp` 的服务器目标改为 `$M0_WORKTREE/tools/`，并在该 worktree 内提交、运行。checkpoint 仍使用原仓库中的绝对路径。worktree 会在共享仓库中增加一个 branch/worktree 记录，但不会修改原工作目录中的文件；仍建议先告知同账户协作者，不要让两个人同时操作同一个 M0 worktree。
 
-从本地 PowerShell 同步三个文件（把 `<SERVER_HOST>` 换成服务器地址）：
+从本地 PowerShell 同步六个文件（把 `<SERVER_HOST>` 换成服务器地址）：
 
 ```powershell
 cd D:\desktop\research\CT-SeqTrack
 
 scp .\tools\export_m0_endpoints.py `
     .\tools\summarize_m0_endpoints.py `
+    .\tools\m0_diagnostic_utils.py `
+    .\tools\audit_candidate_dynamics.py `
+    .\tools\diagnose_proposal_oracle.py `
     .\tools\M0_START_GUIDE.md `
     lishengjie@<SERVER_HOST>:/home/lishengjie/study/lcyu/CT-SeqTrack/tools/
 ```
 
-也可以用 WinSCP 手动上传，但必须保持上面三个相对路径和文件名不变。上传后先在服务器把这三个文件提交为一个独立 commit；这样 manifest、endpoint 输出和源码版本才能绑定。开发 smoke 可以 dirty，正式 manifest 和 full output 必须 clean。
+也可以用 WinSCP 手动上传，但必须保持上面六个相对路径和文件名不变。上传后先在服务器把这六个文件提交为一个独立 commit；这样 manifest、endpoint 输出和源码版本才能绑定。开发 smoke 可以 dirty，正式 manifest 和 full output 必须 clean。
 
 ```bash
 cd /home/lishengjie/study/lcyu/CT-SeqTrack
@@ -110,9 +116,12 @@ git status --short
 git add \
   tools/export_m0_endpoints.py \
   tools/summarize_m0_endpoints.py \
+  tools/m0_diagnostic_utils.py \
+  tools/audit_candidate_dynamics.py \
+  tools/diagnose_proposal_oracle.py \
   tools/M0_START_GUIDE.md
 git diff --cached --check
-git commit -m "tools: add frozen M0 endpoint diagnostics"
+git commit -m "tools: add frozen M0 diagnostics"
 ```
 
 如果服务器不允许提交，仍可完成 smoke，但不要生成正式 manifest 或把 full 输出作为论文证据。
@@ -127,10 +136,15 @@ git rev-parse HEAD
 
 python -m py_compile \
   tools/export_m0_endpoints.py \
-  tools/summarize_m0_endpoints.py
+  tools/summarize_m0_endpoints.py \
+  tools/m0_diagnostic_utils.py \
+  tools/audit_candidate_dynamics.py \
+  tools/diagnose_proposal_oracle.py
 
 python tools/export_m0_endpoints.py --self-test
 python tools/summarize_m0_endpoints.py --self-test
+python tools/audit_candidate_dynamics.py --self-test
+python tools/diagnose_proposal_oracle.py --self-test
 ```
 
 预期：
@@ -138,6 +152,8 @@ python tools/summarize_m0_endpoints.py --self-test
 ```text
 M0 endpoint exporter self-test: PASS
 M0 endpoint summarizer self-test: PASS
+audit_candidate_dynamics self-test: PASS
+diagnose_proposal_oracle self-test: PASS
 ```
 
 建议环境：
@@ -503,9 +519,9 @@ sha256sum transfer/m0_frozen_outputs_20260721.tar.gz \
 
 把 `.tar.gz` 和 `.sha256` 一起下载。本轮不需要回传 checkpoint。
 
-## 11. 本轮之后的解锁边界
+## 11. M0-3 / M0-4 的实现边界
 
-完成并复核本指南的输出后，下一批代码才是：
+2026-07-21 已加入以下两个只读诊断入口：
 
 ```text
 tools/diagnose_proposal_oracle.py
@@ -521,3 +537,173 @@ models/observability.py
 TWC loss
 正式训练配置
 ```
+
+两个工具都默认拒绝 dirty worktree，正式结果不得传 `--allow-dirty`。它们只在
+`mini_train` 上计算机制统计，不读取 mini_val/test 来调阈值，也不保存或更新
+checkpoint。
+
+M0-3 不允许把 A1 权重直接加载到 residual 配置后使用随机 DynamicsEncoder。
+正式权重组合固定为：
+
+```text
+d_obs：A1-order checkpoint 的完整 observation/base path（256-D motion head）
+d_dyn：A2-order-dyn checkpoint 的完整 dynamics_encoder.*（10 个张量）
+排除：A2 的 384-D feature-concat motion_mlp
+```
+
+任一观测路径键、DynamicsEncoder 键或 tensor shape 不匹配时，脚本必须 fail
+fast。该 hybrid 只用于离线 proposal oracle，不是一个可报告 tracking 性能的模型。
+
+## 12. M0-4：candidate 伪速度审计（先运行）
+
+先在服务器 clean worktree 设置现有数据与冻结 checkpoint 的绝对路径。checkpoint
+可以位于旧实验目录，不要求复制进 source worktree：
+
+```bash
+cd /path/to/CT-SeqTrack-m0-20260721
+
+export NUSCENES_ROOT=/home/lishengjie/data/nuscenes-mini
+export A1_CKPT=/absolute/path/to/a1_order_seed42/checkpoints/last.ckpt
+export A2_CKPT=/absolute/path/to/a2_order_dyn_seed42/checkpoints/last.ckpt
+
+python tools/audit_candidate_dynamics.py --self-test
+python tools/diagnose_proposal_oracle.py --self-test
+git status --short
+```
+
+正式 M0-4 全量命令：
+
+```bash
+mkdir -p output/diagnostics/logs
+
+python -u tools/audit_candidate_dynamics.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_order_dyn.yaml \
+  --dynamics-checkpoint "$A2_CKPT" \
+  --path "$NUSCENES_ROOT" \
+  --split mini_train \
+  --tag m0_candidate_standard_seed42 \
+  --device cuda:0 \
+  --batch-size 16 \
+  --workers 0 \
+  2>&1 | tee output/diagnostics/logs/m0_candidate_standard_seed42.log
+```
+
+必须生成：
+
+```text
+output/diagnostics/m0_candidate_audit/m0_candidate_standard_seed42/
+  candidate_dynamics_endpoints.csv
+  candidate_dynamics_summary.json
+```
+
+主统计只使用 non-resampled full-history 样本；proposal error 还要求 crop reachable
+且 dynamics valid。预注册判断为：
+
+```text
+每个 candidate >= 100 个 full-history 样本；
+candidate0 velocity/acceleration jitter P95 <= 1e-4；
+candidate1/2/3 合并后的 velocity jitter P50 >= 0.05 m/s，
+或 acceleration jitter P50 >= 0.10 m/s^2。
+```
+
+通过时唯一结论是 `FREEZE_M1_SHARED_SE2`。第一版 M1 不再实现 smooth drift：后者
+会改变轨迹导数，且需要另行冻结 A1 recursive-error process；当前审计的目标是先
+消除逐历史框独立 jitter 制造的伪导数。若 candidate0 sanity 或样本数失败，结果
+无效；若伪导数没有达到门槛，不得为了启动 M1 强行冻结 augmentation。
+
+## 13. M0-3：crop-reachable proposal oracle
+
+先跑 2 batch smoke；smoke 只检查真实数据、权重组合和输出字段，不作 Go/No-Go：
+
+```bash
+python -u tools/diagnose_proposal_oracle.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
+  --observation-checkpoint "$A1_CKPT" \
+  --dynamics-checkpoint "$A2_CKPT" \
+  --path "$NUSCENES_ROOT" \
+  --split mini_train \
+  --tag m0_oracle_gap1124_smoke_seed42 \
+  --device cuda:0 \
+  --batch-size 2 \
+  --workers 0 \
+  --max-batches 2
+```
+
+如果 smoke 输出正常，保留其独立 tag 输出并确认 worktree clean，再运行正式 gap1124
+mini_train 全量诊断；正式命令没有 `--allow-dirty`：
+
+```bash
+git status --short
+
+python -u tools/diagnose_proposal_oracle.py \
+  --cfg cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml \
+  --observation-checkpoint "$A1_CKPT" \
+  --dynamics-checkpoint "$A2_CKPT" \
+  --path "$NUSCENES_ROOT" \
+  --split mini_train \
+  --tag m0_oracle_gap1124_seed42 \
+  --device cuda:0 \
+  --batch-size 16 \
+  --workers 0 \
+  2>&1 | tee output/diagnostics/logs/m0_oracle_gap1124_seed42.log
+```
+
+必须生成：
+
+```text
+output/diagnostics/m0_proposal_oracle/m0_oracle_gap1124_seed42/
+  proposal_oracle_endpoints.csv
+  proposal_oracle_summary.json
+```
+
+primary subset 固定为 candidate0、crop-reachable、full-history、dynamics-valid、
+non-resampled 的 mini_train endpoint。candidate1/2/3 只作污染敏感性副表。对每个
+endpoint 计算：
+
+```text
+u       = d_dyn - d_obs
+alpha*  = clip(((d_gt - d_obs) dot u) / ||u||^2, 0, 1)
+d_oracle = d_obs + alpha* u
+gain     = ||d_obs-d_gt|| - ||d_oracle-d_gt||
+```
+
+正式 `GO_M2_PROPOSAL_INNOVATION` 必须同时满足：
+
+```text
+primary >= 100 endpoints、>= 20 tracklets；
+mean oracle gain >= 0.05 m；
+gain >= 0.05 m 的 endpoint 比例 >= 15%；
+tracklet bootstrap mean-gain 95% CI 下界 > 0；
+long-gap(dt>=1.0s) 或 sparse(target points<=5) 至少 30 个样本且 mean gain > 0。
+```
+
+任一项失败即 `NO_GO_M2_PROPOSAL_INNOVATION`，不修改 residual 公式、不训练 M2。
+gap1124 是预注册的正式解锁入口；standard 和 burst-drop 只能作为复核，不得在看到
+结果后换入口。复核命令只需分别把 `--cfg/--tag` 改为：
+
+```text
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn.yaml
+m0_oracle_standard_seed42
+
+cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_burst_drop.yaml
+m0_oracle_burst_drop_seed42
+```
+
+## 14. M0-3 / M0-4 回传
+
+```bash
+mkdir -p transfer
+
+tar -czf transfer/m0_oracle_candidate_outputs_20260721.tar.gz \
+  output/diagnostics/m0_candidate_audit \
+  output/diagnostics/m0_proposal_oracle \
+  output/diagnostics/logs/m0_candidate_*.log \
+  output/diagnostics/logs/m0_oracle_*.log
+
+sha256sum transfer/m0_oracle_candidate_outputs_20260721.tar.gz \
+  > transfer/m0_oracle_candidate_outputs_20260721.tar.gz.sha256
+```
+
+只回传 `.tar.gz` 与 `.sha256`；checkpoint 不回传。收到结果后，本地先复算 JSON
+与 CSV，再更新 `need_to_do.md / done.md / sum_results.md`，不能只根据 console 最后
+一行解锁 M1/M2。
