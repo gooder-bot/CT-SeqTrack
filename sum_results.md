@@ -708,6 +708,22 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 本次 D1 完成了旧 aggregate 判定的 endpoint/tracklet 失败定位，不解锁当前 feature-concat A2 的 burst/fixed-gap/multiseed，也不解锁 M1 正式训练或 M2。服务器 provenance 为 dirty，但 exact exporter/config/checkpoint/manifest/CSV hash 已保存，且 paired 效应复现此前 clean aggregate；足以完成冻结诊断，正式论文归档仍保留 clean-worktree caveat。完整报告见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`，可执行复核见 `compare_results/notebooks/m0_p0c_d1_full_analysis_20260721.ipynb`。
 
+### 10.11 M0-3 gap1124 proposal oracle
+
+2026-07-21 正式输出来自 clean commit `1357923...`、seed42、mini_train。`11,424` 行经 nonresampled/full-history/crop-reachable/dynamics-valid/candidate0 筛选后得到 `1,311 endpoints / 213 tracklets`。`d_obs/d_dyn/oracle` mean error 分别为 `1.349/0.309/0.232 m`，oracle gain mean/median 为 `1.118/0.214 m`，去除 gain 最大 5% 后 mean 仍为 `0.816 m`。
+
+由于 oracle gain 按构造非负，又独立计算了非 oracle 对照：`d_dyn` 相对 `d_obs` 的 mean/median gain 为 `1.040/0.175 m`，`81.31%` endpoint 更优；以 tracklet 为 bootstrap 单位，mean gain `0.803 m`、95% CI `[0.633,0.988]`，`87.32%` tracklet 为正。long-gap `417 endpoints / 133 tracklets` 的 oracle gain tracklet bootstrap mean `0.717 m`、CI `[0.493,0.967]`。因此正式决定为 `GO_M2_PROPOSAL_INNOVATION`。
+
+该 Go 只说明 crop-reachable offline proposal 有互补空间，不是 tracking 指标涨点。primary cohort 使用 GT history、candidate0 并排除 18.24% resampled rows；sparse `target_points<=5` 仅 3 个样本，不能作 sparse claim。正式 M2 只能使用 `d_dyn-stopgrad(d_obs)` 的 zero-init bounded innovation，并重新通过 seed42 true/fixed/shuffled 与 standard guardrail。
+
+### 10.12 M0-4 candidate dynamics audit
+
+正式输出共 `20,204` 行，full-history usable `13,934`，四个 candidate 数量为 `3484/3481/3482/3487`。candidate0 jitter 精确为 0；candidate1/2/3 的 velocity/acceleration jitter P50 为 `0.611 m/s`、`2.128 m/s²`，分别是预注册阈值的 `12.22×/21.28×`，确认逐历史帧独立 candidate offset 会制造强伪导数。
+
+按相同 endpoint 与 candidate0 配对后有 `8,515` 个比较、`2,904` 个 endpoint key、`235` 个 tracklet。非零 candidates 的 proposal error delta mean/median 为 `+0.0104/+0.0033 m`，tracklet bootstrap 95% CI `[+0.0093,+0.0155] m`，81.70% tracklet 为正。负效应稳定，但绝对均值约 1 cm，不能解释旧 A2 的全部失败。
+
+正式决定为 `FREEZE_M1_SHARED_SE2`：M1 对同一样本全部历史框使用一个 shared SE(2) 变换，Dynamics label 从 canonical/一致变换轨迹计算；第一版不实现 smooth drift，也不允许依据后续 tracking 涨跌反向改判。完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
@@ -745,8 +761,9 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
 2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；现在复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。
-3. P0-A 只先做 crop-reachable `d_obs -> d_dyn` oracle blend；当前完整 displacement 直接相加存在重复运动的定义歧义，oracle 通过才改公式和训练。
-4. TWC 强协议收尾与 residual oracle/time-control 仍无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
+3. M0-3 oracle 已通过，下一步实现 bounded proposal innovation；但必须先落地 M1 shared SE(2) 与 canonical dynamics label，不能在受污染的独立 candidate 轨迹上直接训练新 gate。
+4. 完成 M0-2 A/B/C 四协议冻结输出后，冻结 clean commit 和唯一 seed42 true/fixed/shuffled 配置；只有因果负对照与 standard guardrail 同时通过才补多 seed。
+5. M2 time-control 无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```
 
 可选复核：

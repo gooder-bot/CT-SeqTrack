@@ -225,8 +225,8 @@ state  = prior + K * innovation
 | 阶段 | 当前状态 | 解锁边界 |
 | --- | --- | --- |
 | M0 | **进行中** | 只做冻结输出、离线 oracle、candidate 审计和 provenance 收口 |
-| M1 | **工程准备已解锁** | candidate 审计后冻结物理一致 augmentation；正式训练仍使用预注册 seed42 controls |
-| M2 | **锁定** | crop-reachable proposal oracle 必须先证明 `d_dyn` 对 `d_obs` 有互补空间 |
+| M1 | **shared SE(2) 已冻结，工程已解锁** | M0-4 排除独立 jitter 与第一版 smooth drift；实现 canonical label、zero-init 和等价性测试 |
+| M2 | **oracle gate 已解锁，待实现** | M0-3 已证明 `d_dyn` 对 `d_obs` 有互补空间；正式训练仍需 M1 数据基础、clean commit 与预注册 controls |
 | M3 | **锁定** | M1/M2 的 true-dt 必须同时优于 fixed/shuffled，并通过 A1 standard guardrail |
 | M4 | **锁定** | M2 互补性、predicted-history tube oracle 与 uncertainty calibration 必须全部成立 |
 
@@ -238,20 +238,20 @@ state  = prior + K * innovation
   - true 相对两个控制各有 `1079/1257` 个 endpoint 的预测中心改变，说明旧 DynamicsEncoder 会读取时间；但 true alignment 没有带来稳定正确性优势。long-gap 和高位移分桶也未通过门槛，mean-error 表面改善主要由单条灾难性长尾驱动。
   - 正式结论仍为 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`。详细证据见 `compare_results/reports/m0_p0c_d1_full_analysis_20260721.md`；旧 2-tracklet smoke 只保留为首帧 CSV/aggregate 口径修复记录。
 - [ ] A/B/C final checkpoint 的 standard、gap1124、burst-drop、unseen schedule 输出，以及 evaluation-only multi-path center/yaw variance。
-- [ ] crop-reachable `d_obs -> d_dyn` oracle convex blend，包含 long-gap/sparse 分桶和明确 Go/No-Go。
-- [ ] candidate0 与 candidate1/2/3 的速度、加速度和 proposal error 审计，为 M1 冻结唯一 augmentation 定义。
+- [x] crop-reachable `d_obs -> d_dyn` oracle convex blend 完成；primary `1311 endpoints / 213 tracklets`，dynamics-only tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`，决定为 `GO_M2_PROPOSAL_INNOVATION`。long-gap 支持，sparse 样本不足。
+- [x] candidate0 与 candidate1/2/3 的 velocity、acceleration 和 proposal error 审计完成；非零 candidate jitter P50 为 `0.611 m/s`、`2.128 m/s²`，matched proposal penalty CI 不跨 0，决定为 `FREEZE_M1_SHARED_SE2`。
 
 M0 的 logger、冻结评测、proposal oracle 与 candidate 审计可以并行，但不得改变 checkpoint 或预测路径。proposal oracle 无空间就停止 M2，不用训练试错替代 oracle。GT-history / predicted-history trajectory-tube crop oracle 作为 M4 的单独前置条件，在 M4 实现前完成，不阻塞 M1/M2。
 
 ### M1：物理一致数据与双时钟 adapter（工程准备已解锁）
 
-- [ ] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中依据 tracking test 涨跌反向改变判据。
-- [ ] shared SE(2) 与 smooth drift 两种 augmentation 只选一个预注册版本。
+- [x] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中依据 tracking test 涨跌反向改变判据。
+- [x] augmentation 预注册为 shared SE(2)，第一版不实现 smooth drift。
 - [ ] 加入 zero-init physical-time adapter，并验证初始输出与 A1 数值一致。
 - [ ] 同 checkpoint 做 true/fixed/shuffled forward invariance smoke test。
 - [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；第一轮不扫超参数网格。
 
-### M2：proposal innovation（尚未解锁）
+### M2：proposal innovation（oracle gate 已解锁，待实现）
 
 - [ ] 实现 `d_dyn - stopgrad(d_obs)`，不保留旧完整位移叠加为正式路径。
 - [ ] `alpha` 从 0 或很小的非零值初始化；记录 applied ratio、innovation norm、梯度和 clamp ratio。

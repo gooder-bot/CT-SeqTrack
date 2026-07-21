@@ -1,0 +1,305 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack M0-3 / M0-4 实验分析",
+    "description": "Proposal oracle、candidate dynamics 审计、独立复算、限制与阶段决策。",
+    "generatedAt": "2026-07-21T00:00:00+08:00",
+    "cards": [
+      {
+        "id": "oracle_gain_card",
+        "dataset": "headline_metrics",
+        "sourceId": "m0_report_sql",
+        "filter": { "metric_group": "m03" },
+        "description": "primary crop-reachable cohort 上，线段 oracle 相对 observation proposal 的中心误差改善。",
+        "metrics": [
+          { "label": "Oracle mean gain (m)", "field": "oracle_gain_mean_m", "format": "number" },
+          { "label": "Dynamics-only gain (m)", "field": "dynamics_gain_mean_m", "format": "number" }
+        ]
+      },
+      {
+        "id": "dynamics_better_card",
+        "dataset": "headline_metrics",
+        "sourceId": "m0_report_sql",
+        "filter": { "metric_group": "m03" },
+        "description": "不依赖 oracle 选择，直接比较冻结 dynamics 与 observation proposal。",
+        "metrics": [
+          { "label": "Dynamics-better endpoints", "field": "dynamics_better_rate", "format": "percent" },
+          { "label": "Positive tracklets", "field": "dynamics_positive_tracklet_rate", "format": "percent" }
+        ]
+      },
+      {
+        "id": "candidate_jitter_card",
+        "dataset": "headline_metrics",
+        "sourceId": "m0_report_sql",
+        "filter": { "metric_group": "m04" },
+        "description": "非零 candidate 的中位伪导数相对预注册阈值的倍数。",
+        "metrics": [
+          { "label": "Velocity threshold multiple", "field": "velocity_threshold_multiple", "format": "number" },
+          { "label": "Acceleration multiple", "field": "acceleration_threshold_multiple", "format": "number" }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "proposal_error_chart",
+        "title": "M0-3 proposal center error",
+        "subtitle": "Primary candidate0、nonresampled、full-history、crop-reachable、dynamics-valid cohort；单位为米。",
+        "showDescription": true,
+        "type": "bar",
+        "dataset": "m03_proposal_errors",
+        "sourceId": "m0_report_sql",
+        "encodings": {
+          "x": { "field": "proposal", "type": "nominal", "label": "Proposal" },
+          "y": { "field": "mean_error_m", "type": "quantitative", "label": "Mean error", "format": "number", "unit": "m" },
+          "tooltip": [
+            { "field": "median_error_m", "type": "quantitative", "label": "Median error", "format": "number", "unit": "m" },
+            { "field": "p95_error_m", "type": "quantitative", "label": "P95 error", "format": "number", "unit": "m" },
+            { "field": "endpoints", "type": "quantitative", "label": "Endpoints", "format": "number" },
+            { "field": "tracklets", "type": "quantitative", "label": "Tracklets", "format": "number" }
+          ]
+        },
+        "xAxisTitle": "Proposal",
+        "yAxisTitle": "Center error (m)",
+        "valueFormat": "number",
+        "unit": "m",
+        "layout": "full",
+        "maxRows": 10
+      },
+      {
+        "id": "candidate_jitter_chart",
+        "title": "M0-4 candidate jitter relative to thresholds",
+        "subtitle": "candidate1/2/3 的 P50 伪导数除以预注册物理一致性阈值。",
+        "showDescription": true,
+        "type": "bar",
+        "dataset": "m04_candidate_jitter",
+        "sourceId": "m0_report_sql",
+        "encodings": {
+          "x": { "field": "derivative", "type": "nominal", "label": "Derivative" },
+          "y": { "field": "threshold_multiple", "type": "quantitative", "label": "P50 / threshold", "format": "number" },
+          "tooltip": [
+            { "field": "p50", "type": "quantitative", "label": "P50", "format": "number" },
+            { "field": "mean", "type": "quantitative", "label": "Mean", "format": "number" },
+            { "field": "p95", "type": "quantitative", "label": "P95", "format": "number" },
+            { "field": "threshold", "type": "quantitative", "label": "Threshold", "format": "number" },
+            { "field": "unit", "type": "text", "label": "Unit" },
+            { "field": "rows", "type": "quantitative", "label": "Rows", "format": "number" }
+          ]
+        },
+        "xAxisTitle": "Derivative",
+        "yAxisTitle": "P50 / threshold (×)",
+        "valueFormat": "number",
+        "layout": "full",
+        "maxRows": 10
+      }
+    ],
+    "tables": [
+      {
+        "id": "decision_table",
+        "title": "Stage decisions",
+        "subtitle": "M0-3、M0-4 与 M0 整体的当前状态和可执行边界。",
+        "showDescription": true,
+        "dataset": "stage_decisions",
+        "sourceId": "m0_report_sql",
+        "defaultSort": { "field": "stage", "direction": "asc" },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "stage", "label": "Stage", "type": "text" },
+          { "field": "decision", "label": "Decision", "type": "text" },
+          { "field": "unlocked", "label": "Next action", "type": "text" },
+          { "field": "boundary", "label": "Boundary", "type": "text" }
+        ]
+      },
+      {
+        "id": "robustness_table",
+        "title": "Independent robustness checks",
+        "subtitle": "以 endpoint 或 tracklet 为分析单位的额外复算；CI 均为 tracklet bootstrap 95% 区间。",
+        "showDescription": true,
+        "dataset": "robustness_checks",
+        "sourceId": "m0_report_sql",
+        "defaultSort": { "field": "check", "direction": "asc" },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "check", "label": "Check", "type": "text" },
+          { "field": "estimate", "label": "Estimate", "type": "text" },
+          { "field": "ci95", "label": "95% CI", "type": "text" },
+          { "field": "interpretation", "label": "Interpretation", "type": "text" }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "m0_report_sql",
+        "label": "Reviewed report snapshot materialization",
+        "path": "compare_results/reports/m0_m03_m04_report/report_snapshot.sql"
+      },
+      {
+        "id": "m0_analysis_snapshot",
+        "label": "M0-3/M0-4 reviewed analysis snapshot",
+        "path": "compare_results/reports/m0_m03_m04_snapshot_20260721.json"
+      },
+      {
+        "id": "m03_formal_output",
+        "label": "M0-3 formal proposal oracle output",
+        "path": "output/diagnostics/m0_proposal_oracle/m0_oracle_gap1124_seed42/proposal_oracle_summary.json"
+      },
+      {
+        "id": "m04_formal_output",
+        "label": "M0-4 formal candidate dynamics output",
+        "path": "output/diagnostics/m0_candidate_audit/m0_candidate_standard_seed42/candidate_dynamics_summary.json"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# CT-SeqTrack M0-3 / M0-4 实验分析"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "## 技术摘要\n\nM0-3 得到 `GO_M2_PROPOSAL_INNOVATION`：在 1,311 个 primary endpoint、213 个 tracklet 上，oracle 相对 observation proposal 的平均中心误差改善为 1.118 m；更关键的是，冻结 dynamics proposal 本身在 81.31% endpoint 上更准确，tracklet bootstrap mean gain 为 0.803 m，95% CI 为 [0.633, 0.988] m。M0-4 得到 `FREEZE_M1_SHARED_SE2`：非零 candidate 的 velocity/acceleration jitter P50 分别达到阈值的 12.22× 和 21.28×。\n\n这两项结果解锁 M1 shared SE(2) 数据层和 M2 bounded proposal-innovation 工程，但仍是 offline 机制证据，不是 tracking Success/Precision 涨点。M0-2 四协议冻结输出尚未完成，因此 M0 整体仍为进行中。"
+      },
+      {
+        "id": "headline_metrics_block",
+        "type": "metric-strip",
+        "cardIds": ["oracle_gain_card", "dynamics_better_card", "candidate_jitter_card"]
+      },
+      {
+        "id": "decision_intro",
+        "type": "markdown",
+        "body": "## 阶段决策\n\n两个关键机制 gate 已经关闭，但解锁范围不同：\n\n- **M0-3 — `GO_M2_PROPOSAL_INNOVATION`**：实现 bounded innovation；边界是 offline proposal evidence，不是 tracking promotion。\n- **M0-4 — `FREEZE_M1_SHARED_SE2`**：实现 shared SE(2) 数据路径；第一版不做 smooth drift，也不保证最终指标上涨。\n- **M0 overall — `IN_PROGRESS`**：可准备 M1/M2 实现；M0-2 四协议输出与 provenance 收口仍未完成。"
+      },
+      {
+        "id": "m03_finding",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "## M0-3：proposal 互补性成立\n\n主 cohort 的 observation、dynamics、segment-oracle mean error 分别为 1.349 m、0.309 m 和 0.232 m。图中应先看 dynamics 相对 observation 的大幅下降，再看 oracle 在 dynamics 之上只继续改善约 0.078 m：正信号主要来自已训练 dynamics proposal，而不是 oracle 事后选择。"
+      },
+      {
+        "id": "proposal_error_chart_block",
+        "type": "chart",
+        "chartId": "proposal_error_chart"
+      },
+      {
+        "id": "m03_robustness",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "oracle gain 按构造不会为负，因此正式判断还使用了 dynamics-only、top-5%-trimmed、long-gap 和 tracklet bootstrap。long-gap 子集包含 417 个 endpoint、133 个 tracklet，oracle gain 的 tracklet bootstrap mean 为 0.717 m，95% CI [0.493, 0.967] m。多种检查方向一致，足以解锁 M2 工程。"
+      },
+      {
+        "id": "m04_finding",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "## M0-4：shared SE(2) 是唯一第一版选择\n\ncandidate0 的 velocity/acceleration jitter 精确为 0；candidate1/2/3 的 P50 分别为 0.611 m/s 和 2.128 m/s²。图中使用无量纲的 P50/threshold，便于同时比较两种导数。两者都远超 1，说明逐历史帧独立 offset 制造的是结构性伪运动，而非可忽略数值噪声。"
+      },
+      {
+        "id": "candidate_jitter_chart_block",
+        "type": "chart",
+        "chartId": "candidate_jitter_chart"
+      },
+      {
+        "id": "m04_effect",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "相同 endpoint 配对后，非零 candidate 的 proposal error mean penalty 为 0.0104 m，tracklet bootstrap 95% CI [0.0093, 0.0155] m，81.70% tracklet 的平均 penalty 为正。负效应稳定但绝对均值约 1 cm，因此应修复该监督污染源，却不能把旧 A2 的全部失败都归因于 candidate jitter。"
+      },
+      {
+        "id": "scope_method",
+        "type": "markdown",
+        "sourceId": "m0_analysis_snapshot",
+        "body": "## 范围、数据与验证\n\n两次 formal run 均来自 clean commit `1357923ec59b947e626916d84290bbf44dfa8899`，使用 mini_train、seed42、batch16、workers0。下载归档包含 15 个安全相对路径条目，SHA256 为 `fd1e48922cb595cee154ef463dbb2f25f2c855dd8da3b1587c37d8610dc3b9e9`，与同行校验文件完全一致。\n\nM0-3 从 CSV 原始向量重新计算 alpha 与 oracle error，最大差为 0；其余浮点差不超过 2.4e-6。M0-4 重新执行 endpoint matching，并以 tracklet 为 bootstrap 单位。完整性、provenance、schema、自检与独立复算均通过，数据质量评为中高。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 限制与稳健性边界\n\n- M0-3 是 training-sampler 上的 GT-history、offline、crop-reachable 分析，不是 recursive online tracking。\n- primary cohort 排除了 resampled endpoint；后续实现必须显式记录 resample 与 empty fallback。\n- proposal oracle 只在 gap1124 正式运行；standard、burst 和 unseen cadence 尚未形成同类验证。\n- sparse target-points 不超过 5 的样本只有 3 个，不能支持 sparse claim；long-gap 有足够样本。\n- M0-4 证明 augmentation 定义有物理问题，不直接证明 shared SE(2) 会提高最终 Success/Precision。\n- 在 seed42 true/fixed/shuffled 和 standard guardrail 通过前，M1/M2 只能称 candidate method。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## 下一步\n\n1. 从 M1 数据层开始：对同一样本全部历史框实施一个 shared SE(2)，从 canonical/一致变换轨迹计算 Dynamics label；第一版不做 smooth drift。\n2. 实现 M2 bounded innovation：`innovation = clip(d_dyn - stopgrad(d_obs), R(delta_t))`，`d_final = d_obs + alpha * innovation`。\n3. 验证 zero-init/alpha=0 恢复 A1，并覆盖 invalid history、resampled/empty fallback、gap/burst forward-loss-backward 和 2-step optimizer。\n4. 并行完成剩余 M0-2 A/B/C 四协议冻结输出与 path variance。\n5. clean commit 和唯一配置冻结后，只跑一次 seed42 true/fixed/shuffled；true 必须同时超过两个控制，并满足 standard guardrail，才补多 seed。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 进一步问题\n\n- dynamics-only 优势在 recursive online tracking 中会保留多少？\n- shared SE(2) 是否同时降低 dynamics proposal error 与跨 seed 方差？\n- M2 alpha 是否随 long gap 增大，并在 invalid/resampled history 上回到 0？\n- M0-2 path variance 能否解释 TWC 只恢复 paired-view 损失的一部分？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-21T00:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline_metrics": [
+        {
+          "metric_group": "m03",
+          "oracle_gain_mean_m": 1.117648,
+          "dynamics_gain_mean_m": 1.039871,
+          "dynamics_better_rate": 0.81312,
+          "dynamics_positive_tracklet_rate": 0.87324,
+          "primary_endpoints": 1311,
+          "primary_tracklets": 213,
+          "decision": "GO_M2_PROPOSAL_INNOVATION"
+        },
+        {
+          "metric_group": "m04",
+          "velocity_threshold_multiple": 12.22,
+          "acceleration_threshold_multiple": 21.28,
+          "matched_error_delta_mean_m": 0.010436,
+          "positive_tracklet_rate": 0.817,
+          "matched_comparisons": 8515,
+          "matched_tracklets": 235,
+          "decision": "FREEZE_M1_SHARED_SE2"
+        }
+      ],
+      "m03_proposal_errors": [
+        { "proposal": "Observation", "mean_error_m": 1.3492, "median_error_m": 0.363567, "p95_error_m": 6.02805, "endpoints": 1311, "tracklets": 213, "cohort": "primary", "decision": "GO_M2_PROPOSAL_INNOVATION" },
+        { "proposal": "Dynamics", "mean_error_m": 0.309334, "median_error_m": 0.117888, "p95_error_m": 1.27717, "endpoints": 1311, "tracklets": 213, "cohort": "primary", "decision": "GO_M2_PROPOSAL_INNOVATION" },
+        { "proposal": "Segment oracle", "mean_error_m": 0.231557, "median_error_m": 0.09248, "p95_error_m": 0.986982, "endpoints": 1311, "tracklets": 213, "cohort": "primary", "decision": "GO_M2_PROPOSAL_INNOVATION" }
+      ],
+      "m04_candidate_jitter": [
+        { "derivative": "Velocity", "mean": 0.62683, "p50": 0.611018, "p95": 1.02177, "threshold": 0.05, "threshold_multiple": 12.22, "unit": "m/s", "rows": 10450, "candidate_group": "candidate1/2/3", "candidate0_exact_zero": true },
+        { "derivative": "Acceleration", "mean": 2.20189, "p50": 2.128118, "p95": 3.9929, "threshold": 0.1, "threshold_multiple": 21.28, "unit": "m/s²", "rows": 10450, "candidate_group": "candidate1/2/3", "candidate0_exact_zero": true }
+      ],
+      "stage_decisions": [
+        { "order": 1, "stage": "M0-3", "decision": "GO", "unlocked": "Implement bounded innovation", "boundary": "Offline evidence; no tracking promotion" },
+        { "order": 2, "stage": "M0-4", "decision": "FREEZE", "unlocked": "Build shared SE(2) data path", "boundary": "No smooth drift; no guaranteed gain" },
+        { "order": 3, "stage": "M0 overall", "decision": "IN PROGRESS", "unlocked": "Prepare M1/M2 implementation", "boundary": "M0-2 outputs and provenance remain" }
+      ],
+      "robustness_checks": [
+        { "order": 1, "check": "M0-3 dynamics-only vs observation", "estimate": "+0.803 m tracklet mean gain", "ci95": "[+0.633, +0.988] m", "interpretation": "Non-oracle complementarity is positive" },
+        { "order": 2, "check": "M0-3 long-gap oracle", "estimate": "+0.717 m tracklet mean gain", "ci95": "[+0.493, +0.967] m", "interpretation": "Long-gap challenge bin is supported" },
+        { "order": 3, "check": "M0-3 top-5%-trimmed oracle", "estimate": "+0.816 m endpoint mean gain", "ci95": "Not applicable", "interpretation": "Signal is not owned by extreme tail" },
+        { "order": 4, "check": "M0-4 matched candidate penalty", "estimate": "+0.0104 m endpoint mean error", "ci95": "[+0.0093, +0.0155] m", "interpretation": "Stable harm, small absolute mean" }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "m0_report_sql",
+      "label": "Reviewed report snapshot materialization",
+      "path": "compare_results/reports/m0_m03_m04_report/report_snapshot.sql"
+    },
+    {
+      "id": "m0_analysis_snapshot",
+      "label": "M0-3/M0-4 reviewed analysis snapshot",
+      "path": "compare_results/reports/m0_m03_m04_snapshot_20260721.json"
+    },
+    {
+      "id": "m03_formal_output",
+      "label": "M0-3 formal proposal oracle output",
+      "path": "output/diagnostics/m0_proposal_oracle/m0_oracle_gap1124_seed42/proposal_oracle_summary.json"
+    },
+    {
+      "id": "m04_formal_output",
+      "label": "M0-4 formal candidate dynamics output",
+      "path": "output/diagnostics/m0_candidate_audit/m0_candidate_standard_seed42/candidate_dynamics_summary.json"
+    }
+  ]
+}

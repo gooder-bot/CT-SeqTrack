@@ -1702,3 +1702,19 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - 确认 stable virtual-rate/effective-time/provenance 当前只完整接入 nuScenes；Waymo 与统一 endpoint/per-tracklet tracking logger 仍是 benchmark 缺口。
 - 将论文优先级改为 P0-C-D1 -> 同提交 TWC A/B/C seed42 -> 通过后多 seed/完整数据/第二数据集；TWC 与 residual 均失败则转多模型 variable-rate benchmark/diagnosis。
 - 完整报告见 `compare_results/reports/paper_viability_and_execution_20260720.md`，并已同步更新 `README.md`、`refined_plan.md`、`need_to_do.md`、`sum_results.md` 与根目录早期思路文档的状态说明。
+
+## 2026-07-21：M0-3 gap1124 proposal oracle 完成并解锁 M2 gate
+
+- 回传 tar.gz 与 `.sha256` 完全匹配；15 个归档条目均为安全相对路径。formal run 来自 clean commit `1357923ec59b947e626916d84290bbf44dfa8899`、seed42、mini_train、batch16、workers0。
+- `11,424` 行经预注册筛选后形成 `1,311 endpoints / 213 tracklets` 的 primary cohort；`d_obs/d_dyn/oracle` mean error 为 `1.349/0.309/0.232 m`。
+- oracle gain mean/median 为 `1.118/0.214 m`，top-5%-trimmed mean 仍为 `0.816 m`；long-gap tracklet bootstrap mean `0.717 m`、95% CI `[0.493,0.967]`。
+- 非 oracle 稳健性通过：`d_dyn` 相对 `d_obs` 在 `81.31%` endpoint 上更优，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。
+- 正式决定为 `GO_M2_PROPOSAL_INNOVATION`；只解锁 bounded innovation 工程与预注册 seed42 controls，不代表 tracking 指标已上涨。
+
+## 2026-07-21：M0-4 candidate dynamics 审计完成并冻结 shared SE(2)
+
+- 正式输出 `20,204` 行，full-history usable `13,934`；四个 candidate 的 usable 数量平衡。
+- candidate0 velocity/acceleration jitter 精确为 0；candidate1/2/3 的 jitter P50 为 `0.611 m/s`、`2.128 m/s²`，分别达到预注册阈值的 `12.22×/21.28×`。
+- endpoint-matched 比较包含 `8,515` 对、`235` 个 tracklet；非零 candidate proposal error delta mean `+0.0104 m`，tracklet bootstrap 95% CI `[+0.0093,+0.0155] m`。
+- 正式决定为 `FREEZE_M1_SHARED_SE2`：第一版 M1 只使用 sample-level shared SE(2)，Dynamics label 从 canonical/一致变换轨迹计算，不实现 smooth drift。
+- 完整数据质量、独立复算、限制和下一步见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。

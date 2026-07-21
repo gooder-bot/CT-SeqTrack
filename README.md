@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：真实时间链路、variable-rate 协议、`DynamicsEncoder`、TWC 和 gate 均已落地，但主要时间接入方式尚无稳定因果正结论。P0-B4 已得到 **`NO_GO_OBSERVATION_RELIABILITY_VALIDATION`**，P0-C 已得到 **`NO_GO_P0C_A2_TRUE_DT_PROMOTION`**。2026-07-21 又完成了同 commit `343145d`、同 seed42、同数据和同步数的 TWC A/B/C：single-view A、paired-view weight0 B、corrected-TWC C 的 final 分别为 `50.01/58.20`、`34.71/34.02`、`43.01/45.76`。`C-B=+8.31/+11.74` 证明 consistency 相对 paired control 有净正效应，但 `C-A=-7.00/-12.44`，只恢复 paired-view 损失的大约一半，正式判定 **`NO_GO_TWC_MAIN_METHOD_PROMOTION`**，不补 seed43/44。上述结果已经足以结束旧路线筛选，项目现已进入 **M0**：完成冻结 endpoint/path-variance 输出、P0-C-D1、crop-reachable proposal oracle 和 candidate 伪速度审计；可以并行准备 M1 的代码骨架与 zero-init A1 等价性测试，但 M1 正式训练和 M2–M4 仍未解锁。已完成记录见 `done.md`，结果口径见 `sum_results.md`，下一步执行清单见 `need_to_do.md`。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。M1 shared SE(2) 数据层和 M2 bounded proposal-innovation 工程 gate 已解锁，但这仍是离线机制证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
 
 ## 文档导航
 
@@ -17,6 +17,8 @@ CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟�
 | `compare_results/reports/paper_viability_and_execution_20260720.md` | P0 后的论文可行性、claim 审计、方法/benchmark 分叉与停止条件 |
 | `compare_results/reports/twc_abc_seed42_comparison_20260721.md` | 同提交 TWC A/B/C 的数据审计、效应分解、图表与最终判定 |
 | `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md` | 新候选贡献、dual-clock/innovation/asymmetric distillation 方法规格与 Go/No-Go |
+| `compare_results/reports/m0_m03_m04_analysis_20260721.md` | M0-3/M0-4 数据质量、独立复算、稳健性、决策与下一步 |
+| `compare_results/reports/m0_m03_m04_report/report.html` | M0-3/M0-4 自包含可视化技术报告（桌面/窄屏 QA 通过） |
 
 ---
 
@@ -209,6 +211,9 @@ use_observability_gate: False
 | P0-B3 | 测试时可靠性与 passive dual-forward | 开发集 observation proxy 为正，但 raw-CV anchor 与 selector No-Go；后续 P0-B4 未独立复现 |
 | P0-B4 | independent observation reliability | mini_val 冻结验证 No-Go；当前 calibrator 与 dual-anchor 停止，详见 `p0b4_observation_reliability_validation_20260720.md` |
 | P0-C | frozen cadence / effective-time controls | manifest/invariance PASS；同 checkpoint true-dt 未超过 fixed/shuffled，promotion No-Go，详见 `p0c_frozen_protocol_validation_20260720.md` |
+| M0-3 | crop-reachable proposal oracle | `GO_M2_PROPOSAL_INNOVATION`；dynamics-only 与 long-gap tracklet bootstrap 均支持互补性，M2 工程 gate 解锁 |
+| M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
+| M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
 
 当前已完成的关键消融：
 
@@ -232,16 +237,18 @@ use_observability_gate: False
 17. P0-C gap1124 stable-token val/test manifest、offline shuffled-dt mapping 与真实 batch invariance
 18. P0-C standard-trained A2 frozen `true/fixed/shuffled-dt` 三路性能与 provenance 复核
 19. 同提交 TWC A/B/C seed42：provenance、12 个评测点、75720 步诊断和 final checkpoint hash 本地复核
+20. M0-3 gap1124 proposal oracle：official checks、原始向量复算、dynamics-only/trimmed/long-gap/tracklet bootstrap 稳健性
+21. M0-4 candidate dynamics audit：伪速度/伪加速度、matched proposal penalty、candidate balance 与 shared SE(2) 冻结决策
 ```
 
 当前下一步：
 
 ```text
-1. TWC A/B/C standard seed42 已完成：`C-B` 为正，但 `C-A` final 为 `-7.00/-12.44`，主方法 promotion No-Go，不补 seed43/44。
-2. 只用冻结的 A/B/C final checkpoint 做一次不重训的 standard/gap1124/burst-drop/unseen-fixed-gap 输出型收尾，保存 endpoint/per-tracklet paired delta 与 evaluation-only path variance；这一步只定位机制，不重开多 seed。
-3. P0-C-D1 可与上一步共用输出 logger，保存 long-gap、首次失控、连续失败和 empty fallback；不改模型/checkpoint/manifest。
-4. residual 先在 crop-reachable subset 计算 `d_obs -> d_dyn` oracle blend；oracle 不通过就不改公式、不训练，oracle 通过才允许一次 seed42 `true/fixed/shuffled`。
-5. TWC 强协议收尾和 residual oracle 都无可推广正信号时，转为多模型、多数据集的 variable-rate benchmark/diagnosis；不实现 reliability-controlled anchor、active dual-anchor、学习式 uncertainty gate 或复杂 memory/SSM。
+1. 从 M1 数据层开始实现 sample-level shared SE(2) 与 canonical dynamics label；第一版不做 smooth drift。
+2. 实现 zero-init bounded proposal innovation：`d_dyn-stopgrad(d_obs)`，并补 invalid/resample/empty fallback 与 A1 数值等价性测试。
+3. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap 输出与 evaluation-only path variance，不重训。
+4. clean commit 和唯一配置冻结后，只跑一次 seed42 `true/fixed/shuffled`；standard guardrail 与强协议收益同时通过才补 seed43/44。
+5. M2 未形成因果正信号则停止该模块 promotion，转回多模型、多数据集 variable-rate benchmark/diagnosis；不复活旧 Gate/TWC 组合。
 ```
 
 ---

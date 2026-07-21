@@ -10,22 +10,22 @@
 
 当前项目仍有论文机会，但不能按“CT-SeqTrack full model 已经成立”继续。完整的 code-to-claim 审计、方法/benchmark 分叉和实验底线见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
 
-**2026-07-21 阶段决定**：前序 P0-B、P0-C 与同提交 TWC A/B/C 已经足以结束旧路线筛选，项目正式进入 M 阶段。当前活动阶段是 M0；M1 只解锁工程准备，M2–M4 仍由 oracle 和因果控制逐级解锁。M0 P0-C-D1 的 true/fixed/shuffled full 已完成 endpoint-level 配对诊断：正确时间会改变预测，但没有稳定超过 fixed/shuffled，进一步确认当前 feature-concat A2 promotion No-Go。这表示研究可以转向新的机制闭环，不表示 dual-clock 已经涨点或可以写成已验证贡献。
+**2026-07-21 阶段决定**：项目仍处于 M0 收口，但两个关键 gate 已关闭。M0-3 得到 `GO_M2_PROPOSAL_INNOVATION`：不仅 oracle gain 稳定为正，冻结 `d_dyn` 本身也在 81.31% primary endpoint 上优于 `d_obs`，tracklet bootstrap CI 不跨 0。M0-4 得到 `FREEZE_M1_SHARED_SE2`：逐历史帧独立 candidate offset 的伪速度/伪加速度远超阈值，M1 第一版只允许 shared SE(2)。这解锁 M1 数据层和 M2 innovation 工程，不表示 dual-clock 已涨点；M0-2 四协议冻结输出未完成，正式训练仍须唯一配置、clean commit 和预注册控制。
 
 四个会决定论文名称和贡献形态的事实是：
 
 - 同提交 A1 TWC A/B/C 已完成：`C-B` final 为 `+8.31/+11.74`，但 paired-view 的 `B-A` 为 `-15.30/-24.18`，导致 `C-A=-7.00/-12.44`。这只支持 TWC 对受损 paired-view 路径的部分修复，不能支持主方法 promotion。
 - A1 corrected-TWC 使用 `main_time_source=order` 且关闭 `DynamicsEncoder`；即使有 `C-B`，也只能支持 rate/resampling consistency，不能单独证明真实 timestamp 有效。
-- 当前 bounded residual 把完整 `dynamics_displacement_pred` 加到已经预测完整 displacement 的 observation 输出上，存在重复运动的定义歧义；必须先做 `d_obs -> d_dyn` oracle convex-blend feasibility。
+- 当前 bounded residual 把完整 `dynamics_displacement_pred` 加到已经预测完整 displacement 的 observation 输出上，存在重复运动的定义歧义；M0-3 已证明 `d_obs -> d_dyn` 线段有稳定空间，正式路径改为 bounded proposal innovation。
 - P0-C 已证明当前 feature-concat A2 的 true-dt 不超过 shuffled；显式时间方法主张必须由新的机制重新通过同类负对照。
 
 论文优先级因此改为：
 
 ```text
 同提交 TWC A/B/C seed42：主方法 promotion No-Go
-    -> M0：P0-C-D1 已完成；继续冻结 checkpoint 的 strong-cadence/path-variance、proposal oracle、candidate 审计
-        -> M1：物理一致 augmentation + zero-init dual-clock（工程准备可并行）
-            -> M2：oracle 通过后做 proposal innovation seed42 true/fixed/shuffled
+    -> M0：P0-C-D1/M0-3/M0-4 已完成；继续 M0-2 strong-cadence/path-variance 收口
+        -> M1：shared SE(2) augmentation + canonical label + zero-init dual-clock（现在开始实现）
+            -> M2：proposal oracle 已通过；实现 bounded innovation，之后做 seed42 true/fixed/shuffled
                 -> M3：因果正信号后做 asymmetric path distillation
                     -> M4：tube oracle/calibration 通过后做 filter/tube
         -> 任一关键 gate 再失败：停止对应模块，保留 benchmark/diagnosis 分叉
@@ -86,12 +86,12 @@ timestamp-native / variable-rate / time-aware 3D SOT
 2. 当前脚本、verdict 和 P0-C 协议已绑定 clean GitHub commit `343145d`；服务器输出继续保存 script/data/config/checkpoint hashes，旧 stash 不恢复到正式运行路径。
 3. P0-C frozen A2 triplet已得到 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；同提交 TWC A/B/C 也已得到 `NO_GO_TWC_MAIN_METHOD_PROMOTION`，均不扩展训练 seed。
 4. M0 P0-C-D1 已完成：三路各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/hash 与时间干预检查通过；true−fixed 为 `+0.438/+0.523`，true−shuffled 为 `-0.123/+0.056`，逐 tracklet Success/Precision bootstrap CI 均跨 0。下一步复用同一 logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，不改变预测路径。
-5. M0 同时完成 crop-reachable proposal oracle 和 candidate0/1/2/3 伪速度审计；前者决定是否解锁 M2，后者决定 M1 使用 shared SE(2) 还是 smooth drift。
-6. M1 的接口、配置、zero-init adapter 和 A1 数值等价性测试可以并行开始，但正式训练必须在 clean commit 上使用唯一预注册配置。
+5. M0-3/M0-4 已完成：M2 oracle gate 通过，M1 augmentation 冻结为 shared SE(2)；完整证据见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
+6. 现在从 M1 shared SE(2) 数据层、canonical dynamics label、接口、配置、zero-init adapter 和 A1 数值等价性测试开始；正式训练必须在 clean commit 上使用唯一预注册配置。
 7. 后续严格按 `M1 physical-consistent augmentation/dual clock -> M2 proposal innovation -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
 ```
 
-当前最可防御的价值已经从“已证明的新模型增益”收窄为：**同一 tracklet 内不规则物理时间协议、冻结 checkpoint 的 matched time negative controls，以及 crop/trajectory/observation failure diagnosis**。历史重采样一致性只留下 `C-B` 部分修复这一机制事实；有界 observation-first correction 仍是待一次性 oracle kill-test 的假设，不应提前列为已成立贡献。
+当前最可防御的价值是：**同一 tracklet 内不规则物理时间协议、冻结 checkpoint 的 matched time negative controls，以及 crop/trajectory/observation failure diagnosis**。M0-3 已把有界 observation-first correction 从待检假设推进为有 offline proposal 互补性的候选，但尚未得到 tracking Success/Precision 增益；M0-4 则把 shared SE(2) 固定为物理一致的数据前提。历史重采样一致性仍只保留 `C-B` 部分修复这一机制事实。
 
 ### 连续时间视角给当前工作的启发
 

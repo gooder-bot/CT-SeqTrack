@@ -6,14 +6,14 @@
 
 ## 当前阶段状态
 
-> **决策：前序核心筛选实验已经结束，项目自 2026-07-21 起正式进入 M 阶段。当前活动阶段是 M0；允许并行进行 M1 的代码骨架与零初始化等价性准备，但 M1 正式训练以及 M2–M4 尚未解锁。**
+> **决策：当前活动阶段仍是 M0。M0-3 已得到 `GO_M2_PROPOSAL_INNOVATION`，M0-4 已得到 `FREEZE_M1_SHARED_SE2`；因此 M1 shared SE(2) 数据层和 M2 proposal-innovation 工程 gate 已解锁。M0-2 四协议冻结输出仍未完成，正式 seed42 训练必须等唯一配置与 clean commit 冻结后再启动。**
 
 | 阶段 | 状态 | 当前允许的工作 |
 | --- | --- | --- |
 | 旧路线筛选：P0-B / P0-C / TWC | **已关闭** | 只保留冻结输出和论文失败边界，不再补训练 seed 或复活旧 Gate/TWC 组合 |
-| M0：冻结输出、oracle 与 candidate 审计 | **进行中** | P0-C-D1 已完成；当前做 A/B/C strong-cadence/path variance、residual oracle、candidate 伪速度审计 |
-| M1：物理一致 augmentation + zero-init dual clock | **工程准备可开始** | 可搭接口、配置、单元测试和 A1 数值等价性；完成 M0 关键诊断前不提交正式训练结论 |
-| M2：proposal innovation | **锁定** | 仅在 crop-reachable `d_obs -> d_dyn` oracle 通过后实现和训练 |
+| M0：冻结输出、oracle 与 candidate 审计 | **进行中，3/4 诊断完成** | P0-C-D1、M0-3、M0-4 已完成；只剩 M0-2 A/B/C strong-cadence/path variance 与文档/provenance 收口 |
+| M1：物理一致 augmentation + zero-init dual clock | **shared SE(2) 已冻结，工程可开始** | 只实现 shared SE(2)、canonical dynamics label、接口、配置、测试和 A1 数值等价性；第一版不做 smooth drift |
+| M2：proposal innovation | **oracle gate 已解锁，待实现** | 实现 bounded innovation 与安全 smoke；正式 seed42 `true/fixed/shuffled` 仍须 clean commit、唯一配置和 M1 数据基础 |
 | M3：asymmetric path distillation | **锁定** | 仅在 M1/M2 的 `true-dt` 同时优于 fixed/shuffled 且不破坏 A1 后启动 |
 | M4：filter / trajectory tube | **锁定** | 仅在 proposal 互补性、predicted-history tube oracle 和 uncertainty calibration 均通过后启动 |
 
@@ -38,6 +38,8 @@
 - P0-B3 三协议已完成并复核：13 特征 trigger 通过预注册判据，但 passive raw-CV union gain 仅 2.88–3.15 pp，当前 selector 在强协议 AUROC 为 0.605/0.433；正式决定为 `RELIABILITY_GO_RAW_CV_ANCHOR_NO_GO`。消融表明预测力主要来自 `prev_obs_*`，raw `current_delta_t` 是跨协议失准的主要来源，因此只能称 observation reliability Conditional-Go，不能称 timestamp-aware reliability 已成立。
 - P0-B4 已在独立 mini_val 上完成冻结验证：`observation_v1` 在 gap/burst 的 AUROC 为 `0.680/0.712`、运行点 recall 为 `0.568/0.609`，均未通过 `0.75/0.70` 门槛；正式决定为 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`。同批 raw-CV 第二 crop 在两个强协议的 trajectory-only endpoint 都为 0，因此 reliability-controlled anchor 与 active dual-anchor 路线停止，不在 mini_val 上重调。
 - TrajTrack 的 `64.94 / 79.07` 来自 GT-assisted evaluator，只能作为 oracle 诊断。
+- M0-3 gap1124 proposal oracle 已通过：primary cohort 为 `1311 endpoints / 213 tracklets`，oracle gain mean/median 为 `1.118/0.214 m`；更重要的是 `d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean `0.803 m`、95% CI `[0.633, 0.988]`，正式决定为 `GO_M2_PROPOSAL_INNOVATION`。
+- M0-4 candidate 审计已通过：非零 candidates 的伪速度/伪加速度 P50 为 `0.611 m/s`、`2.128 m/s²`，分别是阈值的 `12.22×/21.28×`；matched proposal error penalty mean `+0.0104 m`，tracklet bootstrap CI `[+0.0093,+0.0155] m`。M1 正式冻结 shared SE(2)，不选 smooth drift。
 
 ## 1. 四个核心决策问题（执行顺序见第 2 节）
 
@@ -50,15 +52,15 @@ P0-B 已在独立验证入口处 No-Go，P0-C A2 true-dt 与 P1-D TWC A/B/C 也�
 **2026-07-17 状态**：standard active 64-batch 的 observation error P50/P75/P95 为 `0.213 / 0.577 / 3.838 m`；alpha 固定约 `2e-5`，实际 residual P50 仅 `7.25e-8 m`，gate grad P50 仅 `4.00e-10` 且 31/64 batch 为 0。默认配置数值稳定，但没有通过“非平凡修正幅度”验收。完整证据见 `compare_results/reports/p0_ab_diagnostics_20260717.md`。
 
 - [x] 在 standard 真实 full-history batch 上完成 warmup 2-batch 与 active 64-batch forward/loss/backward。
-- [ ] 先核对目标定义：`motion_pred` 与 `dynamics_displacement_pred` 都是完整 displacement，当前直接相加可能重复计算运动。
+- [x] 核对目标定义：`motion_pred` 与 `dynamics_displacement_pred` 都是完整 displacement，当前直接相加会造成定义歧义；正式候选改为 proposal innovation。
 - [x] 确认 warmup 内 residual/gate gradient 为 0；active 的 alpha、raw/clamped/applied residual 与 gradient 全部 finite。
-- [ ] 在 crop-reachable subset 保存 `d_obs / d_dyn / d_gt`，计算线段 `d_obs -> d_dyn` 的 oracle 最优 blend 与 long-gap/sparse 分桶。
+- [x] 在 crop-reachable subset 保存 `d_obs / d_dyn / d_gt` 并完成 oracle、long-gap/sparse 分桶；决定为 `GO_M2_PROPOSAL_INNOVATION`。sparse 仅 3 个样本，不作结论。
 - [x] 确认 residual observation head 输入仍为 256 维，没有额外拼接 `z_dyn`。
-- [ ] 只有 oracle blend 通过预注册收益门槛，才把公式改为 `d_obs + alpha * clamp(d_dyn - stopgrad(d_obs))`，再补 invalid-history、gap/burst forward/backward 和 2-step optimizer smoke。
+- [ ] oracle 已通过；下一步把公式改为 `d_obs + alpha * clamp(d_dyn - stopgrad(d_obs))`，再补 invalid-history、gap/burst forward/backward 和 2-step optimizer smoke。
 - [x] 记录 gate bias、gate gradient norm、alpha 分位数、applied ratio、clamp ratio 和 applied norm；注意当前 `applied_ratio=1` 只表示 norm 大于 `1e-8`，不表示修正有实际作用。
 - [ ] oracle 通过后才依据训练 split reachable subset 一次性预注册 gate init/scale/bound，并运行一个 seed42 `true/fixed/shuffled`；不得根据 test/mini_val 涨跌反复调参。
 
-**验收**：当前默认配置未通过。oracle blend 无稳定空间即终止 residual；只有 oracle 与修正后的 seed42 time-control 均通过，才允许正式训练和多 seed。
+**验收**：旧默认 residual 配置仍未通过，但 M0-3 已证明 proposal 互补性并解锁 M2 公式重构。只有修正后的 seed42 time-control 与 standard guardrail 均通过，才允许补多 seed 和方法 promotion。
 
 ### P0-B：长 gap 的失败可能发生在 search crop 之前
 
@@ -145,10 +147,10 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 3. 同提交 TWC A/B/C standard seed42 已完成并判定 `NO_GO_TWC_MAIN_METHOD_PROMOTION`；不补 seed43/44。
 4. **M0-1 已完成**：P0-C-D1 三路 full endpoint/per-tracklet 诊断再次确认 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`，不再追加该 A2 的 cadence 或 seed。
 5. **M0-2**：用同一 logger 对冻结 A/B/C final checkpoint 评测 standard、gap1124、burst-drop 和 unseen fixed gap，报告 paired delta、path variance、首次失控、连续失败和 empty fallback，不改变预测路径。
-6. **M0-3**：P0-A 只做 crop-reachable `d_obs -> d_dyn` oracle blend，保存 `d_obs/d_dyn/d_gt`，并报告 long-gap/sparse bins；oracle 不通过即停止 M2。
-7. **M0-4**：离线审计 candidate0/1/2/3 的 velocity、acceleration 和 dynamics proposal error，量化逐历史框独立 jitter 制造的伪速度；该项可与第 5、6 项并行。
+6. **M0-3 已完成**：gap1124 crop-reachable proposal oracle 得到 `GO_M2_PROPOSAL_INNOVATION`；`d_dyn` 本身相对 `d_obs` 的 tracklet bootstrap mean gain 为 `0.803 m`，95% CI `[0.633,0.988]`。
+7. **M0-4 已完成**：candidate jitter 明确制造伪速度/伪加速度，matched proposal penalty 的 tracklet CI 不跨 0；M1 唯一 augmentation 冻结为 shared SE(2)，第一版不做 smooth drift。
 8. **M1 工程准备**：在不启动正式训练的前提下，搭建 physical-consistent augmentation、zero-init dual-clock adapter、配置开关和测试；关闭 adapter 时、以及其零初始化时，输出必须在数值容忍度内恢复同提交 A1。
-9. **M1/M2 训练解锁**：candidate 审计完成后才冻结一种物理一致 augmentation；M2 还必须等待 residual oracle 通过。第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
+9. **M1/M2 训练顺序**：candidate 审计与 residual oracle 均已通过 gate；先实现 shared SE(2) 数据基础和 bounded innovation，并完成安全 smoke。冻结 clean commit 与唯一配置后，第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
 10. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
 11. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
 12. 若 M0 oracle/candidate 审计和后续 time-control 都无可推广正信号，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时序模块。
@@ -158,8 +160,8 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [ ] 整理当前文档、脚本和配置并建立可回查的 clean code/config commit；大体积结果不要求入库，但必须保存路径与 SHA256 索引。新正式运行不得沿用 dirty provenance。
 - [x] P0-C-D1 三路 per-tracklet/endpoint 输出完成并通过 endpoint/hash/checkpoint 一致性检查；full paired effect、bootstrap、分桶和长尾敏感性分析已归档，结论为 No-Go。
 - [ ] 冻结 A/B/C 四协议输出和 evaluation-only multi-path variance 完成。
-- [ ] crop-reachable proposal oracle 完成，明确 `GO_M2_PROPOSAL_INNOVATION` 或 `NO_GO_M2_PROPOSAL_INNOVATION`。
-- [ ] candidate 伪速度审计完成，并在 shared SE(2) 与 smooth drift 中只冻结一个 M1 augmentation 方案。
+- [x] crop-reachable proposal oracle 完成，决定为 `GO_M2_PROPOSAL_INNOVATION`；包含 dynamics-only、trimmed、tracklet bootstrap 与 long-gap 稳健性检查。
+- [x] candidate 伪速度审计完成，M1 唯一 augmentation 冻结为 shared SE(2)，第一版排除 smooth drift。
 
 以上五项完成后，M0 才能标记完成。trajectory-tube oracle 是 M4 的单独前置条件，不阻塞 M1/M2，但必须在 M4 实现前完成。
 
@@ -197,15 +199,15 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 
 ## 3. M1–M4 分阶段解锁
 
-### M1：物理一致 augmentation 与 zero-init dual clock（工程准备已解锁）
+### M1：物理一致 augmentation 与 zero-init dual clock（shared SE(2) 已冻结）
 
-- [ ] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中用训练结果反向改写伪速度判据。
-- [ ] 在 shared SE(2) 与 smooth drift 中预注册一个正式 augmentation；Dynamics label 从 canonical/一致扰动轨迹计算。
+- [x] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中用训练结果反向改写伪速度判据。
+- [x] 正式 augmentation 预注册为 shared SE(2)，第一版不做 smooth drift；Dynamics label 从 canonical/一致扰动轨迹计算。
 - [ ] 实现 zero-init physical-time adapter；初始化后与 A1 在同 batch 上的输出误差必须低于数值容忍度。
 - [ ] 保留 SeqTrack3D order embedding；禁止再次用 raw seconds 直接替换主干 order token。
 - [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；不得边看 test 结果边改变扰动过程。
 
-### M2：Proposal innovation（尚未解锁）
+### M2：Proposal innovation（oracle gate 已解锁，待实现）
 
 - [ ] 只在 crop-reachable oracle blend 通过后实现：`innovation=clip(d_dyn-stopgrad(d_obs), R(delta_t))`。
 - [ ] `d_final=d_obs+alpha*innovation`；删除旧正式路径中的完整 `d_obs + alpha*d_dyn` 语义。
