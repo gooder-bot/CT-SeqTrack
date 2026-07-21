@@ -1,0 +1,2299 @@
+{
+  "endpoint_count": 4246,
+  "current_delta_t": {
+    "count": 0,
+    "mean": null,
+    "min": null,
+    "p25": null,
+    "p50": null,
+    "p75": null,
+    "p95": null,
+    "max": null
+  },
+  "displacement_norm": {
+    "count": 0,
+    "mean": null,
+    "min": null,
+    "p25": null,
+    "p50": null,
+    "p75": null,
+    "p95": null,
+    "max": null
+  },
+  "modes": {
+    "a1_pred_history_cv": {
+      "endpoint_count": 4246,
+      "center_inside_rate": 0.7131417804992934,
+      "center_outside_rate": 0.28685821950070656,
+      "box_intersection_rate": 0.724917569477155,
+      "all_corners_inside_rate": 0.6754592557701365,
+      "target_visible_endpoint_count": 2996,
+      "has_target_point_rate": 0.7326435246995995,
+      "no_target_point_rate": 0.2673564753004005,
+      "target_point_recall": {
+        "count": 2996,
+        "mean": 0.7260690194885333,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 4246,
+        "mean": 284.41945360339145,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 13.0,
+        "p75": 116.75,
+        "p95": 1889.5,
+        "max": 12406.0
+      }
+    },
+    "gt_history_cv": {
+      "endpoint_count": 4246,
+      "center_inside_rate": 0.9988224211022139,
+      "center_outside_rate": 0.0011775788977861357,
+      "box_intersection_rate": 0.9992934526613283,
+      "all_corners_inside_rate": 0.9964672633066416,
+      "target_visible_endpoint_count": 2996,
+      "has_target_point_rate": 0.9996662216288384,
+      "no_target_point_rate": 0.00033377837116155273,
+      "target_point_recall": {
+        "count": 2996,
+        "mean": 0.9995309060729621,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 4246,
+        "mean": 289.81841733396135,
+        "min": 0.0,
+        "p25": 3.0,
+        "p50": 17.0,
+        "p75": 123.75,
+        "p95": 1866.5,
+        "max": 7025.0
+      }
+    },
+    "previous_a1_pred": {
+      "endpoint_count": 4246,
+      "center_inside_rate": 0.6848798869524259,
+      "center_outside_rate": 0.31512011304757415,
+      "box_intersection_rate": 0.7164390014130947,
+      "all_corners_inside_rate": 0.6113989637305699,
+      "target_visible_endpoint_count": 2996,
+      "has_target_point_rate": 0.7166221628838452,
+      "no_target_point_rate": 0.28337783711615483,
+      "target_point_recall": {
+        "count": 2996,
+        "mean": 0.6969232174861152,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 4246,
+        "mean": 287.54168629298164,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 13.0,
+        "p75": 119.75,
+        "p95": 1907.75,
+        "max": 12395.0
+      }
+    },
+    "previous_gt": {
+      "endpoint_count": 4246,
+      "center_inside_rate": 0.8403203014601979,
+      "center_outside_rate": 0.15967969853980213,
+      "box_intersection_rate": 0.9510127178520961,
+      "all_corners_inside_rate": 0.6912388130004711,
+      "target_visible_endpoint_count": 2996,
+      "has_target_point_rate": 0.9072096128170895,
+      "no_target_point_rate": 0.09279038718291055,
+      "target_point_recall": {
+        "count": 2996,
+        "mean": 0.8540549580522369,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 4246,
+        "mean": 285.41497880357986,
+        "min": 0.0,
+        "p25": 2.0,
+        "p50": 16.0,
+        "p75": 126.75,
+        "p95": 1864.0,
+        "max": 7006.0
+      }
+    }
+  },
+  "delta_t_buckets": {
+    "<= 0.5": {
+      "previous_gt": {
+        "endpoint_count": 2711,
+        "center_inside_rate": 0.8266322390261897,
+        "center_outside_rate": 0.17336776097381035,
+        "box_intersection_rate": 0.949834009590557,
+        "all_corners_inside_rate": 0.6587974917004795,
+        "target_visible_endpoint_count": 1905,
+        "has_target_point_rate": 0.9039370078740158,
+        "no_target_point_rate": 0.09606299212598424,
+        "target_point_recall": {
+          "count": 1905,
+          "mean": 0.8424763404899355,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2711,
+          "mean": 307.57654002213206,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 16.0,
+          "p75": 137.0,
+          "p95": 2078.5,
+          "max": 7006.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 2711,
+        "center_inside_rate": 0.6595352268535596,
+        "center_outside_rate": 0.3404647731464404,
+        "box_intersection_rate": 0.6945776466248617,
+        "all_corners_inside_rate": 0.583548506086315,
+        "target_visible_endpoint_count": 1905,
+        "has_target_point_rate": 0.6939632545931759,
+        "no_target_point_rate": 0.30603674540682413,
+        "target_point_recall": {
+          "count": 1905,
+          "mean": 0.6745937658410379,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2711,
+          "mean": 316.8959793434157,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 12.0,
+          "p75": 133.0,
+          "p95": 2069.5,
+          "max": 12395.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 2711,
+        "center_inside_rate": 0.9985245296938399,
+        "center_outside_rate": 0.0014754703061601315,
+        "box_intersection_rate": 0.9992622648469199,
+        "all_corners_inside_rate": 0.9959424566580598,
+        "target_visible_endpoint_count": 1905,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1905,
+          "mean": 0.9997871887635668,
+          "min": 0.5945945945945946,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2711,
+          "mean": 312.31685724824786,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 17.0,
+          "p75": 135.5,
+          "p95": 1961.0,
+          "max": 7025.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 2711,
+        "center_inside_rate": 0.6908889708594614,
+        "center_outside_rate": 0.30911102914053856,
+        "box_intersection_rate": 0.7026927333087422,
+        "all_corners_inside_rate": 0.6562154186646993,
+        "target_visible_endpoint_count": 1905,
+        "has_target_point_rate": 0.7112860892388452,
+        "no_target_point_rate": 0.2887139107611548,
+        "target_point_recall": {
+          "count": 1905,
+          "mean": 0.7071011906360538,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2711,
+          "mean": 311.9664330505349,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 13.0,
+          "p75": 131.0,
+          "p95": 2034.0,
+          "max": 12406.0
+        }
+      }
+    },
+    "(0.5, 1]": {
+      "previous_gt": {
+        "endpoint_count": 1535,
+        "center_inside_rate": 0.8644951140065147,
+        "center_outside_rate": 0.1355048859934853,
+        "box_intersection_rate": 0.9530944625407166,
+        "all_corners_inside_rate": 0.7485342019543973,
+        "target_visible_endpoint_count": 1091,
+        "has_target_point_rate": 0.9129239230064161,
+        "no_target_point_rate": 0.08707607699358388,
+        "target_point_recall": {
+          "count": 1091,
+          "mean": 0.8742724341807285,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1535,
+          "mean": 246.27491856677526,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 16.0,
+          "p75": 105.5,
+          "p95": 1598.199999999997,
+          "max": 5749.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1535,
+        "center_inside_rate": 0.7296416938110749,
+        "center_outside_rate": 0.2703583061889251,
+        "box_intersection_rate": 0.7550488599348534,
+        "all_corners_inside_rate": 0.6605863192182411,
+        "target_visible_endpoint_count": 1091,
+        "has_target_point_rate": 0.7561869844179652,
+        "no_target_point_rate": 0.24381301558203483,
+        "target_point_recall": {
+          "count": 1091,
+          "mean": 0.7359127732916809,
+          "min": 0.0,
+          "p25": 0.18879301971703305,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1535,
+          "mean": 235.69837133550487,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 14.0,
+          "p75": 96.5,
+          "p95": 1393.6999999999991,
+          "max": 10197.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1535,
+        "center_inside_rate": 0.9993485342019544,
+        "center_outside_rate": 0.0006514657980456473,
+        "box_intersection_rate": 0.9993485342019544,
+        "all_corners_inside_rate": 0.9973941368078176,
+        "target_visible_endpoint_count": 1091,
+        "has_target_point_rate": 0.999083409715857,
+        "no_target_point_rate": 0.0009165902841430373,
+        "target_point_recall": {
+          "count": 1091,
+          "mean": 0.999083409715857,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1535,
+          "mean": 250.08338762214984,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 17.0,
+          "p75": 100.5,
+          "p95": 1690.2999999999995,
+          "max": 6232.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1535,
+        "center_inside_rate": 0.752442996742671,
+        "center_outside_rate": 0.247557003257329,
+        "box_intersection_rate": 0.7641693811074919,
+        "all_corners_inside_rate": 0.7094462540716613,
+        "target_visible_endpoint_count": 1091,
+        "has_target_point_rate": 0.76993583868011,
+        "no_target_point_rate": 0.23006416131989005,
+        "target_point_recall": {
+          "count": 1091,
+          "mean": 0.759188830637913,
+          "min": 0.0,
+          "p25": 0.9562484744935318,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1535,
+          "mean": 235.76807817589577,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 13.0,
+          "p75": 90.5,
+          "p95": 1395.6999999999991,
+          "max": 10462.0
+        }
+      }
+    }
+  },
+  "displacement_buckets": {
+    "<= 0.5": {
+      "previous_gt": {
+        "endpoint_count": 2671,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 1843,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1843,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2671,
+          "mean": 338.98464994384125,
+          "min": 0.0,
+          "p25": 4.0,
+          "p50": 20.0,
+          "p75": 140.5,
+          "p95": 2418.5,
+          "max": 7006.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 2671,
+        "center_inside_rate": 0.9681767128416323,
+        "center_outside_rate": 0.031823287158367686,
+        "box_intersection_rate": 0.969299887682516,
+        "all_corners_inside_rate": 0.9292399850243355,
+        "target_visible_endpoint_count": 1843,
+        "has_target_point_rate": 0.9755832881172002,
+        "no_target_point_rate": 0.024416711882799813,
+        "target_point_recall": {
+          "count": 1843,
+          "mean": 0.9712831356993034,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2671,
+          "mean": 328.585548483714,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 20.0,
+          "p75": 139.0,
+          "p95": 2197.0,
+          "max": 6212.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 2671,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 1843,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1843,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2671,
+          "mean": 340.1033320853613,
+          "min": 0.0,
+          "p25": 4.0,
+          "p50": 20.0,
+          "p75": 142.0,
+          "p95": 2418.0,
+          "max": 7025.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 2671,
+        "center_inside_rate": 0.9655559715462374,
+        "center_outside_rate": 0.0344440284537626,
+        "box_intersection_rate": 0.9666791463871209,
+        "all_corners_inside_rate": 0.9281168101834519,
+        "target_visible_endpoint_count": 1843,
+        "has_target_point_rate": 0.9739555073250136,
+        "no_target_point_rate": 0.02604449267498643,
+        "target_point_recall": {
+          "count": 1843,
+          "mean": 0.9698307814080664,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 2671,
+          "mean": 329.53575439910145,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 19.0,
+          "p75": 139.0,
+          "p95": 2190.5,
+          "max": 6221.0
+        }
+      }
+    },
+    "(0.5, 1]": {
+      "previous_gt": {
+        "endpoint_count": 33,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 27,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 27,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 33,
+          "mean": 506.969696969697,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 20.0,
+          "p75": 800.0,
+          "p95": 1886.0,
+          "max": 2793.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 33,
+        "center_inside_rate": 0.7575757575757576,
+        "center_outside_rate": 0.24242424242424243,
+        "box_intersection_rate": 0.7878787878787878,
+        "all_corners_inside_rate": 0.6060606060606061,
+        "target_visible_endpoint_count": 27,
+        "has_target_point_rate": 0.8148148148148148,
+        "no_target_point_rate": 0.18518518518518523,
+        "target_point_recall": {
+          "count": 27,
+          "mean": 0.8137254901960783,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 33,
+          "mean": 463.2121212121212,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 27.0,
+          "p75": 739.0,
+          "p95": 1995.2,
+          "max": 2338.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 33,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 27,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 27,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 33,
+          "mean": 515.060606060606,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 20.0,
+          "p75": 936.0,
+          "p95": 1954.6,
+          "max": 2726.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 33,
+        "center_inside_rate": 0.7575757575757576,
+        "center_outside_rate": 0.24242424242424243,
+        "box_intersection_rate": 0.7575757575757576,
+        "all_corners_inside_rate": 0.6060606060606061,
+        "target_visible_endpoint_count": 27,
+        "has_target_point_rate": 0.8148148148148148,
+        "no_target_point_rate": 0.18518518518518523,
+        "target_point_recall": {
+          "count": 27,
+          "mean": 0.8137254901960783,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 33,
+          "mean": 484.90909090909093,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 25.0,
+          "p75": 825.0,
+          "p95": 2032.1999999999991,
+          "max": 2808.0
+        }
+      }
+    },
+    "(1, 2]": {
+      "previous_gt": {
+        "endpoint_count": 151,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 119,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 119,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 151,
+          "mean": 577.6490066225166,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 87.0,
+          "p75": 623.0,
+          "p95": 2736.0,
+          "max": 3812.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 151,
+        "center_inside_rate": 0.6026490066225165,
+        "center_outside_rate": 0.3973509933774835,
+        "box_intersection_rate": 0.6688741721854304,
+        "all_corners_inside_rate": 0.4370860927152318,
+        "target_visible_endpoint_count": 119,
+        "has_target_point_rate": 0.6302521008403361,
+        "no_target_point_rate": 0.3697478991596639,
+        "target_point_recall": {
+          "count": 119,
+          "mean": 0.593686102211883,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 151,
+          "mean": 543.8874172185431,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 91.0,
+          "p75": 497.5,
+          "p95": 2555.0,
+          "max": 8028.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 151,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 119,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 119,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 151,
+          "mean": 493.2251655629139,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 75.0,
+          "p75": 672.0,
+          "p95": 2018.5,
+          "max": 3512.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 151,
+        "center_inside_rate": 0.5761589403973509,
+        "center_outside_rate": 0.42384105960264906,
+        "box_intersection_rate": 0.6622516556291391,
+        "all_corners_inside_rate": 0.46357615894039733,
+        "target_visible_endpoint_count": 119,
+        "has_target_point_rate": 0.6302521008403361,
+        "no_target_point_rate": 0.3697478991596639,
+        "target_point_recall": {
+          "count": 119,
+          "mean": 0.593531396247264,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 151,
+          "mean": 542.4569536423841,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 77.0,
+          "p75": 550.0,
+          "p95": 2177.5,
+          "max": 9542.0
+        }
+      }
+    },
+    "(2, 4]": {
+      "previous_gt": {
+        "endpoint_count": 431,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.18561484918793503,
+        "target_visible_endpoint_count": 329,
+        "has_target_point_rate": 0.9027355623100304,
+        "no_target_point_rate": 0.09726443768996962,
+        "target_point_recall": {
+          "count": 329,
+          "mean": 0.8002854777293722,
+          "min": 0.0,
+          "p25": 0.7676767676767676,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 431,
+          "mean": 142.73781902552204,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 13.0,
+          "p75": 104.0,
+          "p95": 616.0,
+          "max": 3832.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 431,
+        "center_inside_rate": 0.39675174013921116,
+        "center_outside_rate": 0.6032482598607889,
+        "box_intersection_rate": 0.4593967517401392,
+        "all_corners_inside_rate": 0.06496519721577726,
+        "target_visible_endpoint_count": 329,
+        "has_target_point_rate": 0.47112462006079026,
+        "no_target_point_rate": 0.5288753799392097,
+        "target_point_recall": {
+          "count": 329,
+          "mean": 0.41666480121391364,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.9743589743589743,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 431,
+          "mean": 122.06496519721578,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 7.0,
+          "p75": 94.5,
+          "p95": 576.0,
+          "max": 3893.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 431,
+        "center_inside_rate": 0.9953596287703016,
+        "center_outside_rate": 0.004640371229698403,
+        "box_intersection_rate": 0.9976798143851509,
+        "all_corners_inside_rate": 0.9930394431554525,
+        "target_visible_endpoint_count": 329,
+        "has_target_point_rate": 0.9969604863221885,
+        "no_target_point_rate": 0.003039513677811523,
+        "target_point_recall": {
+          "count": 329,
+          "mean": 0.9969604863221885,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 431,
+          "mean": 134.96983758700696,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 16.0,
+          "p75": 98.0,
+          "p95": 578.0,
+          "max": 3360.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 431,
+        "center_inside_rate": 0.4222737819025522,
+        "center_outside_rate": 0.5777262180974478,
+        "box_intersection_rate": 0.46867749419953597,
+        "all_corners_inside_rate": 0.3874709976798144,
+        "target_visible_endpoint_count": 329,
+        "has_target_point_rate": 0.5106382978723404,
+        "no_target_point_rate": 0.4893617021276596,
+        "target_point_recall": {
+          "count": 329,
+          "mean": 0.49954628776284954,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.5,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 431,
+          "mean": 107.21577726218098,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 8.0,
+          "p75": 90.0,
+          "p95": 504.0,
+          "max": 1933.0
+        }
+      }
+    },
+    "> 4": {
+      "previous_gt": {
+        "endpoint_count": 960,
+        "center_inside_rate": 0.29375,
+        "center_outside_rate": 0.70625,
+        "box_intersection_rate": 0.7833333333333333,
+        "all_corners_inside_rate": 0.0,
+        "target_visible_endpoint_count": 678,
+        "has_target_point_rate": 0.6371681415929203,
+        "no_target_point_rate": 0.36283185840707965,
+        "target_point_recall": {
+          "count": 678,
+          "mean": 0.4519981300170183,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.40508365508365507,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 960,
+          "mean": 146.84270833333332,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 6.0,
+          "p75": 62.25,
+          "p95": 449.2999999999997,
+          "max": 5882.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 960,
+        "center_inside_rate": 0.036458333333333336,
+        "center_outside_rate": 0.9635416666666666,
+        "box_intersection_rate": 0.13333333333333333,
+        "all_corners_inside_rate": 0.0,
+        "target_visible_endpoint_count": 678,
+        "has_target_point_rate": 0.1430678466076696,
+        "no_target_point_rate": 0.8569321533923304,
+        "target_point_recall": {
+          "count": 678,
+          "mean": 0.10059762020162138,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.0,
+          "p95": 0.913586956521739,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 960,
+          "mean": 201.278125,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 2.0,
+          "p75": 44.25,
+          "p95": 564.3499999999997,
+          "max": 12395.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 960,
+        "center_inside_rate": 0.996875,
+        "center_outside_rate": 0.0031250000000000444,
+        "box_intersection_rate": 0.9979166666666667,
+        "all_corners_inside_rate": 0.9875,
+        "target_visible_endpoint_count": 678,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 678,
+          "mean": 0.9994020569241808,
+          "min": 0.5945945945945946,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 960,
+          "mean": 179.69479166666667,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 10.0,
+          "p75": 75.0,
+          "p95": 598.9999999999991,
+          "max": 6370.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 960,
+        "center_inside_rate": 0.16145833333333334,
+        "center_outside_rate": 0.8385416666666666,
+        "box_intersection_rate": 0.17604166666666668,
+        "all_corners_inside_rate": 0.1375,
+        "target_visible_endpoint_count": 678,
+        "has_target_point_rate": 0.19911504424778761,
+        "no_target_point_rate": 0.8008849557522124,
+        "target_point_recall": {
+          "count": 678,
+          "mean": 0.19314616399687817,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 960,
+          "mean": 190.97083333333333,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 2.0,
+          "p75": 45.0,
+          "p95": 486.5499999999995,
+          "max": 12406.0
+        }
+      }
+    }
+  },
+  "target_point_buckets": {
+    "(0, 5]": {
+      "previous_gt": {
+        "endpoint_count": 1045,
+        "center_inside_rate": 0.84688995215311,
+        "center_outside_rate": 0.15311004784688997,
+        "box_intersection_rate": 0.9741626794258373,
+        "all_corners_inside_rate": 0.6727272727272727,
+        "target_visible_endpoint_count": 1045,
+        "has_target_point_rate": 0.8688995215311005,
+        "no_target_point_rate": 0.1311004784688995,
+        "target_point_recall": {
+          "count": 1045,
+          "mean": 0.8572727272727273,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1045,
+          "mean": 13.780861244019139,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 5.0,
+          "p75": 13.0,
+          "p95": 60.799999999999955,
+          "max": 362.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1045,
+        "center_inside_rate": 0.6468899521531101,
+        "center_outside_rate": 0.35311004784688993,
+        "box_intersection_rate": 0.6842105263157895,
+        "all_corners_inside_rate": 0.5942583732057416,
+        "target_visible_endpoint_count": 1045,
+        "has_target_point_rate": 0.6574162679425838,
+        "no_target_point_rate": 0.3425837320574162,
+        "target_point_recall": {
+          "count": 1045,
+          "mean": 0.6529824561403508,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1045,
+          "mean": 48.15215311004785,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 5.0,
+          "p75": 16.0,
+          "p95": 122.79999999999995,
+          "max": 10171.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1045,
+        "center_inside_rate": 0.999043062200957,
+        "center_outside_rate": 0.000956937799043045,
+        "box_intersection_rate": 0.999043062200957,
+        "all_corners_inside_rate": 0.999043062200957,
+        "target_visible_endpoint_count": 1045,
+        "has_target_point_rate": 0.999043062200957,
+        "no_target_point_rate": 0.000956937799043045,
+        "target_point_recall": {
+          "count": 1045,
+          "mean": 0.999043062200957,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1045,
+          "mean": 13.84401913875598,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 6.0,
+          "p75": 13.0,
+          "p95": 58.799999999999955,
+          "max": 208.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1045,
+        "center_inside_rate": 0.6832535885167464,
+        "center_outside_rate": 0.31674641148325355,
+        "box_intersection_rate": 0.6966507177033493,
+        "all_corners_inside_rate": 0.6497607655502392,
+        "target_visible_endpoint_count": 1045,
+        "has_target_point_rate": 0.6784688995215311,
+        "no_target_point_rate": 0.3215311004784689,
+        "target_point_recall": {
+          "count": 1045,
+          "mean": 0.6769059011164273,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1045,
+          "mean": 46.73397129186603,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 5.0,
+          "p75": 15.0,
+          "p95": 118.0,
+          "max": 10182.0
+        }
+      }
+    },
+    "(5, 20]": {
+      "previous_gt": {
+        "endpoint_count": 700,
+        "center_inside_rate": 0.8385714285714285,
+        "center_outside_rate": 0.16142857142857148,
+        "box_intersection_rate": 0.9571428571428572,
+        "all_corners_inside_rate": 0.6957142857142857,
+        "target_visible_endpoint_count": 700,
+        "has_target_point_rate": 0.91,
+        "no_target_point_rate": 0.08999999999999997,
+        "target_point_recall": {
+          "count": 700,
+          "mean": 0.859924048867492,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 700,
+          "mean": 51.074285714285715,
+          "min": 0.0,
+          "p25": 13.0,
+          "p50": 27.0,
+          "p75": 61.0,
+          "p95": 190.04999999999995,
+          "max": 393.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 700,
+        "center_inside_rate": 0.69,
+        "center_outside_rate": 0.31000000000000005,
+        "box_intersection_rate": 0.7157142857142857,
+        "all_corners_inside_rate": 0.6128571428571429,
+        "target_visible_endpoint_count": 700,
+        "has_target_point_rate": 0.7028571428571428,
+        "no_target_point_rate": 0.29714285714285715,
+        "target_point_recall": {
+          "count": 700,
+          "mean": 0.6876132941214764,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 700,
+          "mean": 80.99428571428571,
+          "min": 0.0,
+          "p25": 8.75,
+          "p50": 24.0,
+          "p75": 61.25,
+          "p95": 216.0999999999999,
+          "max": 10260.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 700,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9971428571428571,
+        "target_visible_endpoint_count": 700,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 700,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 700,
+          "mean": 47.424285714285716,
+          "min": 6.0,
+          "p25": 15.0,
+          "p50": 27.0,
+          "p75": 58.25,
+          "p95": 154.0,
+          "max": 393.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 700,
+        "center_inside_rate": 0.7157142857142857,
+        "center_outside_rate": 0.28428571428571425,
+        "box_intersection_rate": 0.7328571428571429,
+        "all_corners_inside_rate": 0.6842857142857143,
+        "target_visible_endpoint_count": 700,
+        "has_target_point_rate": 0.7242857142857143,
+        "no_target_point_rate": 0.2757142857142857,
+        "target_point_recall": {
+          "count": 700,
+          "mean": 0.7166474438260152,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 700,
+          "mean": 72.29714285714286,
+          "min": 0.0,
+          "p25": 9.0,
+          "p50": 23.0,
+          "p75": 60.0,
+          "p95": 200.04999999999995,
+          "max": 8109.0
+        }
+      }
+    },
+    "<= 0": {
+      "previous_gt": {
+        "endpoint_count": 1250,
+        "center_inside_rate": 0.8424,
+        "center_outside_rate": 0.15759999999999996,
+        "box_intersection_rate": 0.9312,
+        "all_corners_inside_rate": 0.7048,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 1250,
+          "mean": 14.9632,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 7.0,
+          "p95": 74.54999999999995,
+          "max": 519.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1250,
+        "center_inside_rate": 0.6584,
+        "center_outside_rate": 0.3416,
+        "box_intersection_rate": 0.684,
+        "all_corners_inside_rate": 0.5952,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 1250,
+          "mean": 59.844,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 13.0,
+          "p95": 185.0,
+          "max": 12395.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1250,
+        "center_inside_rate": 0.9976,
+        "center_outside_rate": 0.0023999999999999577,
+        "box_intersection_rate": 0.9984,
+        "all_corners_inside_rate": 0.9928,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 1250,
+          "mean": 14.9168,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 7.0,
+          "p95": 74.0,
+          "max": 519.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1250,
+        "center_inside_rate": 0.6752,
+        "center_outside_rate": 0.3248,
+        "box_intersection_rate": 0.6848,
+        "all_corners_inside_rate": 0.6256,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 1250,
+          "mean": 61.7312,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 13.0,
+          "p95": 180.0999999999999,
+          "max": 12406.0
+        }
+      }
+    },
+    "> 20": {
+      "previous_gt": {
+        "endpoint_count": 1251,
+        "center_inside_rate": 0.8337330135891287,
+        "center_outside_rate": 0.16626698641087134,
+        "box_intersection_rate": 0.9480415667466027,
+        "all_corners_inside_rate": 0.6906474820143885,
+        "target_visible_endpoint_count": 1251,
+        "has_target_point_rate": 0.9376498800959233,
+        "no_target_point_rate": 0.062350119904076684,
+        "target_point_recall": {
+          "count": 1251,
+          "mean": 0.8480829897020442,
+          "min": 0.0,
+          "p25": 0.8927544565842438,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1251,
+          "mean": 913.6810551558754,
+          "min": 0.0,
+          "p25": 124.0,
+          "p50": 271.0,
+          "p75": 1021.5,
+          "p95": 4753.5,
+          "max": 7006.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1251,
+        "center_inside_rate": 0.7402078337330136,
+        "center_outside_rate": 0.2597921662669864,
+        "box_intersection_rate": 0.7761790567545963,
+        "all_corners_inside_rate": 0.6410871302957634,
+        "target_visible_endpoint_count": 1251,
+        "has_target_point_rate": 0.7737809752198241,
+        "no_target_point_rate": 0.22621902478017586,
+        "target_point_recall": {
+          "count": 1251,
+          "mean": 0.7388377194537978,
+          "min": 0.0,
+          "p25": 0.5053191489361701,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1251,
+          "mean": 830.6011191047162,
+          "min": 0.0,
+          "p25": 76.0,
+          "p50": 238.0,
+          "p75": 892.5,
+          "p95": 3705.5,
+          "max": 12234.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1251,
+        "center_inside_rate": 0.9992006394884093,
+        "center_outside_rate": 0.0007993605115906854,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9976019184652278,
+        "target_visible_endpoint_count": 1251,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1251,
+          "mean": 0.9996759349277334,
+          "min": 0.5945945945945946,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1251,
+          "mean": 930.6626698641087,
+          "min": 23.0,
+          "p25": 130.0,
+          "p50": 276.0,
+          "p75": 1095.5,
+          "p95": 5219.5,
+          "max": 7025.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1251,
+        "center_inside_rate": 0.7745803357314148,
+        "center_outside_rate": 0.22541966426858517,
+        "box_intersection_rate": 0.7841726618705036,
+        "all_corners_inside_rate": 0.7418065547561951,
+        "target_visible_endpoint_count": 1251,
+        "has_target_point_rate": 0.7825739408473221,
+        "no_target_point_rate": 0.21742605915267788,
+        "target_point_recall": {
+          "count": 1251,
+          "mean": 0.7724083973163617,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1251,
+          "mean": 824.1694644284572,
+          "min": 0.0,
+          "p25": 79.5,
+          "p50": 228.0,
+          "p75": 900.0,
+          "p95": 3741.5,
+          "max": 10462.0
+        }
+      }
+    }
+  },
+  "mode_extras": {
+    "previous_gt": {
+      "anchor_error": {
+        "count": 4246,
+        "mean": 1.7448914699709295,
+        "min": 0.0,
+        "p25": 0.02299999999999991,
+        "p50": 0.08016544025821107,
+        "p75": 3.7434581221033127,
+        "p95": 7.156651180161379,
+        "max": 15.592871127537764
+      },
+      "center_outside_streak": {
+        "count": 4246,
+        "mean": 1.4531323598681112,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 9.0,
+        "max": 38.0
+      },
+      "target_loss_streak": {
+        "count": 4246,
+        "mean": 0.40108337258596327,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 1.0,
+        "max": 36.0
+      },
+      "available_rate": 1.0
+    },
+    "previous_a1_pred": {
+      "anchor_error": {
+        "count": 4246,
+        "mean": 16.16390532282449,
+        "min": 0.0,
+        "p25": 0.3937594734301717,
+        "p50": 1.0571922456839316,
+        "p75": 13.85503907292371,
+        "p95": 84.22505983059222,
+        "max": 312.3653382195277
+      },
+      "center_outside_streak": {
+        "count": 4246,
+        "mean": 3.325247291568535,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 3.0,
+        "p95": 20.0,
+        "max": 38.0
+      },
+      "target_loss_streak": {
+        "count": 4246,
+        "mean": 1.3391427225624117,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 9.0,
+        "max": 36.0
+      },
+      "available_rate": 1.0
+    },
+    "gt_history_cv": {
+      "anchor_error": {
+        "count": 4246,
+        "mean": 0.13592529131884232,
+        "min": 0.0,
+        "p25": 0.0009324798687080661,
+        "p50": 0.0014480396793921746,
+        "p75": 0.1468851068884358,
+        "p95": 0.5959001954169643,
+        "max": 9.097840445793052
+      },
+      "center_outside_streak": {
+        "count": 4246,
+        "mean": 0.0011775788977861517,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0,
+        "max": 1.0
+      },
+      "target_loss_streak": {
+        "count": 4246,
+        "mean": 0.00023551577955723034,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0,
+        "max": 1.0
+      },
+      "available_rate": 1.0
+    },
+    "a1_pred_history_cv": {
+      "anchor_error": {
+        "count": 4246,
+        "mean": 15.743695704475515,
+        "min": 0.0,
+        "p25": 0.40092721543605825,
+        "p50": 0.8926591894489183,
+        "p75": 13.32732724286775,
+        "p95": 83.86641322720054,
+        "max": 312.3653382195277
+      },
+      "center_outside_streak": {
+        "count": 4246,
+        "mean": 2.9865756005652377,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 2.0,
+        "p95": 18.0,
+        "max": 38.0
+      },
+      "target_loss_streak": {
+        "count": 4246,
+        "mean": 1.2887423457371643,
+        "min": 0.0,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 9.0,
+        "max": 36.0
+      },
+      "available_rate": 1.0
+    }
+  },
+  "baseline_predictions": {
+    "previous_prediction_error": {
+      "count": 4246,
+      "mean": 14.510237244766474,
+      "min": 0.0,
+      "p25": 0.35247967527967805,
+      "p50": 0.8169269515666051,
+      "p75": 10.051433444132625,
+      "p95": 78.32686751788833,
+      "max": 305.8430605866347
+    },
+    "current_prediction_error": {
+      "count": 4246,
+      "mean": 15.735252811511584,
+      "min": 0.0,
+      "p25": 0.3918879989163735,
+      "p50": 0.8806267351981316,
+      "p75": 12.925971072683302,
+      "p95": 84.1019812909883,
+      "max": 312.3653382195277
+    },
+    "baseline_search_point_count": {
+      "count": 4246,
+      "mean": 287.54168629298164,
+      "min": 0.0,
+      "p25": 1.0,
+      "p50": 13.0,
+      "p75": 119.75,
+      "p95": 1907.75,
+      "max": 12395.0
+    },
+    "empty_fallback_rate": 0.21549693829486577,
+    "empty_fallback_count": 915
+  },
+  "previous_prediction_error_buckets": {
+    "<= 0.5": {
+      "previous_gt": {
+        "endpoint_count": 1527,
+        "center_inside_rate": 0.9849377865094957,
+        "center_outside_rate": 0.015062213490504295,
+        "box_intersection_rate": 0.9993451211525868,
+        "all_corners_inside_rate": 0.9364767518009168,
+        "target_visible_endpoint_count": 1070,
+        "has_target_point_rate": 0.9925233644859813,
+        "no_target_point_rate": 0.00747663551401867,
+        "target_point_recall": {
+          "count": 1070,
+          "mean": 0.9782390426447712,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1527,
+          "mean": 249.1728880157171,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 22.0,
+          "p75": 137.0,
+          "p95": 1854.5000000000002,
+          "max": 5529.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1527,
+        "center_inside_rate": 0.9842829076620825,
+        "center_outside_rate": 0.015717092337917515,
+        "box_intersection_rate": 0.9986902423051736,
+        "all_corners_inside_rate": 0.9364767518009168,
+        "target_visible_endpoint_count": 1070,
+        "has_target_point_rate": 0.991588785046729,
+        "no_target_point_rate": 0.008411214953271018,
+        "target_point_recall": {
+          "count": 1070,
+          "mean": 0.9759579280368169,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1527,
+          "mean": 250.16764898493778,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 21.0,
+          "p75": 137.0,
+          "p95": 1885.1000000000001,
+          "max": 5513.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1527,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 1070,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1070,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1527,
+          "mean": 250.23706614276358,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 21.0,
+          "p75": 137.0,
+          "p95": 1824.6000000000004,
+          "max": 5529.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1527,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9993451211525868,
+        "target_visible_endpoint_count": 1070,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 1070,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1527,
+          "mean": 250.7524557956778,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 21.0,
+          "p75": 136.0,
+          "p95": 1796.7,
+          "max": 5526.0
+        }
+      }
+    },
+    "(0.5, 1]": {
+      "previous_gt": {
+        "endpoint_count": 830,
+        "center_inside_rate": 0.963855421686747,
+        "center_outside_rate": 0.03614457831325302,
+        "box_intersection_rate": 0.9975903614457832,
+        "all_corners_inside_rate": 0.8855421686746988,
+        "target_visible_endpoint_count": 644,
+        "has_target_point_rate": 0.9891304347826086,
+        "no_target_point_rate": 0.010869565217391353,
+        "target_point_recall": {
+          "count": 644,
+          "mean": 0.9710182457292238,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 830,
+          "mean": 452.8771084337349,
+          "min": 0.0,
+          "p25": 8.0,
+          "p50": 44.0,
+          "p75": 232.0,
+          "p95": 2427.6499999999996,
+          "max": 7006.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 830,
+        "center_inside_rate": 0.9614457831325302,
+        "center_outside_rate": 0.03855421686746985,
+        "box_intersection_rate": 0.9975903614457832,
+        "all_corners_inside_rate": 0.8759036144578313,
+        "target_visible_endpoint_count": 644,
+        "has_target_point_rate": 0.9891304347826086,
+        "no_target_point_rate": 0.010869565217391353,
+        "target_point_recall": {
+          "count": 644,
+          "mean": 0.9657357094316805,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 830,
+          "mean": 428.5144578313253,
+          "min": 0.0,
+          "p25": 8.0,
+          "p50": 44.0,
+          "p75": 234.5,
+          "p95": 2286.6499999999996,
+          "max": 5828.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 830,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9987951807228915,
+        "target_visible_endpoint_count": 644,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 644,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 830,
+          "mean": 445.94096385542167,
+          "min": 0.0,
+          "p25": 9.0,
+          "p50": 43.0,
+          "p75": 229.0,
+          "p95": 2427.6499999999996,
+          "max": 7025.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 830,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9963855421686747,
+        "target_visible_endpoint_count": 644,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 644,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 830,
+          "mean": 421.2578313253012,
+          "min": 0.0,
+          "p25": 8.0,
+          "p50": 41.0,
+          "p75": 213.5,
+          "p95": 2257.55,
+          "max": 5838.0
+        }
+      }
+    },
+    "(1, 2]": {
+      "previous_gt": {
+        "endpoint_count": 480,
+        "center_inside_rate": 0.9375,
+        "center_outside_rate": 0.0625,
+        "box_intersection_rate": 0.9895833333333334,
+        "all_corners_inside_rate": 0.85,
+        "target_visible_endpoint_count": 348,
+        "has_target_point_rate": 0.985632183908046,
+        "no_target_point_rate": 0.014367816091954033,
+        "target_point_recall": {
+          "count": 348,
+          "mean": 0.9668479921392218,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 480,
+          "mean": 532.9333333333333,
+          "min": 0.0,
+          "p25": 5.0,
+          "p50": 21.0,
+          "p75": 211.5,
+          "p95": 5480.0,
+          "max": 5562.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 480,
+        "center_inside_rate": 0.9041666666666667,
+        "center_outside_rate": 0.09583333333333333,
+        "box_intersection_rate": 0.98125,
+        "all_corners_inside_rate": 0.8166666666666667,
+        "target_visible_endpoint_count": 348,
+        "has_target_point_rate": 0.9597701149425287,
+        "no_target_point_rate": 0.04022988505747127,
+        "target_point_recall": {
+          "count": 348,
+          "mean": 0.9376080000755298,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 480,
+          "mean": 511.1354166666667,
+          "min": 0.0,
+          "p25": 5.0,
+          "p50": 21.0,
+          "p75": 186.75,
+          "p95": 3107.0499999999956,
+          "max": 6212.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 480,
+        "center_inside_rate": 0.9979166666666667,
+        "center_outside_rate": 0.002083333333333326,
+        "box_intersection_rate": 0.9979166666666667,
+        "all_corners_inside_rate": 0.9979166666666667,
+        "target_visible_endpoint_count": 348,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 348,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 480,
+          "mean": 528.3291666666667,
+          "min": 0.0,
+          "p25": 5.0,
+          "p50": 20.0,
+          "p75": 188.5,
+          "p95": 5480.0,
+          "max": 5562.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 480,
+        "center_inside_rate": 0.99375,
+        "center_outside_rate": 0.006249999999999978,
+        "box_intersection_rate": 0.9979166666666667,
+        "all_corners_inside_rate": 0.9625,
+        "target_visible_endpoint_count": 348,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 348,
+          "mean": 0.9973146324514748,
+          "min": 0.5,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 480,
+          "mean": 505.8333333333333,
+          "min": 0.0,
+          "p25": 5.0,
+          "p50": 18.0,
+          "p75": 172.5,
+          "p95": 3096.649999999995,
+          "max": 6221.0
+        }
+      }
+    },
+    "(2, 4]": {
+      "previous_gt": {
+        "endpoint_count": 210,
+        "center_inside_rate": 0.9142857142857143,
+        "center_outside_rate": 0.08571428571428574,
+        "box_intersection_rate": 0.9714285714285714,
+        "all_corners_inside_rate": 0.780952380952381,
+        "target_visible_endpoint_count": 138,
+        "has_target_point_rate": 0.927536231884058,
+        "no_target_point_rate": 0.07246376811594202,
+        "target_point_recall": {
+          "count": 138,
+          "mean": 0.9034338182218453,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 210,
+          "mean": 113.85714285714286,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 7.0,
+          "p75": 64.5,
+          "p95": 477.59999999999945,
+          "max": 2464.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 210,
+        "center_inside_rate": 0.7666666666666667,
+        "center_outside_rate": 0.23333333333333328,
+        "box_intersection_rate": 0.8952380952380953,
+        "all_corners_inside_rate": 0.22380952380952382,
+        "target_visible_endpoint_count": 138,
+        "has_target_point_rate": 0.7898550724637681,
+        "no_target_point_rate": 0.21014492753623193,
+        "target_point_recall": {
+          "count": 138,
+          "mean": 0.6705325430325543,
+          "min": 0.0,
+          "p25": 0.1495433789954338,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 210,
+          "mean": 134.67619047619047,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 17.0,
+          "p75": 81.75,
+          "p95": 814.3499999999997,
+          "max": 2903.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 210,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 138,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 138,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 210,
+          "mean": 107.44761904761904,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 8.0,
+          "p75": 60.5,
+          "p95": 469.9499999999998,
+          "max": 2170.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 210,
+        "center_inside_rate": 0.8857142857142857,
+        "center_outside_rate": 0.11428571428571432,
+        "box_intersection_rate": 0.9714285714285714,
+        "all_corners_inside_rate": 0.2523809523809524,
+        "target_visible_endpoint_count": 138,
+        "has_target_point_rate": 0.8695652173913043,
+        "no_target_point_rate": 0.13043478260869568,
+        "target_point_recall": {
+          "count": 138,
+          "mean": 0.7815903452526474,
+          "min": 0.0,
+          "p25": 0.6871442125237192,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 210,
+          "mean": 130.14285714285714,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 15.5,
+          "p75": 85.75,
+          "p95": 709.3499999999987,
+          "max": 2914.0
+        }
+      }
+    },
+    "> 4": {
+      "previous_gt": {
+        "endpoint_count": 1199,
+        "center_inside_rate": 0.5187656380316931,
+        "center_outside_rate": 0.48123436196830693,
+        "box_intersection_rate": 0.8381984987489575,
+        "all_corners_inside_rate": 0.1651376146788991,
+        "target_visible_endpoint_count": 796,
+        "has_target_point_rate": 0.6884422110552764,
+        "no_target_point_rate": 0.31155778894472363,
+        "target_point_recall": {
+          "count": 796,
+          "mean": 0.5346233169169757,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.6626016260162602,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1199,
+          "mean": 146.604670558799,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 5.0,
+          "p75": 36.0,
+          "p95": 529.4999999999986,
+          "max": 5882.0
+        }
+      },
+      "previous_a1_pred": {
+        "endpoint_count": 1199,
+        "center_inside_rate": 0.010008340283569641,
+        "center_outside_rate": 0.9899916597164303,
+        "box_intersection_rate": 0.025020850708924104,
+        "all_corners_inside_rate": 0.0,
+        "target_visible_endpoint_count": 796,
+        "has_target_point_rate": 0.007537688442211055,
+        "no_target_point_rate": 0.992462311557789,
+        "target_point_recall": {
+          "count": 796,
+          "mean": 0.0037086743093315616,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.0,
+          "p95": 0.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1199,
+          "mean": 174.814011676397,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 17.0,
+          "p95": 504.69999999999845,
+          "max": 12395.0
+        }
+      },
+      "gt_history_cv": {
+        "endpoint_count": 1199,
+        "center_inside_rate": 0.9966638865721434,
+        "center_outside_rate": 0.0033361134278565574,
+        "box_intersection_rate": 0.9983319432860718,
+        "all_corners_inside_rate": 0.9891576313594662,
+        "target_visible_endpoint_count": 796,
+        "has_target_point_rate": 0.9987437185929648,
+        "no_target_point_rate": 0.0012562814070351536,
+        "target_point_recall": {
+          "count": 796,
+          "mean": 0.9982344153198425,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1199,
+          "mean": 168.61050875729774,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 7.0,
+          "p75": 54.0,
+          "p95": 732.4999999999977,
+          "max": 6370.0
+        }
+      },
+      "a1_pred_history_cv": {
+        "endpoint_count": 1199,
+        "center_inside_rate": 0.006672226855713094,
+        "center_outside_rate": 0.9933277731442869,
+        "box_intersection_rate": 0.0316930775646372,
+        "all_corners_inside_rate": 0.0,
+        "target_visible_endpoint_count": 796,
+        "has_target_point_rate": 0.016331658291457288,
+        "no_target_point_rate": 0.9836683417085427,
+        "target_point_recall": {
+          "count": 796,
+          "mean": 0.008012340012144778,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.0,
+          "p95": 0.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1199,
+          "mean": 170.95246038365303,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 16.0,
+          "p95": 443.69999999999936,
+          "max": 12406.0
+        }
+      }
+    }
+  },
+  "cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a1_order.yaml",
+  "cfg_sha256": "bddbb6ad26188dfd09371067af110f3254ca059d08620f99208431a6a3b4beff",
+  "weights": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/20260531-2322-seqtrack3d_nuscenes_a1_order-ct_a1_order_car_60ep_bs16_gpu1/lightning_logs/version_0/checkpoints/last.ckpt",
+  "weights_sha256": "a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82",
+  "reference_endpoints_csv": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/diagnostics/crop_reachability/standard_train/crop_reachability_endpoints.csv",
+  "reference_endpoints_sha256": "9e0e30ecfdf078170baab632468e8d964a62bb29dfd1a8d3054d92c85fda4140",
+  "reference_match": {
+    "reference_endpoint_count": 4246,
+    "observed_endpoint_count": 4246,
+    "missing_endpoint_count": 0,
+    "unexpected_endpoint_count": 0,
+    "allow_partial_reference": false,
+    "exact_match": true
+  },
+  "split": "mini_train",
+  "virtual_rate_mode": "none",
+  "base_scale": 1.25,
+  "base_offset": 2.0,
+  "target_wlh_factor": 1.0,
+  "require_full_history": true,
+  "seed": 42,
+  "device": "cuda:0",
+  "runtime_seconds": 514.0434372425079,
+  "note": "One baseline A1 trajectory is run recursively with its normal previous-prediction anchor. The other anchors are passive counterfactual crop diagnostics on the same endpoint and do not alter the prediction history. previous_gt and gt_history_cv are oracle references; previous_a1_pred and a1_pred_history_cv are GT-free."
+}
+endpoint csv: output/diagnostics/recursive_crop_reachability/standard_a1_recursive/recursive_crop_reachability_endpoints.csv
+summary json: output/diagnostics/recursive_crop_reachability/standard_a1_recursive/recursive_crop_reachability_summary.json

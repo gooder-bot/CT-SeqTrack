@@ -1,0 +1,1330 @@
+virtual-rate mode=gap_pattern tracklets=243/274 frames=2856/5051 drop=0.435 tag=vr_gap1124
+{
+  "endpoint_count": 2127,
+  "current_delta_t": {
+    "count": 2127,
+    "mean": 0.9869962594965337,
+    "min": 0.3997788429260254,
+    "p25": 0.49990200996398926,
+    "p50": 0.9500119686126709,
+    "p75": 1.0495409965515137,
+    "p95": 2.00119686126709,
+    "max": 2.149883985519409
+  },
+  "displacement_norm": {
+    "count": 2127,
+    "mean": 3.4334956921476847,
+    "min": 0.0,
+    "p25": 0.03388934575405905,
+    "p50": 0.137335355972191,
+    "p75": 4.947209996766917,
+    "p95": 16.891540713886954,
+    "max": 36.61491339604669
+  },
+  "modes": {
+    "base": {
+      "endpoint_count": 2127,
+      "center_inside_rate": 0.7480018805829807,
+      "center_outside_rate": 0.25199811941701933,
+      "box_intersection_rate": 0.8222849083215797,
+      "all_corners_inside_rate": 0.6591443347437705,
+      "target_visible_endpoint_count": 1503,
+      "has_target_point_rate": 0.8043912175648703,
+      "no_target_point_rate": 0.1956087824351297,
+      "target_point_recall": {
+        "count": 1503,
+        "mean": 0.7678071201212855,
+        "min": 0.0,
+        "p25": 0.7669683257918551,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 2127,
+        "mean": 312.197461212976,
+        "min": 0.0,
+        "p25": 2.0,
+        "p50": 15.0,
+        "p75": 115.5,
+        "p95": 1951.9999999999945,
+        "max": 16091.0
+      }
+    },
+    "cv_recenter": {
+      "endpoint_count": 2127,
+      "center_inside_rate": 0.9882463563704749,
+      "center_outside_rate": 0.011753643629525135,
+      "box_intersection_rate": 0.9948283968030089,
+      "all_corners_inside_rate": 0.9656793606017866,
+      "target_visible_endpoint_count": 1503,
+      "has_target_point_rate": 0.9933466400532269,
+      "no_target_point_rate": 0.006653359946773074,
+      "target_point_recall": {
+        "count": 1503,
+        "mean": 0.9896291437522837,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 2127,
+        "mean": 286.17489421720734,
+        "min": 0.0,
+        "p25": 2.0,
+        "p50": 16.0,
+        "p75": 114.0,
+        "p95": 1851.199999999997,
+        "max": 17356.0
+      }
+    },
+    "expanded": {
+      "endpoint_count": 2127,
+      "center_inside_rate": 0.8772919605077574,
+      "center_outside_rate": 0.12270803949224263,
+      "box_intersection_rate": 0.9102021626704279,
+      "all_corners_inside_rate": 0.8298072402444758,
+      "target_visible_endpoint_count": 1503,
+      "has_target_point_rate": 0.9035262807717898,
+      "no_target_point_rate": 0.09647371922821024,
+      "target_point_recall": {
+        "count": 1503,
+        "mean": 0.8907956808134271,
+        "min": 0.0,
+        "p25": 1.0,
+        "p50": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "crop_point_count": {
+        "count": 2127,
+        "mean": 1649.9633286318758,
+        "min": 0.0,
+        "p25": 15.0,
+        "p50": 119.0,
+        "p75": 678.5,
+        "p95": 15462.8,
+        "max": 25739.0
+      }
+    }
+  },
+  "delta_t_buckets": {
+    "(0.5, 1]": {
+      "base": {
+        "endpoint_count": 751,
+        "center_inside_rate": 0.7643142476697736,
+        "center_outside_rate": 0.23568575233022637,
+        "box_intersection_rate": 0.8322237017310253,
+        "all_corners_inside_rate": 0.6790945406125166,
+        "target_visible_endpoint_count": 537,
+        "has_target_point_rate": 0.8081936685288641,
+        "no_target_point_rate": 0.1918063314711359,
+        "target_point_recall": {
+          "count": 537,
+          "mean": 0.7685172942232985,
+          "min": 0.0,
+          "p25": 0.8571428571428571,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 751,
+          "mean": 311.91211717709723,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 15.0,
+          "p75": 123.5,
+          "p95": 2416.0,
+          "max": 8110.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 751,
+        "center_inside_rate": 0.9094540612516645,
+        "center_outside_rate": 0.0905459387483355,
+        "box_intersection_rate": 0.9560585885486018,
+        "all_corners_inside_rate": 0.8428761651131824,
+        "target_visible_endpoint_count": 537,
+        "has_target_point_rate": 0.9422718808193669,
+        "no_target_point_rate": 0.05772811918063314,
+        "target_point_recall": {
+          "count": 537,
+          "mean": 0.9236474055539075,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 751,
+          "mean": 1736.3568575233023,
+          "min": 0.0,
+          "p25": 16.0,
+          "p50": 125.0,
+          "p75": 696.0,
+          "p95": 15821.5,
+          "max": 25673.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 751,
+        "center_inside_rate": 0.9973368841544608,
+        "center_outside_rate": 0.0026631158455392434,
+        "box_intersection_rate": 0.9986684420772304,
+        "all_corners_inside_rate": 0.9840213049267643,
+        "target_visible_endpoint_count": 537,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 537,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 751,
+          "mean": 306.9840213049268,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 17.0,
+          "p75": 123.0,
+          "p95": 2059.0,
+          "max": 6232.0
+        }
+      }
+    },
+    "> 2": {
+      "base": {
+        "endpoint_count": 255,
+        "center_inside_rate": 0.6588235294117647,
+        "center_outside_rate": 0.3411764705882353,
+        "box_intersection_rate": 0.6823529411764706,
+        "all_corners_inside_rate": 0.6470588235294118,
+        "target_visible_endpoint_count": 180,
+        "has_target_point_rate": 0.6666666666666666,
+        "no_target_point_rate": 0.33333333333333337,
+        "target_point_recall": {
+          "count": 180,
+          "mean": 0.6435573512702665,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 255,
+          "mean": 341.58039215686273,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 21.0,
+          "p75": 113.5,
+          "p95": 2021.699999999994,
+          "max": 9707.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 255,
+        "center_inside_rate": 0.6980392156862745,
+        "center_outside_rate": 0.3019607843137255,
+        "box_intersection_rate": 0.7333333333333333,
+        "all_corners_inside_rate": 0.6823529411764706,
+        "target_visible_endpoint_count": 180,
+        "has_target_point_rate": 0.7222222222222222,
+        "no_target_point_rate": 0.2777777777777778,
+        "target_point_recall": {
+          "count": 180,
+          "mean": 0.7099280337634655,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 255,
+          "mean": 1878.549019607843,
+          "min": 0.0,
+          "p25": 17.5,
+          "p50": 144.0,
+          "p75": 694.0,
+          "p95": 16747.199999999986,
+          "max": 25561.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 255,
+        "center_inside_rate": 0.9607843137254902,
+        "center_outside_rate": 0.039215686274509776,
+        "box_intersection_rate": 0.9803921568627451,
+        "all_corners_inside_rate": 0.9019607843137255,
+        "target_visible_endpoint_count": 180,
+        "has_target_point_rate": 0.9666666666666667,
+        "no_target_point_rate": 0.033333333333333326,
+        "target_point_recall": {
+          "count": 180,
+          "mean": 0.9507023881870474,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 255,
+          "mean": 349.38823529411764,
+          "min": 0.0,
+          "p25": 4.0,
+          "p50": 17.0,
+          "p75": 125.5,
+          "p95": 1818.6999999999996,
+          "max": 17356.0
+        }
+      }
+    },
+    "<= 0.5": {
+      "base": {
+        "endpoint_count": 610,
+        "center_inside_rate": 0.8065573770491803,
+        "center_outside_rate": 0.1934426229508197,
+        "box_intersection_rate": 0.9459016393442623,
+        "all_corners_inside_rate": 0.6213114754098361,
+        "target_visible_endpoint_count": 427,
+        "has_target_point_rate": 0.9180327868852459,
+        "no_target_point_rate": 0.08196721311475408,
+        "target_point_recall": {
+          "count": 427,
+          "mean": 0.8581434397909913,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 610,
+          "mean": 243.71803278688526,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 13.5,
+          "p75": 98.75,
+          "p95": 1685.4999999999923,
+          "max": 6796.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 610,
+        "center_inside_rate": 0.9967213114754099,
+        "center_outside_rate": 0.003278688524590123,
+        "box_intersection_rate": 0.9983606557377049,
+        "all_corners_inside_rate": 0.9573770491803278,
+        "target_visible_endpoint_count": 427,
+        "has_target_point_rate": 0.9976580796252927,
+        "no_target_point_rate": 0.0023419203747072626,
+        "target_point_recall": {
+          "count": 427,
+          "mean": 0.9950087991071597,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 610,
+          "mean": 1382.927868852459,
+          "min": 0.0,
+          "p25": 15.0,
+          "p50": 123.5,
+          "p75": 625.75,
+          "p95": 8907.899999999965,
+          "max": 25739.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 610,
+        "center_inside_rate": 0.9967213114754099,
+        "center_outside_rate": 0.003278688524590123,
+        "box_intersection_rate": 0.9983606557377049,
+        "all_corners_inside_rate": 0.9918032786885246,
+        "target_visible_endpoint_count": 427,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 427,
+          "mean": 0.9990505728210646,
+          "min": 0.5945945945945946,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 610,
+          "mean": 253.60491803278688,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 14.5,
+          "p75": 95.75,
+          "p95": 1626.0999999999972,
+          "max": 6814.0
+        }
+      }
+    },
+    "(1, 2]": {
+      "base": {
+        "endpoint_count": 511,
+        "center_inside_rate": 0.6986301369863014,
+        "center_outside_rate": 0.3013698630136986,
+        "box_intersection_rate": 0.7299412915851272,
+        "all_corners_inside_rate": 0.6810176125244618,
+        "target_visible_endpoint_count": 359,
+        "has_target_point_rate": 0.7325905292479109,
+        "no_target_point_rate": 0.2674094707520891,
+        "target_point_recall": {
+          "count": 359,
+          "mean": 0.7215953830779374,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 511,
+          "mean": 379.7005870841487,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 15.0,
+          "p75": 129.0,
+          "p95": 2075.5,
+          "max": 16091.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 511,
+        "center_inside_rate": 0.776908023483366,
+        "center_outside_rate": 0.22309197651663404,
+        "box_intersection_rate": 0.8258317025440313,
+        "all_corners_inside_rate": 0.7318982387475538,
+        "target_visible_endpoint_count": 359,
+        "has_target_point_rate": 0.8245125348189415,
+        "no_target_point_rate": 0.1754874651810585,
+        "target_point_recall": {
+          "count": 359,
+          "mean": 0.8083884350527896,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 511,
+          "mean": 1727.6947162426613,
+          "min": 0.0,
+          "p25": 12.5,
+          "p50": 97.0,
+          "p75": 723.5,
+          "p95": 15197.0,
+          "max": 25611.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 511,
+        "center_inside_rate": 0.9784735812133072,
+        "center_outside_rate": 0.021526418786692814,
+        "box_intersection_rate": 0.9921722113502935,
+        "all_corners_inside_rate": 0.9393346379647749,
+        "target_visible_endpoint_count": 359,
+        "has_target_point_rate": 0.9888579387186629,
+        "no_target_point_rate": 0.011142061281337101,
+        "target_point_recall": {
+          "count": 359,
+          "mean": 0.9824277955192736,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 511,
+          "mean": 262.9275929549902,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 15.0,
+          "p75": 113.5,
+          "p95": 1641.0,
+          "max": 5592.0
+        }
+      }
+    }
+  },
+  "displacement_buckets": {
+    "<= 0.5": {
+      "base": {
+        "endpoint_count": 1318,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 920,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 920,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1318,
+          "mean": 326.75189681335354,
+          "min": 0.0,
+          "p25": 4.0,
+          "p50": 21.0,
+          "p75": 132.0,
+          "p95": 2414.1499999999996,
+          "max": 7168.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 1318,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 920,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 920,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1318,
+          "mean": 1808.5432473444614,
+          "min": 0.0,
+          "p25": 20.0,
+          "p50": 148.0,
+          "p75": 718.75,
+          "p95": 15725.849999999991,
+          "max": 25739.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 1318,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 920,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 920,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 1318,
+          "mean": 334.3497723823976,
+          "min": 0.0,
+          "p25": 4.0,
+          "p50": 22.0,
+          "p75": 132.75,
+          "p95": 2408.899999999999,
+          "max": 17356.0
+        }
+      }
+    },
+    "(2, 4]": {
+      "base": {
+        "endpoint_count": 126,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.14285714285714285,
+        "target_visible_endpoint_count": 97,
+        "has_target_point_rate": 0.9381443298969072,
+        "no_target_point_rate": 0.061855670103092786,
+        "target_point_recall": {
+          "count": 97,
+          "mean": 0.8347714586627161,
+          "min": 0.0,
+          "p25": 0.8571428571428571,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 126,
+          "mean": 211.05555555555554,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 9.5,
+          "p75": 113.75,
+          "p95": 795.5,
+          "max": 4496.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 126,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 97,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 97,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 126,
+          "mean": 1255.2460317460318,
+          "min": 0.0,
+          "p25": 11.75,
+          "p50": 126.0,
+          "p75": 705.25,
+          "p95": 4728.0,
+          "max": 20213.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 126,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9761904761904762,
+        "target_visible_endpoint_count": 97,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 97,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 126,
+          "mean": 188.76984126984127,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 10.0,
+          "p75": 95.25,
+          "p95": 1297.5,
+          "max": 2629.0
+        }
+      }
+    },
+    "> 4": {
+      "base": {
+        "endpoint_count": 617,
+        "center_inside_rate": 0.1312803889789303,
+        "center_outside_rate": 0.8687196110210698,
+        "box_intersection_rate": 0.3873581847649919,
+        "all_corners_inside_rate": 0.0,
+        "target_visible_endpoint_count": 433,
+        "has_target_point_rate": 0.3348729792147806,
+        "no_target_point_rate": 0.6651270207852193,
+        "target_point_recall": {
+          "count": 433,
+          "mean": 0.23104219411549326,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.42105263157894735,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 617,
+          "mean": 279.2058346839546,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 6.0,
+          "p75": 80.0,
+          "p95": 1042.199999999994,
+          "max": 16091.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 617,
+        "center_inside_rate": 0.5769854132901134,
+        "center_outside_rate": 0.42301458670988656,
+        "box_intersection_rate": 0.6904376012965965,
+        "all_corners_inside_rate": 0.413290113452188,
+        "target_visible_endpoint_count": 433,
+        "has_target_point_rate": 0.6651270207852193,
+        "no_target_point_rate": 0.33487297921478065,
+        "target_point_recall": {
+          "count": 433,
+          "mean": 0.6209374324770919,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 617,
+          "mean": 1171.2139384116695,
+          "min": 0.0,
+          "p25": 8.0,
+          "p50": 76.0,
+          "p75": 560.0,
+          "p95": 5776.799999999995,
+          "max": 23570.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 617,
+        "center_inside_rate": 0.9611021069692058,
+        "center_outside_rate": 0.03889789303079416,
+        "box_intersection_rate": 0.9821717990275527,
+        "all_corners_inside_rate": 0.8881685575364667,
+        "target_visible_endpoint_count": 433,
+        "has_target_point_rate": 0.976905311778291,
+        "no_target_point_rate": 0.023094688221709014,
+        "target_point_recall": {
+          "count": 433,
+          "mean": 0.9640013927475343,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 617,
+          "mean": 181.0907617504052,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 9.0,
+          "p75": 82.0,
+          "p95": 723.399999999992,
+          "max": 11842.0
+        }
+      }
+    },
+    "(1, 2]": {
+      "base": {
+        "endpoint_count": 42,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 36,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 36,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 42,
+          "mean": 667.0,
+          "min": 0.0,
+          "p25": 2.25,
+          "p50": 107.0,
+          "p75": 801.5,
+          "p95": 2753.35,
+          "max": 3303.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 42,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 36,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 36,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 42,
+          "mean": 4520.047619047619,
+          "min": 1.0,
+          "p25": 14.25,
+          "p50": 558.0,
+          "p75": 5516.5,
+          "p95": 18809.449999999997,
+          "max": 19968.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 42,
+        "center_inside_rate": 0.9761904761904762,
+        "center_outside_rate": 0.023809523809523836,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 0.9761904761904762,
+        "target_visible_endpoint_count": 36,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 36,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 42,
+          "mean": 557.7380952380952,
+          "min": 0.0,
+          "p25": 2.25,
+          "p50": 95.0,
+          "p75": 663.25,
+          "p95": 2009.5499999999997,
+          "max": 2598.0
+        }
+      }
+    },
+    "(0.5, 1]": {
+      "base": {
+        "endpoint_count": 24,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 17,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 17,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 24,
+          "mean": 271.1666666666667,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 4.0,
+          "p75": 18.0,
+          "p95": 1898.2999999999995,
+          "max": 2485.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 24,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 17,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 17,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 24,
+          "mean": 2298.75,
+          "min": 0.0,
+          "p25": 8.5,
+          "p50": 12.0,
+          "p75": 110.5,
+          "p95": 17372.05,
+          "max": 18218.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 24,
+        "center_inside_rate": 1.0,
+        "center_outside_rate": 0.0,
+        "box_intersection_rate": 1.0,
+        "all_corners_inside_rate": 1.0,
+        "target_visible_endpoint_count": 17,
+        "has_target_point_rate": 1.0,
+        "no_target_point_rate": 0.0,
+        "target_point_recall": {
+          "count": 17,
+          "mean": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 24,
+          "mean": 378.25,
+          "min": 0.0,
+          "p25": 3.75,
+          "p50": 4.5,
+          "p75": 18.0,
+          "p95": 1978.8999999999999,
+          "max": 4529.0
+        }
+      }
+    }
+  },
+  "target_point_buckets": {
+    "(0, 5]": {
+      "base": {
+        "endpoint_count": 557,
+        "center_inside_rate": 0.7522441651705566,
+        "center_outside_rate": 0.2477558348294434,
+        "box_intersection_rate": 0.8312387791741472,
+        "all_corners_inside_rate": 0.6481149012567325,
+        "target_visible_endpoint_count": 557,
+        "has_target_point_rate": 0.7791741472172352,
+        "no_target_point_rate": 0.2208258527827648,
+        "target_point_recall": {
+          "count": 557,
+          "mean": 0.7734590065828845,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 557,
+          "mean": 16.26391382405745,
+          "min": 0.0,
+          "p25": 2.0,
+          "p50": 5.0,
+          "p75": 15.0,
+          "p95": 71.19999999999993,
+          "max": 230.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 557,
+        "center_inside_rate": 0.895870736086176,
+        "center_outside_rate": 0.10412926391382404,
+        "box_intersection_rate": 0.933572710951526,
+        "all_corners_inside_rate": 0.8384201077199281,
+        "target_visible_endpoint_count": 557,
+        "has_target_point_rate": 0.9084380610412927,
+        "no_target_point_rate": 0.09156193895870735,
+        "target_point_recall": {
+          "count": 557,
+          "mean": 0.9048473967684022,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 557,
+          "mean": 106.54398563734291,
+          "min": 0.0,
+          "p25": 10.0,
+          "p50": 34.0,
+          "p75": 136.0,
+          "p95": 423.59999999999843,
+          "max": 1381.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 557,
+        "center_inside_rate": 0.9946140035906643,
+        "center_outside_rate": 0.0053859964093356805,
+        "box_intersection_rate": 0.9982046678635548,
+        "all_corners_inside_rate": 0.9712746858168761,
+        "target_visible_endpoint_count": 557,
+        "has_target_point_rate": 0.9946140035906643,
+        "no_target_point_rate": 0.0053859964093356805,
+        "target_point_recall": {
+          "count": 557,
+          "mean": 0.9934171154997007,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 557,
+          "mean": 14.91382405745063,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 5.0,
+          "p75": 13.0,
+          "p95": 60.399999999999864,
+          "max": 361.0
+        }
+      }
+    },
+    "(5, 20]": {
+      "base": {
+        "endpoint_count": 340,
+        "center_inside_rate": 0.7441176470588236,
+        "center_outside_rate": 0.25588235294117645,
+        "box_intersection_rate": 0.8294117647058824,
+        "all_corners_inside_rate": 0.6735294117647059,
+        "target_visible_endpoint_count": 340,
+        "has_target_point_rate": 0.8117647058823529,
+        "no_target_point_rate": 0.18823529411764706,
+        "target_point_recall": {
+          "count": 340,
+          "mean": 0.7743871197273355,
+          "min": 0.0,
+          "p25": 0.8333333333333334,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 340,
+          "mean": 102.05294117647058,
+          "min": 0.0,
+          "p25": 11.0,
+          "p50": 28.0,
+          "p75": 68.0,
+          "p95": 234.95000000000022,
+          "max": 11412.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 340,
+        "center_inside_rate": 0.8794117647058823,
+        "center_outside_rate": 0.12058823529411766,
+        "box_intersection_rate": 0.9176470588235294,
+        "all_corners_inside_rate": 0.8411764705882353,
+        "target_visible_endpoint_count": 340,
+        "has_target_point_rate": 0.9088235294117647,
+        "no_target_point_rate": 0.0911764705882353,
+        "target_point_recall": {
+          "count": 340,
+          "mean": 0.8859771199302933,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 340,
+          "mean": 518.2794117647059,
+          "min": 1.0,
+          "p25": 57.0,
+          "p50": 187.0,
+          "p75": 464.25,
+          "p95": 1216.8500000000001,
+          "max": 21520.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 340,
+        "center_inside_rate": 0.9882352941176471,
+        "center_outside_rate": 0.0117647058823529,
+        "box_intersection_rate": 0.9941176470588236,
+        "all_corners_inside_rate": 0.9735294117647059,
+        "target_visible_endpoint_count": 340,
+        "has_target_point_rate": 0.9911764705882353,
+        "no_target_point_rate": 0.008823529411764675,
+        "target_point_recall": {
+          "count": 340,
+          "mean": 0.9869670974450387,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 340,
+          "mean": 45.81470588235294,
+          "min": 0.0,
+          "p25": 14.0,
+          "p50": 28.0,
+          "p75": 58.0,
+          "p95": 139.25000000000006,
+          "max": 393.0
+        }
+      }
+    },
+    "<= 0": {
+      "base": {
+        "endpoint_count": 624,
+        "center_inside_rate": 0.7435897435897436,
+        "center_outside_rate": 0.2564102564102564,
+        "box_intersection_rate": 0.8012820512820513,
+        "all_corners_inside_rate": 0.6682692307692307,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 624,
+          "mean": 15.790064102564102,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 6.0,
+          "p95": 78.70000000000005,
+          "max": 519.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 624,
+        "center_inside_rate": 0.8589743589743589,
+        "center_outside_rate": 0.14102564102564108,
+        "box_intersection_rate": 0.8958333333333334,
+        "all_corners_inside_rate": 0.8044871794871795,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 624,
+          "mean": 167.9551282051282,
+          "min": 0.0,
+          "p25": 3.0,
+          "p50": 13.5,
+          "p75": 63.0,
+          "p95": 799.9500000000002,
+          "max": 4990.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 624,
+        "center_inside_rate": 0.9823717948717948,
+        "center_outside_rate": 0.017628205128205177,
+        "box_intersection_rate": 0.9903846153846154,
+        "all_corners_inside_rate": 0.9663461538461539,
+        "target_visible_endpoint_count": 0,
+        "has_target_point_rate": null,
+        "no_target_point_rate": null,
+        "target_point_recall": {
+          "count": 0,
+          "mean": null,
+          "min": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p95": null,
+          "max": null
+        },
+        "crop_point_count": {
+          "count": 624,
+          "mean": 14.474358974358974,
+          "min": 0.0,
+          "p25": 0.0,
+          "p50": 1.0,
+          "p75": 6.0,
+          "p95": 63.250000000000114,
+          "max": 519.0
+        }
+      }
+    },
+    "> 20": {
+      "base": {
+        "endpoint_count": 606,
+        "center_inside_rate": 0.7508250825082509,
+        "center_outside_rate": 0.24917491749174914,
+        "box_intersection_rate": 0.8316831683168316,
+        "all_corners_inside_rate": 0.6518151815181518,
+        "target_visible_endpoint_count": 606,
+        "has_target_point_rate": 0.8234323432343235,
+        "no_target_point_rate": 0.17656765676567654,
+        "target_point_recall": {
+          "count": 606,
+          "mean": 0.7589204854262892,
+          "min": 0.0,
+          "p25": 0.6172040169133193,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 606,
+          "mean": 1007.3168316831683,
+          "min": 0.0,
+          "p25": 111.5,
+          "p50": 247.0,
+          "p75": 1105.25,
+          "p95": 5480.0,
+          "max": 16091.0
+        }
+      },
+      "expanded": {
+        "endpoint_count": 606,
+        "center_inside_rate": 0.8778877887788779,
+        "center_outside_rate": 0.12211221122112215,
+        "box_intersection_rate": 0.8993399339933993,
+        "all_corners_inside_rate": 0.8415841584158416,
+        "target_visible_endpoint_count": 606,
+        "has_target_point_rate": 0.8960396039603961,
+        "no_target_point_rate": 0.10396039603960394,
+        "target_point_recall": {
+          "count": 606,
+          "mean": 0.8805836427166354,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 606,
+          "mean": 5229.551155115511,
+          "min": 17.0,
+          "p25": 609.75,
+          "p50": 1504.0,
+          "p75": 6344.25,
+          "p95": 20940.75,
+          "max": 25739.0
+        }
+      },
+      "cv_recenter": {
+        "endpoint_count": 606,
+        "center_inside_rate": 0.9884488448844885,
+        "center_outside_rate": 0.011551155115511524,
+        "box_intersection_rate": 0.9966996699669967,
+        "all_corners_inside_rate": 0.9554455445544554,
+        "target_visible_endpoint_count": 606,
+        "has_target_point_rate": 0.9933993399339934,
+        "no_target_point_rate": 0.0066006600660065695,
+        "target_point_recall": {
+          "count": 606,
+          "mean": 0.9876410174835577,
+          "min": 0.0,
+          "p25": 1.0,
+          "p50": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "crop_point_count": {
+          "count": 606,
+          "mean": 950.1287128712871,
+          "min": 4.0,
+          "p25": 126.0,
+          "p50": 254.5,
+          "p75": 1079.75,
+          "p95": 5183.0,
+          "max": 17356.0
+        }
+      }
+    }
+  },
+  "cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_gap1124.yaml",
+  "split": "mini_train",
+  "virtual_rate_mode": "gap_pattern",
+  "base_scale": 1.25,
+  "base_offset": 2.0,
+  "expanded_scale_multiplier": 2.0,
+  "expanded_offset_multiplier": 2.0,
+  "target_wlh_factor": 1.0,
+  "require_full_history": true,
+  "note": "base and expanded use the previous GT box; cv_recenter uses only GT history with a constant-velocity center extrapolation. This is an oracle reachability diagnostic, not an online tracking result."
+}
+endpoint csv: output/diagnostics/crop_reachability/gap1124_train/crop_reachability_endpoints.csv
+summary json: output/diagnostics/crop_reachability/gap1124_train/crop_reachability_summary.json

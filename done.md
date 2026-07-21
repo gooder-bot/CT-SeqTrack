@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-20
+更新时间：2026-07-21
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -24,6 +24,8 @@
 - [x] P0-B3 passive reliability 三协议 full 已完成并在本地独立复核：reference endpoints/checkpoint hash 完全一致，预注册结论为 `RELIABILITY_GO_RAW_CV_ANCHOR_NO_GO`；可靠性信号只能收窄为 observation-quality proxy，raw-CV anchor 与当前 selector 均为 No-Go。
 - [x] P0-B4 10-tracklet smoke 与完整 mini_val 冻结验证已完成并本地复算：gap/burst AUROC `0.680/0.712`、固定阈值 recall `0.568/0.609`，正式结论为 `NO_GO_OBSERVATION_RELIABILITY_VALIDATION`；reliability-controlled anchor 在实现前停止。
 - [x] P0-A standard warmup/active 真实 batch 诊断已完成：默认 residual 数值稳定但实际修正约 `1e-7 m`，未通过非平凡幅度验收。
+- [x] TWC 同提交 A/B/C seed42 已完成并本地复核：Final `B-A=-15.30/-24.18`、`C-B=+8.31/+11.74`、`C-A=-7.00/-12.44`；主方法 promotion No-Go，不补 seed43/44。
+- [x] 2026-07-21 完成旧路线阶段决策：P0-B、P0-C 与 TWC 的核心筛选已足够关闭旧扩展路线，项目转入 M0；这是一项研究阶段决策，不代表 M1–M4 已实现或已获得性能增益。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text
@@ -54,6 +56,7 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 - [x] `A3-order-gate-safe / A3-order-conf-res-gate`：gate-safe 比旧 P5 full 安全但低于 A2；conf-res 旧 best 很高但 final 崩坏。
 - [x] 2026-07-08 五次稳定性复核：A3 best-e14 retest、A2 seed43、A2 seed44、A2+TWC w0.01、A3 conf-res rerun 均已整理到 `compare_results/reports/latest_5runs_comparison.md`。
 - [x] corrected A1/A2+TWC seed42：A1 相对配置级 baseline final `+1.49/+5.03`，A2 `-0.93/-2.07`；完整结果见 `compare_results/reports/corrected_twc_seed42_comparison.md`。
+- [x] 同提交 TWC A/B/C seed42：完成 provenance/config/checkpoint/event 审计、CSV 汇总和 PNG/SVG 图表；确认 `C-B` 净正效应但 C 仍显著低于 A，详见 `compare_results/reports/twc_abc_seed42_comparison_20260721.md`。
 - [x] gap1124 / burst-drop / random20 的 A1/A2 六组 HTV 筛选：A2 只在 random20 为正，在两个强不规则协议为负；见 `compare_results/reports/htv_6runs_comparison.md`。
 - [x] TrajTrack aligned seed42 训练完整性与 evaluator 审计：确认当前高分路径使用 GT-assisted refinement，不能作为公平在线排名；见 `compare_results/reports/trajtrack_gt_assisted_vs_plain_seqtrack_reference.md`。
 - [x] 逐页视觉核查 SeqTrack3D 与 TrajTrack 本地论文，并用 HVTrack、StreamTrack、MambaTrack3D、ChronoTrack 的官方论文页面收窄 related-work 边界。
@@ -72,12 +75,25 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 P0-B4 独立验证进一步显示 observation-only trigger 的强协议 AUROC 与 recall 均未过线，
 同批 raw-CV 第二 crop 在强协议没有任何 trajectory-only endpoint，
 因此 reliability-updated Kalman/frozen-state 与 active dual-anchor 在实现前停止；
-下一步转向 frozen variable-rate protocol/benchmark，再做 reachable-subset residual 与 TWC 的窄控制。
-corrected-TWC 的 A1 seed42 有正信号，但只有单 seed且 baseline 不是同提交；
+下一步正式进入 M0：完成冻结 A/B/C checkpoint 的 strong-cadence/path-variance、P0-C-D1、reachable-subset proposal oracle 和 candidate 伪速度审计；M1 只并行准备代码骨架与零初始化等价性测试。
+corrected-TWC 的同提交 `C-B` 有正信号，但 paired-view 退化更大，C 仍低于 A；TWC 主方法 promotion 已 No-Go；
 HTV 六组显示旧 feature-concat dynamics 只在温和 random20 为正，强 gap/burst 为负；
 TrajTrack 当前本地高分含 GT oracle，只能作为实现诊断；
 gate / conf-res 目前也不能作为稳定主配置。
 ```
+
+## 2026-07-21：TWC A/B/C seed42 同提交结果
+
+结果目录 `output/paper_twc_abc_20260720_183711/` 的 A/B/C 三组均来自 commit `343145d`，tracked source clean；seed42、mini_train/mini_val selection、batch16、candidate4、60 epoch、1262 steps/epoch 和每5 epoch评测完全一致。B/C resolved config 除运行路径/tag 外只差 `twc_weight: 0.0 -> 0.05`。
+
+- A single-view final：`50.01 Success / 58.20 Precision`。
+- B paired-view weight0 final：`34.71 / 34.02`，`B-A=-15.30/-24.18`。
+- C corrected-TWC final：`43.01 / 45.76`，`C-B=+8.31/+11.74`，但 `C-A=-7.00/-12.44`。
+- Late mean 的 `C-B=+7.35/+10.64`、`C-A=-6.36/-9.24`，结论不依赖 final 单点。
+- B/C 的 75720 步 valid ratio 序列完全一致，anchor/current-point gap max 全程为0；C 的末1000步 center/angle gap 比 B 低 `2.17%/6.13%`。
+- A/B/C `last.ckpt` SHA256 分别为 `08b27a65...d7de1`、`24f2c20d...fa04c9`、`a26c59de...7b2ca`。
+
+生成 `tools/summarize_twc_abc_seed42.py`、6份 CSV、3组 PNG/SVG 图表和完整报告。最终记录为 `C_MINUS_B_POSITIVE_ON_STANDARD_SEED42` 与 `NO_GO_TWC_MAIN_METHOD_PROMOTION`；不补 seed43/44，只允许冻结 checkpoint 的 strong-cadence/path-variance 输出型收尾。
 
 ## 2026-07-20：P0-B3 reliability 三协议回传与复核
 
@@ -1645,10 +1661,30 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 ```
 ---
 
-## 2026-07-20：P0-C 冻结协议工程入口完成（待服务器真实数据验收）
+## 2026-07-20：P0-C 冻结协议工程与服务器真实 batch 验收完成
 
 - `datasets/__init__.py` 已支持 train 与 val/test/eval cadence 字段分离，并保留旧无前缀配置的兼容回退。
 - nuScenes virtual-rate manifest 升级为 stable-token v2：以 version/split/scene/instance 建键，记录 protocol、endpoint、commit 与多层 SHA256，并对错 split/role/protocol/tracklet/hash fail fast。
 - 新增离线 split-wide shuffled-dt manifest；batch 与递归评测同时保留 real/effective time，且模型只有 `DynamicsEncoder` 读取 effective time。
 - 新增 `tools/check_p0c_time_controls.py`、`tools/build_dynamics_time_manifest.py`、P0-C gap1124 配置和 `protocols/README.md`；`main.py` 会写 `run_provenance.json`。
-- 本地已通过相关 Python 文件 `py_compile`、split-aware config/hash 自测和 synthetic effective-time 自测。由于本地 Windows 环境缺少 nuScenes devkit，真实 manifest 构建、真实 batch invariance 与冻结 checkpoint 三路评测留给服务器执行，不能提前记为 P0-C 实验验收完成。
+- 本地已通过相关 Python 文件 `py_compile`、split-aware config/hash 自测和 synthetic effective-time 自测。
+- 服务器 clean commit `343145d` 已生成 val/test gap1124 cadence manifest 与 test shuffled-dt manifest；val/test 均为 `91/106 tracklets`、`1257/2285 frames`，test endpoint selection SHA256 为 `85e5603c...f9649f6f`。
+- shuffled mapping 为 `1257 endpoints / 1166 transitions`，满足 `1257 - 1166 = 91 tracklets`；真实 nuScenes batch 的 frame/crop/candidate/label/real-time 不变量检查最终输出 `P0-C true/fixed/shuffled batch invariance: PASS`。
+- 本节完成的是协议工程和输入公平性验收；当时三路性能仍待执行，随后已在下一节完成并判定 No-Go。验证报告见 `compare_results/reports/p0c_frozen_protocol_validation_20260720.md`。
+
+## 2026-07-20：P0-C 同 checkpoint 三路 time-control 性能完成并 No-Go
+
+- 使用 standard-trained A2-order-dyn seed42 60ep final/last checkpoint，SHA256 为 `b508f9580d52c7f90cf7d4d09ac38ad6043481a42cc84ef3fcdca63924ac87ad`。
+- true/fixed/shuffled 三份 provenance 共享 commit `343145d`、source config `69b801f7...7d658`、test manifest/selection、seed42 和 `91 tracklets / 1257 frames`；resolved config 只在时间控制字段与 log_dir 上不同。
+- 指标分别为 true `55.2247 / 66.8854`、fixed `54.7872 / 66.3624`、shuffled `55.3480 / 66.8298`。true 相对 fixed 为 `+0.4375 / +0.5231`，相对 shuffled 为 `-0.1233 / +0.0557`。
+- 未达到 true 同时超过两个对照且 `Success >= +0.5 / Precision >= +1.0` 的预注册门槛，正式判定 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；不扩展 burst/fixed-gap/multiseed。
+- tarball、三个原始 manifest file/content hash、selection/permutation hash、console 与 TensorBoard events 已在本地独立复核；完整报告见 `compare_results/reports/p0c_frozen_protocol_validation_20260720.md`。
+
+## 2026-07-20：P0 后论文可行性与 code-to-claim 审计完成
+
+- 沿 `sampler -> time fields -> DynamicsEncoder -> residual/TWC loss -> protocol/provenance` 重新核对代码与实验结论。
+- 确认 A1 corrected-TWC 使用 `main_time_source=order` 且关闭 DynamicsEncoder；其正信号只能支持 history-resampling consistency，不能直接支持 physical timestamp 收益。
+- 确认当前 bounded residual 将两个由完整 displacement 标签监督的 proposal 直接相加，存在重复运动的定义歧义；后续改为先做 crop-reachable `d_obs -> d_dyn` oracle blend，oracle 通过才允许修正公式和训练。
+- 确认 stable virtual-rate/effective-time/provenance 当前只完整接入 nuScenes；Waymo 与统一 endpoint/per-tracklet tracking logger 仍是 benchmark 缺口。
+- 将论文优先级改为 P0-C-D1 -> 同提交 TWC A/B/C seed42 -> 通过后多 seed/完整数据/第二数据集；TWC 与 residual 均失败则转多模型 variable-rate benchmark/diagnosis。
+- 完整报告见 `compare_results/reports/paper_viability_and_execution_20260720.md`，并已同步更新 `README.md`、`refined_plan.md`、`need_to_do.md`、`sum_results.md` 与根目录早期思路文档的状态说明。

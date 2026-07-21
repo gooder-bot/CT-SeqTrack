@@ -1,16 +1,41 @@
 # CT-SeqTrack 研究计划与论文定位
 
-更新时间：2026-07-20
+更新时间：2026-07-21
 
-这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。
+这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。2026-07-21 之后的新候选贡献、公式、代码落点和 Go/No-Go 见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
 
 ---
 
+## 0. P0 后的论文可行性决策
+
+当前项目仍有论文机会，但不能按“CT-SeqTrack full model 已经成立”继续。完整的 code-to-claim 审计、方法/benchmark 分叉和实验底线见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
+
+**2026-07-21 阶段决定**：前序 P0-B、P0-C 与同提交 TWC A/B/C 已经足以结束旧路线筛选，项目正式进入 M 阶段。当前活动阶段是 M0；M1 只解锁工程准备，M2–M4 仍由 oracle 和因果控制逐级解锁。这表示研究可以转向新方法闭环，不表示 dual-clock 已经涨点或可以写成已验证贡献。
+
+四个会决定论文名称和贡献形态的事实是：
+
+- 同提交 A1 TWC A/B/C 已完成：`C-B` final 为 `+8.31/+11.74`，但 paired-view 的 `B-A` 为 `-15.30/-24.18`，导致 `C-A=-7.00/-12.44`。这只支持 TWC 对受损 paired-view 路径的部分修复，不能支持主方法 promotion。
+- A1 corrected-TWC 使用 `main_time_source=order` 且关闭 `DynamicsEncoder`；即使有 `C-B`，也只能支持 rate/resampling consistency，不能单独证明真实 timestamp 有效。
+- 当前 bounded residual 把完整 `dynamics_displacement_pred` 加到已经预测完整 displacement 的 observation 输出上，存在重复运动的定义歧义；必须先做 `d_obs -> d_dyn` oracle convex-blend feasibility。
+- P0-C 已证明当前 feature-concat A2 的 true-dt 不超过 shuffled；显式时间方法主张必须由新的机制重新通过同类负对照。
+
+论文优先级因此改为：
+
+```text
+同提交 TWC A/B/C seed42：主方法 promotion No-Go
+    -> M0：冻结 checkpoint 的 strong-cadence/path-variance、P0-C-D1、proposal oracle、candidate 审计
+        -> M1：物理一致 augmentation + zero-init dual-clock（工程准备可并行）
+            -> M2：oracle 通过后做 proposal innovation seed42 true/fixed/shuffled
+                -> M3：因果正信号后做 asymmetric path distillation
+                    -> M4：tube oracle/calibration 通过后做 filter/tube
+        -> 任一关键 gate 再失败：停止对应模块，保留 benchmark/diagnosis 分叉
+```
+
 ## 1. 最终定位
 
-当前方向继续成立，但论文定位必须收窄：
+研究问题继续成立，但论文定位必须由后续正证据决定：
 
-**真实时间感知的 3D 单目标跟踪：在不规则采样、掉帧和长时间间隔下，用真实 `delta_t` 驱动历史状态、当前观测和序列约束。**
+**在不规则采样、掉帧和长时间间隔下，评估并提高 3D SOT 对观测 cadence 和历史采样路径的鲁棒性；只有 explicit-dt 机制通过负对照，才升级为真实时间感知状态估计。**
 
 更稳的关键词：
 
@@ -20,13 +45,18 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 一句话主线：
 
-**真实 timestamp 改变了历史状态的物理含义；CT-SeqTrack 当前先用冻结的 variable-rate / held-out-cadence 协议诊断这一变化，再要求轻量运动先验与重采样一致性通过物理时间负对照。**
+**真实 timestamp 改变了历史状态的物理含义；当前先用冻结的 variable-rate / held-out-cadence 协议诊断这一变化，并分别验证 resampling consistency 的净贡献与 explicit-dt 的物理时间因果性。**
 
 可考虑标题：
 
+- CT-SeqTrack: Dual-Clock State Filtering for Variable-Rate 3D Single Object Tracking
+- Physical-Time State Estimation for Variable-Rate LiDAR 3D Tracking
+- Endpoint-Consistent History Resampling for Variable-Rate 3D Single Object Tracking
 - CT-SeqTrack: Timestamp-native Sequence Modeling for 3D Point Cloud Tracking
 - Variable-rate 3D Single Object Tracking with Time-resampling Consistency
 - Timestamp-aware Sequence Tracking for 3D Single Object Tracking
+
+标题也必须由证据分叉：只有 explicit-dt 机制通过 true/fixed/shuffled，才使用 `timestamp-native/time-aware`；如果只有 A1-TWC 成立，应使用 `variable-rate/resampling-consistent`；如果方法机制均失败，则改为 benchmark/diagnosis 标题。
 
 不要把主 claim 写成：
 
@@ -39,7 +69,7 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 - 已有结果支持：主干保留 SeqTrack3D 的 order-time 语义，同时把真实 `delta_t/current_delta_t` 注入 `DynamicsEncoder`，比直接替换主干时间 token 更稳定。
 - 目前不能宣称：完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- corrected-TWC seed42 已完成：A1 相对配置级 baseline 为 `+1.49 Success / +5.03 Precision`，A2 为 `-0.93 / -2.07`，两组 anchor/current XYZ gap max 都为 0。A1 是待多 seed 复现的候选贡献，不能升级为稳定结论；A2 暂不组合 TWC。
+- corrected-TWC 的同提交 A/B/C seed42 已完成：B 相对 A 明显退化，C 相对 B 回升 `+8.31/+11.74`，但相对 A 仍为 `-7.00/-12.44`；两组 paired run 的 anchor/current XYZ gap max 全程为 0。TWC 主方法 promotion No-Go，不补 seed43/44。
 - 目前不能宣称 observability gate 已经带来稳定最终收益；gate-safe 低于 A2，conf-res best-e14 复测未复现旧 best。
 - bounded residual 已完成 standard 真实 batch 回归：warmup 与 active forward/loss/backward finite，但默认实际 correction 只有约 `1e-7 m`、gate 梯度极小，未通过功能验收，也没有性能结果。
 - HTV 六组筛选显示旧 feature-concat A2 只在 random20 上为正，在 gap1124/burst-drop 上明显退化。因此“真实时间分支已解决强不规则跟踪”不成立，必须先验证 residual、candidate 监督与 crop 可达性。
@@ -53,13 +83,15 @@ timestamp-native / variable-rate / time-aware 3D SOT
 
 ```text
 1. P0-B4 已完成并 No-Go：不实现当前 observation calibrator 控制的 Kalman/frozen-state，不做 active dual-anchor，不在 mini_val 上重调。
-2. 先把当前脚本、verdict 和文档绑定到 clean GitHub commit；服务器输出继续保存 script/data/config/checkpoint hashes。
-3. P0-C frozen protocol 的本地工程入口已完成：train/eval cadence 分离、stable-token v2 manifest、离线 shuffled mapping、real/effective time 双字段和 provenance 已接通；当前先在服务器 clean commit 上完成真实 batch invariance，再用同一冻结 checkpoint 做 held-out `true/fixed/shuffled-dt`。
-4. P0-A 只保留一次 crop-reachable subset 机制收尾；先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册参数。
-5. corrected-TWC 只做同提交 single-view / paired-view weight0 / corrected-TWC seed42 控制；若无净一致性收益，与 residual 一起降级为负结果或诊断。
+2. 当前脚本、verdict 和 P0-C 协议已绑定 clean GitHub commit `343145d`；服务器输出继续保存 script/data/config/checkpoint hashes，旧 stash 不恢复到正式运行路径。
+3. P0-C frozen A2 triplet已得到 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；同提交 TWC A/B/C 也已得到 `NO_GO_TWC_MAIN_METHOD_PROMOTION`，均不扩展训练 seed。
+4. 当前正式进入 M0：复用一个 per-tracklet/endpoint logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，并完成 P0-C-D1 失败定位；不改变预测路径。
+5. M0 同时完成 crop-reachable proposal oracle 和 candidate0/1/2/3 伪速度审计；前者决定是否解锁 M2，后者决定 M1 使用 shared SE(2) 还是 smooth drift。
+6. M1 的接口、配置、zero-init adapter 和 A1 数值等价性测试可以并行开始，但正式训练必须在 clean commit 上使用唯一预注册配置。
+7. 后续严格按 `M1 physical-consistent augmentation/dual clock -> M2 proposal innovation -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
 ```
 
-当前最可防御的新颖性不是单独的“timestamp”“HTV”“运动先验”或“temporal consistency”，而是它们的窄组合：**同一 tracklet 内不规则物理时间间隔、同一模型对未见 cadence/drop schedule 的泛化、有界 observation-first time-conditioned trajectory correction，以及同一 endpoint 的历史重采样一致性**。
+当前最可防御的价值已经从“已证明的新模型增益”收窄为：**同一 tracklet 内不规则物理时间协议、冻结 checkpoint 的 matched time negative controls，以及 crop/trajectory/observation failure diagnosis**。历史重采样一致性只留下 `C-B` 部分修复这一机制事实；有界 observation-first correction 仍是待一次性 oracle kill-test 的假设，不应提前列为已成立贡献。
 
 ### 连续时间视角给当前工作的启发
 
@@ -86,9 +118,33 @@ state(t) = timestamp-conditioned state estimation, t in R+
 
 ---
 
-## 2. 收敛后的三个贡献
+## 2. 新候选贡献框架（未验证）
 
-### 贡献 1：Timestamp-native 输入契约与 variable-rate 评测
+> 状态边界：本节是 P0-B4、P0-C 和 TWC A/B/C No-Go 之后的重构方案，不是已经取得涨点的结果。完整方法规格与停止条件见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
+
+新的论文层级不再把 Dyn、TWC、Gate、HTV 写成四个平行模块：
+
+| 层级 | 新定义 | 论文角色 | 当前状态 |
+| --- | --- | --- | --- |
+| 贡献 1 | matched within-track variable-rate protocol | 问题定义、真实时间因果控制与评价 | 工程地基已完成，需扩 full data / second dataset |
+| 贡献 2 | dual-clock continuous-discrete state update | 唯一方法主轴 | 候选，需 oracle 与 time controls |
+| 贡献 3 | endpoint-consistent asymmetric path distillation | 辅助训练目标 | 候选，当前对称 TWC 已 No-Go |
+| HTV | irregular/held-out cadence protocols | 贡献 1 的评测条件 | 不能单独称首次 HTV |
+| Gate | covariance-derived gain 或固定小 innovation weight | 非贡献、可选实现细节 | 旧 hand-crafted Gate 停止 |
+
+统一方法叙事：
+
+```text
+SeqTrack3D order clock
+    + zero-init physical-time adapter
+    + explicit F(delta_t) state propagation
+    + bounded proposal innovation
+    + canonical-teacher -> irregular-student path distillation
+```
+
+核心结构性约束是：新方法在 adapter/innovation 权重为 0 时必须严格退化为 A1；真实时间只能提供增量信息，不能破坏已经有效的 order-time 主干。
+
+### 贡献 1：Matched variable-rate protocol and physical-time controls
 
 CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而不是简单把所有主干时间 token 都替换为真实秒数：
 
@@ -99,7 +155,37 @@ CT-SeqTrack 先把 SeqTrack3D 的输入契约扩展为真实时间感知，而�
 
 这仍然是 timestamp-native 的地基：真实时间进入数据、监督和评价协议。论文叙事要避免把失败的 raw main-branch 注入方式写成最终方法，也不要只在普通 fixed-step final 上判断方向成败。
 
-### 候选贡献 2：Timestamp-conditioned trajectory guidance and bounded refinement
+新版本进一步要求：
+
+- 同一 endpoint、当前点云、局部坐标、candidate offset、point seed 和 checkpoint 下，只改变模型读取的 effective time；
+- `true/fixed/shuffled` 必须在同一 checkpoint 上比较，不能各自重训；
+- standard-only checkpoint 直接测试 seen/unseen cadence；
+- 保存 per-tracklet/endpoint 输出、首次失控、连续失败、crop recall 与 path variance；
+- 只有 `true > fixed` 且 `true > shuffled`，才能把贡献 2 称为 physical-time method。
+
+### 贡献 2（候选）：Dual-clock continuous-discrete state update
+
+主干保留 SeqTrack3D 的 order embedding，并新增零初始化 physical-time adapter：
+
+```text
+phi_dt_i = TimeEncode(log(1 + delta_t_i / dt_ref))
+h_i'     = h_i + A_zero(h_i, phi_dt_i)
+```
+
+`A_zero` 在初始化时输出严格为 0，使模型从 A1 出发。真实时间只控制 relative-time feature、状态传播和搜索支持，不再直接替换主干 token。
+
+Dynamics 从独立 feature concat 重构为连续—离散状态传播：
+
+```text
+s_t = [position, velocity, yaw, yaw_rate]
+s_prior(t + dt) = F(dt) s_post(t) + bounded_acceleration_residual
+```
+
+第一版使用显式 constant-velocity/constant-turn `F(dt)`，不直接上 ODE/CDE/Mamba。若状态 prior 在 long-gap/sparse 子集具有互补性，再用其均值和随 `dt` 增长的不确定性构造固定点预算的 trajectory tube。
+
+训练数据也必须保持物理一致：当前逐历史框独立 candidate offset 会制造伪速度；新分支只允许共享 SE(2) 扰动或从递归误差拟合的平滑 drift，Dynamics label 从 canonical/一致扰动轨迹计算。
+
+以下旧 feature-concat、raw-CV 与 bounded residual 内容保留为重构动机和失败证据，不代表新贡献已经实现。
 
 当前更稳的模型主线是：主干保持 order-time，真实 `delta_t/current_delta_t` 进入 `DynamicsEncoder`。历史框差分按真实 `delta_t` 计算速度和角速度，形成 timestamp-conditioned dynamics prior。
 
@@ -131,7 +217,16 @@ bounded residual                   -> one reachable-subset kill-test only
 
 当前论文不能再把 **observation-reliability-updated timestamp-conditioned trajectory guidance** 写成已成立方法。更可防御的表述是：feature concat、raw-CV anchor 和 frozen observation reliability 在不同入口依次失败；现有末端 residual 只保留为可解释的 negative/kill-test 消融，除非它在冻结协议和时间负对照下给出新的因果正信号。
 
-### 贡献 3：Time-resampling Consistency
+若 oracle 通过，正式 residual 只允许采用 proposal innovation：
+
+```text
+innovation = clip_norm(d_dyn - stopgrad(d_obs), R(delta_t))
+d_final    = d_obs + alpha * innovation
+```
+
+禁止继续把完整 `d_dyn` 加到完整 `d_obs`。`alpha=0` 必须恢复 A1，并持续记录 applied ratio、innovation norm、clamp ratio 和梯度。
+
+### 贡献 3（候选）：Endpoint-consistent asymmetric path distillation
 
 同一条 tracklet 通过不同历史采样路径观察同一当前绝对时刻时，最终状态估计应该一致。这里的“不同采样路径”不是改变当前帧，也不是改变搜索区域，而是在共享最近历史 anchor 的前提下改变更早历史帧：
 
@@ -151,15 +246,42 @@ L_theta  = SmoothL1(sin(theta_a), sin(theta_b))
 L_twc    = L_center + lambda_theta_twc * L_theta
 ```
 
-训练时用两个 view 的 supervised loss 平均值，而不是简单相加，避免开启 TWC 后把主监督梯度放大：
+当前实现用两个 view 的 supervised loss 平均值，而不是简单相加：
 
 ```text
 L = 0.5 * (L_a + L_b) + lambda_twc * L_twc
 ```
 
-这个贡献必须写窄：不是泛泛 temporal consistency，而是 **time-resampling consistency under different sampling paths to the same absolute time**。corrected seed42 已确认坐标修复有效，并在 A1 上形成单 seed 正信号；但旧 baseline 不是同提交配对，且还缺 seed43/44，所以 TWC 仍是待复现的候选贡献，不是 A2+dynamics 主配置。
+同提交 A/B/C 已证明这一路径会让困难 view B 的监督显著破坏主任务。下一版不继续调小 `twc_weight`，而是改为 canonical teacher 到 irregular student 的非对称蒸馏：
 
-### 候选扩展：Observability-aware Fusion
+```text
+teacher = EMA(model)
+p_a     = teacher(canonical_dense_path)
+p_b     = model(irregular_true_time_path)
+
+L = L_sup_a
+  + beta * L_sup_b
+  + lambda_path * w_a * D(stopgrad(p_a), p_b)
+```
+
+第一轮固定 `beta=0`；`w_a` 只能来自 teacher 的推理时可得置信度/不确定性；`fixed/shuffled` 只用于评估，不进入 consistency 训练。这样保留 canonical A 的主任务分布，避免当前 `0.5(L_a+L_b)` 的退化来源。
+
+这个贡献必须写窄：不是泛 temporal consistency，而是 **endpoint-conditioned history-resampling distillation**。在新目标超过 single-view A1 之前，现有 TWC 仍只能作为“部分修复 paired-view 退化”的机制诊断。
+
+### 非贡献项：Gate 停止；仅保留可校准 uncertainty fusion
+
+P0-B4 已否定当前 hand-crafted observation reliability Gate 的独立推广性。该 Gate 不复活、不在 mini_val 上重调，也不列贡献。
+
+只有贡献 2 的 state prior、proposal innovation 和 trajectory-tube oracle 都通过后，才允许把二元 Gate 改成连续精度融合：
+
+```text
+K     = P_dyn (P_dyn + R_obs)^(-1)
+state = prior + K * innovation
+```
+
+其中 `P_dyn` 随真实 `delta_t` 传播，`R_obs` 必须先通过 NLL、coverage 和 calibration 验证。校准失败就退回固定小 `alpha`，不增加 learned Gate。
+
+以下旧 observability 设计保留为历史实现说明。
 
 当前点云可靠时，更信 observation feature；当前点云稀疏、遮挡或 gap 较大时，更信 timestamp-conditioned dynamics prior。
 
@@ -190,11 +312,11 @@ MambaTrack3D、HVTrack、TrajTrack 和通用 Kalman/连续时间状态估计可�
 | 方法族 | 可升级方向 | 对当前 CT-SeqTrack 的启发 | 当前是否采用 |
 | --- | --- | --- | --- |
 | MambaTrack3D / SSM | 用真实 `delta_t` 替换固定离散步长，例如 `A_bar = exp(delta_t * A)` | 说明 fixed-step SSM 可以自然扩展到 variable-rate temporal modeling | 不采用，作为 future work |
-| Kalman / continuous-time state estimation | 用连续不确定性传播替换固定步长转移 | 提醒遮挡和长 gap 下不确定性应随时间累计 | 不采用，避免复杂 SDE |
+| Kalman / continuous-discrete state estimation | 用显式 `F(delta_t)` 和 uncertainty propagation 替换固定步长转移 | 支持 dual-clock state prior、proposal innovation 与 trajectory tube | 条件采用：仅在 M0-M2 oracle/time-control 通过后 |
 | HVTrack / attention memory | 用连续 timestamp encoding 替代 frame-index positional encoding | 支持当前 `TimeEncoding(raw/mlp/fourier)` 的设计动机 | 部分采用：只做 scalar-preserving 时间编码 |
 | TrajTrack / trajectory prior | 用历史 bbox 形成 global proposal，并与 local observation proposal 做一致性判断 | 支持低维 bbox-only dynamics proposal；同时要求 refinement 严格 GT-free | 只借鉴 proposal 关系，不复制完整 TrajFormer |
 
-因此 related work 中可以承认：连续时间动力系统、variable-`Delta t` SSM、Neural ODE/SDE/CDE 都是合理扩展；但 CT-SeqTrack 的贡献更窄，聚焦在现有 Seq2Seq 3D SOT 框架内检验真实 timestamp、bounded residual 和 endpoint resampling consistency。Observability-aware fusion 目前只是诊断候选。
+因此 related work 中可以承认：连续时间动力系统、variable-`Delta t` SSM、Neural ODE/SDE/CDE 都是合理扩展；但 CT-SeqTrack 的贡献更窄，聚焦在现有 Seq2Seq 3D SOT 框架内检验真实 timestamp、continuous-discrete proposal innovation 和 endpoint-conditioned path distillation。旧 Observability Gate 已停止；可校准 uncertainty fusion 只是后置条件分支。
 
 ### SeqTrack3D
 
@@ -294,7 +416,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。正式实验中，`A2-order-dyn` 仍只是值得诊断的真实时间使用方式，不是稳定结论。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。下一步先把 `true/fixed/shuffled-dt` 固化为 P0-C benchmark 的通用控制，再决定 residual 是否值得一次性收尾。
+feature-concat P3 已完成过服务器 smoke test；新的 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零。P0-C frozen triplet 中，true 相对 fixed 只有 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，未通过 promotion；因此 `A2-order-dyn` 只保留为失败消融，不扩展 cadence/seed。TWC A/B/C 也显示 C 无法恢复到 single-view A，不扩展 seed。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。下一步只做冻结 checkpoint 输出型收尾，并决定 residual oracle 是否值得一次性执行。
 
 第一版只做真实时间差分动力学：
 
@@ -328,7 +450,7 @@ view B: [t-1, t-3, t-5] -> t
 
 这个设计能让 P4 的实验解释更干净：如果 TWC 有收益，应来自模型对不同真实时间采样路径的稳定性提升，而不是来自额外 batch 大小、额外 crop 扰动或坐标系变化。
 
-当前状态：旧 validity-fixed 消融后来被证明仍存在 nonzero candidate 坐标污染，旧数值已撤回。共享绝对 frame offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现，corrected A1+TWC seed42 得到配置级正信号，但 baseline 不同提交且只有单 seed；它只能作为候选稳定性贡献。当前先解决 crop/causal 主线，之后再做同提交的 single-view、paired-view weight0、corrected-TWC 控制组。
+当前状态：旧 validity-fixed 消融后来被证明仍存在 nonzero candidate 坐标污染，旧数值已撤回。共享绝对 frame offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；同提交 single-view、paired-view weight0、corrected-TWC 控制组已完成。`C-B` 为正但 `C-A` 明显为负，故主方法 promotion No-Go；只保留冻结 checkpoint 的 strong-cadence/path-variance 收尾。
 
 ### P5：Observability Gate
 
@@ -376,7 +498,7 @@ verdict                   = NO_GO_OBSERVATION_RELIABILITY_VALIDATION
 
 - 不在 mini_val 上重调 feature、L2、threshold 或 crop scale；P0-B4 No-Go 永久保留。
 - 不实现当前 calibrator 控制的 frozen-state、active dual-anchor 或 learned selector。
-- 先完成 P0-C 的 stable manifest、train/eval cadence 分离和 held-out schedule；所有方法共享 endpoint/checkpoint/预算。
+- P0-C 的 stable manifest、输入公平性和同 checkpoint 三路性能已完成；A2 true-dt promotion No-Go，不扩展 schedule/multiseed。
 - `true/fixed/shuffled-dt` 改为通用 benchmark 因果控制，不再作为复活当前 reliability anchor 的工具。
 - residual 和 TWC 各只允许一次预注册、同提交的 seed42 机制控制；失败即停止。
 - 选择/融合规则仍只能使用推理时可得量；GT 只用于离线标签、loss 和 oracle 分析。
@@ -427,15 +549,14 @@ A3-conf-res rerun seed42
 下一步优先复核：
 
 ```text
-P0-C stable train/eval manifest 与 held-out cadence
-通用 true-dt vs fixed-dt vs shuffled-dt 一致性回归
-reachable-subset bounded residual vs no-residual
-corrected A1-order+TWC vs paired-view weight0 vs single-view A1-order
+A/B/C final checkpoint 的 standard/gap1124/burst-drop/unseen-fixed-gap endpoint 与 path variance（不重训）
+P0-C-D1 per-tracklet/endpoint paired failure localization（与上一步复用 logger）
+crop-reachable residual oracle convex-blend feasibility
 TrajTrack pre_wo_refine vs GT-free paper-aligned refine vs oracle-assisted refine
 candidate-wise dynamics 与 target-in-crop diagnostics
 ```
 
-这些实验的作用不是复活已经 No-Go 的 reliability anchor，而是回答：未见 cadence 评测是否公平、任何剩余收益是否真的依赖物理时间、residual 在 reachable subset 是否有必要，以及 TWC 是否提供超出 paired-view augmentation 的净一致性收益。当前 corrected-TWC 只有不完全配对的单 seed 信号，residual 没有性能正结论，dual-anchor 已停止。
+这些实验的作用不是复活已经 No-Go 的 reliability anchor，而是回答：未见 cadence 评测是否公平、任何剩余收益是否真的依赖物理时间、residual 在 reachable subset 是否有必要，以及 TWC 的 `C-B` 是否在强协议和 held-out path variance 上仍成立。当前 TWC 已确认 paired control 内的单 seed 净效应但未超过 single-view A，residual 没有性能正结论，dual-anchor 已停止。
 
 ### 困难子集
 
@@ -468,7 +589,7 @@ re-appearance：
 - 标准主表不能明显退化。
 - `delta_t` 越大，相比 fixed-time baseline 的优势越明显。
 - sparse / occlusion / re-appearance 子集更稳定。
-- corrected-TWC 应能降低不同采样路径下的预测方差；这是待验证假设，不是当前结论。
+- 冻结 corrected-TWC 只检查是否降低路径方差；新的方法收益假设属于 asymmetric path distillation，不能沿用当前对称 TWC 的结果。
 
 ---
 
@@ -479,8 +600,10 @@ Existing 3D SOT methods have explored appearance matching, point-to-box proposal
 context modeling, part-to-part motion cues, sequence modeling, memory-based
 tracking, trajectory priors, and high-temporal-variation protocols. However,
 most of them still interpret historical observations as fixed-step frame
-sequences. CT-SeqTrack instead treats timestamps as first-class inputs and
-learns variable-rate state estimation from real temporal intervals.
+sequences. CT-SeqTrack separates the discrete order clock from physical
+elapsed time: the former preserves sequence identity, while the latter
+controls continuous-discrete state propagation, search support, and
+endpoint-conditioned path distillation under irregular cadence.
 ```
 
 当前不做：
@@ -525,6 +648,8 @@ uncertainty propagation across long observation gaps.
 - MambaTrack3D: https://arxiv.org/abs/2511.15077
 - TrajTrack: https://arxiv.org/abs/2509.11453
 - ChronoTrack: https://openaccess.thecvf.com/content/CVPR2026F/html/Yoo_Temporally_Consistent_Long-Term_Memory_for_3D_Single_Object_Tracking_CVPRF_2026_paper.html
+- Neural Continuous-Discrete State Space Models: https://proceedings.mlr.press/v202/ansari23a.html
+- ContiFormer: https://proceedings.neurips.cc/paper_files/paper/2023/hash/9328208f88ec69420031647e6ff97727-Abstract.html
 - Motion-to-Matching: https://arxiv.org/abs/2308.11875
 - M3SOT: https://ojs.aaai.org/index.php/AAAI/article/view/28152
 - FlowTrack: https://arxiv.org/abs/2407.01959

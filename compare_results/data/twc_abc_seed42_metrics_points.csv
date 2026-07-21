@@ -1,0 +1,73 @@
+﻿run_key,condition,metric,epoch,step,value
+A,Single view,success/test,5,6310,33.10831832885742
+A,Single view,success/test,10,12620,42.92450714111328
+A,Single view,success/test,15,18930,45.81290817260742
+A,Single view,success/test,20,25240,43.62254333496094
+A,Single view,success/test,25,31550,47.64441680908203
+A,Single view,success/test,30,37860,42.101749420166016
+A,Single view,success/test,35,44170,51.96608352661133
+A,Single view,success/test,40,50480,46.94639205932617
+A,Single view,success/test,45,56790,48.88949966430664
+A,Single view,success/test,50,63100,50.31181716918945
+A,Single view,success/test,55,69410,49.12582778930664
+A,Single view,success/test,60,75720,50.00984573364258
+A,Single view,precision/test,5,6310,31.15317153930664
+A,Single view,precision/test,10,12620,56.52516555786133
+A,Single view,precision/test,15,18930,57.89933776855469
+A,Single view,precision/test,20,25240,52.05470275878906
+A,Single view,precision/test,25,31550,50.13676452636719
+A,Single view,precision/test,30,37860,43.75382614135742
+A,Single view,precision/test,35,44170,60.20787811279297
+A,Single view,precision/test,40,50480,49.9442024230957
+A,Single view,precision/test,45,56790,54.56455993652344
+A,Single view,precision/test,50,63100,56.852298736572266
+A,Single view,precision/test,55,69410,54.63019561767578
+A,Single view,precision/test,60,75720,58.20459747314453
+B,"Paired views, TWC weight 0",success/test,5,6310,32.92232131958008
+B,"Paired views, TWC weight 0",success/test,10,12620,28.77790069580078
+B,"Paired views, TWC weight 0",success/test,15,18930,42.19146728515625
+B,"Paired views, TWC weight 0",success/test,20,25240,26.493436813354492
+B,"Paired views, TWC weight 0",success/test,25,31550,32.23741912841797
+B,"Paired views, TWC weight 0",success/test,30,37860,37.230857849121094
+B,"Paired views, TWC weight 0",success/test,35,44170,38.65098190307617
+B,"Paired views, TWC weight 0",success/test,40,50480,34.57877731323242
+B,"Paired views, TWC weight 0",success/test,45,56790,35.07767868041992
+B,"Paired views, TWC weight 0",success/test,50,63100,37.90918731689453
+B,"Paired views, TWC weight 0",success/test,55,69410,34.464988708496094
+B,"Paired views, TWC weight 0",success/test,60,75720,34.705692291259766
+B,"Paired views, TWC weight 0",precision/test,5,6310,35.68162155151367
+B,"Paired views, TWC weight 0",precision/test,10,12620,29.004377365112305
+B,"Paired views, TWC weight 0",precision/test,15,18930,42.69584274291992
+B,"Paired views, TWC weight 0",precision/test,20,25240,26.47921371459961
+B,"Paired views, TWC weight 0",precision/test,25,31550,30.409189224243164
+B,"Paired views, TWC weight 0",precision/test,30,37860,37.09299850463867
+B,"Paired views, TWC weight 0",precision/test,35,44170,38.65427017211914
+B,"Paired views, TWC weight 0",precision/test,40,50480,33.37965393066406
+B,"Paired views, TWC weight 0",precision/test,45,56790,34.86542510986328
+B,"Paired views, TWC weight 0",precision/test,50,63100,38.17833709716797
+B,"Paired views, TWC weight 0",precision/test,55,69410,34.35667419433594
+B,"Paired views, TWC weight 0",precision/test,60,75720,34.01969528198242
+C,Paired views + corrected TWC,success/test,5,6310,31.86761474609375
+C,Paired views + corrected TWC,success/test,10,12620,37.22210693359375
+C,Paired views + corrected TWC,success/test,15,18930,42.13676071166992
+C,Paired views + corrected TWC,success/test,20,25240,36.13676834106445
+C,Paired views + corrected TWC,success/test,25,31550,42.449668884277344
+C,Paired views + corrected TWC,success/test,30,37860,41.1739616394043
+C,Paired views + corrected TWC,success/test,35,44170,45.4146614074707
+C,Paired views + corrected TWC,success/test,40,50480,41.04048156738281
+C,Paired views + corrected TWC,success/test,45,56790,42.52845001220703
+C,Paired views + corrected TWC,success/test,50,63100,44.4737434387207
+C,Paired views + corrected TWC,success/test,55,69410,42.42997741699219
+C,Paired views + corrected TWC,success/test,60,75720,43.01422119140625
+C,Paired views + corrected TWC,precision/test,5,6310,37.39496612548828
+C,Paired views + corrected TWC,precision/test,10,12620,43.77571487426758
+C,Paired views + corrected TWC,precision/test,15,18930,44.65098571777344
+C,Paired views + corrected TWC,precision/test,20,25240,40.29868698120117
+C,Paired views + corrected TWC,precision/test,25,31550,44.04486083984375
+C,Paired views + corrected TWC,precision/test,30,37860,43.55251693725586
+C,Paired views + corrected TWC,precision/test,35,44170,49.241798400878906
+C,Paired views + corrected TWC,precision/test,40,50480,43.55142593383789
+C,Paired views + corrected TWC,precision/test,45,56790,45.45077133178711
+C,Paired views + corrected TWC,precision/test,50,63100,47.18819046020508
+C,Paired views + corrected TWC,precision/test,55,69410,46.067832946777344
+C,Paired views + corrected TWC,precision/test,60,75720,45.7614860534668

@@ -1,10 +1,39 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-20
+更新时间：2026-07-21
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 0. 当前总判断
+
+### 2026-07-21 TWC A/B/C 同提交 seed42
+
+同 commit `343145d`、同 seed42、同 mini_train/mini_val selection、batch16、candidate4、60 epoch 和 75720 optimizer steps 的三组控制已经完成并拉回本地：
+
+| run | Success final | Precision final | Success late mean | Precision late mean |
+| --- | ---: | ---: | ---: | ---: |
+| A: single view | 50.01 | 58.20 | 49.06 | 54.84 |
+| B: paired views, `twc_weight=0` | 34.71 | 34.02 | 35.35 | 34.96 |
+| C: paired views, `twc_weight=0.05` | 43.01 | 45.76 | 42.70 | 45.60 |
+
+Final 效应分解为：
+
+```text
+B-A = -15.30 Success / -24.18 Precision
+C-B =  +8.31 Success / +11.74 Precision
+C-A =  -7.00 Success / -12.44 Precision
+```
+
+这严格确认了 corrected-TWC 相对相同 paired-view control 的净正效应，但也确认 paired-view 训练路径本身造成巨大退化。C 在 Final 只恢复 `54.3%/48.6%` 的 A-B 损失，在 Late mean 恢复 `53.6%/53.5%`，仍未回到 single-view A。B/C 的有效样本序列完全一致，anchor/current-point gap max 全程为 0；C 的末 1000 步 center/angle gap 仅比 B 低 `2.17%/6.13%`，属于温和的训练期一致性改善。
+
+正式边界为：
+
+```text
+C_MINUS_B_POSITIVE_ON_STANDARD_SEED42
+NO_GO_TWC_MAIN_METHOD_PROMOTION
+```
+
+原预注册 gate 还要求 standard 无明显退化、gap1124/burst-drop 的 `C-B` 和 held-out evaluation-only path variance。当前训练包只含 standard mini_val aggregate，没有 per-tracklet/endpoint 或 strong-cadence 终点；因此不补 seed43/44，只允许用冻结 final checkpoint 做一次不重训的 strong-cadence/path-variance 收尾。完整报告、图表和 CSV 见 `compare_results/reports/twc_abc_seed42_comparison_20260721.md`。
 
 ### 2026-07-20 P0-B4 independent validation
 
@@ -84,7 +113,7 @@ corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free 
 - 旧 active `A2-order-dyn+TWC` 及 `twc_weight=0.01` 曾明显退化，但同样受坐标污染，不能作为 TWC 与 dynamics 冲突的证据。
 - `A3-order-gate-safe` 比旧 P5 full 安全，但相对 A2-order-dyn final success / precision 仍下降 -2.64 / -8.45。
 - `A3-order-conf-res-gate` 旧汇总 best checkpoint 很高（success 62.04 / precision 76.30），但最新 best-e14 复测只有 28.06 / 37.70，暂时不能把旧 best 当作确认收益。
-- corrected A1+TWC seed42 在坐标修复后形成 +1.49/+5.03 的配置级正信号，且两路 anchor/current XYZ gap 均为 0。
+- corrected A1+TWC 的旧配置级正信号已由同提交 A/B/C 取代：`C-B` final 为 `+8.31/+11.74`，但 `C-A` 为 `-7.00/-12.44`；TWC 只部分修复 paired-view 退化。
 - HTV 六组说明旧 feature-concat dynamics 的效果依赖 protocol：random20 为正，gap1124/burst-drop 为负。
 - 三协议 crop oracle 说明高速位移失败会发生在模型 forward 前；强 gap/burst 下固定 2x expanded 也明显不足，而 GT-history CV recenter 仍接近 99% recall 且没有额外背景点代价。
 - 三协议递归诊断否定了 raw CV 恒开启替换 anchor，但确认可靠预测历史下的 CV recall 可达 97%–99%，支持“可靠性控制的预防性第二锚点”这一更窄假设。
@@ -94,7 +123,7 @@ corrected TWC 先独立复现 A1，gate 暂缓；TrajTrack 先修正为 GT-free 
 当前不能说：
 
 - 不能说完整 CT-SeqTrack full model 已经稳定超过 SeqTrack3D。
-- 不能说 corrected-TWC 已稳定有效；当前只有 A1 seed42，且 baseline 不是同代码提交的严格配对。
+- 不能说 corrected-TWC 已稳定超过 A1；虽然同提交 seed42 的 `C-B` 已确认净正效应，但 C 在 final、best、late mean 上都低于 single-view A，且没有 strong-cadence/path-variance 与多 seed 证据。
 - 不能说 gate 已经无效，因为 gate-safe 比旧 P5 full 安全，conf-res 又出现很高 best；但也不能说 gate 已经稳定有效。
 - 不能按 `A3-order-conf-res-gate` 旧 best 下正向结论，因为最新复测未复现。
 - 不能说 candidate noise 已被彻底排除，因为 `cand1` 只有 `num_candidates=4` 实验约 1/4 的 optimizer step，且还缺少 candidate 分桶日志。
@@ -525,7 +554,7 @@ compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg
 | A1 | 51.23 / 57.86 | 52.72 / 62.89 | +1.49 / +5.03 | +0.99 / +2.67 |
 | A2 | 50.96 / 63.31 | 50.04 / 61.25 | -0.93 / -2.07 | -1.33 / -2.53 |
 
-两组 corrected run 均完成 60 epoch、75720 optimizer steps，TWC anchor gap max 和 current XYZ gap max 都为 0。A1 值得补 seed43/44；A2 不建议继续组合 TWC。旧 baseline 没有 commit 记录，因此下一轮必须在同一提交上重跑 paired baseline。
+两组 corrected run 均完成 60 epoch、75720 optimizer steps，TWC anchor gap max 和 current XYZ gap max 都为 0。旧 baseline 没有 commit 记录，所以本节当时只能支持 A1 进入同提交 A/B/C；该控制现已于 2026-07-21 完成，最终结论以 10.9 节为准，不再补 seed43/44。
 
 完整报告：`compare_results/reports/corrected_twc_seed42_comparison.md`。
 
@@ -623,20 +652,50 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 
 完整报告：`compare_results/reports/p0b4_observation_reliability_validation_20260720.md`。
 
+### 10.8 P0-C frozen protocol 与同 checkpoint time-control 判定
+
+clean commit `343145d` 已在 nuScenes mini_val 上生成 role-specific gap1124 manifest 与 offline shuffled-dt mapping。val/test 均从 `106 tracklets / 2285 frames` 冻结为 `91 / 1257`，drop ratio 为 `0.449891`；test selection SHA256 为 `85e5603c...f9649f6f`。shuffled mapping 含 `1257 endpoints / 1166 transitions`，满足 `1257 - 1166 = 91 tracklets`。
+
+真实 batch 中三路 `delta_t_real` 完全一致；true effective time 与 real exact match，fixed 为 `[0.5, 0.5, 0.5]`，shuffled 为冻结映射后的不同 gap，最终得到：
+
+```text
+P0-C true/fixed/shuffled batch invariance: PASS
+```
+
+同一个 standard-trained A2 seed42 60ep final checkpoint 随后完成三路冻结评测：
+
+| mode | Success | Precision | true − mode Success | true − mode Precision |
+| --- | ---: | ---: | ---: | ---: |
+| true | 55.2247 | 66.8854 | 0.0000 | 0.0000 |
+| fixed | 54.7872 | 66.3624 | +0.4375 | +0.5231 |
+| shuffled | 55.3480 | 66.8298 | -0.1233 | +0.0557 |
+
+三份 provenance 的 commit `343145d`、checkpoint `b508f958...24ac87ad`、source config、seed42、selection hash、`91 tracklets / 1257 frames` 一致，resolved config 只在时间控制与 log_dir 上不同；console 与 TensorBoard events exact match。true 没有同时优于两个对照，最小差值为 `-0.1233 Success / +0.0557 Precision`，未达到 `+0.5 / +1.0`。正式判定：
+
+```text
+NO_GO_P0C_A2_TRUE_DT_PROMOTION
+```
+
+这说明当前 frozen feature-concat A2 对时间输入有响应，但正确 physical-time 对应关系没有稳定收益；不扩展 burst/fixed-gap/multiseed。完整报告见 `compare_results/reports/p0c_frozen_protocol_validation_20260720.md`。
+
+### 10.9 TWC A/B/C 同提交 seed42
+
+2026-07-21 已完成同提交 A/B/C 的本地事件复算、checkpoint hash、配置差异和诊断完整性审计。B/C resolved config 除运行元数据外只差 `twc_weight: 0.0 -> 0.05`；三组均有 12 个同步评测点，final 为 step75720。结果表明 `C-B` 在 Final/Best/Late mean 上全部为正，但 `B-A` 的损害更大，使 `C-A` 仍全面为负。该结果结束了“旧 baseline 不同提交”的归因问题，同时触发 TWC 主方法 promotion No-Go。详见 `compare_results/reports/twc_abc_seed42_comparison_20260721.md`。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
-- 真实时间方向没有被否定，失败主要来自不合适的注入方式。
+- 真实时间方向不能被一个实验普遍否定，但 P0-C 已证明当前 frozen feature-concat A2 的正确 `delta_t` alignment 没有超过 fixed/shuffled 负对照，不能作为方法贡献。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
-- DynamicsEncoder 仍可作为时间接入消融，但 feature-concat 在强 gap/burst 下失败、默认末端 residual 近乎关闭，P0-B4 又否定当前 reliability-controlled anchor 入口；下一轮不再增加 trajectory/gate 结构。
+- DynamicsEncoder 只保留为失败消融：feature-concat 在强 gap/burst 下不稳且 P0-C promotion No-Go，默认末端 residual 又近乎关闭；下一轮不再增加 trajectory/gate 结构。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
-- corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；A1 seed42 为正、A2 为负，但仍缺同提交 baseline 与多 seed。
+- corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；同提交 A/B/C 已证明 `C-B` 为正，但 C 仍显著低于 single-view A，主方法 promotion No-Go。
 - P5 full 旧结果不能作为最终 gate 结论；gate-safe 比旧 P5 full 安全，但仍低于 A2-order-dyn。
 - conf-res 旧 best checkpoint 未被最新 best-e14 复测确认；当前不能按旧 best 写正向收益。
-- corrected-TWC 如果继续，应先只在 `A1-order` 上做最小重跑；gate 仍只做诊断，不与 residual 同时启用。
+- corrected-TWC 不再补训练 seed；只允许冻结 A/B/C final checkpoint 做一次 strong-cadence 与 evaluation-only path-variance 收尾，gate 仍不与 residual 同时启用。
 - TrajTrack 当前高分含 GT oracle；它只能提示 trajectory proposal 的潜力，不能证明公平收益。
 - standard/gap1124/burst-drop oracle 均证明高速位移下 search crop 本身会丢目标；recursive 诊断进一步说明 raw predicted CV 只能在历史可靠时改善，不能从已漂移状态独立恢复。
 - P0-B3 开发集曾显示 previous-observation quality 可以预测可见目标的下一 crop miss，但 P0-B4 独立验证未达到预注册排序和运行点召回门槛；该信号只能保留为开发集诊断，不能升级为方法贡献。
@@ -645,7 +704,7 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 还不能说明的事情：
 
 - 还不能说完整 CT-SeqTrack 已经稳定超过 SeqTrack3D。
-- 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只有 A1 seed42 正信号，而 A2 seed42 为负。
+- 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只确认 A1 paired control 内 `C-B` 的单 seed 净效应，端到端 `C-A` 仍明显为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
 - active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；仍未知的是强协议 residual 量级与正确 correction 定义。
@@ -658,12 +717,10 @@ standard P0-B 使用前一帧 GT 框，是对在线 tracker 乐观的 oracle。P
 当前优先顺序：
 
 ```text
-1. 把当前 P0-B4 verdict、脚本和文档提交到 clean GitHub commit；后续服务器运行不得再让关键脚本只存在于 dirty/untracked 状态。
-2. P0-C 本地协议工程已完成；下一步在服务器 clean commit 上生成 role-specific cadence manifest 与 shuffled mapping，并让真实 batch `true/fixed/shuffled-dt` 不变量检查通过。
-3. 用同一个冻结 A2 checkpoint 做 gap1124 三路评测，不重训、不改 threshold；核对 provenance/hash 后再报告 reachability、首次失控和连续失败，而不是只报总体 Success/Precision。
-4. P0-A 只做一次 crop-reachable mini_train 机制收尾：先核对 residual 是 error correction 还是完整 displacement 再相加，再一次性预注册 init/scale/bound；不扫网格。
-5. corrected-TWC 若继续，只做同提交 `single-view / paired-view weight0 / corrected-TWC` seed42；只有 `C-B` 为正且路径方差下降才补多 seed。
-6. 上述控制仍无因果正信号时，正式收敛为 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
+1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
+2. 复用一个 endpoint/per-tracklet 输出 logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾；同时可完成 P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位，不改模型或 checkpoint。
+3. P0-A 只先做 crop-reachable `d_obs -> d_dyn` oracle blend；当前完整 displacement 直接相加存在重复运动的定义歧义，oracle 通过才改公式和训练。
+4. TWC 强协议收尾与 residual oracle/time-control 仍无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```
 
 可选复核：
@@ -767,22 +824,23 @@ dynamics_valid_ratio
 CT-SeqTrack full model outperforms SeqTrack3D.
 ```
 
-更稳的写法：
+当前更稳的写法：
 
 ```text
-We find that directly replacing SeqTrack3D's order-time tokens with raw
-timestamps destabilizes the main branch. A more stable design is to preserve
-the order-time semantics in the SeqTrack3D backbone while injecting real
-delta_t through a conservative timestamp-conditioned residual dynamics prior,
-especially under variable-rate and long-gap tracking.
+We study whether 3D single-object trackers remain robust under within-track
+irregular observation schedules. Matched true/fixed/shuffled-time controls
+separate sensitivity to a time input from benefits of physically aligned time,
+while endpoint-consistent history resampling isolates path robustness from
+crop and coordinate changes.
 ```
 
 中文主线：
 
 ```text
-真实 timestamp 改变历史状态的物理含义，但它不应该粗暴替换 SeqTrack3D
-主干里的顺序 token。当前最稳的 CT-SeqTrack 路线是：主干保留 order-time，
-先用 variable-rate / long-gap / sparse 协议把问题设置做清楚，再让真实 delta_t
-进入保守 residual dynamics prior。A2 的 seed 稳定性、TWC 与 dynamics 的组合、
-以及 gate / conf-res 的 checkpoint 可复现性都还没有解决。
+真实 timestamp 改变历史状态的物理含义，但当前证据只支持先把 variable-rate
+问题和 matched time controls 做清楚。同提交 A/B/C 只确认 TWC 对受损 paired-view
+路径的部分修复，不能作为超过 A1 的贡献，而且它不读取真实 delta_t；只有新的显式时间机制
+在 true/fixed/shuffled 中形成因果正信号，论文才能恢复 timestamp-native 方法主张。
 ```
+
+论文可行性、claim 审计与方法/benchmark 分叉见 `compare_results/reports/paper_viability_and_execution_20260720.md`。

@@ -1,0 +1,232 @@
+{
+  "calibrator": {
+    "coefficients": [
+      -1.2741750032619108,
+      0.6380433665990807,
+      -0.5725663222605202,
+      -0.17240529901438145,
+      0.5808893529343736
+    ],
+    "feature_set": "observation_v1",
+    "feature_specs": [
+      {
+        "name": "prev_log_search_points",
+        "source": "prev_obs_search_point_count",
+        "transform": "log1p"
+      },
+      {
+        "name": "prev_empty_fallback",
+        "source": "prev_obs_empty_fallback",
+        "transform": "bool"
+      },
+      {
+        "name": "prev_mean_fg_score",
+        "source": "prev_obs_mean_fg_score",
+        "transform": "identity"
+      },
+      {
+        "name": "prev_fg_margin",
+        "source": "prev_obs_fg_margin_mean",
+        "transform": "identity"
+      },
+      {
+        "name": "prev_motion_dynamic_probability",
+        "source": "prev_obs_motion_dynamic_probability",
+        "transform": "identity"
+      }
+    ],
+    "imputation_medians": [
+      3.5263605246161616,
+      0.0,
+      0.3243615925312042,
+      0.9422351554964118,
+      0.02847660891711712
+    ],
+    "intercept": -1.3475956664410298,
+    "l2": 0.001,
+    "label": "current_obs_crop_miss",
+    "operating_threshold": 0.18608993474102864,
+    "standardization_means": [
+      3.5321844307033823,
+      0.14786381842456608,
+      0.38920518041709024,
+      0.9235032991549079,
+      0.25064771925917984
+    ],
+    "standardization_scales": [
+      2.4359931581090875,
+      0.3549649414033406,
+      0.26923081293981055,
+      0.08641000682641418,
+      0.3898908495978668
+    ],
+    "target_recall": 0.8
+  },
+  "dependency_sha256": "6f121fb8487c0ea80f22a7c7b4cd79373564968c21113a45f99ebf2e23e7d1b0",
+  "evaluation_inputs": {
+    "burst_drop": {
+      "path": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\p0b4_full_20260720\\output\\diagnostics\\reliability_signals\\burst_drop_p0b4_val\\reliability_endpoints.csv",
+      "row_count": 978,
+      "sha256": "f7f35d81415e177f5e412d53a4158c8708246157205a74b263b56d0bb9956e3a"
+    },
+    "gap1124": {
+      "path": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\p0b4_full_20260720\\output\\diagnostics\\reliability_signals\\gap1124_p0b4_val\\reliability_endpoints.csv",
+      "row_count": 984,
+      "sha256": "286044c5dea42fa8d46038f0424d284b53face159661e04cad350d2c95c0b87a"
+    },
+    "standard": {
+      "path": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\p0b4_full_20260720\\output\\diagnostics\\reliability_signals\\standard_p0b4_val\\reliability_endpoints.csv",
+      "row_count": 1979,
+      "sha256": "a23f0d4e53df9a45f2c01a5a57d8848b6c3772c9f97995898a196b21fb4148e0"
+    }
+  },
+  "evaluation_metrics": {
+    "burst_drop": {
+      "activation_rate": 0.2785276073619632,
+      "auprc": 0.41218476338218196,
+      "auroc": 0.7120196604110813,
+      "brier": 0.07803288467195034,
+      "count": 815,
+      "ece_10": 0.08895457827377046,
+      "evaluation_role": "frozen_independent_evaluation",
+      "operating_false_positive_rate": 0.2479892761394102,
+      "operating_precision": 0.18502202643171806,
+      "operating_recall": 0.6086956521739131,
+      "positive_count": 69,
+      "prevalence": 0.08466257668711656,
+      "prevalence_brier": 0.07749482479581467,
+      "tracklet_count": 91
+    },
+    "gap1124": {
+      "activation_rate": 0.2858866103739445,
+      "auprc": 0.37134060396108237,
+      "auroc": 0.6804367281188474,
+      "brier": 0.08587003457305233,
+      "count": 829,
+      "ece_10": 0.09335951488980837,
+      "evaluation_role": "frozen_independent_evaluation",
+      "operating_false_positive_rate": 0.2582781456953642,
+      "operating_precision": 0.17721518987341772,
+      "operating_recall": 0.5675675675675675,
+      "positive_count": 74,
+      "prevalence": 0.08926417370325694,
+      "prevalence_brier": 0.08129608099633172,
+      "tracklet_count": 91
+    },
+    "standard": {
+      "activation_rate": 0.27418361059765867,
+      "auprc": 0.52525882653893,
+      "auroc": 0.7938476938476938,
+      "brier": 0.07950179062947768,
+      "count": 1623,
+      "ece_10": 0.07323793758376447,
+      "evaluation_role": "frozen_independent_evaluation",
+      "operating_false_positive_rate": 0.21968121968121967,
+      "operating_precision": 0.2876404494382023,
+      "operating_recall": 0.7111111111111111,
+      "positive_count": 180,
+      "prevalence": 0.11090573012939002,
+      "prevalence_brier": 0.09860564915385693,
+      "tracklet_count": 96
+    }
+  },
+  "feature_set": "observation_v1",
+  "fit_input": {
+    "path": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\p0b4_full_20260720\\output\\diagnostics\\reliability_signals\\standard_p0b3\\reliability_endpoints.csv",
+    "row_count": 4246,
+    "sha256": "755588d0147bb065c57d90909902986f787d8951e7ccadc1d8525cb8f9939af1"
+  },
+  "fit_metrics": {
+    "activation_rate": 0.4392523364485981,
+    "auprc": 0.7496027627036291,
+    "auroc": 0.8612731656853658,
+    "brier": 0.11961850620439907,
+    "count": 2996,
+    "ece_10": 0.02872566872678187,
+    "evaluation_role": "fit_resubstitution_only_not_confirmatory",
+    "operating_false_positive_rate": 0.2968822708236389,
+    "operating_precision": 0.5151975683890577,
+    "operating_recall": 0.8004722550177096,
+    "positive_count": 847,
+    "prevalence": 0.2827102803738318,
+    "prevalence_brier": 0.20278517774478122,
+    "tracklet_count": 247
+  },
+  "git": {
+    "branch": "main",
+    "commit": "55949b5500066bca7a4bf205906857357c8c52f7",
+    "dirty": true,
+    "status_lines": [
+      "M README.md",
+      " M done.md",
+      " M need_to_do.md",
+      " M refined_plan.md",
+      " M sum_results.md",
+      " M tools/P0_AB_DIAGNOSTICS.md",
+      "?? compare_results/data/p0b3_reliability_feature_ablation_20260720.csv",
+      "?? compare_results/reports/p0b3_reliability_validation_20260720.md",
+      "?? logs/",
+      "?? server_results/",
+      "?? tools/diagnose_reliability_signals.py",
+      "?? tools/run_p0b4_observation_validation.sh",
+      "?? tools/summarize_reliability_signals.py",
+      "?? tools/validate_observation_reliability.py",
+      "?? transfer/"
+    ]
+  },
+  "leakage_guard": {
+    "evaluation_refit": false,
+    "evaluation_threshold_tuning": false,
+    "feature_sources": [
+      "prev_obs_search_point_count",
+      "prev_obs_empty_fallback",
+      "prev_obs_mean_fg_score",
+      "prev_obs_fg_margin_mean",
+      "prev_obs_motion_dynamic_probability"
+    ],
+    "fit_eval_tracklets_disjoint": true,
+    "label_scope": "visible-target current observation crop miss"
+  },
+  "script_sha256": "84fb52dfe4f32594a600130a953af2afaf50c26bbe1307444196b46df076b619",
+  "strong_protocols": [
+    "gap1124",
+    "burst_drop"
+  ],
+  "tag": "observation_v1_local_recheck",
+  "thresholds": {
+    "go_auprc_margin": 0.15,
+    "go_auroc": 0.75,
+    "max_ece": 0.1,
+    "max_fpr": 0.3,
+    "min_operating_recall": 0.7
+  },
+  "verdict": {
+    "decision": "NO_GO_OBSERVATION_RELIABILITY_VALIDATION",
+    "next_step": "Stop the reliability-controlled anchor path; do not retune on evaluation data.",
+    "pass": false,
+    "protocol_checks": {
+      "burst_drop": {
+        "auprc_margin": 0.3275221866950654,
+        "checks": {
+          "auprc_margin": true,
+          "auroc": false,
+          "ece": true,
+          "fpr": true,
+          "operating_recall": false
+        },
+        "pass": false
+      },
+      "gap1124": {
+        "auprc_margin": 0.2820764302578254,
+        "checks": {
+          "auprc_margin": true,
+          "auroc": false,
+          "ece": true,
+          "fpr": true,
+          "operating_recall": false
+        },
+        "pass": false
+      }
+    }
+  }
+}

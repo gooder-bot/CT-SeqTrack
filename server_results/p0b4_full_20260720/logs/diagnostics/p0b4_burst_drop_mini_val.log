@@ -1,0 +1,110 @@
+virtual-rate mode=burst_drop tracklets=91/106 frames=1251/2285 drop=0.453 tag=vr_burst_k323_s233
+{
+  "endpoint_count": 978,
+  "tracklet_count": 91,
+  "visible_endpoint_count": 815,
+  "current_obs_crop_miss_prevalence": 0.08466257668711656,
+  "current_obs_drift_prevalence": 0.09100204498977506,
+  "next_obs_crop_miss_labeled_count": 752,
+  "next_obs_crop_miss_prevalence": 0.08643617021276596,
+  "selector_labeled_count": 58,
+  "trajectory_better_prevalence": 0.08620689655172414,
+  "obs_empty_fallback_rate": 0.06850715746421268,
+  "traj_empty_fallback_rate": 0.06850715746421268,
+  "obs_candidate_error": {
+    "count": 978,
+    "mean": 2.684370818698953,
+    "min": 0.01672028348918009,
+    "p25": 0.3437083611845104,
+    "p50": 0.642294298946141,
+    "p75": 1.1672961390133474,
+    "p95": 20.381706353787514,
+    "max": 68.76362096725745
+  },
+  "traj_candidate_error": {
+    "count": 978,
+    "mean": 2.846566743828721,
+    "min": 0.018842370679013353,
+    "p25": 0.3939494637013468,
+    "p50": 0.7077222178144902,
+    "p75": 1.2093404842362878,
+    "p95": 21.02086955669091,
+    "max": 68.89660322480918
+  },
+  "cv_speed": {
+    "count": 978,
+    "mean": 0.15114780601713546,
+    "min": 0.0,
+    "p25": 0.022239367889851612,
+    "p50": 0.048772303667275335,
+    "p75": 0.09873873882607874,
+    "p95": 0.2407643635203915,
+    "max": 12.980156147200098
+  },
+  "cv_shift": {
+    "count": 978,
+    "mean": 0.17336813495943587,
+    "min": 0.0,
+    "p25": 0.011907608962343743,
+    "p50": 0.03519029357961813,
+    "p75": 0.1247111655853657,
+    "p95": 0.31644300852270574,
+    "max": 19.450295001788742
+  },
+  "candidate_center_distance": {
+    "count": 978,
+    "mean": 0.20400640733557446,
+    "min": 0.0,
+    "p25": 0.012174919747663857,
+    "p50": 0.03672680222078689,
+    "p75": 0.12365002296559488,
+    "p95": 0.3261609483353356,
+    "max": 21.682782981266435
+  },
+  "passive_crop_complementarity": {
+    "obs_has_target_point_rate": 0.9153374233128835,
+    "traj_has_target_point_rate": 0.90920245398773,
+    "dual_union_has_target_point_rate": 0.9153374233128835,
+    "traj_only_endpoint_count": 0,
+    "obs_only_endpoint_count": 5,
+    "both_miss_endpoint_count": 69,
+    "obs_target_point_recall_mean": 0.9135002451362365,
+    "traj_target_point_recall_mean": 0.9076930626908216,
+    "dual_oracle_target_point_recall_mean": 0.9141065829475379
+  },
+  "cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a1_order_vr_burst_drop.yaml",
+  "cfg_sha256": "50c21bd9eb914a8154ffb791954e39a1edded739496466ed8d4ebdd51e0b3446",
+  "weights": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/20260531-2322-seqtrack3d_nuscenes_a1_order-ct_a1_order_car_60ep_bs16_gpu1/lightning_logs/version_0/checkpoints/last.ckpt",
+  "weights_sha256": "a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82",
+  "reference_endpoints_csv": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/diagnostics/crop_reachability/burst_drop_val_reference/crop_reachability_endpoints.csv",
+  "reference_endpoints_sha256": "f399c2de99e1c65fc1a43559117a08d74bf979213260e2f31fc7740901201083",
+  "reference_match": {
+    "reference_endpoint_count": 978,
+    "observed_endpoint_count": 978,
+    "missing_endpoint_count": 0,
+    "unexpected_endpoint_count": 0,
+    "allow_partial_reference": false,
+    "exact_match": true
+  },
+  "split": "mini_val",
+  "version": "v1.0-mini",
+  "virtual_rate_mode": "burst_drop",
+  "base_scale": 1.25,
+  "base_offset": 2.0,
+  "target_wlh_factor": 1.0,
+  "prediction_error_threshold": 4.0,
+  "selector_margin": 0.25,
+  "require_full_history": true,
+  "seed": 42,
+  "device": "cuda:0",
+  "git": {
+    "commit": "f28f495dfd6f582fe4599617a488b62e5b1d5e19",
+    "dirty": true,
+    "status_porcelain": "M compare_results/data/latest_5runs_diagnostics_summary.csv\n M compare_results/data/latest_5runs_hparams_summary.csv\n M compare_results/data/latest_5runs_metrics_points.csv\n M compare_results/data/latest_5runs_metrics_summary.csv\n M compare_results/data/latest_5runs_with_baseline_metrics_points.csv\n M compare_results/data/latest_5runs_with_baseline_metrics_summary.csv\n M compare_results/data/related_comparisons_metrics_points.csv\n M compare_results/data/related_comparisons_metrics_summary.csv\n M compare_results/figures/bar_charts/a1_time_variants_60ep_final_scores.svg\n M compare_results/figures/bar_charts/a2_dynamics_variants_60ep_final_scores.svg\n M compare_results/figures/bar_charts/a2_seed_stability_60ep_final_scores.svg\n M compare_results/figures/bar_charts/a3_gate_variants_60ep_final_scores.svg\n M compare_results/figures/bar_charts/latest_5runs_best_final_summary.svg\n M compare_results/figures/bar_charts/latest_5runs_with_baseline_final_scores.svg\n M compare_results/figures/bar_charts/long_training_180ep_final_scores.svg\n M compare_results/figures/bar_charts/main_a1_a2_p5_60ep_final_scores.svg\n M compare_results/figures/bar_charts/twc_related_60ep_final_scores.svg\n M compare_results/figures/delta_charts/a1_time_variants_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/a2_dynamics_variants_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/a2_seed_stability_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/a3_gate_variants_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/latest_5runs_with_baseline_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/long_training_180ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/main_a1_a2_p5_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/delta_charts/twc_related_60ep_final_delta_vs_baseline.svg\n M compare_results/figures/diagnostics/latest_5runs_diagnostics_tail_mean.svg\n M compare_results/figures/line_charts/a1_time_variants_60ep_precision_curve.svg\n M compare_results/figures/line_charts/a1_time_variants_60ep_success_curve.svg\n M compare_results/figures/line_charts/a2_dynamics_variants_60ep_precision_curve.svg\n M compare_results/figures/line_charts/a2_dynamics_variants_60ep_success_curve.svg\n M compare_results/figures/line_charts/a2_seed_stability_60ep_precision_curve.svg\n M compare_results/figures/line_charts/a2_seed_stability_60ep_success_curve.svg\n M compare_results/figures/line_charts/a3_gate_variants_60ep_precision_curve.svg\n M compare_results/figures/line_charts/a3_gate_variants_60ep_success_curve.svg\n M compare_results/figures/line_charts/latest_5runs_precision_curve.svg\n M compare_results/figures/line_charts/latest_5runs_success_curve.svg\n M compare_results/figures/line_charts/latest_5runs_with_baseline_precision_curve.svg\n M compare_results/figures/line_charts/latest_5runs_with_baseline_success_curve.svg\n M compare_results/figures/line_charts/long_training_180ep_precision_curve.svg\n M compare_results/figures/line_charts/long_training_180ep_success_curve.svg\n M compare_results/figures/line_charts/main_a1_a2_p5_60ep_precision_curve.svg\n M compare_results/figures/line_charts/main_a1_a2_p5_60ep_success_curve.svg\n M compare_results/figures/line_charts/twc_related_60ep_precision_curve.svg\n M compare_results/figures/line_charts/twc_related_60ep_success_curve.svg\n M compare_results/reports/latest_5runs_comparison.md\n M compare_results/reports/latest_5runs_with_baseline_comparison.md\n M compare_results/reports/related_comparisons.md\n M tools/check_train_steps.py\n?? .last_corrected_twc_gpu3_run\n?? logs/\n?? tools/diagnose_crop_reachability.py\n?? tools/diagnose_recursive_crop_reachability.py\n?? tools/diagnose_reliability_signals.py\n?? tools/run_p0b4_observation_validation.sh\n?? tools/summarize_reliability_signals.py\n?? tools/validate_observation_reliability.py"
+  },
+  "runtime_seconds": 256.8985860347748,
+  "feature_boundary": "Fields prefixed previous_prediction_error/current_gt/current_target/obs_candidate_error/traj_candidate_error/selector_label and crop GT metrics are offline labels only. Trigger features must use prev_obs_* plus current delta_t/CV geometry. Current obs/traj foreground features are post-crop selector evidence.",
+  "note": "The observation candidate alone updates the recursive history. The raw real-dt predicted-history CV branch is passive and cannot change later endpoints. This tool diagnoses reliability and candidate complementarity; it is not an active dual-anchor tracker and does not train any parameter."
+}
+endpoint csv: output/diagnostics/reliability_signals/burst_drop_p0b4_val/reliability_endpoints.csv
+summary json: output/diagnostics/reliability_signals/burst_drop_p0b4_val/reliability_summary.json

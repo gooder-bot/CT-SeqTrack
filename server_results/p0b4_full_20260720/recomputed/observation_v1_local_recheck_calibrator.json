@@ -1,0 +1,63 @@
+{
+  "coefficients": [
+    -1.2741750032619108,
+    0.6380433665990807,
+    -0.5725663222605202,
+    -0.17240529901438145,
+    0.5808893529343736
+  ],
+  "feature_set": "observation_v1",
+  "feature_specs": [
+    {
+      "name": "prev_log_search_points",
+      "source": "prev_obs_search_point_count",
+      "transform": "log1p"
+    },
+    {
+      "name": "prev_empty_fallback",
+      "source": "prev_obs_empty_fallback",
+      "transform": "bool"
+    },
+    {
+      "name": "prev_mean_fg_score",
+      "source": "prev_obs_mean_fg_score",
+      "transform": "identity"
+    },
+    {
+      "name": "prev_fg_margin",
+      "source": "prev_obs_fg_margin_mean",
+      "transform": "identity"
+    },
+    {
+      "name": "prev_motion_dynamic_probability",
+      "source": "prev_obs_motion_dynamic_probability",
+      "transform": "identity"
+    }
+  ],
+  "imputation_medians": [
+    3.5263605246161616,
+    0.0,
+    0.3243615925312042,
+    0.9422351554964118,
+    0.02847660891711712
+  ],
+  "intercept": -1.3475956664410298,
+  "l2": 0.001,
+  "label": "current_obs_crop_miss",
+  "operating_threshold": 0.18608993474102864,
+  "standardization_means": [
+    3.5321844307033823,
+    0.14786381842456608,
+    0.38920518041709024,
+    0.9235032991549079,
+    0.25064771925917984
+  ],
+  "standardization_scales": [
+    2.4359931581090875,
+    0.3549649414033406,
+    0.26923081293981055,
+    0.08641000682641418,
+    0.3898908495978668
+  ],
+  "target_recall": 0.8
+}
