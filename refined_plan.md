@@ -1,6 +1,6 @@
 # CT-SeqTrack 研究计划与论文定位
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
 这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。2026-07-21 之后的新候选贡献、公式、代码落点和 Go/No-Go 见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
 
@@ -10,7 +10,7 @@
 
 当前项目仍有论文机会，但不能按“CT-SeqTrack full model 已经成立”继续。完整的 code-to-claim 审计、方法/benchmark 分叉和实验底线见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
 
-**2026-07-21 阶段决定**：项目仍处于 M0 收口，但两个关键 gate 已关闭。M0-3 得到 `GO_M2_PROPOSAL_INNOVATION`：不仅 oracle gain 稳定为正，冻结 `d_dyn` 本身也在 81.31% primary endpoint 上优于 `d_obs`，tracklet bootstrap CI 不跨 0。M0-4 得到 `FREEZE_M1_SHARED_SE2`：逐历史帧独立 candidate offset 的伪速度/伪加速度远超阈值，M1 第一版只允许 shared SE(2)。当前明确为 **Engineering GO / Formal-training HOLD**：M1/M2 的代码、单测和真实 batch smoke 现在开始，不表示 dual-clock 已涨点；M0-2 可并行评测但尚未收口，正式训练仍须 strict A1 等价、2-step、唯一配置、clean commit 和预注册控制。
+**2026-07-22 阶段决定**：项目仍处于 M0 收口，但 M1/M2 已从“允许开始工程”推进到 **`E0–E5 Engineering GO / E6 Formal-training HOLD`**。M0-3 的 `GO_M2_PROPOSAL_INNOVATION` 与 M0-4 的 `FREEZE_M1_SHARED_SE2` 保持不变；commit `9a0b26d` 已通过真实 loader/TWC、A1 strict-zero 等价、warmup 内两步 exact-zero、invalid/empty strict fallback、sampler-resampled coverage、standard/gap/burst finite 和 active 2-step。该结果不表示 dual-clock 已涨点；下一步只允许用既有 mini_train oracle 冻结唯一正式配置与 true/fixed/shuffled controls，完成 E6。M0-2 继续并行收口。
 
 四个会决定论文名称和贡献形态的事实是：
 
@@ -24,10 +24,11 @@
 ```text
 同提交 TWC A/B/C seed42：主方法 promotion No-Go
     -> M0：P0-C-D1/M0-3/M0-4 已完成；继续 M0-2 strong-cadence/path-variance 收口
-        -> M1：shared SE(2) augmentation + canonical label + zero-init dual-clock（现在开始实现）
-            -> M2：proposal oracle 已通过；实现 bounded innovation，之后做 seed42 true/fixed/shuffled
-                -> M3：因果正信号后做 asymmetric path distillation
-                    -> M4：tube oracle/calibration 通过后做 filter/tube
+        -> M1/M2：shared SE(2) + canonical label + dual-clock + bounded innovation，E0–E5 已通过
+            -> E6：冻结 alpha/R、共享 warmup、唯一 seed42 配置、true/fixed/shuffled controls 和 clean provenance
+                -> 只运行一次 seed42 formal time-control
+                    -> M3：因果正信号后做 asymmetric path distillation
+                        -> M4：tube oracle/calibration 通过后做 filter/tube
         -> 任一关键 gate 再失败：停止对应模块，保留 benchmark/diagnosis 分叉
 ```
 
@@ -87,9 +88,9 @@ timestamp-native / variable-rate / time-aware 3D SOT
 3. P0-C frozen A2 triplet已得到 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`；同提交 TWC A/B/C 也已得到 `NO_GO_TWC_MAIN_METHOD_PROMOTION`，均不扩展训练 seed。
 4. M0 P0-C-D1 已完成：三路各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/hash 与时间干预检查通过；true−fixed 为 `+0.438/+0.523`，true−shuffled 为 `-0.123/+0.056`，逐 tracklet Success/Precision bootstrap CI 均跨 0。下一步复用同一 logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，不改变预测路径。
 5. M0-3/M0-4 已完成：M2 oracle gate 通过，M1 augmentation 冻结为 shared SE(2)；完整证据见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
-6. 现在从 M1 shared world-SE(2) 数据层、canonical dynamics label、接口、配置、strict-zero adapter 和 A1 数值等价性测试开始；注意 `getOffsetBB` 的平移按每框局部坐标解释，不能用“重复同一 offset 数组”冒充共同刚体变换。
-7. M2 新增独立 proposal-innovation 模式；旧 full-displacement residual 保留作历史负对照。完成 invalid/fallback、三协议 forward/backward 与 2-step 后，才在 clean commit 上冻结唯一预注册训练配置。
-8. 后续严格按 `M1 physical-consistent augmentation/dual clock -> M2 proposal innovation -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
+6. M1/M2 E0–E5 已在 commit `9a0b26d` 通过，完整复核见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`；不再重复 smoke，不根据随机初始化 clamp ratio 调 alpha/R。
+7. 现在只使用既有 mini_train M0-3 oracle 一次性冻结 alpha 与 `R(delta_t)`，并冻结唯一 seed42 true/fixed/shuffled 配置、manifest/sampling/optimizer/final checkpoint/归档口径，完成 E6。
+8. E6 后严格按 `M1/M2 seed42 time-control -> positive causal signal -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
 ```
 
 当前最可防御的价值是：**同一 tracklet 内不规则物理时间协议、冻结 checkpoint 的 matched time negative controls，以及 crop/trajectory/observation failure diagnosis**。M0-3 已把有界 observation-first correction 从待检假设推进为有 offline proposal 互补性的候选，但尚未得到 tracking Success/Precision 增益；M0-4 则把 shared SE(2) 固定为物理一致的数据前提。历史重采样一致性仍只保留 `C-B` 部分修复这一机制事实。
@@ -418,7 +419,7 @@ ChronoTrack 已经接近 temporally consistent long-term memory 叙事。
 
 ### P3：Dynamics / Velocity Branch
 
-feature-concat P3 已完成过服务器 smoke test；旧 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零，而且它把完整 `dyn_disp` 叠加到完整 `d_obs`。P0-C-D1 full 中，true 相对 fixed 只有 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，Success/Precision 的逐 tracklet bootstrap 95% CI 均跨 0；因此 `A2-order-dyn` 只保留为失败消融，不扩展 cadence/seed。模型对时间有数值响应（相对两个控制各有 `1079/1257` 个 endpoint 的中心改变），但正确对应关系没有稳定收益。TWC A/B/C 也显示 C 无法恢复到 single-view A，不扩展 seed。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。M0-3 proposal oracle 与 M0-4 candidate audit 均已完成，当前转入 shared world-SE(2) 数据基础和独立 proposal-innovation 模式的工程实现；旧 `residual_limited` 只作负对照。
+feature-concat P3 已完成过服务器 smoke test；旧 `residual_limited` 路径已完成 standard 真实 batch 数值验收，但默认 correction 与 gate gradient 近乎为零，而且它把完整 `dyn_disp` 叠加到完整 `d_obs`。P0-C-D1 full 中，true 相对 fixed 只有 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，Success/Precision 的逐 tracklet bootstrap 95% CI 均跨 0；因此 `A2-order-dyn` 只保留为失败消融，不扩展 cadence/seed。模型对时间有数值响应（相对两个控制各有 `1079/1257` 个 endpoint 的中心改变），但正确对应关系没有稳定收益。TWC A/B/C 也显示 C 无法恢复到 single-view A，不扩展 seed。P0-B2/P0-B3 已证明 raw predicted-history proposal 缺少互补性，P0-B4 又否定当前 reliability 入口；不再实现 state anchor。M0-3 proposal oracle 与 M0-4 candidate audit 均已完成，shared world-SE(2) 与独立 proposal-innovation 也已通过 E0–E5；当前只进入 E6 唯一配置和 time-control 冻结，旧 `residual_limited` 只作负对照。
 
 第一版只做真实时间差分动力学：
 

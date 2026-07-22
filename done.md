@@ -1740,3 +1740,13 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - `tools/check_candidate_shared_se2.py` 的 radians/degrees、identity、共同刚体、canonical label 和双路径共享自测通过。
 - `tools/check_m1_m2_invariants.py` 的 adapter exact identity、zero/disabled/invalid fallback、time-dependent bound 和 2-step optimizer 自测通过；旧 residual 与 observability dataset-free smoke 回归通过。
 - 真实 nuScenes loader/TWC、同权重 A1 output/loss 等价、三协议 forward/backward 与服务器 2-step 尚未完成，所以本节不改变 `Formal-training HOLD`。
+
+## 2026-07-22：M1/M2 E0–E5 服务器硬门禁完成
+
+- 正式运行来自 clean commit `9a0b26d175a843ee49c07ca08ce63f5baa3c0168`，A1 checkpoint SHA256 为 `a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82`；M2/gap/burst 三个配置 hash 已与本地 commit 独立匹配。
+- shared world-SE(2) dataset-free 与真实 loader/TWC 检查通过；A1 strict-zero model equivalence 通过，`320/334` tensor 匹配，14 个缺失 tensor 均是按设计新建的 DynamicsEncoder/physical-time adapter，unexpected 为 0。
+- standard warmup 在真实执行 2 次 optimizer update 后，adapter/innovation output 与 effective scale 仍精确为 0；DynamicsEncoder 两步梯度非零，证明 warmup 不阻断辅助监督。
+- deterministic fallback 扫描在 53 batch/106 样本内覆盖 `8 invalid / 16 empty / 2 sampler-resampled`；invalid/empty applied max 精确为 0，resampled forward/loss/backward finite，扫描不更新权重。
+- standard/gap1124/burst-drop active 各完成 2 次 optimizer update；encoder/adapter 梯度非零、修正非平凡，最大 bound violation 为 float32 舍入量级 `5.96e-8`。
+- 五个 JSONL 共 61 个 batch/122 个样本，所有 loss/gradient finite；sample/fallback/applied/clamp/optimizer/bound 已从原始记录本地独立复算并与五个 summary 完全一致，全部 `requirements_passed=true`。
+- 正式判定为 `PASS_M1_M2_E0_E5_ENGINEERING_GATES`；E6 的唯一 formal config、alpha/R、true/fixed/shuffled、manifest/sampling/optimizer/final checkpoint 与完整归档仍未冻结，因此维持 `HOLD_FORMAL_TRAINING_PENDING_E6`。完整报告见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。

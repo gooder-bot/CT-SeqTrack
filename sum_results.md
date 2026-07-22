@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -724,7 +724,30 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 
 正式决定为 `FREEZE_M1_SHARED_SE2`：M1 对同一样本全部历史框使用一个 shared SE(2) 变换，Dynamics label 从 canonical/一致变换轨迹计算；第一版不实现 smooth drift，也不允许依据后续 tracking 涨跌反向改判。完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
 
-代码复核进一步确认：`getOffsetBB` 在每个框自身局部朝向中解释平移，因此不能用“对全部历史框重复同一 offset 数组”冒充共同刚体变换；M1 必须围绕共同 anchor 实现 world-SE(2)。当前统一状态为 `Engineering GO / Formal-training HOLD`：M1/M2 实现、单测和真实 batch smoke 可以开始，正式训练等待 E0–E6。
+代码复核进一步确认：`getOffsetBB` 在每个框自身局部朝向中解释平移，因此不能用“对全部历史框重复同一 offset 数组”冒充共同刚体变换；M1 必须围绕共同 anchor 实现 world-SE(2)。M0-4 当时将状态推进为 `Engineering GO / Formal-training HOLD`；后续 E0–E5 结果见第 10.13 节。
+
+### 10.13 M1/M2 E0–E5 服务器硬门禁
+
+2026-07-22，commit `9a0b26d` 使用固定 A1 checkpoint SHA256 `a2fbff...a82` 在 GPU2/3 完成五组工程 gate。三个配置 hash 与本地 commit 完全一致；A1 的 `320` 个 checkpoint tensor 全部匹配，新模型缺失的 `14` 个 tensor 均属于按设计新建的 DynamicsEncoder/physical-time adapter，unexpected key 为 0。shared world-SE(2) dataset-free、真实 loader/TWC 与 strict-zero A1 model equivalence 均 PASS。
+
+| run | batch / optimizer | 样本 | invalid / empty / resampled | applied / clamp | bound violation max | grad max（encoder / adapter） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| standard active | `2 / 2` | 4 | `0 / 1 / 0` | `3 / 2` | `0` | `0.0445 / 1.1858` |
+| standard warmup | `2 / 2` | 4 | `0 / 1 / 0` | `0 / 2` | `0` | `0.0392 / 0` |
+| standard fallback | `53 / 0` | 106 | `8 / 16 / 2` | `86 / 10` | `5.96e-8` | `0.2145 / 0.3027` |
+| gap1124 active | `2 / 2` | 4 | `0 / 1 / 0` | `3 / 3` | `5.96e-8` | `0.1267 / 3.8867` |
+| burst-drop active | `2 / 2` | 4 | `0 / 1 / 0` | `3 / 3` | `5.96e-8` | `0.0515 / 2.6593` |
+
+五个 JSONL 共 `61` 个 batch、`122` 个样本，所有 loss/gradient finite；本地独立重算的 step、sample、fallback、applied/clamp、optimizer 和 bound 统计与 summary 完全一致。warmup 内执行两次 optimizer update 后 adapter/innovation output 与 effective scale 仍精确为 0，而 DynamicsEncoder 两步梯度非零。fallback 的 invalid `8`、empty `16` applied max 都精确为 0；第 53 batch 首次出现 `2` 个 sampler-resampled 样本并保持 finite。resampled 是替换成另一条有效训练样本，不是模型 strict-zero 条件。
+
+正式决定为：
+
+```text
+PASS_M1_M2_E0_E5_ENGINEERING_GATES
+HOLD_FORMAL_TRAINING_PENDING_E6
+```
+
+这只证明公式、数据路径、回退和优化器机制可安全运行；不能证明 tracking 指标上涨，也不能用随机初始化 DynamicsEncoder 下的 clamp ratio 调整 alpha/半径。完整复核见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。
 
 ## 11. 当前各实验共同说明了什么
 
@@ -734,6 +757,7 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
 - feature-concat A2 仍是失败消融：它在强 gap/burst 下不稳且 P0-C promotion No-Go；但 M0-3 表明冻结 DynamicsEncoder proposal 在严格 offline cohort 中有明显信息，因此保留它作为 M2 proposal source，不复活旧 feature concat 或 hand-crafted Gate。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
+- M1/M2 的 shared-SE(2)、canonical label、strict fallback、warmup、受界 innovation 和 optimizer 路径已通过 E0–E5 工程验收，可以进入唯一正式配置与 E6 冻结。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
 - corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；同提交 A/B/C 已证明 `C-B` 为正，但 C 仍显著低于 single-view A，主方法 promotion No-Go。
@@ -752,6 +776,7 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
 - active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；M0-3 已确认 gap1124 proposal 互补性与 correction 方向，但 online recursive 转化、standard/burst guardrail 仍未知。
+- M1/M2 E0–E5 不能说明 tracking Success/Precision 已改善，也不能说明 true-dt 优于 fixed/shuffled；这些只允许由 E6 后的一次预注册 seed42 time-control 回答。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 - 还不能说 physical `delta_t` 提高了 reliability prediction；raw `current_delta_t` 在当前 standard-only calibrator 中反而造成强协议过触发。
 - 不能把 observation-only trigger 写成最终 uncertainty model；P0-B4 独立 mini_val 已 No-Go，且标签只覆盖 target visible 条件下的 crop miss。
@@ -763,8 +788,8 @@ NO_GO_P0C_A2_TRUE_DT_PROMOTION
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
 2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；并行复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。M0-2 不阻塞写代码，但阻塞 M0 完成。
-3. 先实现 M1 shared world-SE(2) 与 canonical dynamics label；`utils/twc_utils.py` 的跨视图共享保持原义，不能用重复局部 offset 冒充整轨迹刚体变换。
-4. 新增独立 M2 bounded proposal-innovation mode，并完成 strict-zero/A1 等价、invalid/resample/empty fallback、三协议 forward/backward 与 2-step；E0–E6 通过后冻结 clean commit 和唯一 seed42 true/fixed/shuffled 配置。
+3. M1/M2 E0–E5 已通过；只使用既有 mini_train M0-3 oracle 一次性冻结 alpha 与 `R(delta_t)`，共享 warmup 直接固定为计划值 5 epoch，不读取 mini_val/test 或 smoke clamp ratio 调参。
+4. 冻结唯一 seed42 true/fixed/shuffled 配置、manifest/sampling/optimizer/final checkpoint 和完整归档规范，完成 E6 后才启动一次 formal run。
 5. M2 time-control 无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
 ```
 

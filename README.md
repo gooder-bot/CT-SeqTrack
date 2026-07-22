@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目处于 **M0 收口**。2026-07-21 完成的 M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**：primary `1311 endpoints / 213 tracklets`，`d_dyn` 本身在 `81.31%` endpoint 上优于 `d_obs`，tracklet bootstrap mean gain `0.803 m`、95% CI `[0.633,0.988]`。M0-4 则得到 **`FREEZE_M1_SHARED_SE2`**：非零 candidate 的伪速度/伪加速度 P50 是阈值的 `12.22×/21.28×`，matched proposal error penalty 的 tracklet CI 不跨 0。当前判定为 **Engineering GO / Formal-training HOLD**。M1/M2 第一代码切片、dataset-free 几何/strict fallback/2-step，以及首轮服务器真实 nuScenes loader/TWC、同权重 A1 等价和 standard/gap/burst forward/backward 已通过。当前代码把 resampled、invalid、empty、两步 optimizer 和 optimizer-after-warmup exact-zero 升级为机器可判定硬门禁；新提交服务器复验通过前仍不启动正式 seed42。以上仍是离线机制与工程证据，不是 tracking 涨点；M0-2 A/B/C 四协议冻结输出尚未完成，M0 整体仍为进行中。已完成记录见 `done.md`，完整分析见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`，下一步见 `need_to_do.md`。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口**，同时进入 M1/M2 formal 配置准备。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成服务器硬门禁：真实 loader/TWC、A1 strict-zero 等价、warmup 内两步 exact-zero、invalid/empty strict fallback、sampler-resampled coverage、standard/gap/burst finite 与 active 2-step 全部通过，正式状态为 **`E0–E5 Engineering GO / E6 Formal-training HOLD`**。这仍只是工程证据，不是 tracking 涨点；下一步是只用既有 mini_train oracle 一次性冻结 alpha、`R(delta_t)`、唯一 seed42 true/fixed/shuffled 配置和 E6 provenance。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
 
 ## 文档导航
 
@@ -19,6 +19,7 @@ CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟�
 | `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md` | 新候选贡献、dual-clock/innovation/asymmetric distillation 方法规格与 Go/No-Go |
 | `compare_results/reports/m0_m03_m04_analysis_20260721.md` | M0-3/M0-4 数据质量、独立复算、稳健性、决策与下一步 |
 | `compare_results/reports/m0_m03_m04_report/report.html` | M0-3/M0-4 自包含可视化技术报告（桌面/窄屏 QA 通过） |
+| `compare_results/reports/m1_m2_e0_e5_validation_20260722.md` | M1/M2 服务器 E0–E5 provenance、JSONL 独立复算、解锁边界与 E6 阻塞 |
 
 ---
 
@@ -214,8 +215,8 @@ use_observability_gate: False
 | M0-3 | crop-reachable proposal oracle | `GO_M2_PROPOSAL_INNOVATION`；dynamics-only 与 long-gap tracklet bootstrap 均支持互补性，M2 工程 gate 解锁 |
 | M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
 | M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
-| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | 第一代码切片、dataset-free、真实 loader/TWC 与同权重 A1 output/loss 等价已通过；共享 warmup 两步复验待执行 |
-| M2 engineering | bounded proposal innovation | 独立模式、严格 fallback、`R(delta_t)`、诊断和首轮三协议真实 batch 已通过；resampled 硬门禁与正式配置仍 HOLD |
+| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E5 通过：真实 loader/TWC、A1 strict-zero 等价与 warmup 内两步 exact-zero 均完成；E6 待冻结 |
+| M2 engineering | bounded proposal innovation | E0–E5 通过：strict fallback、resampled coverage、三协议 finite、active 2-step 与 bound 均完成；正式配置仍 HOLD |
 
 当前已完成的关键消融：
 
@@ -241,16 +242,17 @@ use_observability_gate: False
 19. 同提交 TWC A/B/C seed42：provenance、12 个评测点、75720 步诊断和 final checkpoint hash 本地复核
 20. M0-3 gap1124 proposal oracle：official checks、原始向量复算、dynamics-only/trimmed/long-gap/tracklet bootstrap 稳健性
 21. M0-4 candidate dynamics audit：伪速度/伪加速度、matched proposal penalty、candidate balance 与 shared SE(2) 冻结决策
+22. M1/M2 E0–E5：clean commit 服务器硬门禁、五组 JSONL 独立复算、warmup/invalid/empty/resampled/三协议/2-step/bound 验收
 ```
 
 当前下一步：
 
 ```text
-1. 在服务器设置 `A1_CKPT` 后运行 `bash tools/run_m1_m2_gates_gpu23.sh`，并行验收 candidate0/1/2/3、TWC 共享、A1 output/loss 等价及 standard/gap1124/burst-drop 真实 batch。
-2. 检查 `output/m1_m2_gates/gpu2|gpu3` 的日志与 JSONL，确认 invalid/empty fallback、innovation/adapter 梯度和 correction bound，而不是只看命令退出码。
-3. 验收通过后，根据 training oracle 一次性确认工程配置中的 `alpha=0.75` 与 `R(delta_t)`，再冻结唯一正式配置。
+1. E0–E5 已完成并本地独立复算；不再重复 smoke 或根据随机初始化 clamp ratio 调参。
+2. 只读取既有 mini_train M0-3 oracle 原始向量，一次性冻结 `alpha` 与 `R(delta_t)`；adapter/innovation 共享 warmup 直接冻结为计划值 5 epoch，不经指标调优；不得读取 mini_val/test 决定超参数。
+3. 新建唯一 seed42 formal true-dt config，并派生只改变 effective-time mapping 的 fixed/shuffled controls；冻结 manifest、sampling、optimizer steps、final checkpoint 和归档规范，完成 E6。
 4. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的四协议输出与 evaluation-only path variance，不重训。
-5. E0–E6、clean commit 和唯一配置全部冻结后，只跑一次 seed42 `true/fixed/shuffled`；未形成因果正信号则转回 benchmark/diagnosis。
+5. E6 和新的 clean commit 完成后，只跑一次 seed42 `true/fixed/shuffled`；未形成因果正信号则转回 benchmark/diagnosis。
 ```
 
 ---
