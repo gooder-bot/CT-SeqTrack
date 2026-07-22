@@ -10,7 +10,7 @@
 
 当前项目仍有论文机会，但不能按“CT-SeqTrack full model 已经成立”继续。完整的 code-to-claim 审计、方法/benchmark 分叉和实验底线见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
 
-**2026-07-22 阶段决定**：项目仍处于 M0 收口，但 M1/M2 已从“允许开始工程”推进到 **`E0–E5 Engineering GO / E6 Formal-training HOLD`**。M0-3 的 `GO_M2_PROPOSAL_INNOVATION` 与 M0-4 的 `FREEZE_M1_SHARED_SE2` 保持不变；commit `9a0b26d` 已通过真实 loader/TWC、A1 strict-zero 等价、warmup 内两步 exact-zero、invalid/empty strict fallback、sampler-resampled coverage、standard/gap/burst finite 和 active 2-step。该结果不表示 dual-clock 已涨点；下一步只允许用既有 mini_train oracle 冻结唯一正式配置与 true/fixed/shuffled controls，完成 E6。M0-2 继续并行收口。
+**2026-07-22 阶段决定**：项目仍处于 M0 收口；M1/M2 状态为 **`E0–E5 Engineering GO / E6 Static Freeze Ready / Formal-training HOLD pending clean server manifests`**。M0-3 的 `GO_M2_PROPOSAL_INNOVATION` 与 M0-4 的 `FREEZE_M1_SHARED_SE2` 保持不变；commit `9a0b26d` 已通过真实 loader/TWC、A1 strict-zero 等价、warmup 内两步 exact-zero、invalid/empty strict fallback、sampler-resampled coverage、standard/gap/burst finite 和 active 2-step。现已只用既有 mini_train M0-3 向量一次性冻结 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`、共享 5-epoch warmup、唯一 formal true 配置与 same-checkpoint controls。该结果不表示 dual-clock 已涨点；下一步必须形成新 clean commit，在服务器生成绑定该提交的 cadence/shuffled manifests 并通过 E6 preflight，随后才允许唯一 seed42 训练。M0-2 继续并行收口。
 
 四个会决定论文名称和贡献形态的事实是：
 
@@ -89,8 +89,8 @@ timestamp-native / variable-rate / time-aware 3D SOT
 4. M0 P0-C-D1 已完成：三路各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/hash 与时间干预检查通过；true−fixed 为 `+0.438/+0.523`，true−shuffled 为 `-0.123/+0.056`，逐 tracklet Success/Precision bootstrap CI 均跨 0。下一步复用同一 logger，对冻结 A/B/C final checkpoint 做 strong-cadence 与 evaluation-only path-variance 收尾，不改变预测路径。
 5. M0-3/M0-4 已完成：M2 oracle gate 通过，M1 augmentation 冻结为 shared SE(2)；完整证据见 `compare_results/reports/m0_m03_m04_analysis_20260721.md`。
 6. M1/M2 E0–E5 已在 commit `9a0b26d` 通过，完整复核见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`；不再重复 smoke，不根据随机初始化 clamp ratio 调 alpha/R。
-7. 现在只使用既有 mini_train M0-3 oracle 一次性冻结 alpha 与 `R(delta_t)`，并冻结唯一 seed42 true/fixed/shuffled 配置、manifest/sampling/optimizer/final checkpoint/归档口径，完成 E6。
-8. E6 后严格按 `M1/M2 seed42 time-control -> positive causal signal -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
+7. E6 静态冻结已完成：mini_train 单规则复算确认 `alpha=0.75` 与当前 `R(delta_t)`，共享 warmup=5，唯一 true-dt 训练配置、`1262×60=75720` step、last-only checkpoint、manifest/preflight/归档和同 checkpoint true/fixed/shuffled+A1 输出脚本均已固定；服务器 manifest 与 clean provenance 尚待执行。
+8. 新 clean commit 上先生成并校验 standard/gap/burst manifests，再只训练一次 seed42 true-dt；fixed/shuffled 只评测同一 `last.ckpt`。之后严格按 `positive causal signal -> M3 asymmetric path distillation -> optional M4 filter/tube` 逐级推进；不从旧 feature concat、旧 Gate 或对称 paired loss 直接扩展。
 ```
 
 当前最可防御的价值是：**同一 tracklet 内不规则物理时间协议、冻结 checkpoint 的 matched time negative controls，以及 crop/trajectory/observation failure diagnosis**。M0-3 已把有界 observation-first correction 从待检假设推进为有 offline proposal 互补性的候选，但尚未得到 tracking Success/Precision 增益；M0-4 则把 shared SE(2) 固定为物理一致的数据前提。历史重采样一致性仍只保留 `C-B` 部分修复这一机制事实。

@@ -1,5 +1,19 @@
 # P0-C frozen protocol artifacts
 
+## M2 formal E6（2026-07-22）
+
+新的 M2 formal 不复用下方旧 A2 P0-C 结果文件，也不手工拼接 manifest。形成并拉取新的 clean E6 commit 后，在有 nuScenes-mini 的服务器执行：
+
+```bash
+export EXPECTED_GIT_COMMIT="$(git rev-parse HEAD)"
+export DATA_ROOT=/home/lishengjie/data/nuscenes-mini
+bash tools/prepare_m2_formal_manifests.sh
+```
+
+脚本会生成 standard/gap1124/burst-drop 的冻结 cadence/shuffled-time artifact，逐协议运行真实 batch `true/fixed/shuffled` 不变量检查，并保存文件 SHA256 与 tar archive。文件仍然 gitignored，必须随正式实验输出归档。M2 训练完成后由 `tools/run_m2_formal_time_controls_gpu3.sh` 在同一个 epoch60 `last.ckpt` 上消费这些映射；fixed/shuffled 不单独训练。
+
+下方 P0-C A2 内容是旧 feature-concat checkpoint 的可复现历史记录，其 `NO_GO_P0C_A2_TRUE_DT_PROMOTION` 结论不变。
+
 ## Current status (2026-07-20)
 
 The protocol-build stage has passed on clean commit `343145d`:

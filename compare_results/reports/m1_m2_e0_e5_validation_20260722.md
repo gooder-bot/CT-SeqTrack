@@ -91,16 +91,16 @@ standard、gap1124、burst-drop 和 fallback 的 `61` 个 batch 全部 finite；
 
 standard/gap/burst active 路径共完成 `6` 次真实 optimizer update；三协议都观测到 DynamicsEncoder 和 physical-time adapter 的非零有限梯度，并产生非平凡但受 `alpha*R(dt)` 约束的 correction。另有 `2` 次 warmup optimizer update 验证 schedule 语义。
 
-### E6 可复现性：未完成
+### E6 可复现性：静态冻结完成，服务器 provenance 未完成
 
-本次 gate run 已具备 clean commit、A1/config hash、固定 seed、workers0 和不混写输出目录，足以归档工程验收；但正式 seed42 尚未冻结以下项目：
+本次 gate run 已具备 clean commit、A1/config hash、固定 seed、workers0 和不混写输出目录，足以归档工程验收。随后已完成下列静态冻结：
 
-1. 只依据 mini_train oracle 一次性确定的 `alpha` 与 `R(delta_t)`，以及不经指标调优的 adapter/innovation 共享 warmup（预注册计划值 5 epoch）；不得根据本次随机初始化 smoke 的 clamp ratio 调参。
-2. 唯一 true-dt 训练配置及只改变 effective-time mapping 的 fixed/shuffled controls。
-3. train/eval manifest、candidate/point-sampling、optimizer steps、final checkpoint 和评测 endpoint 口径。
-4. 正式运行的 console、artifact manifest、archive SHA256 与 clean provenance。
+1. `tools/freeze_m2_formal_parameters.py` 只读取既有 mini_train M0-3 原始向量并验证单一预声明规则；`1311 endpoints / 213 tracklets` 上 mean gain 为 `0.288272 m`，tracklet-equal mean gain 为 `0.262530 m`，bootstrap 95% CI `[0.230185,0.295833] m`，long-gap mean gain `0.288963 m`。决定为 `FREEZE_M2_ALPHA_RADIUS`。
+2. 正式值固定为 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`；adapter/innovation 共享 warmup 固定为 5 epoch。未读取 mini_val/test，未搜索 alpha/scale/gate/bound 网格。完整证据见 `m2_e6_parameter_freeze_20260722.{json,md}`。
+3. 唯一训练配置固定为 `cfgs/seqtrack3d_nuscenes_m2_proposal_innovation_formal_true.yaml`：seed42、batch16、workers12、60 epoch、`1262 steps/epoch / 75720 total steps`，只允许用 `--init_checkpoint` 从固定 A1 初始化，只采用 epoch60 `last.ckpt`。
+4. `prepare_m2_formal_manifests.sh`、`check_m2_formal_freeze.py`、`run_m2_formal_seed42_gpu2.sh` 与 `run_m2_formal_time_controls_gpu3.sh` 已固定 manifest、不变量、console、artifact manifest、archive SHA256 与 same-checkpoint controls 的运行契约。fixed/shuffled 只评测同一 M2 final checkpoint，不单独训练。
 
-因此 E6 仍是正式训练的唯一 E-gate 阻塞项；M0-2 四协议/path-variance 也仍需并行收口，M0 整体不能标记完成。
+尚未完成的是：把本次改造形成新的 clean commit，在服务器生成绑定该提交的 standard/gap1124/burst-drop cadence 与 shuffled-time manifests，并用真实 nuScenes 数据、A1 checkpoint 和预期 commit 通过 fail-closed E6 preflight。因此正式训练仍 HOLD；M0-2 四协议/path-variance 也仍需并行收口，M0 整体不能标记完成。
 
 ## 5. 结论边界与下一步
 
@@ -110,7 +110,8 @@ standard/gap/burst active 路径共完成 `6` 次真实 optimizer update；三�
 
 下一步固定为：
 
-1. 只使用已有 mini_train M0-3 oracle 原始向量，对 alpha 和 `R(delta_t)` 做一次预注册确认；共享 warmup 直接冻结为计划值 5 epoch，不经指标调优；不使用 mini_val/test 或本次 smoke 的 clamp ratio。
-2. 新建唯一 seed42 formal true-dt config，并派生仅 effective-time mapping 不同的 fixed/shuffled controls；完成 E6 manifest/provenance 规范。
-3. E6 文档和 clean commit 通过后，才执行一次 seed42 true/fixed/shuffled；不扫 scale/gate/bound 网格。
-4. 并行完成 M0-2 冻结 A/B/C 四协议与 evaluation-only path variance，不重训旧模型。
+1. 提交并推送当前 E6 静态冻结改造，服务器 `git pull --ff-only` 后确认 exact clean commit。
+2. 服务器先执行 `prepare_m2_formal_manifests.sh`，生成并检查 standard/gap1124/burst-drop cadence/shuffled manifests；随后 E6 preflight 核对 A1 SHA256、formal config/report hash 与 `1262×60=75720` 数据契约。
+3. preflight 通过后仅执行一次 seed42 true-dt formal training；fixed/shuffled 不训练，而是在同一个 epoch60 `last.ckpt` 上顺序评测，并导出相同 endpoint 的 A1 baseline。
+4. 不扫 scale/gate/bound 网格；若预注册因果与 A1 guardrail 不通过，转回 benchmark/diagnosis。
+5. 并行完成 M0-2 冻结 A/B/C 四协议与 evaluation-only path variance，不重训旧模型。

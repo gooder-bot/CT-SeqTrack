@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-状态：**候选方法，M 阶段已启动，当前处于 M0；M1/M2 为 Engineering GO，正式训练为 HOLD。尚未完成性能验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前允许 M1/M2 实现、单测和真实 batch smoke；正式 seed42 训练与 M3–M4 必须按本文门槛逐级解锁。
+状态：**候选方法，M 阶段已启动，当前处于 M0；M1/M2 为 Engineering GO，E6 静态冻结已完成，正式训练仍 HOLD，等待新 clean commit 的服务器 manifests/preflight。尚未完成性能验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前 alpha/R/warmup/唯一 formal 配置与 same-checkpoint controls 已固定；正式 seed42 训练与 M3–M4 必须按本文门槛逐级解锁。
 
 ## 1. 决策摘要
 
@@ -234,7 +234,7 @@ state  = prior + K * innovation
 | --- | --- | --- |
 | M0 | **进行中** | 只做冻结输出、离线 oracle、candidate 审计和 provenance 收口 |
 | M1 | **Engineering GO** | M0-4 排除独立 jitter 与第一版 smooth drift；现在实现 shared world-SE(2)、canonical label、zero-init 和等价性测试 |
-| M2 | **Engineering GO，Formal-training HOLD** | M0-3 已证明 `d_dyn` 对 `d_obs` 有互补空间；M1 不变量后接入新模式，正式训练仍需 E0–E6、clean commit 与预注册 controls |
+| M2 | **Engineering GO，E6 Static Freeze Ready，Formal-training HOLD** | M0-3 已证明互补空间，alpha/R/warmup/唯一配置与 controls 已冻结；等待 clean server manifests/preflight |
 | M3 | **锁定** | M1/M2 的 true-dt 必须同时优于 fixed/shuffled，并通过 A1 standard guardrail |
 | M4 | **锁定** | M2 互补性、predicted-history tube oracle 与 uncertainty calibration 必须全部成立 |
 
@@ -255,20 +255,20 @@ M0 的 logger、冻结评测、proposal oracle 与 candidate 审计可以并行�
 
 - [x] 读取并冻结 M0 的 candidate0/1/2/3 审计结论；不得在 M1 中依据 tracking test 涨跌反向改变判据。
 - [x] augmentation 预注册为 shared SE(2)，第一版不实现 smooth drift。
-- [ ] 新增默认关闭的 candidate trajectory mode；legacy independent 与 shared world-SE(2) 不静默混用。
-- [ ] shared 变换围绕共同 anchor 在世界坐标一次施加；不能把相同局部 offset 重复交给每个 `getOffsetBB`。
-- [ ] canonical GT label 只使用真实 `delta_t`；补 pairwise trajectory、伪导数、candidate0、candidate1/2/3、degrees/radians 和 TWC 回归单测。
-- [ ] 加入显式 zero-scale/disabled physical-time adapter，并验证同权重同 batch 的 motion/output/loss 与 A1 数值一致；sigmoid 近零不算通过。
+- [x] 新增默认关闭的 candidate trajectory mode；legacy independent 与 shared world-SE(2) 不静默混用。
+- [x] shared 变换围绕共同 anchor 在世界坐标一次施加；没有把相同局部 offset 重复交给每个 `getOffsetBB`。
+- [x] canonical GT label 只使用真实 `delta_t`；pairwise trajectory、伪导数、candidate0/1/2/3、degrees/radians 和 TWC 回归已通过。
+- [x] 加入显式 zero-scale/disabled physical-time adapter；同权重同 batch 的 motion/output/loss 与 A1 strict-zero 数值一致。
 - [ ] 同 checkpoint 做 true/fixed/shuffled forward invariance smoke test。
-- [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；第一轮不扫超参数网格。
+- [ ] 唯一 augmentation 与 seed42 mini 配置已静态冻结；剩余新 clean commit 与 server manifest/preflight，第一轮不扫超参数网格。
 
 ### M2：proposal innovation（Engineering GO，Formal-training HOLD）
 
-- [ ] 新增显式 `proposal_innovation` mode：实现 `d_dyn - stopgrad(d_obs)`；旧完整位移叠加只保留作可复现负对照。
-- [ ] effective alpha 用单一、可解释的 `[0,1]` 系数；不继承旧 `residual_scale × max_alpha = 0.02` 的线段上限，绝对 correction 由 `R(dt)` 控制。
-- [ ] `alpha=0`、disabled、warmup 或 `dynamics_valid=0` 时严格恢复 observation/A1；不能只要求 alpha 很小。
-- [ ] 记录 raw/clamped/applied innovation norm、applied ratio、alpha、clamp ratio、invalid fallback、gate/encoder gradient。
-- [ ] 完成 standard/gap1124/burst-drop、invalid/resampled/empty fallback 与至少 2-step optimizer smoke。
+- [x] 新增显式 `proposal_innovation` mode：实现 `d_dyn - stopgrad(d_obs)`；旧完整位移叠加只保留作可复现负对照。
+- [x] effective alpha 使用单一 `[0,1]` 系数；正式值冻结为 `0.75`，绝对 correction 由 `R(dt)=min(0.5+0.5dt,2.0)` 控制。
+- [x] `alpha=0`、disabled、warmup 或 `dynamics_valid=0` 时严格恢复 observation/A1。
+- [x] 记录 raw/clamped/applied innovation norm、applied ratio、alpha、clamp ratio、invalid fallback、adapter/encoder gradient。
+- [x] standard/gap1124/burst-drop、invalid/resampled/empty fallback 与至少 2-step optimizer smoke 已通过。
 - [ ] 只跑 seed42 mini 的 true/fixed/shuffled；不扫大网格。
 
 正式训练必须等待 E0–E6：默认路径回归、shared-SE(2) 几何不变量、canonical-label 不变量、zero/invalid 严格 A1 回退、三协议数值安全、2-step 可训练性，以及唯一配置/同 A1 初始化/clean provenance。M0-2 可与上述工程并行，不阻塞写代码；但它仍是 M0 完成和旧 TWC 解释收口的必要项。

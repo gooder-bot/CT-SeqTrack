@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口**，同时进入 M1/M2 formal 配置准备。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成服务器硬门禁：真实 loader/TWC、A1 strict-zero 等价、warmup 内两步 exact-zero、invalid/empty strict fallback、sampler-resampled coverage、standard/gap/burst finite 与 active 2-step 全部通过，正式状态为 **`E0–E5 Engineering GO / E6 Formal-training HOLD`**。这仍只是工程证据，不是 tracking 涨点；下一步是只用既有 mini_train oracle 一次性冻结 alpha、`R(delta_t)`、唯一 seed42 true/fixed/shuffled 配置和 E6 provenance。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口**，同时进入 M1/M2 formal 配置准备。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成 E0–E5 服务器硬门禁；随后 E6 静态冻结已完成：只读取既有 mini_train oracle，确认 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)` 与共享 5-epoch warmup，并新增唯一 formal true-dt 配置、manifest/preflight/训练/同 checkpoint 时间控制脚本。正式状态为 **`E0–E5 Engineering GO / E6 Static Freeze Ready / Formal-training HOLD pending clean server manifests`**。这仍不是 tracking 涨点；必须先形成新的 clean commit，并在服务器生成绑定该提交的 cadence/shuffled-time manifests，通过 E6 preflight 后才允许启动唯一 seed42 true-dt 训练。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
 
 ## 文档导航
 
@@ -20,6 +20,7 @@ CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟�
 | `compare_results/reports/m0_m03_m04_analysis_20260721.md` | M0-3/M0-4 数据质量、独立复算、稳健性、决策与下一步 |
 | `compare_results/reports/m0_m03_m04_report/report.html` | M0-3/M0-4 自包含可视化技术报告（桌面/窄屏 QA 通过） |
 | `compare_results/reports/m1_m2_e0_e5_validation_20260722.md` | M1/M2 服务器 E0–E5 provenance、JSONL 独立复算、解锁边界与 E6 阻塞 |
+| `compare_results/reports/m2_e6_parameter_freeze_20260722.md` | 既有 mini_train M0-3 向量的单规则复算、alpha/R/warmup 冻结与保守性边界 |
 
 ---
 
@@ -215,8 +216,8 @@ use_observability_gate: False
 | M0-3 | crop-reachable proposal oracle | `GO_M2_PROPOSAL_INNOVATION`；dynamics-only 与 long-gap tracklet bootstrap 均支持互补性，M2 工程 gate 解锁 |
 | M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
 | M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
-| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E5 通过：真实 loader/TWC、A1 strict-zero 等价与 warmup 内两步 exact-zero 均完成；E6 待冻结 |
-| M2 engineering | bounded proposal innovation | E0–E5 通过：strict fallback、resampled coverage、三协议 finite、active 2-step 与 bound 均完成；正式配置仍 HOLD |
+| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E5 通过；共享 5-epoch warmup 与唯一 formal 配置已静态冻结，等待 server manifest/preflight |
+| M2 engineering | bounded proposal innovation | E0–E5 通过；`alpha=0.75` 与 `R(dt)=min(0.5+0.5dt,2.0)` 已由 mini_train 一次性冻结，正式训练仍 HOLD |
 
 当前已完成的关键消融：
 
@@ -243,16 +244,19 @@ use_observability_gate: False
 20. M0-3 gap1124 proposal oracle：official checks、原始向量复算、dynamics-only/trimmed/long-gap/tracklet bootstrap 稳健性
 21. M0-4 candidate dynamics audit：伪速度/伪加速度、matched proposal penalty、candidate balance 与 shared SE(2) 冻结决策
 22. M1/M2 E0–E5：clean commit 服务器硬门禁、五组 JSONL 独立复算、warmup/invalid/empty/resampled/三协议/2-step/bound 验收
+23. M2 E6 静态冻结：1311 endpoints / 213 tracklets 的单规则复算、tracklet bootstrap、唯一 formal true 配置与 fail-closed server workflow
 ```
 
 当前下一步：
 
 ```text
 1. E0–E5 已完成并本地独立复算；不再重复 smoke 或根据随机初始化 clamp ratio 调参。
-2. 只读取既有 mini_train M0-3 oracle 原始向量，一次性冻结 `alpha` 与 `R(delta_t)`；adapter/innovation 共享 warmup 直接冻结为计划值 5 epoch，不经指标调优；不得读取 mini_val/test 决定超参数。
-3. 新建唯一 seed42 formal true-dt config，并派生只改变 effective-time mapping 的 fixed/shuffled controls；冻结 manifest、sampling、optimizer steps、final checkpoint 和归档规范，完成 E6。
-4. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的四协议输出与 evaluation-only path variance，不重训。
-5. E6 和新的 clean commit 完成后，只跑一次 seed42 `true/fixed/shuffled`；未形成因果正信号则转回 benchmark/diagnosis。
+2. E6 参数与配置静态冻结已完成；提交并推送当前改造，服务器只接受新的 clean commit。
+3. 在服务器执行 `tools/prepare_m2_formal_manifests.sh`，生成绑定 clean commit 的 standard/gap1124/burst-drop cadence 与 shuffled-time manifests；再由 `check_m2_formal_freeze.py` 核对 A1 hash、`1262×60=75720` steps 和配置不漂移。
+4. 通过 E6 server preflight 后，只用 GPU2 执行一次 `run_m2_formal_seed42_gpu2.sh`；它使用 `--init_checkpoint` 从冻结 A1 初始化，只保留 epoch60 `last.ckpt`，不选择 best checkpoint。
+5. 训练完成后用 GPU3 执行 `run_m2_formal_time_controls_gpu3.sh`；同一 M2 checkpoint 顺序导出 standard/gap/burst 的 true/fixed/shuffled，并在相同 endpoint 导出 A1 baseline。fixed/shuffled 不训练。
+6. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的四协议输出与 evaluation-only path variance，不重训。
+7. 若 seed42 未形成预注册因果正信号，转回 benchmark/diagnosis，不在 mini_val/test 上重调 alpha/R。
 ```
 
 ---
@@ -430,6 +434,51 @@ python tools/check_train_steps.py \
 ## 训练与测试
 
 当前服务器运行状态和正式复跑命令以 `need_to_do.md` 为准。不要根据旧 PID 或本地文档直接认定历史 HTV 任务仍在运行。
+
+### M2 E6 唯一正式工作流
+
+当前 formal 入口是 fail-closed 的三步流程。先确认服务器位于已评审的新 clean commit，并设置：
+
+```bash
+PROJECT_ROOT=/home/lishengjie/study/lcyu/CT-SeqTrack
+cd "$PROJECT_ROOT"
+
+export EXPECTED_GIT_COMMIT="$(git rev-parse HEAD)"
+export DATA_ROOT=/home/lishengjie/data/nuscenes-mini
+export A1_CKPT="$PROJECT_ROOT/output/20260531-2322-seqtrack3d_nuscenes_a1_order-ct_a1_order_car_60ep_bs16_gpu1/lightning_logs/version_0/checkpoints/last.ckpt"
+```
+
+第一步只使用 CPU 生成并检查绑定当前 commit 的 cadence/shuffled manifests：
+
+```bash
+bash tools/prepare_m2_formal_manifests.sh
+```
+
+第二步只在 GPU2 启动一个 seed42 true-dt 训练。脚本会再次核对 clean Git、A1 SHA256、oracle/report/config hash、`1262×60=75720` steps、manifest 完整性和 `--init_checkpoint` 语义：
+
+```bash
+export GPU=2
+export OUT_ROOT="$PROJECT_ROOT/output/m2_formal_true_seed42_${EXPECTED_GIT_COMMIT:0:7}_$(date +%Y%m%d_%H%M%S)"
+
+nohup bash tools/run_m2_formal_seed42_gpu2.sh \
+  > "/tmp/m2_formal_train_${EXPECTED_GIT_COMMIT:0:7}.launcher.log" 2>&1 &
+echo $!
+```
+
+第三步在训练成功并确认 `final_checkpoint.json` 后，只在 GPU3 对同一个 `last.ckpt` 做 true/fixed/shuffled，同时导出相同 endpoint 的 A1 baseline。fixed/shuffled 不训练：
+
+```bash
+export FINAL_CKPT="$(find "$OUT_ROOT" -type f -name last.ckpt -print -quit)"
+export EXPECTED_FINAL_CKPT_SHA256="$(sha256sum "$FINAL_CKPT" | awk '{print $1}')"
+export GPU=3
+export OUT_ROOT="$PROJECT_ROOT/output/m2_formal_controls_${EXPECTED_GIT_COMMIT:0:7}_$(date +%Y%m%d_%H%M%S)"
+
+nohup bash tools/run_m2_formal_time_controls_gpu3.sh \
+  > "/tmp/m2_formal_controls_${EXPECTED_GIT_COMMIT:0:7}.launcher.log" 2>&1 &
+echo $!
+```
+
+不要手工绕过脚本的 commit/hash/step 检查，不要用 `--checkpoint` 代替训练初始化的 `--init_checkpoint`，也不要从 top-k/best 文件挑结果。
 
 ### 服务器训练线程限制（必须）
 

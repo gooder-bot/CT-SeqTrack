@@ -6,14 +6,14 @@
 
 ## 当前阶段状态
 
-> **决策：当前活动阶段仍是 M0 收口与 M1/M2 formal 准备并行；M1/M2 的 E0–E5 已在 clean commit `9a0b26d` 上通过服务器硬门禁，状态为 `Engineering validation GO / Formal-training HOLD`。下一关只允许使用既有 mini_train oracle 一次性冻结 alpha、`R(delta_t)`、唯一 seed42 true/fixed/shuffled 配置和完整 E6 provenance。M0-2 四协议冻结输出继续并行；E6 完成前不得启动正式训练。**
+> **决策：当前活动阶段仍是 M0 收口与 M1/M2 formal 准备并行；M1/M2 的 E0–E5 已在 clean commit `9a0b26d` 上通过服务器硬门禁。E6 静态冻结现已完成：mini_train 单规则复算确认 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`、共享 5-epoch warmup、唯一 true-dt formal 配置和 same-checkpoint controls。状态为 `Engineering validation GO / E6 Static Freeze Ready / Formal-training HOLD pending clean server manifests`。M0-2 四协议冻结输出继续并行；新的 clean commit、服务器 manifest 与 E6 preflight 完成前不得启动正式训练。**
 
 | 阶段 | 状态 | 当前允许的工作 |
 | --- | --- | --- |
 | 旧路线筛选：P0-B / P0-C / TWC | **已关闭** | 只保留冻结输出和论文失败边界，不再补训练 seed 或复活旧 Gate/TWC 组合 |
 | M0：冻结输出、oracle 与 candidate 审计 | **进行中，3/4 诊断完成** | P0-C-D1、M0-3、M0-4 已完成；只剩 M0-2 A/B/C strong-cadence/path variance 与文档/provenance 收口 |
-| M1：物理一致 augmentation + zero-init dual clock | **E0–E5 通过，E6 待冻结** | shared SE(2)、canonical label、zero-init adapter、真实 loader/TWC、A1 等价和 warmup 两步 hard gate 均通过；第一版不做 smooth drift |
-| M2：proposal innovation | **E0–E5 通过，Formal-training HOLD** | strict fallback、resampled coverage、三协议 finite、受界 correction 与 active 2-step 均通过；当前只冻结唯一正式配置和 controls |
+| M1：物理一致 augmentation + zero-init dual clock | **E0–E5 通过，E6 静态冻结完成** | shared SE(2)、canonical label、zero-init adapter 与共享 5-epoch formal warmup 已固定；等待 server manifest/preflight |
+| M2：proposal innovation | **E0–E5 通过，Formal-training HOLD** | alpha/R、唯一 true config、75720-step/last-only contract 与 controls 已固定；待 clean server provenance |
 | M3：asymmetric path distillation | **锁定** | 仅在 M1/M2 的 `true-dt` 同时优于 fixed/shuffled 且不破坏 A1 后启动 |
 | M4：filter / trajectory tube | **锁定** | 仅在 proposal 互补性、predicted-history tube oracle 和 uncertainty calibration 均通过后启动 |
 
@@ -157,11 +157,12 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 6. **M0-3 已完成**：gap1124 crop-reachable proposal oracle 得到 `GO_M2_PROPOSAL_INNOVATION`；`d_dyn` 本身相对 `d_obs` 的 tracklet bootstrap mean gain 为 `0.803 m`，95% CI `[0.633,0.988]`。
 7. **M0-4 已完成**：candidate jitter 明确制造伪速度/伪加速度，matched proposal penalty 的 tracklet CI 不跨 0；M1 唯一 augmentation 冻结为 shared SE(2)，第一版不做 smooth drift。
 8. **M1 E0–E5 已完成**：sample-level world-SE(2)、canonical label、zero-init adapter、真实 loader/TWC、A1 strict-zero 等价和 warmup 内两步 optimizer 后 exact-zero 均在 commit `9a0b26d` 通过。
-9. **M2 E0–E5 已完成**：独立 proposal-innovation、invalid/empty exact-zero、sampler-resampled coverage、standard/gap/burst finite、active 2-step 与 correction bound 均通过；旧 `residual_limited` 保持原义。当前只进入 E6 配置/协议冻结，不启动训练。
-10. **M1/M2 训练顺序**：E0–E6 全部通过并形成 clean commit 后，第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
-11. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
-12. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
-13. 若 M1/M2 的在线 time-control 没有可推广正信号，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时序模块。
+9. **M2 E0–E5 已完成**：独立 proposal-innovation、invalid/empty exact-zero、sampler-resampled coverage、standard/gap/burst finite、active 2-step 与 correction bound 均通过；旧 `residual_limited` 保持原义。
+10. **E6 静态冻结已完成**：冻结报告只评估预先声明的 `alpha=0.75` 与 `R(dt)=min(0.5+0.5dt,2.0)`，1311 endpoints / 213 tracklets 的 mean gain 为 `0.288 m`，tracklet bootstrap 95% CI 为 `[0.230,0.296] m`；共享 warmup=5，唯一 formal true 配置、1262 steps/epoch、75720 total steps、last-only checkpoint 和 server workflow 已固定。当前仍不启动训练。
+11. **M1/M2 训练顺序**：提交新的 clean commit；服务器先生成并校验 standard/gap/burst cadence/shuffled manifests；E6 preflight 通过后只训练一个 seed42 true-dt 模型。fixed/shuffled 只评测同一 final checkpoint，不训练三份模型。
+12. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
+13. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
+14. 若 M1/M2 的在线 time-control 没有可推广正信号，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时序模块。
 
 ### M0 完成定义
 
@@ -219,13 +220,13 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [x] 纯函数共同刚体变换、anchor-normalized trajectory、canonical label、degrees/radians 与双路径共享已通过；2026-07-22 服务器真实 loader 的 full-history candidate1/2/3 与 TWC 回归通过。
 - [x] zero-init physical-time adapter 已实现且 dataset-free exact identity 通过；2026-07-22 服务器同 A1 权重、同 batch 的 motion/output/loss strict-zero 等价通过（A1 `320/334` 张量匹配，14 个新 dynamics/adapter 张量按设计新建）。
 - [x] 保留 SeqTrack3D order embedding；新工程配置固定 `main_time_source: order`，physical time 只进入 DynamicsEncoder、zero-init adapter 与 `R(delta_t)`。
-- [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；不得边看 test 结果边改变扰动过程。
+- [ ] formal 配置与唯一 augmentation 已静态冻结；下一步提交 clean commit，并在服务器通过 manifest/preflight 后启动，不得边看 test 结果边改变扰动过程。
 
 ### M2：Proposal innovation（Engineering GO，Formal-training HOLD）
 
 - [x] 新增独立显式 `proposal_innovation` 模式：`innovation=clip(d_dyn-stopgrad(d_obs), R(delta_t))`；旧 `residual` alias 和语义未改。
 - [x] 实现 `d_final=d_obs+alpha*innovation`；旧完整 `d_obs + scale*alpha*d_dyn` 仅保留为历史负对照。
-- [ ] 新公式已只有一个 `[0,1]` effective alpha，绝对修正由 `R(delta_t)` 控制；工程 smoke 暂用 M0-3 mean alpha 四舍五入得到的 `0.75` 与显式半径，正式值仍须在 training oracle 上一次性确认后冻结。
+- [x] 新公式只有一个 `[0,1]` effective alpha；既有 mini_train oracle 已一次性确认并冻结 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`，没有读取 mini_val/test 或搜索网格。
 - [x] zero-scale/disabled、`alpha=0`、`dynamics_valid=0`、empty-search 的 strict fallback 与真实模型 A1 等价均通过；warmup 内执行两次 optimizer update 后 adapter/innovation output 与 effective scale 仍精确为 0，DynamicsEncoder 梯度非零。
 - [x] 已新增 raw/clamped/applied innovation、半径、alpha、applied/clamp ratio、invalid fallback、adapter/encoder gradient 诊断；旧 residual 字段保留。
 - [x] commit `9a0b26d` 的服务器硬门禁通过：五组共 `61` 个 batch/`122` 个样本全 finite；fallback 为 `8 invalid / 16 empty / 2 resampled`，invalid/empty applied max 精确为 0；standard/gap/burst active 均完成 2-step，encoder/adapter 梯度非零，bound violation max `5.96e-8`。
@@ -239,9 +240,9 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [x] **E3 公式不变量**：zero/invalid/empty/warmup 严格回到 A1；正式路径不再叠加两个完整位移。
 - [x] **E4 数值安全**：三协议与所有 fallback batch 的 loss/gradient finite；sampler-resampled 已显式覆盖。
 - [x] **E5 可训练性**：至少 2-step optimizer，innovation 分支启用后有非零有限梯度和非平凡但受界的修正。
-- [ ] **E6 可复现性**：唯一 seed42 配置、共享 warmup（计划值 5 epoch）、同 A1 初始化、固定 manifest/candidate/point sampling/optimizer steps/final checkpoint、clean commit/provenance。
+- [ ] **E6 可复现性**：静态部分已完成——唯一 true-dt seed42 配置、共享 warmup=5、A1 `--init_checkpoint`、candidate/point sampling、1262×60=75720 steps、last-only checkpoint、same-checkpoint controls 和归档脚本均已冻结；剩余 server cadence/shuffled manifests、clean commit 与 preflight provenance。
 
-2026-07-22 硬门禁复验来自 clean commit `9a0b26d` 和固定 A1 SHA256 `a2fbff...a82`。五组 summary 均 `requirements_passed=true`，本地从 JSONL 独立复算计数、finite、梯度与 bound 完全一致，正式判定 `PASS_M1_M2_E0_E5_ENGINEERING_GATES`。strong-cadence clamp ratio 仍只属于随机初始化 smoke，不能用于调参；sampler-resampled 表示替换为另一条有效训练样本，其门禁是显式记录与 finite，不是 strict-zero。完整报告见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。Formal-training 继续 HOLD，直到 E6 冻结。
+2026-07-22 硬门禁复验来自 clean commit `9a0b26d` 和固定 A1 SHA256 `a2fbff...a82`。五组 summary 均 `requirements_passed=true`，本地从 JSONL 独立复算计数、finite、梯度与 bound 完全一致，正式判定 `PASS_M1_M2_E0_E5_ENGINEERING_GATES`。随后 `m2_e6_parameter_freeze_20260722.{json,md}` 完成单规则参数确认，正式配置与 fail-closed server workflow 已实现。strong-cadence clamp ratio 仍只属于随机初始化 smoke，不能用于调参；sampler-resampled 表示替换为另一条有效训练样本，其门禁是显式记录与 finite，不是 strict-zero。Formal-training 继续 HOLD，直到新 clean commit 上的 manifests 与 E6 server preflight 通过。
 
 ### M3：Endpoint-consistent asymmetric path distillation（尚未解锁）
 

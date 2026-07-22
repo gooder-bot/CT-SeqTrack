@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -27,6 +27,8 @@
 - [x] TWC 同提交 A/B/C seed42 已完成并本地复核：Final `B-A=-15.30/-24.18`、`C-B=+8.31/+11.74`、`C-A=-7.00/-12.44`；主方法 promotion No-Go，不补 seed43/44。
 - [x] 2026-07-21 完成旧路线阶段决策：P0-B、P0-C 与 TWC 的核心筛选已足够关闭旧扩展路线，项目转入 M0；这是一项研究阶段决策，不代表 M1–M4 已实现或已获得性能增益。
 - [x] 2026-07-21 完成 M0 P0-C-D1 gap1124 三路 full 冻结诊断：true/fixed/shuffled 各 `91` 个 tracklet、`1257` 个 endpoint，endpoint/order/checkpoint/config/selection/manifest exact match，时间干预按定义生效；true 相对 fixed 为 `+0.438/+0.523`，相对 shuffled 为 `-0.123/+0.056`，逐 tracklet bootstrap 不支持稳定 Success/Precision 正效应，再次确认 `NO_GO_P0C_A2_TRUE_DT_PROMOTION`。旧 2-tracklet smoke 只保留为首帧口径修复的工程记录。
+- [x] 2026-07-22 M1/M2 E0–E5 服务器硬门禁完成：A1 strict-zero 等价、shared-SE(2)/canonical label、warmup 两步 exact-zero、invalid/empty fallback、resampled coverage、三协议 finite/active 2-step 与 correction bound 全部通过。
+- [x] 2026-07-22 M2 E6 静态冻结完成：只验证预声明的 `alpha=0.75` 与 `R(dt)=min(0.5+0.5dt,2.0)`；`1311 endpoints / 213 tracklets` 上 tracklet-equal mean gain `0.263 m`、bootstrap 95% CI `[0.230,0.296] m`。共享 warmup=5、唯一 formal true config、75720-step/last-only contract、server manifests/preflight/train/same-checkpoint control scripts 已固定。server clean manifest/preflight 尚属未完成任务。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text

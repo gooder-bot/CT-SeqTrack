@@ -43,6 +43,25 @@ def load_config(path):
     return cfg
 
 
+def merge_protocol_config(cfg, path):
+    if path is None:
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        protocol_cfg = yaml.load(handle, Loader=yaml.FullLoader)
+    for key, value in protocol_cfg.items():
+        if "virtual_rate" in key:
+            setattr(cfg, key, value)
+
+
+def set_virtual_rate_manifest(cfg, role, path):
+    if path is None:
+        return
+    setattr(cfg, f"{role}_virtual_rate_manifest", path)
+    setattr(cfg, f"virtual_rate_manifest_{role}", path)
+    setattr(cfg, f"{role}_virtual_rate_manifest_strict", True)
+    setattr(cfg, f"{role}_virtual_rate_manifest_require_commit_match", True)
+
+
 def to_numpy(value):
     if torch.is_tensor(value):
         return value.detach().cpu().numpy()
@@ -138,6 +157,10 @@ def make_sampler(cfg, role, split, mode, shuffled_manifest):
     set_role_value(
         local, role, "dynamics_time_manifest",
         shuffled_manifest if mode == "shuffled" else "")
+    if mode == "shuffled":
+        set_role_value(local, role, "dynamics_time_manifest_strict", True)
+        set_role_value(
+            local, role, "dynamics_time_manifest_require_commit_match", True)
     return get_dataset(
         local, type="train_motion_mf", split=split, protocol_role=role)
 
@@ -159,6 +182,8 @@ def deterministic_sample(sampler, index, seed):
 
 def integration_check(args):
     cfg = load_config(args.cfg)
+    merge_protocol_config(cfg, args.protocol_cfg)
+    set_virtual_rate_manifest(cfg, args.role, args.virtual_rate_manifest)
     if args.path is not None:
         cfg.path = args.path
     if args.version is not None:
@@ -198,6 +223,8 @@ def main():
     parser.add_argument("--split")
     parser.add_argument("--path")
     parser.add_argument("--version")
+    parser.add_argument("--protocol-cfg")
+    parser.add_argument("--virtual-rate-manifest")
     parser.add_argument("--seed", type=int, default=20260720)
     args = parser.parse_args()
     if args.self_test:

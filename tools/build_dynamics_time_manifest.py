@@ -22,6 +22,16 @@ def load_config(path):
     return cfg
 
 
+def merge_protocol_config(cfg, path):
+    if path is None:
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        protocol_cfg = yaml.load(handle, Loader=yaml.FullLoader)
+    for key, value in protocol_cfg.items():
+        if "virtual_rate" in key:
+            setattr(cfg, key, value)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Build an offline split-wide shuffled-dt permutation manifest.")
@@ -31,6 +41,12 @@ def main():
     parser.add_argument("--split", default=None)
     parser.add_argument("--path", default=None)
     parser.add_argument("--version", default=None)
+    parser.add_argument(
+        "--protocol-cfg", default=None,
+        help="Merge only virtual-rate fields from this frozen protocol config.")
+    parser.add_argument(
+        "--virtual-rate-manifest", default=None,
+        help="Frozen cadence manifest whose endpoint selection the mapping must use.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--allow-dirty", action="store_true")
     args = parser.parse_args()
@@ -44,6 +60,7 @@ def main():
             "for a non-formal smoke manifest.")
 
     cfg = load_config(args.cfg)
+    merge_protocol_config(cfg, args.protocol_cfg)
     if args.path is not None:
         cfg.path = args.path
     if args.version is not None:
@@ -52,6 +69,11 @@ def main():
     # consumed by a separate shuffled-mode run.
     setattr(cfg, f"{args.role}_dynamics_time_mode", "true")
     setattr(cfg, f"dynamics_time_manifest_{args.role}", "")
+    if args.virtual_rate_manifest is not None:
+        setattr(cfg, f"{args.role}_virtual_rate_manifest", args.virtual_rate_manifest)
+        setattr(cfg, f"virtual_rate_manifest_{args.role}", args.virtual_rate_manifest)
+        setattr(cfg, f"{args.role}_virtual_rate_manifest_strict", True)
+        setattr(cfg, f"{args.role}_virtual_rate_manifest_require_commit_match", True)
     split = args.split or getattr(cfg, f"{args.role}_split", cfg.test_split)
     wrapped = get_dataset(
         cfg,

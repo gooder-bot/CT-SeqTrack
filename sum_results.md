@@ -6,6 +6,21 @@
 
 ## 0. 当前总判断
 
+### 2026-07-22 M1/M2 E0–E6 状态
+
+M1/M2 已通过 E0–E5 服务器工程门禁。E6 的参数与配置静态冻结也已完成：mini_train M0-3 的既有 `1311 endpoints / 213 tracklets` 只用于确认一个预声明规则，正式值固定为 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`、adapter/innovation 共享 warmup=5。该规则的 endpoint mean gain 为 `0.288 m`，tracklet-equal mean gain 为 `0.263 m`，bootstrap 95% CI `[0.230,0.296] m`；但 clamp rate 为 `34.48%`，属于安全而保守的首轮规则，不声称最优。
+
+当前仍没有新的 tracking Success/Precision 结果。正式状态是：
+
+```text
+PASS_M1_M2_E0_E5_ENGINEERING_GATES
+FREEZE_M2_ALPHA_RADIUS
+E6_STATIC_FREEZE_READY
+HOLD_FORMAL_TRAINING_PENDING_CLEAN_SERVER_MANIFESTS
+```
+
+下一步是在新 clean commit 上生成 standard/gap1124/burst-drop cadence 与 shuffled-time manifests，通过 A1 hash、75720-step 和配置漂移 preflight 后，只训练一个 seed42 true-dt 模型；fixed/shuffled 只评测同一个 epoch60 `last.ckpt`。
+
 ### 2026-07-21 TWC A/B/C 同提交 seed42
 
 同 commit `343145d`、同 seed42、同 mini_train/mini_val selection、batch16、candidate4、60 epoch 和 75720 optimizer steps 的三组控制已经完成并拉回本地：
