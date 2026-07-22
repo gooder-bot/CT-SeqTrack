@@ -104,6 +104,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             getattr(config, 'dynamics_innovation_radius_max', 2.0))
         self.dynamics_innovation_warmup_epoch = int(getattr(
             config, 'dynamics_innovation_warmup_epoch', self.dynamics_warmup_epoch))
+        self.physical_time_adapter_warmup_epoch = int(getattr(
+            config,
+            'physical_time_adapter_warmup_epoch',
+            self.dynamics_innovation_warmup_epoch,
+        ))
         self.dynamics_innovation_disable_on_empty_search = bool(getattr(
             config, 'dynamics_innovation_disable_on_empty_search', False))
         if self.dynamics_residual_scale < 0:
@@ -112,6 +117,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError("dynamics_max_residual_norm must be positive.")
         if not 0.0 <= self.physical_time_adapter_scale <= 1.0:
             raise ValueError("physical_time_adapter_scale must be in [0, 1].")
+        if self.physical_time_adapter_warmup_epoch < 0:
+            raise ValueError("physical_time_adapter_warmup_epoch must be non-negative.")
         if not 0.0 <= self.dynamics_innovation_alpha <= 1.0:
             raise ValueError("dynamics_innovation_alpha must be in [0, 1].")
         if not 0.0 <= self.dynamics_innovation_scale <= 1.0:
@@ -404,12 +411,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         "current_delta_t_effective",
                         input_dict.get("current_delta_t"),
                     )
+                    adapter_scale = self.physical_time_adapter_scale
+                    if (self.training
+                            and getattr(self, 'current_epoch', 0)
+                            < self.physical_time_adapter_warmup_epoch):
+                        adapter_scale = 0.0
                     motion_feature, adapter_aux = self.physical_time_adapter(
                         point_feature,
                         z_dyn,
                         adapter_gap,
                         dynamics_valid,
-                        enabled_scale=self.physical_time_adapter_scale,
+                        enabled_scale=adapter_scale,
                     )
                     output_dict.update(adapter_aux)
             elif self.use_observability_gate:

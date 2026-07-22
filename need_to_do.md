@@ -6,14 +6,14 @@
 
 ## 当前阶段状态
 
-> **决策：当前活动阶段仍是 M0，M1/M2 为 `Engineering GO / Formal-training HOLD`。M1/M2 第一代码切片和 dataset-free 几何、fallback、2-step 已通过；下一关是训练服务器上的真实 loader/TWC 回归、同权重 A1 output/loss 等价和三协议 forward/backward。M0-2 四协议冻结输出可并行收口；正式 seed42 训练必须等 E0–E6、唯一配置与 clean commit 全部通过后再启动。**
+> **决策：当前活动阶段仍是 M0，M1/M2 为 `Engineering GO / Formal-training HOLD`。M1/M2 第一代码切片、dataset-free 检查以及首轮服务器真实 loader/TWC、A1 等价、三协议 forward/backward 已通过；下一关是用当前硬门禁复验 resampled fallback 和 optimizer-after-warmup。M0-2 四协议冻结输出可并行收口；正式 seed42 训练必须等 E0–E6、唯一配置与 clean commit 全部通过后再启动。**
 
 | 阶段 | 状态 | 当前允许的工作 |
 | --- | --- | --- |
 | 旧路线筛选：P0-B / P0-C / TWC | **已关闭** | 只保留冻结输出和论文失败边界，不再补训练 seed 或复活旧 Gate/TWC 组合 |
 | M0：冻结输出、oracle 与 candidate 审计 | **进行中，3/4 诊断完成** | P0-C-D1、M0-3、M0-4 已完成；只剩 M0-2 A/B/C strong-cadence/path variance 与文档/provenance 收口 |
-| M1：物理一致 augmentation + zero-init dual clock | **第一代码切片完成，服务器验收待执行** | shared SE(2)、canonical label、zero-init adapter、model-equivalence 工具已落地；第一版不做 smooth drift |
-| M2：proposal innovation | **第一代码切片完成，Formal-training HOLD** | 独立 innovation 模式与 dataset-free 2-step 已通过；旧 full-displacement residual 只保留作负对照 |
+| M1：物理一致 augmentation + zero-init dual clock | **第一代码切片完成，硬门禁复验待执行** | shared SE(2)、canonical label、zero-init adapter 与首轮服务器 model-equivalence 已通过；第一版不做 smooth drift |
+| M2：proposal innovation | **服务器首轮 smoke 通过，Formal-training HOLD** | 独立 innovation 模式、dataset-free/服务器 2-step 已通过；当前复验 resampled 与两步 warmup，旧 full-displacement residual 只保留作负对照 |
 | M3：asymmetric path distillation | **锁定** | 仅在 M1/M2 的 `true-dt` 同时优于 fixed/shuffled 且不破坏 A1 后启动 |
 | M4：filter / trajectory tube | **锁定** | 仅在 proposal 互补性、predicted-history tube oracle 和 uncertainty calibration 均通过后启动 |
 
@@ -156,8 +156,8 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 5. **M0-2**：用同一 logger 对冻结 A/B/C final checkpoint 评测 standard、gap1124、burst-drop 和 unseen fixed gap，报告 paired delta、path variance、首次失控、连续失败和 empty fallback，不改变预测路径。
 6. **M0-3 已完成**：gap1124 crop-reachable proposal oracle 得到 `GO_M2_PROPOSAL_INNOVATION`；`d_dyn` 本身相对 `d_obs` 的 tracklet bootstrap mean gain 为 `0.803 m`，95% CI `[0.633,0.988]`。
 7. **M0-4 已完成**：candidate jitter 明确制造伪速度/伪加速度，matched proposal penalty 的 tracklet CI 不跨 0；M1 唯一 augmentation 冻结为 shared SE(2)，第一版不做 smooth drift。
-8. **M1 第一代码切片已完成**：sample-level world-SE(2)、canonical label、zero-init adapter、配置开关和测试已落地；dataset-free 通过，关闭 adapter 的真实模型 A1 等价待服务器执行。
-9. **M2 第一代码切片已完成**：独立 proposal-innovation 模式、严格 fallback、诊断和 dataset-free 2-step 已落地；旧 `residual_limited` 保持原义。三协议真实 batch smoke 后再冻结唯一配置。
+8. **M1 第一代码切片已完成**：sample-level world-SE(2)、canonical label、zero-init adapter、配置开关和测试已落地；dataset-free 与服务器真实模型 A1 等价均已通过，当前复验共享 warmup 的两步 exact-zero。
+9. **M2 第一代码切片已完成**：独立 proposal-innovation 模式、严格 fallback、诊断和 dataset-free 2-step 已落地；首轮三协议真实 batch smoke 已通过，当前用 run summary 硬门禁补齐 resampled 证据后再冻结唯一配置；旧 `residual_limited` 保持原义。
 10. **M1/M2 训练顺序**：E0–E6 全部通过并形成 clean commit 后，第一轮只跑预注册 seed42 mini true/fixed/shuffled，不扫大网格。
 11. **M3 解锁**：只有 dual-clock/innovation 的 true-dt 同时超过 fixed/shuffled、满足 standard guardrail 且相对新的 single-path control 为正，才实现 asymmetric canonical-teacher -> irregular-student path distillation。
 12. **M4 解锁**：只有 state prior、predicted-history tube oracle 和 uncertainty calibration 均通过，才实现 continuous-discrete filter / trajectory tube；旧 hand-crafted Gate 不复活。
@@ -216,8 +216,8 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [x] 实现围绕最近历史 anchor 的共同世界坐标 SE(2)：历史中心共用一次旋转/平移，yaw 同加 `dtheta`，没有复用每框局部 offset 冒充刚体变换。
 - [x] Dynamics displacement/velocity label 由未扰动 canonical GT trajectory 和真实 `delta_t` 显式计算，不再从 candidate `ref_boxs` 构造监督。
 - [x] 保存 augmentation mode、sample-level local/world transform、canonical refs 与等价 local-offset 审计字段；candidate0 有显式 identity 快路。
-- [ ] 纯函数共同刚体变换、anchor-normalized trajectory、canonical label、degrees/radians 与双路径共享已通过；真实 loader 的 padding/full-history/candidate1/2/3 和 TWC 回归仍需服务器运行 `check_candidate_shared_se2.py --cfg ... --twc`。
-- [ ] zero-init physical-time adapter 已实现且 dataset-free exact identity 通过；仍需服务器运行同权重同 batch 的 `check_m1_m2_model_equivalence.py`，确认 motion/output/loss 等价。
+- [x] 纯函数共同刚体变换、anchor-normalized trajectory、canonical label、degrees/radians 与双路径共享已通过；2026-07-22 服务器真实 loader 的 full-history candidate1/2/3 与 TWC 回归通过。
+- [x] zero-init physical-time adapter 已实现且 dataset-free exact identity 通过；2026-07-22 服务器同 A1 权重、同 batch 的 motion/output/loss strict-zero 等价通过（A1 `320/334` 张量匹配，14 个新 dynamics/adapter 张量按设计新建）。
 - [x] 保留 SeqTrack3D order embedding；新工程配置固定 `main_time_source: order`，physical time 只进入 DynamicsEncoder、zero-init adapter 与 `R(delta_t)`。
 - [ ] 正式训练前冻结 clean commit、唯一 augmentation 定义和 seed42 mini 配置；不得边看 test 结果边改变扰动过程。
 
@@ -226,9 +226,9 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [x] 新增独立显式 `proposal_innovation` 模式：`innovation=clip(d_dyn-stopgrad(d_obs), R(delta_t))`；旧 `residual` alias 和语义未改。
 - [x] 实现 `d_final=d_obs+alpha*innovation`；旧完整 `d_obs + scale*alpha*d_dyn` 仅保留为历史负对照。
 - [ ] 新公式已只有一个 `[0,1]` effective alpha，绝对修正由 `R(delta_t)` 控制；工程 smoke 暂用 M0-3 mean alpha 四舍五入得到的 `0.75` 与显式半径，正式值仍须在 training oracle 上一次性确认后冻结。
-- [ ] 显式 zero-scale/disabled、`alpha=0`、`dynamics_valid=0` 的 dataset-free exact fallback 已通过，warmup 已接入；真实模型 A1 等价仍待服务器验收。
+- [ ] 显式 zero-scale/disabled、`alpha=0`、`dynamics_valid=0` 的 dataset-free exact fallback和真实模型 A1 等价均已通过；2026-07-22 首轮服务器还只证明 optimizer 更新前的 warmup exact-zero。当前代码已让 adapter/innovation 共用显式 warmup，并把两步 optimizer 后仍为 exact-zero 改为硬门禁，待新提交服务器复验。
 - [x] 已新增 raw/clamped/applied innovation、半径、alpha、applied/clamp ratio、invalid fallback、adapter/encoder gradient 诊断；旧 residual 字段保留。
-- [ ] dataset-free finite/bounded/2-step optimizer 已通过；standard/gap1124/burst-drop、invalid/resampled/empty real batch forward/loss/backward 仍待服务器执行。
+- [ ] dataset-free finite/bounded/2-step optimizer 已通过；2026-07-22 首轮服务器 standard/gap1124/burst-drop 全 finite，invalid `7`、empty `4` 且 applied exact-zero，encoder/adapter 梯度非零。当前 checker 已新增 deterministic resampled 标记、run summary 和 `require-*` 硬门禁；仍待新提交复验 resampled 以及两步 warmup。
 - [ ] mini seed42 只跑一个预注册配置，并用同一 checkpoint 做 true/fixed/shuffled；不扫 scale/gate 网格。
 
 ### E0–E6：从工程 GO 升级到正式训练 GO
@@ -240,6 +240,8 @@ P0-B、P0-C 和 TWC 主方法 promotion 均已 No-Go，旧路线的核心筛选�
 - [ ] **E4 数值安全**：三协议与所有 fallback batch 的 loss/gradient finite。
 - [ ] **E5 可训练性**：至少 2-step optimizer，innovation 分支启用后有非零有限梯度和非平凡但受界的修正。
 - [ ] **E6 可复现性**：唯一 seed42 配置、同 A1 初始化、固定 manifest/candidate/point sampling/optimizer steps/final checkpoint、clean commit/provenance。
+
+2026-07-22 首轮服务器输出的工程含义：E0/E1/E2 与 E5 已得到正证据，E4 的 standard/gap/burst、invalid/empty 已覆盖；strong-cadence active smoke 的 mean clamp ratio 为 `0.75`，但 DynamicsEncoder 此时由 A1 缺失键随机初始化，因此该数值不能用于反调正式半径。Formal-training 继续 HOLD，直到新硬门禁完成 resampled 和 optimizer-after-warmup 复验，并冻结 E6。
 
 ### M3：Endpoint-consistent asymmetric path distillation（尚未解锁）
 

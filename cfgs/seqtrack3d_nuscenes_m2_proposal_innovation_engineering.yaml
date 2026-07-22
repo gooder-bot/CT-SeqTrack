@@ -61,6 +61,9 @@ dynamics_displacement_weight: 0.01
 use_physical_time_adapter: true
 physical_time_adapter_hidden_dim: 128
 physical_time_adapter_scale: 1.0
+# Engineering smoke keeps both M1/M2 paths active immediately.  Formal seed42
+# will freeze one shared non-zero warmup for the adapter and innovation.
+physical_time_adapter_warmup_epoch: 0
 
 # M2 bounded proposal innovation. alpha=0.75 is an engineering smoke value,
 # rounded from the M0-3 mean oracle alpha=0.775; it is not yet a formal claim.

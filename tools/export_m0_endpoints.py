@@ -362,6 +362,15 @@ def output_fields(output):
         "dynamics_residual_x": None,
         "dynamics_residual_y": None,
         "dynamics_residual_z": None,
+        "dynamics_innovation_raw_x": None,
+        "dynamics_innovation_raw_y": None,
+        "dynamics_innovation_raw_z": None,
+        "dynamics_innovation_clamped_x": None,
+        "dynamics_innovation_clamped_y": None,
+        "dynamics_innovation_clamped_z": None,
+        "dynamics_innovation_applied_x": None,
+        "dynamics_innovation_applied_y": None,
+        "dynamics_innovation_applied_z": None,
         "velocity_pred_x": None,
         "velocity_pred_y": None,
         "velocity_pred_z": None,
@@ -372,6 +381,18 @@ def output_fields(output):
         "dynamics_residual_clamped_norm": None,
         "dynamics_residual_clamp_mask": None,
         "dynamics_residual_applied": None,
+        "dynamics_innovation_raw_norm": None,
+        "dynamics_innovation_clamped_norm": None,
+        "dynamics_innovation_applied_norm": None,
+        "dynamics_innovation_radius": None,
+        "dynamics_innovation_alpha": None,
+        "dynamics_innovation_scale_effective": None,
+        "dynamics_innovation_clamp_mask": None,
+        "dynamics_innovation_applied_mask": None,
+        "dynamics_innovation_invalid_fallback": None,
+        "dynamics_innovation_valid": None,
+        "physical_time_adapter_norm": None,
+        "physical_time_adapter_scale_effective": None,
         "obs_num_points_search": None,
         "obs_soft_fg_count": None,
         "obs_mean_fg_score": None,
@@ -393,6 +414,11 @@ def output_fields(output):
         else "motion_dyn_residual"
     )
     dynamics_residual = tensor_vector(output, residual_key, 3)
+    innovation_raw = tensor_vector(output, "dynamics_innovation_raw", 3)
+    innovation_clamped = tensor_vector(
+        output, "dynamics_innovation_clamped", 3)
+    innovation_applied = tensor_vector(
+        output, "dynamics_innovation_applied", 3)
     velocity = tensor_vector(output, "velocity_pred", 3)
     fields.update(
         {
@@ -413,6 +439,15 @@ def output_fields(output):
             "dynamics_residual_x": dynamics_residual[0],
             "dynamics_residual_y": dynamics_residual[1],
             "dynamics_residual_z": dynamics_residual[2],
+            "dynamics_innovation_raw_x": innovation_raw[0],
+            "dynamics_innovation_raw_y": innovation_raw[1],
+            "dynamics_innovation_raw_z": innovation_raw[2],
+            "dynamics_innovation_clamped_x": innovation_clamped[0],
+            "dynamics_innovation_clamped_y": innovation_clamped[1],
+            "dynamics_innovation_clamped_z": innovation_clamped[2],
+            "dynamics_innovation_applied_x": innovation_applied[0],
+            "dynamics_innovation_applied_y": innovation_applied[1],
+            "dynamics_innovation_applied_z": innovation_applied[2],
             "velocity_pred_x": velocity[0],
             "velocity_pred_y": velocity[1],
             "velocity_pred_z": velocity[2],
@@ -434,6 +469,42 @@ def output_fields(output):
             ),
             "dynamics_residual_applied": tensor_scalar(
                 output, "dynamics_residual_applied_mask"
+            ),
+            "dynamics_innovation_raw_norm": tensor_scalar(
+                output, "dynamics_innovation_raw_norm"
+            ),
+            "dynamics_innovation_clamped_norm": tensor_scalar(
+                output, "dynamics_innovation_clamped_norm"
+            ),
+            "dynamics_innovation_applied_norm": tensor_scalar(
+                output, "dynamics_innovation_applied_norm"
+            ),
+            "dynamics_innovation_radius": tensor_scalar(
+                output, "dynamics_innovation_radius"
+            ),
+            "dynamics_innovation_alpha": tensor_scalar(
+                output, "dynamics_innovation_alpha"
+            ),
+            "dynamics_innovation_scale_effective": tensor_scalar(
+                output, "dynamics_innovation_scale_effective"
+            ),
+            "dynamics_innovation_clamp_mask": tensor_scalar(
+                output, "dynamics_innovation_clamp_mask"
+            ),
+            "dynamics_innovation_applied_mask": tensor_scalar(
+                output, "dynamics_innovation_applied_mask"
+            ),
+            "dynamics_innovation_invalid_fallback": tensor_scalar(
+                output, "dynamics_innovation_invalid_fallback"
+            ),
+            "dynamics_innovation_valid": tensor_scalar(
+                output, "dynamics_innovation_valid"
+            ),
+            "physical_time_adapter_norm": tensor_scalar(
+                output, "physical_time_adapter_norm"
+            ),
+            "physical_time_adapter_scale_effective": tensor_scalar(
+                output, "physical_time_adapter_scale"
             ),
             "obs_num_points_search": tensor_scalar(
                 output, "obs_num_points_search"
@@ -752,6 +823,22 @@ def self_test():
     )
     if crop["active_crop_retained_target_points"] != 2:
         raise RuntimeError(f"active crop field self-test failed: {crop}")
+    m2_fields = output_fields(None)
+    required_m2_fields = {
+        "dynamics_innovation_raw_norm",
+        "dynamics_innovation_applied_norm",
+        "dynamics_innovation_radius",
+        "dynamics_innovation_alpha",
+        "dynamics_innovation_scale_effective",
+        "dynamics_innovation_clamp_mask",
+        "dynamics_innovation_applied_mask",
+        "dynamics_innovation_valid",
+        "physical_time_adapter_norm",
+        "physical_time_adapter_scale_effective",
+    }
+    missing = sorted(required_m2_fields - set(m2_fields))
+    if missing:
+        raise RuntimeError(f"M2 endpoint fields missing: {missing}")
     print("M0 endpoint exporter self-test: PASS")
 
 

@@ -42,6 +42,26 @@ def check_adapter_zero_init():
     disabled, _ = adapter(point, dynamics, gap, valid, enabled_scale=0.0)
     assert_exact(disabled, point, "disabled adapter is not an exact identity")
 
+    # A warmup/disabled adapter must remain an exact no-op even after its
+    # parameters have previously received an optimizer update.
+    optimizer = torch.optim.SGD(adapter.parameters(), lr=1e-2)
+    optimizer.zero_grad()
+    torch.mean(adapted ** 2).backward()
+    optimizer.step()
+    active_after_step, _ = adapter(
+        point, dynamics, gap, valid, enabled_scale=1.0)
+    if torch.equal(active_after_step, point):
+        raise AssertionError("adapter optimizer step did not make the active path nontrivial")
+    disabled_after_step, disabled_aux = adapter(
+        point, dynamics, gap, valid, enabled_scale=0.0)
+    assert_exact(
+        disabled_after_step, point,
+        "disabled adapter changed features after an optimizer step")
+    assert_exact(
+        disabled_aux["physical_time_adapter_correction"],
+        torch.zeros_like(point),
+        "disabled adapter emitted correction after an optimizer step")
+
 
 def check_innovation_fallbacks_and_bound():
     observation = torch.tensor([[1.0, 0.0, 0.0], [0.2, -0.1, 0.0]])
