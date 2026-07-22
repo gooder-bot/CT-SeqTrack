@@ -10,16 +10,19 @@
 
 M1/M2 已通过 E0–E5 服务器工程门禁。E6 的参数与配置静态冻结也已完成：mini_train M0-3 的既有 `1311 endpoints / 213 tracklets` 只用于确认一个预声明规则，正式值固定为 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`、adapter/innovation 共享 warmup=5。该规则的 endpoint mean gain 为 `0.288 m`，tracklet-equal mean gain 为 `0.263 m`，bootstrap 95% CI `[0.230,0.296] m`；但 clamp rate 为 `34.48%`，属于安全而保守的首轮规则，不声称最优。
 
-当前仍没有新的 tracking Success/Precision 结果。正式状态是：
+当前仍没有新的 tracking Success/Precision 结果，但服务器门禁已从 HOLD 进入训练：
 
 ```text
 PASS_M1_M2_E0_E5_ENGINEERING_GATES
 FREEZE_M2_ALPHA_RADIUS
 E6_STATIC_FREEZE_READY
-HOLD_FORMAL_TRAINING_PENDING_CLEAN_SERVER_MANIFESTS
+PASS_E6_SERVER_MANIFESTS_PREFLIGHT_COMMIT_473738f
+M2_FORMAL_AND_SCRATCH_CONTROLS_RUNNING
 ```
 
-下一步是在新 clean commit 上生成 standard/gap1124/burst-drop cadence 与 shuffled-time manifests，通过 A1 hash、75720-step 和配置漂移 preflight 后，只训练一个 seed42 true-dt 模型；fixed/shuffled 只评测同一个 epoch60 `last.ckpt`。
+R1 A1-init seed42 M2 formal 已在 GPU2 启动，输出根为 `output/m2_formal_true_seed42_473738f_20260722_112536`。用户另报告 R2 M2 scratch 与 R3 matched W0 scratch 在 GPU3 运行；二者的精确输出根/provenance 尚待拉回。当前只等待训练、核对 final 完整性并执行冻结评测；fixed/shuffled 仍只评测 R1 同一个 epoch60 `last.ckpt`。
+
+标准 protocol 的本地 `delta_t` 为 `0.4974±0.0228 s`，CV 仅 `4.59%`，物理时间分支在该分布上很难被单独辨识。standard 因此是 normal-cadence guardrail；主要方法证据必须来自 strong/held-out cadence 和同 checkpoint `true/fixed/shuffled`。完整 HTV/丢帧边界与执行计划见 `compare_results/reports/htv_identifiability_and_execution_plan_20260722.md`。
 
 ### 2026-07-21 TWC A/B/C 同提交 seed42
 
@@ -772,7 +775,7 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
 - feature-concat A2 仍是失败消融：它在强 gap/burst 下不稳且 P0-C promotion No-Go；但 M0-3 表明冻结 DynamicsEncoder proposal 在严格 offline cohort 中有明显信息，因此保留它作为 M2 proposal source，不复活旧 feature concat 或 hand-crafted Gate。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
-- M1/M2 的 shared-SE(2)、canonical label、strict fallback、warmup、受界 innovation 和 optimizer 路径已通过 E0–E5 工程验收，可以进入唯一正式配置与 E6 冻结。
+- M1/M2 的 shared-SE(2)、canonical label、strict fallback、warmup、受界 innovation 和 optimizer 路径已通过 E0–E6，R1 formal 已启动；这仍只是工程/执行进度，不是性能结论。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
 - corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；同提交 A/B/C 已证明 `C-B` 为正，但 C 仍显著低于 single-view A，主方法 promotion No-Go。
@@ -791,7 +794,7 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
 - active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；M0-3 已确认 gap1124 proposal 互补性与 correction 方向，但 online recursive 转化、standard/burst guardrail 仍未知。
-- M1/M2 E0–E5 不能说明 tracking Success/Precision 已改善，也不能说明 true-dt 优于 fixed/shuffled；这些只允许由 E6 后的一次预注册 seed42 time-control 回答。
+- M1/M2 E0–E6 和训练启动不能说明 tracking Success/Precision 已改善，也不能说明 true-dt 优于 fixed/shuffled；这些只允许由 R1 final 的同 checkpoint time-control 回答。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 - 还不能说 physical `delta_t` 提高了 reliability prediction；raw `current_delta_t` 在当前 standard-only calibrator 中反而造成强协议过触发。
 - 不能把 observation-only trigger 写成最终 uncertainty model；P0-B4 独立 mini_val 已 No-Go，且标签只覆盖 target visible 条件下的 crop miss。
@@ -803,9 +806,10 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
 2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；并行复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。M0-2 不阻塞写代码，但阻塞 M0 完成。
-3. M1/M2 E0–E5 已通过；只使用既有 mini_train M0-3 oracle 一次性冻结 alpha 与 `R(delta_t)`，共享 warmup 直接固定为计划值 5 epoch，不读取 mini_val/test 或 smoke clamp ratio 调参。
-4. 冻结唯一 seed42 true/fixed/shuffled 配置、manifest/sampling/optimizer/final checkpoint 和完整归档规范，完成 E6 后才启动一次 formal run。
-5. M2 time-control 无可推广正信号时，正式收敛为多模型、多数据集的 variable-rate 3D SOT benchmark/diagnosis，不增加复杂时间模块。
+3. 等待 R1 A1-init M2、R2 M2 scratch、R3 matched W0 scratch 完成；不启动第四个训练、不读取中间 best 调参。
+4. 核对每个任务的 epoch/global step、last.ckpt/hash、退出码、resolved config、events 与 provenance；比较 `R1-A1` 和 `R2-R3` 的 standard final。
+5. 只对 R1 final 运行 same-checkpoint standard/gap/burst `true/fixed/shuffled` 与 matched A1，随后做 per-tracklet bootstrap、delta_t/位移/稀疏分桶和递归失败定位。
+6. 只有 matched effect、causal time、strong cadence 和 standard guardrail 同时成立，才补多 seed/full data/M3；否则转 benchmark/diagnosis，不增加复杂时间模块。
 ```
 
 可选复核：

@@ -1,8 +1,8 @@
 # CT-SeqTrack 新贡献框架与方法改造规格
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
-状态：**候选方法，M 阶段已启动，当前处于 M0；M1/M2 为 Engineering GO，E6 静态冻结已完成，正式训练仍 HOLD，等待新 clean commit 的服务器 manifests/preflight。尚未完成性能验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前 alpha/R/warmup/唯一 formal 配置与 same-checkpoint controls 已固定；正式 seed42 训练与 M3–M4 必须按本文门槛逐级解锁。
+状态：**候选方法，M0 收口与 M2 训练并行。M1/M2 Engineering Gate、E6 静态冻结、commit `473738f` 的服务器 manifests/preflight 已通过；R1 A1-init M2 formal 与用户报告的 R2 M2 scratch/R3 matched W0 scratch 正在运行，尚未完成性能或因果时间验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前 alpha/R/warmup/唯一 formal 配置与 same-checkpoint controls 已固定；M3–M4 必须按本文门槛逐级解锁。
 
 ## 1. 决策摘要
 
@@ -53,6 +53,8 @@ within-track irregular cadence
 ```
 
 不能写成“首次研究 HTV”。HVTrack 已通过不同固定 frame interval 构造 KITTI-HV；这里的区别必须是轨迹内部不规则性、matched endpoint 和时间字段的因果干预。
+
+standard 的本地 `delta_t` 仅为 `0.4974±0.0228 s`（CV `4.59%`，`86.55%` 位于 `0.5±0.01 s`），而 gap1124/burst-drop 的 CV 为 `58.94%/62.63%`。近常量时间使 `g(delta_t)` 接近固定系数并可被普通权重吸收，因此 standard 只承担 normal-cadence guardrail；物理时间主张必须依赖 strong/held-out cadence 和 same-checkpoint negative controls。正式统计、丢帧表述边界和协议矩阵见 `compare_results/reports/htv_identifiability_and_execution_plan_20260722.md`。
 
 ### 贡献 2：Dual-clock continuous-discrete state update
 
@@ -233,8 +235,8 @@ state  = prior + K * innovation
 | 阶段 | 当前状态 | 解锁边界 |
 | --- | --- | --- |
 | M0 | **进行中** | 只做冻结输出、离线 oracle、candidate 审计和 provenance 收口 |
-| M1 | **Engineering GO** | M0-4 排除独立 jitter 与第一版 smooth drift；现在实现 shared world-SE(2)、canonical label、zero-init 和等价性测试 |
-| M2 | **Engineering GO，E6 Static Freeze Ready，Formal-training HOLD** | M0-3 已证明互补空间，alpha/R/warmup/唯一配置与 controls 已冻结；等待 clean server manifests/preflight |
+| M1 | **工程完成，formal 中使用** | shared world-SE(2)、canonical label、zero-init 与 E0–E6 已通过；禁止训练中漂移配置 |
+| M2 | **R1/R2/R3 运行中，结果待定** | R1 preflight PASS；先完成 final/provenance、`R1-A1`、`R2-R3` 和 same-checkpoint time controls |
 | M3 | **锁定** | M1/M2 的 true-dt 必须同时优于 fixed/shuffled，并通过 A1 standard guardrail |
 | M4 | **锁定** | M2 互补性、predicted-history tube oracle 与 uncertainty calibration 必须全部成立 |
 
@@ -260,18 +262,19 @@ M0 的 logger、冻结评测、proposal oracle 与 candidate 审计可以并行�
 - [x] canonical GT label 只使用真实 `delta_t`；pairwise trajectory、伪导数、candidate0/1/2/3、degrees/radians 和 TWC 回归已通过。
 - [x] 加入显式 zero-scale/disabled physical-time adapter；同权重同 batch 的 motion/output/loss 与 A1 strict-zero 数值一致。
 - [ ] 同 checkpoint 做 true/fixed/shuffled forward invariance smoke test。
-- [ ] 唯一 augmentation 与 seed42 mini 配置已静态冻结；剩余新 clean commit 与 server manifest/preflight，第一轮不扫超参数网格。
+- [x] 唯一 augmentation 与 seed42 mini 配置已静态冻结；commit `473738f` 的 server manifests/preflight 已通过，第一轮不扫超参数网格。
 
-### M2：proposal innovation（Engineering GO，Formal-training HOLD）
+### M2：proposal innovation（训练运行中，结果待定）
 
 - [x] 新增显式 `proposal_innovation` mode：实现 `d_dyn - stopgrad(d_obs)`；旧完整位移叠加只保留作可复现负对照。
 - [x] effective alpha 使用单一 `[0,1]` 系数；正式值冻结为 `0.75`，绝对 correction 由 `R(dt)=min(0.5+0.5dt,2.0)` 控制。
 - [x] `alpha=0`、disabled、warmup 或 `dynamics_valid=0` 时严格恢复 observation/A1。
 - [x] 记录 raw/clamped/applied innovation norm、applied ratio、alpha、clamp ratio、invalid fallback、adapter/encoder gradient。
 - [x] standard/gap1124/burst-drop、invalid/resampled/empty fallback 与至少 2-step optimizer smoke 已通过。
-- [ ] 只跑 seed42 mini 的 true/fixed/shuffled；不扫大网格。
+- [ ] R1 A1-init seed42 formal 训练完成后，只用同一 final checkpoint 评测 true/fixed/shuffled；不训练三个 time mode，不扫大网格。
+- [ ] R2 M2 scratch 与 R3 matched W0 scratch 先完成训练完整性审计，再用 `R2-R3` 隔离随机初始化下的结构净效应。
 
-正式训练必须等待 E0–E6：默认路径回归、shared-SE(2) 几何不变量、canonical-label 不变量、zero/invalid 严格 A1 回退、三协议数值安全、2-step 可训练性，以及唯一配置/同 A1 初始化/clean provenance。M0-2 可与上述工程并行，不阻塞写代码；但它仍是 M0 完成和旧 TWC 解释收口的必要项。
+E0–E6 已完成并解锁当前 R1；这不自动解锁新 seed、mixed-cadence、M3 或 M4。训练完成后必须先核对 epoch/global step、唯一 `last.ckpt`、SHA256、resolved config、events 与 artifact manifest，再比较 `R1-A1`、`R2-R3` 和 R1 same-checkpoint time controls。M0-2 可并行收口，但仍是 M0 完成和旧 TWC 解释收口的必要项。
 
 ### M3：asymmetric path distillation（尚未解锁）
 
@@ -281,11 +284,154 @@ M0 的 logger、冻结评测、proposal oracle 与 candidate 审计可以并行�
 
 ### M4：连续—离散滤波和 trajectory tube（尚未解锁）
 
-仅当 M2 显示 dynamics proposal 有互补性、M1 通过时间负对照、tube oracle 有明显 crop recall 空间时执行。
+M4 是后置的高上限阶段，不是当前 M2 上再叠一个 learned Gate。它要把“每帧生成 observation/dynamics proposal 并做固定权重修正”升级为：**跨帧保存后验状态和协方差、按真实 `delta_t` 连续传播、在离散 LiDAR 帧到来时用当前观测更新，并在 observation forward 之前用先验分布构造受限搜索 tube**。当前仓库尚无 persistent state、covariance update 或 tube crop；`datasets/sampler.py` 中已经禁用并抛出 `NotImplementedError` 的旧 `KalmanFiltering` 片段不属于 M4。
 
-- [ ] 先用固定 process/observation covariance 的非学习滤波基线。
-- [ ] 再决定是否学习 `Q(dt)` 与 `R_obs`。
-- [ ] 保持 point budget、FLOPs 和候选数公平。
+#### M4 的解锁条件
+
+只有以下三项同时成立才允许开始 M4：
+
+1. M2 在在线递归评测中显示 dynamics proposal 有互补性，standard guardrail 通过，且同 checkpoint 的 `true-dt` 同时超过 `fixed-dt/shuffled-dt`；
+2. 使用 **M2 predicted history** 而不是 GT history 的 trajectory-tube oracle，在固定点预算下相对 baseline crop 产生非平凡的 target-recall/tube-only complementarity；
+3. 固定 covariance 基线或 learned covariance 在独立 split 上通过 NLL、coverage、ECE/reliability 等校准检查。
+
+GT-history CV 接近 99% recall 只说明理想历史存在上限，不能解锁 M4。P0-B2 已判定 always-on raw predicted-history CV recenter 为 No-Go；因此 M4 只能采用 `baseline crop union bounded tube`，不能把 raw trajectory center 替换成唯一 search anchor。
+
+#### 持久状态与连续传播
+
+第一版状态固定为：
+
+```text
+s_t = [x, y, z, vx, vy, vz, yaw, yaw_rate]
+```
+
+box size 继续来自 observation 或上一后验框，不在第一版加入尺寸动力学。每个 tracklet 必须保存：
+
+```text
+posterior mean mu_t_plus
+posterior covariance P_t_plus
+last timestamp
+valid/reset/fallback state
+```
+
+在下一帧 LiDAR 到达前，使用真实时间间隔传播：
+
+```text
+dt          = timestamp_t - timestamp_(t-1)
+mu_t_minus  = f(mu_(t-1)_plus, dt)
+P_t_minus   = F(dt) P_(t-1)_plus F(dt)^T + Q(dt)
+```
+
+第一版 `f/F` 使用显式 constant-velocity/constant-turn，不直接实现 ODE/CDE/Mamba：
+
+```text
+x'   = x  + vx * dt        vx'       = vx
+y'   = y  + vy * dt        vy'       = vy
+z'   = z  + vz * dt        vz'       = vz
+yaw' = wrap(yaw + yaw_rate * dt)
+yaw_rate' = yaw_rate
+```
+
+如需学习修正，只允许加入受界 acceleration/turn residual；禁止再预测并叠加一份无限制完整 displacement。第一版过程噪声使用固定参数。对单轴 `[position, velocity]`，可采用 constant-acceleration noise 的正定结构：
+
+```text
+Q_axis(dt) = sigma_a^2 * [[dt^4/4, dt^3/2],
+                          [dt^3/2, dt^2  ]]
+```
+
+`xy/z/yaw` 的尺度分别冻结。只有固定 `Q/R` 基线成立后，才允许学习 `Q_theta(dt, history)`；learned covariance 必须用 Cholesky/softplus 等参数化保证半正定，并限制极端 `dt` 下的数值范围。
+
+#### 离散 observation update
+
+当前 observation branch 的框中心和 yaw 被解释为离散 measurement：
+
+```text
+z_t = [x_obs, y_obs, z_obs, yaw_obs]
+```
+
+measurement matrix `H` 从完整状态中选择位置和 yaw。更新为：
+
+```text
+nu_t      = z_t - H mu_t_minus
+S_t       = H P_t_minus H^T + R_obs
+K_t       = P_t_minus H^T S_t^(-1)
+mu_t_plus = mu_t_minus + K_t nu_t
+```
+
+`yaw` innovation 必须 wrap；实现使用 `torch.linalg.solve`/Cholesky solve，不显式求逆。协方差更新使用更稳定的 Joseph form：
+
+```text
+P_t_plus = (I-KH) P_t_minus (I-KH)^T + K R_obs K^T
+```
+
+固定 `R_obs` 的 GT-free filter baseline 必须先于 learned observation covariance。若实现 covariance head，它只能读取推理时可得的 observation feature、foreground/point statistics 和预测置信度，不能读取当前 GT、GT overlap 或当前真实误差。旧 P5 hand-crafted observability Gate 已 No-Go，不复活、不在 mini_val 上换名重调。
+
+M4 与 M2 是替换/升级关系，而不是重复融合同一信息：
+
+```text
+M2: d_obs + fixed_alpha * bounded(d_dyn - d_obs)
+M4: propagated prior + covariance-derived measurement update
+```
+
+完整 M4 启用后，不能先做一次 M2 fixed-alpha correction，再对同一 observation/dynamics pair 做第二次 Kalman correction。M2 仅保留为安全基线、消融和 calibration 失败时的 fallback。
+
+#### Trajectory tube search support
+
+状态 prior 必须在 observation forward 之前生成搜索支持。给定平面速度方向 `e_parallel`、垂直方向 `e_perp` 与位置协方差 `P_xy`：
+
+```text
+sigma_parallel = sqrt(e_parallel^T P_xy e_parallel)
+sigma_perp     = sqrt(e_perp^T     P_xy e_perp)
+
+tube_length = base_length + |v| * dt + k_parallel * sigma_parallel
+tube_width  = base_width              + k_perp     * sigma_perp
+search      = baseline_crop union trajectory_tube
+```
+
+低速时用 posterior yaw 作为 tube 方向；tube length/width 必须有上限。invalid history、非单调 timestamp、非 finite/非 PSD covariance 或状态重置时，严格退回 baseline crop。union 的目的在于保留 observation anchor，避免 P0-B2 中“错误 predicted center 成为唯一 anchor”导致的失控。
+
+公平性硬约束：
+
+- baseline crop 与 tube union 后仍使用相同总 point budget；不得简单增加一份点；
+- candidate 数、checkpoint、endpoint、point-sampling seed 保持一致；
+- 记录 baseline/tube/union 的 target points、background ratio、crop recall、tube-only reachable、empty fallback；
+- 同时报告参数量、FLOPs、FPS、显存和实际 crop point count。
+
+#### M4 的分阶段实现
+
+M4 不允许一次性同时引入 filter、tube 和 learned covariance，固定为四个切片：
+
+1. **M4-0 predicted-history tube oracle**：使用 frozen M2 checkpoint，只做 baseline-crop/tube-union 的离线固定预算 reachability；没有 tube-only complementarity 就停止。
+2. **M4-1 fixed-covariance filter**：新增 persistent `mu/P`、解析 `F(dt)`、固定 `Q/R` 和 tracklet reset；不接 tube、不训练 covariance head，先与 A1、M2、CV/Kalman GT-free 基线比较。
+3. **M4-2 filter + tube**：只有 M4-1 为正才让 prior mean/covariance进入 search support；保持点预算/FLOPs 口径，分开报告 filter-only、tube-only、filter+tube。
+4. **M4-3 learned covariance**：只有固定滤波和 tube 均为正，才学习 `Q(dt)`/`R_obs`；先在独立 split 校准，再进入 tracking 闭环。
+
+第一帧使用 3D SOT 合法的初始化框：position/yaw covariance 较小，velocity/yaw-rate 初始化为 0 且 covariance 较大。新 tracklet、非法 `dt`、数值失败和显式 reset 必须清空旧状态；所有 reset/fallback 决策只能使用推理时可得信号。
+
+#### 校准和正式消融
+
+learned covariance 进入融合前至少报告：
+
+- Gaussian NLL；
+- 50/90/95% coverage 与置信区域大小；
+- ECE/reliability diagram，按 `delta_t`、稀疏度和 cadence 分桶；
+- covariance eigenvalue、非 PSD/非 finite、reset/fallback 比例；
+- 可选 NEES，用于检查状态误差与协方差是否匹配。
+
+正式最小消融矩阵：
+
+```text
+A1 / SeqTrack observation baseline
+M2 fixed-alpha proposal innovation
+fixed CV/Kalman, no tube
+tube only, no filter update
+filter only, no tube
+fixed-Q/R filter + tube
+learned-R only
+learned-Q/R full
+true / fixed / shuffled time controls
+```
+
+如果 fixed covariance filter 无收益、predicted-history tube 无独立 crop 空间或 covariance calibration 失败，则停止 M4；退回 M2 固定有界 innovation，不通过增加复杂时序模块追分，也不能在论文标题中使用“state filtering”。
 
 ## 6. 预注册 Go / No-Go
 

@@ -1,0 +1,380 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack 论文就绪度与研究定位审计",
+    "description": "基于代码、提交历史、冻结实验、当前服务器训练状态和相关论文的技术审计。",
+    "generatedAt": "2026-07-22T16:00:00+08:00",
+    "cards": [],
+    "charts": [
+      {
+        "id": "proposal_error_chart",
+        "title": "M0-3 offline proposal center error",
+        "subtitle": "同一 primary crop-reachable cohort；单位为米。该图是机制证据，不是 online tracking 指标。",
+        "showDescription": true,
+        "type": "bar",
+        "dataset": "m03_proposal_errors",
+        "sourceId": "audit_report_sql",
+        "encodings": {
+          "x": { "field": "proposal", "type": "nominal", "label": "Proposal" },
+          "y": { "field": "mean_error_m", "type": "quantitative", "label": "Mean center error", "format": "number", "unit": "m" },
+          "tooltip": [
+            { "field": "median_error_m", "type": "quantitative", "label": "Median", "format": "number", "unit": "m" },
+            { "field": "p95_error_m", "type": "quantitative", "label": "P95", "format": "number", "unit": "m" },
+            { "field": "endpoints", "type": "quantitative", "label": "Endpoints", "format": "number" }
+          ]
+        },
+        "xAxisTitle": "Proposal source",
+        "yAxisTitle": "Center error (m)",
+        "valueFormat": "number",
+        "unit": "m",
+        "layout": "full",
+        "maxRows": 10
+      }
+    ],
+    "tables": [
+      {
+        "id": "innovation_table",
+        "title": "创新点成熟度",
+        "subtitle": "只把已经进入代码并通过对应 gate 的部分列为当前贡献。",
+        "showDescription": true,
+        "dataset": "innovations",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "innovation", "label": "创新候选", "type": "text" },
+          { "field": "maturity", "label": "成熟度", "type": "text" },
+          { "field": "claim_boundary", "label": "论文表述边界", "type": "text" }
+        ]
+      },
+      {
+        "id": "history_table",
+        "title": "最近研究轨迹",
+        "subtitle": "从“在主干注入真实时间”逐步转向“保持观测语义、只在运动支路使用物理时间”。",
+        "showDescription": true,
+        "dataset": "research_history",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "period", "label": "阶段", "type": "text" },
+          { "field": "work", "label": "主要工作", "type": "text" },
+          { "field": "result", "label": "得到的认识", "type": "text" }
+        ]
+      },
+      {
+        "id": "evidence_table",
+        "title": "目前最重要的证据",
+        "subtitle": "不同实验使用不同目的和 cohort，不能把数字横向当成统一排行榜。",
+        "showDescription": true,
+        "dataset": "evidence",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "experiment", "label": "实验", "type": "text" },
+          { "field": "result", "label": "结果", "type": "text" },
+          { "field": "interpretation", "label": "结论", "type": "text" }
+        ]
+      },
+      {
+        "id": "literature_table",
+        "title": "与本地论文的边界",
+        "subtitle": "CT-SeqTrack 的新意必须落在 irregular cadence、物理时间干预和受限修正，而不是重复已有的一般性轨迹建模。",
+        "showDescription": true,
+        "dataset": "literature_boundaries",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "work", "label": "相关工作", "type": "text" },
+          { "field": "already_claimed", "label": "已有主张", "type": "text" },
+          { "field": "ct_boundary", "label": "你的可辩护差异", "type": "text" }
+        ]
+      },
+      {
+        "id": "gaps_table",
+        "title": "距离投稿还差什么",
+        "subtitle": "P0 是现在必须解决；P1 是完整方法论文的最低实验包；P2 决定期刊上限。",
+        "showDescription": true,
+        "dataset": "publication_gaps",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "priority", "label": "优先级", "type": "text" },
+          { "field": "gap", "label": "缺口", "type": "text" },
+          { "field": "completion_rule", "label": "完成标准", "type": "text" }
+        ]
+      },
+      {
+        "id": "experiment_table",
+        "title": "建议实验顺序",
+        "subtitle": "先关闭当前 M2 因果门，再决定走方法论文还是 benchmark/diagnosis 论文。",
+        "showDescription": true,
+        "dataset": "next_experiments",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "stage", "label": "顺序", "type": "text" },
+          { "field": "action", "label": "要做什么", "type": "text" },
+          { "field": "decision", "label": "判定/产物", "type": "text" }
+        ]
+      },
+      {
+        "id": "venue_table",
+        "title": "文章类型与投稿去向",
+        "subtitle": "适配判断按当前方法定位和需要补齐的证据给出，不等于录用概率。",
+        "showDescription": true,
+        "dataset": "venue_fit",
+        "sourceId": "audit_report_sql",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "venue", "label": "方向", "type": "text" },
+          { "field": "fit", "label": "适配度", "type": "text" },
+          { "field": "required_package", "label": "投稿前最低条件", "type": "text" },
+          { "field": "assessment", "label": "判断", "type": "text" }
+        ]
+      }
+    ],
+    "sources": [
+      { "id": "audit_report_sql", "label": "Paper-readiness reviewed snapshot materialization", "path": "compare_results/reports/paper_readiness_audit_20260722/report_snapshot.sql" },
+      { "id": "proposal_doc", "label": "Dual-clock proposal and staged plan", "path": "compare_results/reports/dual_clock_state_filtering_proposal_20260721.md" },
+      { "id": "e0e5_report", "label": "M1/M2 E0–E5 validation", "path": "compare_results/reports/m1_m2_e0_e5_validation_20260722.md" },
+      { "id": "e6_report", "label": "M2 E6 frozen parameter report", "path": "compare_results/reports/m2_e6_parameter_freeze_20260722.md" },
+      { "id": "m0_analysis", "label": "M0-3/M0-4 mechanism analysis", "path": "compare_results/reports/m0_m03_m04_analysis_20260721.md" },
+      { "id": "paper_viability", "label": "Prior publication viability audit", "path": "compare_results/reports/paper_viability_and_execution_20260720.md" },
+      { "id": "twc_abc", "label": "TWC causal A/B/C comparison", "path": "compare_results/reports/twc_abc_seed42_comparison_20260721.md" },
+      { "id": "p0c_controls", "label": "P0-C matched time-control validation", "path": "compare_results/reports/p0c_frozen_protocol_validation_20260720.md" },
+      { "id": "model_code", "label": "SeqTrack3D integration code", "path": "models/seqtrack3d.py" },
+      { "id": "dynamics_code", "label": "Dynamics encoder, adapter and innovation code", "path": "models/dynamics.py" },
+      { "id": "sampler_code", "label": "Canonical dynamics labels and shared-SE(2) sampling", "path": "datasets/sampler.py" },
+      { "id": "time_code", "label": "Main/effective time field separation", "path": "datasets/misc_utils.py" },
+      { "id": "candidate_code", "label": "Shared-SE(2) candidate utilities", "path": "utils/candidate_utils.py" },
+      { "id": "formal_config", "label": "Formal M2 true-time configuration", "path": "cfgs/seqtrack3d_nuscenes_m2_proposal_innovation_formal_true.yaml" },
+      { "id": "formal_runner", "label": "Formal seed42 training runner", "path": "tools/run_m2_formal_seed42_gpu2.sh" },
+      { "id": "git_history", "label": "Repository commit history through 473738f", "path": ".git/logs/HEAD" },
+      { "id": "seqtrack_paper", "label": "SeqTrack3D local paper", "path": "2024SeqTrack3D Exploring Sequence Information for.pdf" },
+      { "id": "ral_venue", "label": "IEEE Robotics and Automation Letters", "url": "https://www.ieee-ras.org/publications/ieee-robotics-and-automation-letters/" },
+      { "id": "tiv_venue", "label": "IEEE Transactions on Intelligent Vehicles", "url": "https://ieee-itss.org/pub/t-iv/" },
+      { "id": "tits_venue", "label": "IEEE Transactions on Intelligent Transportation Systems", "url": "https://ieee-itss.org/pub/t-its/" },
+      { "id": "pr_venue", "label": "Pattern Recognition", "url": "https://www.sciencedirect.com/journal/pattern-recognition" },
+      { "id": "tro_venue", "label": "IEEE Transactions on Robotics", "url": "https://www.ieee-ras.org/publications/t-ro/t-ro-information-for-authors/" },
+      { "id": "iv2027_venue", "label": "IEEE Intelligent Vehicles Symposium 2027", "url": "https://ieee-iv.org/2027/" },
+      { "id": "hvtrack", "label": "HVTrack, ECCV 2024", "url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/01145.pdf" },
+      { "id": "chronotrack", "label": "ChronoTrack, CVPR Findings 2026", "url": "https://openaccess.thecvf.com/content/CVPR2026F/html/Yoo_Temporally_Consistent_Long-Term_Memory_for_3D_Single_Object_Tracking_CVPRF_2026_paper.html" },
+      { "id": "gsot3d", "label": "GSOT3D, ICCV 2025", "url": "https://openaccess.thecvf.com/content/ICCV2025/papers/Jiao_GSOT3D_Towards_Generic_3D_Single_Object_Tracking_in_the_Wild_ICCV_2025_paper.pdf" },
+      { "id": "ncdssm", "label": "Neural Continuous-Discrete State Space Models, ICML 2023", "url": "https://proceedings.mlr.press/v202/ansari23a.html" },
+      { "id": "contiformer", "label": "ContiFormer, NeurIPS 2023", "url": "https://papers.nips.cc/paper_files/paper/2023/hash/9328208f88ec69420031647e6ff97727-Abstract-Conference.html" }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# CT-SeqTrack 论文就绪度与研究定位审计\n\n**审计日期：2026-07-22｜代码：`473738f`｜结论状态：正式 M2 seed42 仍在训练，论文主结论尚未形成。**"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## 技术摘要\n\nCT-SeqTrack 已经从早期的“把真实时间直接送入 SeqTrack3D 主干”转向了更清晰、也更可发表的研究问题：**在不改变原有观测序列语义的前提下，怎样让 3D 单目标跟踪器在不规则 LiDAR 帧间隔下只在运动推理和 proposal 修正支路使用物理时间。** 当前最成熟的三部分是：split-aware irregular-cadence 协议与 matched time intervention、order/physical 双时钟职责分离、以及带精确回退的 bounded proposal innovation。\n\n工程完成度很高：M1/M2 的 E0–E5 已通过，E6 的配置、步数、checkpoint 和 provenance 已冻结，服务器上的唯一 seed42 true-time 正式训练已经启动。但科学完成度尚未达到投稿：正式 Success/Precision 结果未返回；当前训练从已训练 60 epoch 的 A1 初始化后又训练 60 epoch，和原 A1 比较存在额外训练预算混杂；mini_val 被反复用于开发；目前没有 full nuScenes、第二数据集、3 seeds 和现代公平基线。\n\n因此最准确的判断是：**你已经有一篇方法论文的核心假设、实现和严谨实验骨架，但还没有一篇可以送审的完整论文。** 若 M2 因果 gate 为正，最适合写成 irregular-cadence 3D SOT 的机器人/智能车方法论文；若 gate 不成立，则应转成跨 tracker、跨数据集的 variable-rate robustness benchmark/diagnosis 论文。"
+      },
+      {
+        "id": "innovation_intro",
+        "type": "markdown",
+        "sourceId": "proposal_doc",
+        "body": "## 你的创新点，按可辩护程度排序\n\n### 1. 最强：不规则采样下的 matched physical-time intervention\n\n你的协议不是简单降帧，也不是换一个固定 interval。它在同一 track 内制造 gap1124、burst-drop、random/held-out cadence，并冻结 endpoint、几何输入和 checkpoint，只改变 DynamicsEncoder 实际看到的 `delta_t_effective`。true/fixed/shuffled 的差异因此可以解释为物理时间信息的因果贡献，而不是样本或 search crop 改变。这套评测设计目前比单个网络模块更有辨识度。\n\n### 2. 方法核心：order clock 与 physical clock 职责分离\n\n主干 point/corner token 继续使用固定 order-time，保留 SeqTrack3D 已学习的序列语义；真实秒数只进入 dynamics displacement、zero-init adapter 和 `R(delta_t)`。固定/打乱控制也只改变 effective time，而监督标签始终用 real time。这不是“多加一个时间编码”，而是一个明确的结构性归纳偏置。\n\n### 3. 可解释修正：bounded proposal innovation\n\n代码没有把 observation displacement 与 dynamics displacement 直接相加，而是计算 `d_dyn - stopgrad(d_obs)`，再按 `R(delta_t)=min(base+per_sec*delta_t,max)` 截断并乘冻结的 alpha。alpha=0、scale=0、invalid history、empty search 都能精确回退。它避免重复计算整段位移，是当前最像论文算法贡献的模块。\n\n### 4. 必要但不宜当作唯一 headline：shared-SE(2) 与 canonical labels\n\n逐历史帧独立 jitter 会制造伪速度和伪加速度；现在改为同一样本共享世界坐标 SE(2)，并从未扰动 GT 轨迹和真实时间生成 dynamics targets。这显著提高物理一致性和可复现性，但更适合写成“使方法成立的监督设计”，不宜单独包装成重大算法创新。"
+      },
+      { "id": "innovation_table_block", "type": "table", "tableId": "innovation_table" },
+      {
+        "id": "architecture",
+        "type": "markdown",
+        "sourceId": "model_code",
+        "body": "## 代码实际上做了什么\n\n数据层先生成两套时间：`delta_t_real` 负责物理监督，`delta_t_effective` 负责 true/fixed/shuffled 干预；main point/corner time token 不受这些控制影响。训练样本的 canonical dynamics label 在 candidate augmentation 之前生成，shared-SE(2) 只对整个历史轨迹施加一个样本级变换。\n\n模型层保留原 256-D observation motion path。DynamicsEncoder 根据历史状态和 effective time 估计速度，再乘当前 gap 得到 displacement；ZeroInitPhysicalTimeAdapter 将 point feature、dynamics latent 和 log/linear time 特征融合到 coarse motion feature，最后一层全零初始化，所以 warmup/禁用时是严格 no-op；最后 bounded innovation 只修正 proposal center。\n\n这套设计目前仍应称为 **timestamp-conditioned discrete tracker** 或 **dual-clock proposal correction**。它没有持久化滤波状态、协方差传播、measurement update 或任意时间查询，因此不宜在论文标题里声称“continuous-time state filtering”。M3 的 endpoint-conditioned history distillation 和 M4 的 continuous-discrete filter/trajectory tube 仍是计划，不是已经完成的贡献。"
+      },
+      {
+        "id": "history_intro",
+        "type": "markdown",
+        "body": "## 你最近都在干什么\n\n最近两个月的工作并不是无序试参，而是一次连续的假设收缩：先发现真实时间直接进入主干会破坏原序列语义；再用多 seed、TWC A/B/C、crop reachability、reliability 和 proposal oracle 排除不成立的路径；最后把可用信号收敛到双时钟和受限 proposal 修正。"
+      },
+      { "id": "history_table_block", "type": "table", "tableId": "history_table" },
+      {
+        "id": "evidence_intro",
+        "type": "markdown",
+        "sourceId": "m0_analysis",
+        "body": "## 目前已经知道什么\n\n负结果非常重要：raw physical time 主干崩溃、A2 多 seed 不稳定、TWC 不能超过 matched single-view、P0-C 的 true/fixed/shuffled 差异接近零、reliability gate 未达阈值。这些结果共同说明“模型里出现真实时间字段”不等于“模型真正利用了物理时间”。M1/M2 正是对这些失败机制的针对性改造。\n\nM0-3 的 proposal oracle 则给出了继续做 M2 的正依据：在 crop-reachable 离线 cohort 上，dynamics proposal 明显优于 observation proposal，冻结 alpha/radius 后仍有正 gain。但它使用训练 sampler、GT history 和 offline endpoint，不能代替递归在线 tracking 的 Success/Precision。"
+      },
+      { "id": "evidence_table_block", "type": "table", "tableId": "evidence_table" },
+      { "id": "proposal_error_chart_block", "type": "chart", "chartId": "proposal_error_chart" },
+      {
+        "id": "literature_intro",
+        "type": "markdown",
+        "sourceId": "seqtrack_paper",
+        "body": "## 和本地论文相比，你真正能说什么\n\nSC3D、P2B 已经建立了 3D SOT 与 point-to-box 范式；CXTrack 强调上下文；SeqTrack3D 已经使用历史点云和 box sequence；P2P 已经强调 motion cues；PillarTrack 改造 pillar backbone；MVCTrack 处理 multimodal guidance；TrajTrack 已经使用历史 box trajectory 做 proposal/prediction/refinement。因此你不能再主张“首次利用历史”“首次使用轨迹”“首次建模运动”或“首次解决稀疏点云”。\n\n你的窄而清楚的空位是：**同一 tracker、同一 endpoint、同一几何输入下，研究 irregular within-track cadence，并用真实/固定/打乱时间干预验证模型是否真的使用物理时间，再用受时间间隔约束的 proposal innovation 提升鲁棒性。** HVTrack 的固定 interval memory、ChronoTrack 的 temporal consistency、GSOT3D 的 generic benchmark，以及连续时间序列模型都进一步说明，标题和贡献必须限定在 3D SOT 的 variable-rate robustness，而不是泛化成“首个连续时间跟踪器”。"
+      },
+      { "id": "literature_table_block", "type": "table", "tableId": "literature_table" },
+      {
+        "id": "critical_risk",
+        "type": "markdown",
+        "sourceId": "formal_runner",
+        "body": "## 当前最关键的论文风险：训练预算不匹配\n\n正式 M2 runner 通过 `--init_checkpoint` 只加载 A1 权重，不恢复 A1 的 optimizer/trainer state；随后所有约 3.8M 参数继续训练 60 epoch、75,720 optimizer steps。若最终只和原来已经训练 60 epoch 的 A1 `last.ckpt` 比，M2 实际得到累计额外训练预算。这样即使指标上涨，也不能排除“多训练 60 epoch”或“新数据路径再微调一轮”的作用。\n\n当前服务器训练无需中止，因为它仍是完整 C2 方法臂。现在应在看正式结果前冻结两个同步数对照：**C0 continuation control**（同一 A1 init、同 60 epoch/步数、shared-SE(2) 路径，但 adapter/innovation/dynamics contribution 关闭）和 **C1 adapter-only**（同 init/步数，双时钟 adapter 开、innovation 关）；C2 是当前 full M1+M2。三臂再用相同 checkpoint-selection 和 endpoints 比较，才能拆分额外训练、adapter 与 innovation 的贡献。"
+      },
+      {
+        "id": "gaps_intro",
+        "type": "markdown",
+        "body": "## 距离发出一篇文章还差什么\n\n缺口不是“还差写论文”，而是还差一个能经受审稿的证据闭环。mini_val 已被多轮开发反复查看，不能再承担独立最终测试集的角色；单一 nuScenes-mini、单 seed 和旧 A1 baseline 也不足以支撑期刊级结论。"
+      },
+      { "id": "gaps_table_block", "type": "table", "tableId": "gaps_table" },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "body": "## 推荐的最终实验设计\n\n主比较应固定 checkpoint、endpoint manifest、point budget、search area 与随机种子，报告 standard、gap1124、burst-drop、held-out cadence 四类协议；核心统计用 tracklet-level paired bootstrap，而不是把帧当独立样本。除 Success/Precision 外，必须报告 true-fixed、true-shuffled 的 paired delta，证明收益依赖正确物理时间。\n\n机制分析应增加 adapter norm、raw/clamped/applied innovation norm、clamp ratio、effective alpha 和 fallback ratio，并按 `delta_t`、target points、crop reachability、failure/recovery 分桶。当前 endpoint exporter 已输出这些字段，但 summarizer 还没有完整聚合；这是一次后处理代码补充，不需要重训。\n\n完整方法包建议使用 seeds 42/43/44；full nuScenes 至少完成 Car，并尽量扩到多类别；第二数据集优先 Waymo，若为了和 HVTrack 对齐可增加 KITTI-HV。公平基线至少包括 SeqTrack3D、HVTrack、P2P 和无 GT 辅助的 TrajTrack；本地 TrajTrack 对齐评测曾使用当前 GT 触发/选择 refinement，只能作为诊断，不能进入论文主表。"
+      },
+      { "id": "experiment_table_block", "type": "table", "tableId": "experiment_table" },
+      {
+        "id": "article_type",
+        "type": "markdown",
+        "body": "## 最适合写成什么文章\n\n### 首选：方法型机器人/智能车论文\n\n建议题目：**Dual-Clock Proposal Innovation for Robust 3D Single Object Tracking under Irregular LiDAR Cadence**。三条贡献即可：\n\n1. 提出 within-track irregular-cadence 与 matched true/fixed/shuffled intervention protocol；\n2. 提出保持 observation sequence 语义的 order/physical dual-clock architecture；\n3. 提出带 `R(delta_t)`、zero-init 和 exact fallback 的 bounded proposal innovation，并在多数据集、多 seed 下证明 standard 不退化、irregular cadence 提升且收益依赖正确时间。\n\n不要把 shared-SE(2) 单独列成同等级第四大创新；把它写成 physically consistent supervision。也不要使用“continuous-time filtering”作为标题，除非后续真正完成并验证 M4 的 state/covariance/filter update。\n\n### 备选：benchmark/diagnosis 论文\n\n若 M2 的 true-time gate 不成立，停止继续堆 M3/M4。把 strongest asset 转成 Variable-Rate 3D SOT benchmark：至少 2 个数据集、5 个 tracker、冻结 held-out cadence、相同 checkpoint 跨 schedule、failure taxonomy 和 ranking reversal。当前仅一个 SeqTrack3D 派生模型和 mini 数据不足以构成 benchmark 论文。"
+      },
+      { "id": "venue_table_block", "type": "table", "tableId": "venue_table" },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 限制、置信度与尚未验证的假设\n\n- 当前服务器 formal run 尚未结束，本报告不能判断 M2 是 GO 还是 No-Go。\n- M0-3 是 offline、GT-history、training-sampler、crop-reachable cohort；其 0.803 m dynamics gain 不能外推成 tracking Success/Precision。\n- E0–E5 证明实现不破坏既定不变量与 fallback，不证明泛化或 SOTA。\n- 多个历史数字来自不同训练配置和 cohort，只用于解释研究方向，不能直接组成论文主表。\n- 本报告未绘制跨实验柱状图，原因是这些结果的配置、checkpoint 与分析单位不一致；可视化会制造错误的可比性。\n- venue 判断基于截至 2026-07-22 的官方 scope；具体截稿、页数和政策需在投稿时重新核对。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## 现在的执行结论\n\n1. 让当前 GPU2 的 C2 正式训练完成，不重复启动同配置。\n2. 训练结束后立即跑 GPU3 的 true/fixed/shuffled 控制导出和 A1 baseline，拉回 checkpoint、三协议 JSONL/summary、run log、provenance 和 SHA256。\n3. 在看完整结果前冻结 C0 continuation 与 C1 adapter-only 的配置、步数和 checkpoint-selection；GPU2/GPU3 可并行跑这两个匹配预算对照。\n4. 扩展 summarizer，聚合 innovation/adapter/fallback 机制字段，并做 tracklet paired bootstrap。\n5. seed42 只有在 true 同时胜过 fixed 与 shuffled、standard 不退化、机制统计合理时才进入 seeds 43/44 和 full dataset。\n6. 完成 full nuScenes、第二数据集、公平现代基线、效率与独立 held-out 测试后开始写方法论文。若 seed42 gate 失败，转 benchmark/diagnosis 路线，不继续堆复杂模块。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 论文前必须回答的进一步问题\n\n- M2 的上涨来自额外训练、dual-clock adapter，还是 bounded innovation？\n- true time 是否稳定胜过 fixed/shuffled，而非只在单一 cadence 或单 seed 偶然有效？\n- `R(delta_t)` 的 clamp 是否集中在 long-gap，是否提高 failure recovery 而不破坏 standard？\n- full dataset 与第二数据集上，收益是否仍然存在，并能否覆盖多个类别/稀疏度区间？\n- 在公平、无当前 GT 的 evaluator 下，和 HVTrack、P2P、TrajTrack、ChronoTrack 等方法相比是否仍有竞争力？\n- 如果要保留“state filtering”叙事，持久状态、协方差、measurement update 和 trajectory tube 的最小实现与消融是什么？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-22T16:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "project_status": [
+        {
+          "engineering_gates_passed": 6,
+          "formal_seeds_completed": 0,
+          "external_datasets_validated": 0,
+          "oracle_endpoints": 1311,
+          "dynamics_gain_m": 0.803,
+          "frozen_clamp_rate": 0.3448
+        }
+      ],
+      "innovations": [
+        { "order": 1, "innovation": "Matched irregular-cadence protocol", "maturity": "已实现并冻结", "evidence": "split-aware manifests；same endpoint/geometry/checkpoint；true/fixed/shuffled 只改 effective time", "claim_boundary": "可作为 protocol contribution；尚未扩成跨 tracker benchmark" },
+        { "order": 2, "innovation": "Order/physical dual clocks", "maturity": "M1 已实现，E0–E5 通过", "evidence": "主干保持 order time；real/effective time 只进入 dynamics、adapter、R(dt)", "claim_boundary": "可称结构设计；不能称通用 continuous-time theory" },
+        { "order": 3, "innovation": "Bounded proposal innovation", "maturity": "M2 已实现，正式训练中", "evidence": "stop-gradient residual、dt-dependent radius、frozen alpha、exact fallbacks", "claim_boundary": "正式 online tracking gate 未返回，暂不能声称有效" },
+        { "order": 4, "innovation": "Shared-SE(2) canonical supervision", "maturity": "已实现并验证几何不变量", "evidence": "样本级世界 SE(2)；labels 来自 unperturbed GT + real dt", "claim_boundary": "是物理一致性修复，不应夸成单独重大算法" },
+        { "order": 5, "innovation": "M3 history distillation", "maturity": "仅计划", "evidence": "无完成代码与正式实验", "claim_boundary": "不能写进当前贡献" },
+        { "order": 6, "innovation": "M4 continuous-discrete filter/tube", "maturity": "仅计划", "evidence": "无 persistent state/covariance/filter update", "claim_boundary": "当前不应使用 state-filtering/continuous-time headline" }
+      ],
+      "research_history": [
+        { "order": 1, "period": "2026-05", "work": "真实 timestamp、TimeEncoding、DynamicsEncoder、TWC、observability gate", "result": "建立物理时间管线，但主干直接吃真实时间风险很高" },
+        { "order": 2, "period": "2026-05 至 06", "work": "A1/A2/P5、多 seed、180 epoch 和动态残差消融", "result": "raw real-time 主干崩溃；order-time 恢复；A2 seed 不稳定" },
+        { "order": 3, "period": "2026-07-08 起", "work": "转向 variable-rate/HTV，设计 gap、burst、random 协议", "result": "研究问题从常规涨点收敛到 irregular cadence 鲁棒性" },
+        { "order": 4, "period": "2026-07-11 至 20", "work": "修 TWC 坐标/采样，做 crop reachability、recursive CV、reliability 和 frozen time controls", "result": "排除 TWC/reliability 作为主方法；识别 crop 与监督污染" },
+        { "order": 5, "period": "2026-07-21", "work": "TWC A/B/C、M0 proposal oracle、candidate jitter audit", "result": "oracle 解锁 M2；candidate audit 冻结 shared-SE(2)" },
+        { "order": 6, "period": "2026-07-22", "work": "实现 M1/M2，完成 E0–E5，冻结 E6，启动 GPU2 正式训练", "result": "工程门关闭；正式性能门仍在运行" }
+      ],
+      "evidence": [
+        { "order": 1, "experiment": "Main baseline / raw real-time A1", "result": "50.99/59.96 vs 28.28/27.43 (Success/Precision)", "interpretation": "真实秒数直接替换主干时间语义会严重破坏模型" },
+        { "order": 2, "experiment": "A1 order / A2 order-dyn seeds", "result": "A1 51.23/57.86；A2 seed42 50.96/63.31，seed43 23.64/23.77，seed44 46.90/52.62", "interpretation": "单 seed Precision 正信号不稳定，不能作为论文主结论" },
+        { "order": 3, "experiment": "TWC A/B/C", "result": "A 50.01/58.20；B 34.71/34.02；C 43.01/45.76", "interpretation": "TWC 能修复 paired-view 损伤的一部分，但仍低于 matched single-view" },
+        { "order": 4, "experiment": "P0-C old feature concat", "result": "true-fixed +0.438/+0.523；true-shuffled -0.123/+0.056；CI 跨 0", "interpretation": "旧结构没有可靠地利用正确物理时间" },
+        { "order": 5, "experiment": "P0-B4 reliability", "result": "gap AUROC 0.680/recall 0.568；burst 0.712/0.609，低于 0.75/0.70", "interpretation": "observation reliability gate No-Go" },
+        { "order": 6, "experiment": "M0-3 proposal oracle", "result": "1311 endpoints；d_obs 1.349m，d_dyn 0.309m，oracle 0.232m；dynamics gain 0.803m CI [0.633,0.988]", "interpretation": "有足够离线机制信号实现 bounded innovation，但还不是 tracking 涨点" },
+        { "order": 7, "experiment": "Frozen E6 rule", "result": "alpha 0.75；R=min(0.5+0.5dt,2)；gain 0.288m；clamp 34.48%", "interpretation": "冻结规则在离线 cohort 为正，可进入唯一正式实验" },
+        { "order": 8, "experiment": "Candidate jitter audit", "result": "velocity P50 0.611m/s；acceleration P50 2.128m/s²；matched penalty +0.0104m", "interpretation": "逐帧独立 jitter 是结构性伪运动，shared-SE(2) 必要" }
+      ],
+      "m03_proposal_errors": [
+        { "proposal": "Observation", "mean_error_m": 1.3492, "median_error_m": 0.363567, "p95_error_m": 6.02805, "endpoints": 1311 },
+        { "proposal": "Dynamics", "mean_error_m": 0.309334, "median_error_m": 0.117888, "p95_error_m": 1.27717, "endpoints": 1311 },
+        { "proposal": "Segment oracle", "mean_error_m": 0.231557, "median_error_m": 0.09248, "p95_error_m": 0.986982, "endpoints": 1311 }
+      ],
+      "literature_boundaries": [
+        { "order": 1, "work": "SC3D / P2B", "already_claimed": "3D SOT 与 point-to-box proposal 基础范式", "ct_boundary": "不能声称首次 3D SOT 或首次 point-to-box" },
+        { "order": 2, "work": "CXTrack", "already_claimed": "contextual information 提升点云跟踪", "ct_boundary": "你的核心不是一般上下文，而是 matched physical-time intervention" },
+        { "order": 3, "work": "SeqTrack3D", "already_claimed": "历史点云与 box sequence 的 seq2seq 跟踪", "ct_boundary": "保持其 order-time 观测语义，只在物理运动支路处理 irregular cadence" },
+        { "order": 4, "work": "P2P", "already_claimed": "part-to-part motion cues", "ct_boundary": "不能泛称首次运动建模；强调真实 dt 和错误时间控制" },
+        { "order": 5, "work": "PillarTrack / MVCTrack", "already_claimed": "pillar backbone 与 multimodal guidance", "ct_boundary": "你的工作不是 backbone 或 multimodal novelty" },
+        { "order": 6, "work": "TrajTrack", "already_claimed": "历史 bbox trajectory proposal/predict/refine", "ct_boundary": "不能泛称首次 trajectory guidance；强调 dt-conditioned bounded innovation 与公平 GT-free 评测" },
+        { "order": 7, "work": "HVTrack / ChronoTrack", "already_claimed": "fixed-interval memory、temporal consistency", "ct_boundary": "within-track variable cadence 与 matched true/fixed/shuffled intervention 是更窄差异" },
+        { "order": 8, "work": "NCDSSM / ContiFormer", "already_claimed": "一般 irregular time-series 的连续/离散建模", "ct_boundary": "你的贡献是应用于 3D SOT 的轻量双时钟方法，不是基础连续时间理论" }
+      ],
+      "publication_gaps": [
+        { "order": 1, "priority": "P0", "gap": "当前 C2 formal result", "why": "没有 online Success/Precision 就没有方法结论", "completion_rule": "true 同时胜 fixed/shuffled，standard guardrail 通过，日志/provenance/hash 完整" },
+        { "order": 2, "priority": "P0", "gap": "matched training-budget controls", "why": "A1 init 后再训练 60ep 会把模块收益与额外优化步数混在一起", "completion_rule": "C0 continuation、C1 adapter-only、C2 full 同 init/步数/数据路径" },
+        { "order": 3, "priority": "P0", "gap": "模块因果消融", "why": "当前 full config 同时改变 shared-SE(2)、adapter、innovation", "completion_rule": "至少 data-only、adapter-only、innovation-only/full 的配对比较" },
+        { "order": 4, "priority": "P1", "gap": "多 seed", "why": "历史 A2 已出现严重 seed collapse", "completion_rule": "42/43/44，报告均值、方差和 paired CI" },
+        { "order": 5, "priority": "P1", "gap": "full dataset 与独立测试", "why": "mini_val 已反复用于开发，不能充当最终盲测", "completion_rule": "full nuScenes + held-out schedule/test；不得再据 test 调参" },
+        { "order": 6, "priority": "P1", "gap": "第二数据集", "why": "单数据集难以证明 irregular-cadence 机制可泛化", "completion_rule": "Waymo 优先；或 KITTI-HV 用于 interval robustness 对齐" },
+        { "order": 7, "priority": "P1", "gap": "公平现代基线", "why": "只比原 SeqTrack3D 不能定位 2026 年竞争力", "completion_rule": "SeqTrack3D、HVTrack、P2P、TrajTrack GT-free，条件允许加 ChronoTrack/其他最新方法" },
+        { "order": 8, "priority": "P1", "gap": "机制与效率", "why": "审稿人会问模块为何有效以及代价", "completion_rule": "dt/sparsity/failure bins；clamp/applied/fallback；params/FLOPs/FPS/memory" },
+        { "order": 9, "priority": "P2", "gap": "benchmark 规模或真正 state filter", "why": "决定能否冲更高的 PR/T-RO/CV venue", "completion_rule": "≥2 datasets×≥5 trackers，或完成 persistent state/covariance/filter/tube" }
+      ],
+      "next_experiments": [
+        { "order": 1, "stage": "现在", "action": "完成 GPU2 C2；不重复启动", "decision": "保留 last.ckpt、run.log、provenance、manifest/hash" },
+        { "order": 2, "stage": "C2 完成后", "action": "GPU3 跑同 checkpoint 的 true/fixed/shuffled + A1 standard/gap/burst", "decision": "关闭 seed42 causal gate" },
+        { "order": 3, "stage": "并行冻结", "action": "定义 C0 continuation 与 C1 adapter-only", "decision": "消除额外训练预算和模块归因混杂" },
+        { "order": 4, "stage": "结果后处理", "action": "扩展 summary：innovation、adapter、clamp、alpha、fallback + tracklet bootstrap", "decision": "形成机制表和 failure recovery 分析" },
+        { "order": 5, "stage": "seed42 GO 后", "action": "跑 seeds43/44，完全相同冻结规则", "decision": "排除历史 seed instability" },
+        { "order": 6, "stage": "多 seed GO 后", "action": "full nuScenes、Waymo/KITTI-HV、held-out cadence", "decision": "完成泛化和独立测试证据" },
+        { "order": 7, "stage": "最终包", "action": "公平基线、效率、消融、代码/manifests release", "decision": "开始撰写并按 venue 压缩篇幅" },
+        { "order": 8, "stage": "任一主 gate No-Go", "action": "停止堆 M3/M4，转跨 tracker robustness benchmark", "decision": "重新定义文章，不把负结果包装成方法成功" }
+      ],
+      "venue_fit": [
+        { "order": 1, "venue": "IEEE RA-L", "fit": "首选", "required_package": "M2 正 gate；matched-budget ablations；full nuScenes + 第二数据集 + 多 seed + 效率", "assessment": "最适合简洁、可复现的机器人感知/跟踪方法；篇幅短，贡献必须聚焦" },
+        { "order": 2, "venue": "IEEE T-IV", "fit": "很合适", "required_package": "完整自动驾驶场景验证、多类别/多数据集、鲁棒性和实时性", "assessment": "irregular LiDAR cadence 与智能车感知主题自然匹配" },
+        { "order": 3, "venue": "IEEE T-ITS", "fit": "合适但需扩展", "required_package": "突出交通/自动驾驶系统价值，实验规模和应用意义更完整", "assessment": "适合更长的系统性版本，不宜只交 mini 单类实验" },
+        { "order": 4, "venue": "IEEE IV 2027", "fit": "合适的会议路线", "required_package": "方法正结果、完整 automotive validation；关注官方后续 deadline", "assessment": "应用导向强；若想先发会议，这是现实目标" },
+        { "order": 5, "venue": "Pattern Recognition", "fit": "扩展版/高门槛", "required_package": "更普适的方法论、强基线、≥2 数据集，最好同时形成 benchmark 贡献", "assessment": "当前 mini 阶段不够；只有 evidence package 显著扩大后才建议" },
+        { "order": 6, "venue": "TCSVT", "fit": "次选", "required_package": "强调时序视觉建模并提供充分视频/点云实验", "assessment": "LiDAR-only 的题目不如 RA-L/T-IV 贴合" },
+        { "order": 7, "venue": "T-RO", "fit": "当前不建议", "required_package": "真正 state filtering/uncertainty/tube，重大机器人学推进和广泛验证", "assessment": "当前 bounded correction 新颖度与证据规模不足" },
+        { "order": 8, "venue": "CVPR/ICCV/ECCV", "fit": "当前不建议", "required_package": "更强算法新颖性、最新 SOTA、大规模数据与清楚的视觉社区影响", "assessment": "M1/M2 现阶段偏增量；完成 M3/M4 或大 benchmark 后再评估" },
+        { "order": 9, "venue": "Workshop / technical report", "fit": "仅在资源受限时", "required_package": "mini + 单 seed 可作为阶段性公开材料", "assessment": "不应在主项目仍有上升空间时过早终止为低证据版本" }
+      ]
+    }
+  },
+  "sources": [
+    { "id": "audit_report_sql", "label": "Paper-readiness reviewed snapshot materialization", "path": "compare_results/reports/paper_readiness_audit_20260722/report_snapshot.sql" },
+    { "id": "proposal_doc", "label": "Dual-clock proposal and staged plan", "path": "compare_results/reports/dual_clock_state_filtering_proposal_20260721.md" },
+    { "id": "e0e5_report", "label": "M1/M2 E0–E5 validation", "path": "compare_results/reports/m1_m2_e0_e5_validation_20260722.md" },
+    { "id": "e6_report", "label": "M2 E6 frozen parameter report", "path": "compare_results/reports/m2_e6_parameter_freeze_20260722.md" },
+    { "id": "m0_analysis", "label": "M0-3/M0-4 mechanism analysis", "path": "compare_results/reports/m0_m03_m04_analysis_20260721.md" },
+    { "id": "paper_viability", "label": "Prior publication viability audit", "path": "compare_results/reports/paper_viability_and_execution_20260720.md" },
+    { "id": "twc_abc", "label": "TWC causal A/B/C comparison", "path": "compare_results/reports/twc_abc_seed42_comparison_20260721.md" },
+    { "id": "p0c_controls", "label": "P0-C matched time-control validation", "path": "compare_results/reports/p0c_frozen_protocol_validation_20260720.md" },
+    { "id": "model_code", "label": "SeqTrack3D integration code", "path": "models/seqtrack3d.py" },
+    { "id": "dynamics_code", "label": "Dynamics encoder, adapter and innovation code", "path": "models/dynamics.py" },
+    { "id": "sampler_code", "label": "Canonical dynamics labels and shared-SE(2) sampling", "path": "datasets/sampler.py" },
+    { "id": "time_code", "label": "Main/effective time field separation", "path": "datasets/misc_utils.py" },
+    { "id": "candidate_code", "label": "Shared-SE(2) candidate utilities", "path": "utils/candidate_utils.py" },
+    { "id": "formal_config", "label": "Formal M2 true-time configuration", "path": "cfgs/seqtrack3d_nuscenes_m2_proposal_innovation_formal_true.yaml" },
+    { "id": "formal_runner", "label": "Formal seed42 training runner", "path": "tools/run_m2_formal_seed42_gpu2.sh" },
+    { "id": "git_history", "label": "Repository commit history through 473738f", "path": ".git/logs/HEAD" },
+    { "id": "seqtrack_paper", "label": "SeqTrack3D local paper", "path": "2024SeqTrack3D Exploring Sequence Information for.pdf" },
+    { "id": "ral_venue", "label": "IEEE Robotics and Automation Letters", "url": "https://www.ieee-ras.org/publications/ieee-robotics-and-automation-letters/" },
+    { "id": "tiv_venue", "label": "IEEE Transactions on Intelligent Vehicles", "url": "https://ieee-itss.org/pub/t-iv/" },
+    { "id": "tits_venue", "label": "IEEE Transactions on Intelligent Transportation Systems", "url": "https://ieee-itss.org/pub/t-its/" },
+    { "id": "pr_venue", "label": "Pattern Recognition", "url": "https://www.sciencedirect.com/journal/pattern-recognition" },
+    { "id": "tro_venue", "label": "IEEE Transactions on Robotics", "url": "https://www.ieee-ras.org/publications/t-ro/t-ro-information-for-authors/" },
+    { "id": "iv2027_venue", "label": "IEEE Intelligent Vehicles Symposium 2027", "url": "https://ieee-iv.org/2027/" },
+    { "id": "hvtrack", "label": "HVTrack, ECCV 2024", "url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/01145.pdf" },
+    { "id": "chronotrack", "label": "ChronoTrack, CVPR Findings 2026", "url": "https://openaccess.thecvf.com/content/CVPR2026F/html/Yoo_Temporally_Consistent_Long-Term_Memory_for_3D_Single_Object_Tracking_CVPRF_2026_paper.html" },
+    { "id": "gsot3d", "label": "GSOT3D, ICCV 2025", "url": "https://openaccess.thecvf.com/content/ICCV2025/papers/Jiao_GSOT3D_Towards_Generic_3D_Single_Object_Tracking_in_the_Wild_ICCV_2025_paper.pdf" },
+    { "id": "ncdssm", "label": "Neural Continuous-Discrete State Space Models, ICML 2023", "url": "https://proceedings.mlr.press/v202/ansari23a.html" },
+    { "id": "contiformer", "label": "ContiFormer, NeurIPS 2023", "url": "https://papers.nips.cc/paper_files/paper/2023/hash/9328208f88ec69420031647e6ff97727-Abstract-Conference.html" }
+  ]
+}

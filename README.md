@@ -2,7 +2,7 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口**，同时进入 M1/M2 formal 配置准备。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成 E0–E5 服务器硬门禁；随后 E6 静态冻结已完成：只读取既有 mini_train oracle，确认 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)` 与共享 5-epoch warmup，并新增唯一 formal true-dt 配置、manifest/preflight/训练/同 checkpoint 时间控制脚本。正式状态为 **`E0–E5 Engineering GO / E6 Static Freeze Ready / Formal-training HOLD pending clean server manifests`**。这仍不是 tracking 涨点；必须先形成新的 clean commit，并在服务器生成绑定该提交的 cadence/shuffled-time manifests，通过 E6 preflight 后才允许启动唯一 seed42 true-dt 训练。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
+当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口 + M2 formal 运行**。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成 E0–E5；commit `473738f` 已完成服务器 cadence/shuffled manifests 与 E6 preflight，并启动唯一 A1-init seed42 true-dt formal 训练。服务器另有 M2 scratch 与 matched W0 scratch 两个初始化消融由用户报告运行中，结果和精确 provenance 尚待拉回。正式状态为 **`M2 formal/scratch controls RUNNING; tracking and causal-time result pending`**，仍不能宣称 tracking 涨点、正确 `delta_t` 有效或跨 cadence 泛化。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
 
 ## 文档导航
 
@@ -16,11 +16,12 @@ CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟�
 | `compare_results/` | 完整指标表、曲线和实验结果文件 |
 | `compare_results/reports/paper_viability_and_execution_20260720.md` | P0 后的论文可行性、claim 审计、方法/benchmark 分叉与停止条件 |
 | `compare_results/reports/twc_abc_seed42_comparison_20260721.md` | 同提交 TWC A/B/C 的数据审计、效应分解、图表与最终判定 |
-| `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md` | 新候选贡献、dual-clock/innovation/asymmetric distillation 方法规格与 Go/No-Go |
+| `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md` | 新候选贡献、dual-clock/innovation/asymmetric distillation，以及 M4 persistent filter/trajectory tube 的完整方法规格与 Go/No-Go |
 | `compare_results/reports/m0_m03_m04_analysis_20260721.md` | M0-3/M0-4 数据质量、独立复算、稳健性、决策与下一步 |
 | `compare_results/reports/m0_m03_m04_report/report.html` | M0-3/M0-4 自包含可视化技术报告（桌面/窄屏 QA 通过） |
 | `compare_results/reports/m1_m2_e0_e5_validation_20260722.md` | M1/M2 服务器 E0–E5 provenance、JSONL 独立复算、解锁边界与 E6 阻塞 |
 | `compare_results/reports/m2_e6_parameter_freeze_20260722.md` | 既有 mini_train M0-3 向量的单规则复算、alpha/R/warmup 冻结与保守性边界 |
+| `compare_results/reports/htv_identifiability_and_execution_plan_20260722.md` | 标准 `delta_t` 可辨识性、HTV/丢帧论文边界、正式协议、三任务登记与结果分叉 |
 
 ---
 
@@ -74,7 +75,7 @@ innovation = clip_norm(d_dyn - stopgrad(d_obs), R(delta_t))
 d_final    = d_obs + alpha * innovation
 ```
 
-旧 hand-crafted observability Gate 已停止，不再列贡献。只有 state prior、time controls、tube oracle 和 uncertainty calibration 都通过后，才允许研究 covariance-derived Kalman gain。完整定义见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
+旧 hand-crafted observability Gate 已停止，不再列贡献。只有 state prior、time controls、M2 predicted-history tube oracle 和 uncertainty calibration 都通过后，才允许研究 covariance-derived Kalman gain。M4 固定按 `tube oracle -> fixed-Q/R filter -> filter+tube -> learned Q/R` 逐级推进，不允许一次同时引入 filter、tube 和 learned covariance。完整定义见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
 
 ---
 
@@ -216,8 +217,8 @@ use_observability_gate: False
 | M0-3 | crop-reachable proposal oracle | `GO_M2_PROPOSAL_INNOVATION`；dynamics-only 与 long-gap tracklet bootstrap 均支持互补性，M2 工程 gate 解锁 |
 | M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
 | M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
-| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E5 通过；共享 5-epoch warmup 与唯一 formal 配置已静态冻结，等待 server manifest/preflight |
-| M2 engineering | bounded proposal innovation | E0–E5 通过；`alpha=0.75` 与 `R(dt)=min(0.5+0.5dt,2.0)` 已由 mini_train 一次性冻结，正式训练仍 HOLD |
+| M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E6 通过；共享 5-epoch warmup 与唯一 formal 配置已冻结并用于 R1 |
+| M2 engineering | bounded proposal innovation | E0–E6 通过；R1 A1-init formal 与 R2/R3 scratch 配对运行中，tracking/time-control 结果待定 |
 
 当前已完成的关键消融：
 
@@ -250,13 +251,13 @@ use_observability_gate: False
 当前下一步：
 
 ```text
-1. E0–E5 已完成并本地独立复算；不再重复 smoke 或根据随机初始化 clamp ratio 调参。
-2. E6 参数与配置静态冻结已完成；提交并推送当前改造，服务器只接受新的 clean commit。
-3. 在服务器执行 `tools/prepare_m2_formal_manifests.sh`，生成绑定 clean commit 的 standard/gap1124/burst-drop cadence 与 shuffled-time manifests；再由 `check_m2_formal_freeze.py` 核对 A1 hash、`1262×60=75720` steps 和配置不漂移。
-4. 通过 E6 server preflight 后，只用 GPU2 执行一次 `run_m2_formal_seed42_gpu2.sh`；它使用 `--init_checkpoint` 从冻结 A1 初始化，只保留 epoch60 `last.ckpt`，不选择 best checkpoint。
-5. 训练完成后用 GPU3 执行 `run_m2_formal_time_controls_gpu3.sh`；同一 M2 checkpoint 顺序导出 standard/gap/burst 的 true/fixed/shuffled，并在相同 endpoint 导出 A1 baseline。fixed/shuffled 不训练。
-6. 并行完成剩余 M0-2：冻结 A/B/C final checkpoint 的四协议输出与 evaluation-only path variance，不重训。
-7. 若 seed42 未形成预注册因果正信号，转回 benchmark/diagnosis，不在 mini_val/test 上重调 alpha/R。
+1. 不再启动新训练或修改 alpha/R；等待 R1 A1-init M2 formal、R2 M2 scratch、R3 matched W0 scratch 三个任务完成。
+2. 分别核对 epoch60/global_step、last.ckpt、退出码、resolved config、训练步数、SHA256 与 provenance；不完整任务不进入比较。
+3. 先做 R1/R2/R3 standard final；用 R2-R3 隔离 scratch 条件下 M2 的结构净效应，用 R1-A1 检查 continuation 收益。
+4. 对 R1 final checkpoint 运行 `tools/run_m2_formal_time_controls_gpu3.sh`；导出 standard/gap/burst 的 true/fixed/shuffled 与 matched A1。fixed/shuffled 不训练。
+5. 做 per-tracklet paired/bootstrap、delta_t/位移/稀疏分桶、首次失控和连续失败；在看到结果前冻结 standard non-inferiority margin。
+6. 只有 strong cadence、true controls、standard guardrail 与 matched scratch baseline 同时支持方法，才补 seed43/44、full nuScenes 和第二数据集；否则转 benchmark/diagnosis。
+7. M3/M4 继续锁定；不依据 mini_val/test 反调 alpha/R，不用扩大 crop 或新增 Gate 掩盖失败。
 ```
 
 ---
@@ -437,7 +438,7 @@ python tools/check_train_steps.py \
 
 ### M2 E6 唯一正式工作流
 
-当前 formal 入口是 fail-closed 的三步流程。先确认服务器位于已评审的新 clean commit，并设置：
+当前 formal 入口是 fail-closed 的三步流程。2026-07-22，commit `473738f` 已完成前两步并启动 R1，输出根为 `output/m2_formal_true_seed42_473738f_20260722_112536`；以下命令保留作复现合同，不应在当前任务未结束时重复启动。先确认服务器位于已评审的新 clean commit，并设置：
 
 ```bash
 PROJECT_ROOT=/home/lishengjie/study/lcyu/CT-SeqTrack
