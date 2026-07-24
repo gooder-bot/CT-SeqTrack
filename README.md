@@ -346,7 +346,8 @@ pip install -r requirement.txt
 
 ## 数据准备
 
-本项目沿用 SeqTrack3D / Open3DSOT 风格的数据准备流程，支持 nuScenes 和 Waymo。准备数据后，在配置文件中修改：
+本项目沿用 SeqTrack3D / Open3DSOT 风格的数据准备流程，支持
+nuScenes、Waymo 和 KITTI Tracking。准备数据后，在配置文件中修改：
 
 ```yaml
 path: /your/path
@@ -361,6 +362,53 @@ path: /home/lishengjie/data/nuscenes-mini
 version: v1.0-mini
 category_name: Car
 ```
+
+KITTI Tracking 接口使用 Open3DSOT 的训练/验证/测试划分：
+`0000–0016 / 0017–0018 / 0019–0020`。`path` 可以指向包含
+`training/` 的 KITTI tracking 根目录，也可以直接指向 `training/`：
+
+```yaml
+dataset: kitti_mf
+path: /data/KITTI/tracking
+version: kitti_tracking
+category_name: Car
+kitti_frame_period: 0.1
+```
+
+目录至少应包含：
+
+```text
+training/
+├── calib/
+├── label_02/
+└── velodyne/
+```
+
+KITTI 配置入口是 `cfgs/seqtrack3d_kitti.yaml`。先运行不依赖真实
+KITTI 数据的合成接口检查：
+
+```bash
+python tools/check_kitti_interface.py
+```
+
+真实数据时间字段检查：
+
+```bash
+python tools/check_time_batch.py \
+  --cfg cfgs/seqtrack3d_kitti.yaml \
+  --path /data/KITTI/tracking \
+  --split train \
+  --batch-size 2 \
+  --workers 0 \
+  --require-full-history
+```
+
+KITTI-HTV 不修改原始 label 或点云。`kitti_hv_interval` 按 HVTrack
+官方实现生成 `tracklet[i::interval]` 的全部 phase 子轨迹，支持
+`1/2/3/5/10` 和训练用的 `all`，再用 manifest 冻结 endpoint 集合。
+生成和评测命令见 `protocols/README.md`。loader 始终用原始 KITTI
+frame id 计算 timestamp，因此降采样后的真实 `delta_t` 不会被错误
+压回 `0.1 s`。
 
 ---
 

@@ -46,6 +46,8 @@ def dataset_provenance(wrapped):
         "version": getattr(dataset, "version", None),
         "split": getattr(dataset, "split", None),
         "protocol_role": getattr(dataset, "protocol_role", None),
+        "kitti_hv_intervals": getattr(
+            dataset, "kitti_hv_intervals", None),
         "tracklets": dataset.get_num_tracklets(),
         "frames": dataset.get_num_frames_total(),
         "virtual_rate_summary": getattr(dataset, "virtual_rate_summary", {}),

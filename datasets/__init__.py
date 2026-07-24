@@ -1,4 +1,5 @@
 from datasets import sampler, \
+                    kitti_mf, \
                     nuscenes_lidar_mf,  \
                     waymo_data_mf
 from datasets.protocol_utils import (
@@ -32,6 +33,33 @@ def get_dataset(config, type='train', **kwargs):
                                              hist_num=config.hist_num,
                                              **virtual_rate_kwargs,
                                              **dynamics_time_kwargs)
+    elif config.dataset in ('kitti_mf', 'kitti'):
+        role = kwargs.get('protocol_role')
+        if role is None:
+            role = 'train' if type.lower().startswith('train') else 'eval'
+        role = normalize_protocol_role(role)
+        virtual_rate_kwargs = resolve_virtual_rate_kwargs(config, role)
+        dynamics_time_kwargs = resolve_dynamics_time_kwargs(config, role)
+        data = kitti_mf.KITTIMFDataset(
+            path=config.path,
+            split=kwargs.get('split', 'train'),
+            category_name=config.category_name,
+            version=getattr(config, 'version', 'kitti_tracking'),
+            preloading=config.preloading,
+            preload_offset=(
+                config.preload_offset if type != 'test' else -1),
+            hist_num=config.hist_num,
+            frame_period=getattr(
+                config, 'kitti_frame_period',
+                getattr(config, 'default_time_step', 0.1)),
+            kitti_hv_interval=getattr(
+                config, f'{role}_kitti_hv_interval',
+                getattr(config, 'kitti_hv_interval', 1)),
+            scene_ids=getattr(config, 'kitti_scene_ids', None),
+            allow_missing_pointcloud=getattr(
+                config, 'kitti_allow_missing_pointcloud', False),
+            **virtual_rate_kwargs,
+            **dynamics_time_kwargs)
     elif config.dataset == 'waymo_mf':
         data = waymo_data_mf.WaymoDataset(path=config.path,
                                        split=kwargs.get('split', 'train'),
@@ -41,7 +69,9 @@ def get_dataset(config, type='train', **kwargs):
                                        tiny=config.tiny,
                                        hist_num = config.hist_num)
     else:
-        data = None
+        raise ValueError(
+            f"Unsupported dataset {config.dataset!r}; expected one of "
+            "'nuscenes_mf', 'kitti_mf', or 'waymo_mf'.")
   
     if type.lower() == 'train_motion_mf':
         return sampler.MotionTrackingSamplerMF(dataset=data,

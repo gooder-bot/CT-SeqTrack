@@ -31,11 +31,29 @@ def main():
     parser.add_argument("--version", default=None)
     parser.add_argument("--split", default=None)
     parser.add_argument("--role", choices=("train", "val", "test"), default="test")
+    parser.add_argument(
+        "--kitti-hv-interval",
+        default=None,
+        help="Official KITTI-HV interval (1/2/3/5/10 or 'all').")
     parser.add_argument("--mode", default=None)
     parser.add_argument("--gap-pattern", nargs="*", type=int, default=None)
+    parser.add_argument(
+        "--stride", type=int, default=None,
+        help=(
+            "Single-path stride for generic CT cadence tests. Official "
+            "KITTI-HV should use --kitti-hv-interval instead."))
     parser.add_argument("--drop-prob", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--max-gap", type=int, default=None)
+    parser.add_argument("--min-tracklet-len", type=int, default=None)
+    keep_last_group = parser.add_mutually_exclusive_group()
+    keep_last_group.add_argument(
+        "--keep-last", dest="keep_last", action="store_true",
+        help="Force the final frame into every tracklet.")
+    keep_last_group.add_argument(
+        "--no-keep-last", dest="keep_last", action="store_false",
+        help="Preserve exact stride cadence without an irregular final gap.")
+    parser.set_defaults(keep_last=None)
     parser.add_argument(
         "--allow-dirty", action="store_true",
         help="Allow tracked source changes. Formal frozen manifests should omit this.")
@@ -46,6 +64,12 @@ def main():
         cfg.path = args.path
     if args.version is not None:
         cfg.version = args.version
+    if args.kitti_hv_interval is not None:
+        setattr(
+            cfg,
+            f"{args.role}_kitti_hv_interval",
+            args.kitti_hv_interval,
+        )
     dirty = subprocess.check_output(
         ["git", "status", "--porcelain", "--untracked-files=no"],
         cwd=str(ROOT), text=True).strip()
@@ -58,9 +82,12 @@ def main():
     overrides = {
         "virtual_rate_mode": args.mode,
         "virtual_rate_gap_pattern": args.gap_pattern,
+        "virtual_rate_stride": args.stride,
         "virtual_rate_drop_prob": args.drop_prob,
         "virtual_rate_seed": args.seed,
         "virtual_rate_max_gap": args.max_gap,
+        "virtual_rate_min_tracklet_len": args.min_tracklet_len,
+        "virtual_rate_keep_last": args.keep_last,
     }
     for key, value in overrides.items():
         if value is not None and value != []:

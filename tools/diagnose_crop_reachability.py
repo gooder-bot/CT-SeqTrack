@@ -98,8 +98,11 @@ def frame_timestamp(frame, fallback):
 
 def frame_token(frame, fallback):
     frame_id = frame.get("frame_id")
-    if frame_id:
+    if frame_id is not None:
         return str(frame_id)
+    endpoint_key = frame.get("_ct_endpoint_key")
+    if endpoint_key:
+        return str(endpoint_key).rsplit("/frame/", 1)[-1]
     meta = frame.get("meta", {})
     sample_data = meta.get("sample_data_lidar", {}) if isinstance(meta, dict) else {}
     return str(sample_data.get("token", fallback))

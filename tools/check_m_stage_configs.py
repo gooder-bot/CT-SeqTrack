@@ -10,6 +10,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 M3_CONFIG = ROOT / "cfgs" / "seqtrack3d_nuscenes_m3_endpoint_distill_engineering.yaml"
 M4_CONFIG = ROOT / "cfgs" / "seqtrack3d_nuscenes_m4_filter_tube_engineering.yaml"
+M3_SCRATCH_CONFIG = (
+    ROOT / "cfgs" / "seqtrack3d_nuscenes_m3_endpoint_distill_scratch.yaml")
+W0_SCRATCH_CONFIG = (
+    ROOT / "cfgs" / "seqtrack3d_nuscenes_w0_shared_se2_scratch.yaml")
 
 
 def load_yaml(path):
@@ -33,6 +37,8 @@ def require(config, key, expected=None):
 def main():
     m3 = load_yaml(M3_CONFIG)
     m4 = load_yaml(M4_CONFIG)
+    m3_scratch = load_yaml(M3_SCRATCH_CONFIG)
+    w0_scratch = load_yaml(W0_SCRATCH_CONFIG)
 
     require(m3, "candidate_trajectory_mode", "shared_se2")
     require(m3, "hist_num", 3)
@@ -79,11 +85,33 @@ def main():
             "M3/M4 checkpoint architecture mismatch: "
             + json.dumps(mismatches, sort_keys=True))
 
+    require(m3_scratch, "candidate_trajectory_mode", "shared_se2")
+    require(m3_scratch, "use_dynamics_encoder", True)
+    require(m3_scratch, "use_physical_time_adapter", True)
+    require(m3_scratch, "use_m3_path_distillation", True)
+    require(m3_scratch, "m3_teacher_confidence_mode", "hybrid")
+    if int(require(m3_scratch, "physical_time_adapter_warmup_epoch")) < 5:
+        raise RuntimeError("Scratch M2 adapter warmup must be at least 5 epochs")
+    if int(require(m3_scratch, "dynamics_innovation_warmup_epoch")) < 5:
+        raise RuntimeError("Scratch M2 innovation warmup must be at least 5 epochs")
+    if int(require(m3_scratch, "m3_warmup_epoch")) < 10:
+        raise RuntimeError("Scratch M3 must start after the M2 warmup")
+
+    require(w0_scratch, "candidate_trajectory_mode", "shared_se2")
+    require(w0_scratch, "use_dynamics_encoder", False)
+    require(w0_scratch, "dynamics_motion_mode", "feature")
+    require(w0_scratch, "use_physical_time_adapter", False)
+    require(w0_scratch, "use_m3_path_distillation", False)
+    require(w0_scratch, "m4_variant", "off")
+    if float(require(w0_scratch, "dynamics_innovation_scale")) != 0.0:
+        raise RuntimeError("Scratch W0 innovation must be disabled")
+
     required_scripts = (
         "tools/run_m3_matched_abc.sh",
         "tools/run_m3_matched_evaluation.sh",
         "tools/run_m4_matched_evaluation.sh",
         "tools/run_m_stage_pipeline.sh",
+        "tools/run_m_stage_scratch_gpu0123.sh",
         "tools/export_m4_endpoints.py",
     )
     missing_scripts = [
@@ -105,6 +133,17 @@ def main():
             "variants": ["off", "filter", "tube", "filter_tube"],
             "point_budget": m4["point_sample_size"],
             "clock_controls": ["fixed", "real"],
+        },
+        "scratch": {
+            "arms": [
+                "W0_shared_se2",
+                "A_m2_single_view",
+                "B_m2_paired_weight0",
+                "C_m2_m3_distill",
+            ],
+            "m2_warmup_epoch": m3_scratch[
+                "dynamics_innovation_warmup_epoch"],
+            "m3_warmup_epoch": m3_scratch["m3_warmup_epoch"],
         },
     }, indent=2, sort_keys=True))
 

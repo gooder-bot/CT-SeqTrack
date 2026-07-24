@@ -1,4 +1,5 @@
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,42 @@ def merge_protocol_config(cfg, path):
             setattr(cfg, key, value)
 
 
+def apply_frozen_virtual_rate_protocol(cfg, path, role):
+    """Replay every cadence field recorded by a schema-v2 manifest."""
+    with open(path, "r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    if manifest.get("schema") != "ct_seqtrack.virtual_rate_manifest":
+        raise ValueError(
+            "Unsupported virtual-rate manifest; expected schema-v2 CT manifest")
+    protocol = manifest.get("protocol")
+    if not isinstance(protocol, dict):
+        raise ValueError("Virtual-rate manifest does not contain protocol fields")
+    if "kitti_hv_intervals" in manifest:
+        intervals = list(manifest["kitti_hv_intervals"])
+        setattr(
+            cfg,
+            f"{role}_kitti_hv_interval",
+            intervals[0] if len(intervals) == 1 else intervals,
+        )
+    key_map = {
+        "gap_pattern": "virtual_rate_gap_pattern",
+        "stride": "virtual_rate_stride",
+        "drop_every": "virtual_rate_drop_every",
+        "drop_prob": "virtual_rate_drop_prob",
+        "seed": "virtual_rate_seed",
+        "max_gap": "virtual_rate_max_gap",
+        "keep_first": "virtual_rate_keep_first",
+        "keep_last": "virtual_rate_keep_last",
+        "min_tracklet_len": "virtual_rate_min_tracklet_len",
+        "burst_keep_lengths": "virtual_rate_burst_keep_lengths",
+        "burst_skip_lengths": "virtual_rate_burst_skip_lengths",
+    }
+    setattr(cfg, f"{role}_virtual_rate_mode", "manifest")
+    for manifest_key, config_key in key_map.items():
+        if manifest_key in protocol:
+            setattr(cfg, f"{role}_{config_key}", protocol[manifest_key])
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Build an offline split-wide shuffled-dt permutation manifest.")
@@ -41,6 +78,10 @@ def main():
     parser.add_argument("--split", default=None)
     parser.add_argument("--path", default=None)
     parser.add_argument("--version", default=None)
+    parser.add_argument(
+        "--kitti-hv-interval",
+        default=None,
+        help="Official KITTI-HV interval when no cadence manifest supplies it.")
     parser.add_argument(
         "--protocol-cfg", default=None,
         help="Merge only virtual-rate fields from this frozen protocol config.")
@@ -65,11 +106,19 @@ def main():
         cfg.path = args.path
     if args.version is not None:
         cfg.version = args.version
+    if args.kitti_hv_interval is not None:
+        setattr(
+            cfg,
+            f"{args.role}_kitti_hv_interval",
+            args.kitti_hv_interval,
+        )
     # The physical endpoint set is loaded first. The generated file is then
     # consumed by a separate shuffled-mode run.
     setattr(cfg, f"{args.role}_dynamics_time_mode", "true")
     setattr(cfg, f"dynamics_time_manifest_{args.role}", "")
     if args.virtual_rate_manifest is not None:
+        apply_frozen_virtual_rate_protocol(
+            cfg, args.virtual_rate_manifest, args.role)
         setattr(cfg, f"{args.role}_virtual_rate_manifest", args.virtual_rate_manifest)
         setattr(cfg, f"virtual_rate_manifest_{args.role}", args.virtual_rate_manifest)
         setattr(cfg, f"{args.role}_virtual_rate_manifest_strict", True)

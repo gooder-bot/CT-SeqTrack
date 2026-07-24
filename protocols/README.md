@@ -197,3 +197,84 @@ Observed result: the minimum true-dt improvement was `-0.1233` Success and
 Each output root contains `run_provenance.json` with the commit, dirty status,
 resolved-config hash, checkpoint hash, endpoint selection hash, cadence manifest
 hash, and shuffled mapping hash.
+
+## KITTI-HTV interface
+
+`cfgs/seqtrack3d_kitti.yaml` uses the labelled KITTI Tracking sequences and the
+Open3DSOT split (`0000–0016 / 0017–0018 / 0019–0020`). The loader retains every
+annotation's original KITTI frame number and defines physical time as
+`frame_id × 0.1 s`; the filtered list position is never substituted for the
+physical timestamp.
+
+Run the synthetic end-to-end interface check before using real data:
+
+```bash
+python tools/check_kitti_interface.py
+```
+
+The official HVTrack preprocessing expands interval `N` into all phase-aligned
+sub-tracklets `tracklet[i::N]` for `i=0..N-1`; it does not evaluate only phase
+zero. `kitti_hv_interval` reproduces that behavior; see the
+[official HVTrack data processor](https://github.com/Mumuqiao/HVTrack/blob/main/datasets/kitti_full.py).
+Build a frozen interval-2 test manifest:
+
+```bash
+mkdir -p protocols/manifests
+
+python tools/build_virtual_rate_manifest.py \
+  --cfg cfgs/seqtrack3d_kitti.yaml \
+  --path /data/KITTI/tracking \
+  --role test --split test \
+  --kitti-hv-interval 2 \
+  --output protocols/manifests/kitti_test_htv_interval2.json
+```
+
+For the KITTI-HV intervals used in comparison tables, repeat the command with
+`--kitti-hv-interval 3`, `5`, and `10`, using a distinct output file for each
+interval. For mixed-interval training, `--kitti-hv-interval all` expands
+intervals `1/2/3/5/10`; do not use this mixed dataset for a single-interval
+evaluation table.
+
+The runtime also accepts role-specific settings. To reproduce the official
+mixed-interval training idea while keeping validation at interval 5, use
+`--train_kitti_hv_interval all --val_kitti_hv_interval 5`; the validation
+tracklet set should still be frozen separately before a formal comparison.
+
+Evaluate a frozen checkpoint on interval 2:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python main.py \
+  --cfg cfgs/seqtrack3d_kitti.yaml \
+  --path /data/KITTI/tracking \
+  --checkpoint /path/to/frozen_kitti.ckpt \
+  --test --seed 42 --workers 8 \
+  --test_kitti_hv_interval 2 \
+  --test_virtual_rate_mode manifest \
+  --test_virtual_rate_manifest \
+    protocols/manifests/kitti_test_htv_interval2.json \
+  --tag kitti_htv_interval2
+```
+
+The manifest is strict over dataset, version, split, category, role,
+`kitti_hv_intervals`, phase-expanded tracklet identities, selection and cadence
+parameters. Therefore an interval-2 manifest cannot accidentally be consumed
+as interval 3.
+
+If the evaluated method reads effective physical time, build a shuffled-time
+negative control tied to the exact cadence selection:
+
+```bash
+python tools/build_dynamics_time_manifest.py \
+  --cfg cfgs/seqtrack3d_kitti.yaml \
+  --path /data/KITTI/tracking \
+  --role test --split test --seed 42 \
+  --virtual-rate-manifest \
+    protocols/manifests/kitti_test_htv_interval2.json \
+  --output \
+    protocols/manifests/kitti_test_htv_interval2_shuffled_dt_seed42.json
+```
+
+Run `true/fixed/shuffled` on the same checkpoint and endpoint manifest. For
+interval 2, the fixed control should normally use `--dynamics_fixed_delta_t
+0.2`; this declares a constant interval without leaking the true per-tracklet
+gaps. Do not train separate checkpoints for these three evaluation controls.

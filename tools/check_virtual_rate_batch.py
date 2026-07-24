@@ -35,8 +35,12 @@ def get_raw_dataset(wrapped):
     return getattr(wrapped, "dataset", wrapped)
 
 
-def anno_timestamp(anno):
-    return float(anno["sample_data_lidar"]["timestamp"]) * 1e-6
+def anno_timestamp(dataset, anno):
+    timestamp_reader = getattr(dataset, "_anno_timestamp", None)
+    if not callable(timestamp_reader):
+        raise TypeError(
+            f"{dataset.__class__.__name__} does not expose _anno_timestamp")
+    return float(timestamp_reader(anno))
 
 
 def print_summary(dataset):
@@ -50,6 +54,8 @@ def print_summary(dataset):
             print(f"  {key}: {value}")
     print("num_tracklets:", dataset.get_num_tracklets())
     print("num_frames_total:", dataset.get_num_frames_total())
+    if hasattr(dataset, "kitti_hv_intervals"):
+        print("kitti_hv_intervals:", dataset.kitti_hv_intervals)
     print("virtual_rate_selection_sha256:", getattr(
         dataset, "virtual_rate_selection_sha256", ""))
     print("virtual_rate_manifest_content_sha256:", getattr(
@@ -73,7 +79,9 @@ def print_tracklets(dataset, limit):
     print("tracklet_examples:")
     for out_idx, meta in enumerate(meta_list[:limit]):
         annos = dataset.tracklet_anno_list[out_idx]
-        timestamps = np.array([anno_timestamp(anno) for anno in annos], dtype=np.float64)
+        timestamps = np.array(
+            [anno_timestamp(dataset, anno) for anno in annos],
+            dtype=np.float64)
         gaps = np.diff(timestamps)
         rounded_gaps = np.round(gaps, 6).tolist()
         cv = float(gaps.std() / gaps.mean()) if gaps.size > 0 and gaps.mean() > 0 else 0.0

@@ -262,6 +262,9 @@ def source_tracklet_id(dataset, tracklet_id):
 
 
 def tracklet_key(dataset, sequence, tracklet_id, version, split):
+    get_tracklet_key = getattr(dataset, "get_tracklet_key", None)
+    if callable(get_tracklet_key):
+        return str(get_tracklet_key(tracklet_id))
     meta = sequence[0].get("meta", {}) if sequence else {}
     box_anno = meta.get("box_anno", meta) if isinstance(meta, dict) else {}
     if isinstance(box_anno, dict):

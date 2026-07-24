@@ -117,6 +117,9 @@ def parse_config():
     parser.add_argument('--check_val_every_n_epoch', type=int, default=1, help='check_val_every_n_epoch')
     parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
     parser.add_argument('--cfg', type=str, help='the config_file')
+    parser.add_argument(
+        '--path', type=str, default=argparse.SUPPRESS,
+        help='override the dataset root from the YAML config')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
     parser.add_argument(
         '--init_checkpoint', type=str, default=None,
@@ -136,6 +139,38 @@ def parse_config():
     parser.add_argument(
         '--dynamics_fixed_delta_t', type=float, default=argparse.SUPPRESS,
         help='Constant adjacent-observation step used by fixed mode.')
+    parser.add_argument(
+        '--test_virtual_rate_mode',
+        choices=(
+            'none', 'manifest', 'gap_pattern', 'periodic_drop',
+            'burst_drop', 'random_drop', 'stride'),
+        default=argparse.SUPPRESS,
+        help='Override the test cadence protocol (for example KITTI-HTV).')
+    parser.add_argument(
+        '--test_virtual_rate_stride',
+        type=int,
+        default=argparse.SUPPRESS,
+        help='Frame interval used by test_virtual_rate_mode=stride.')
+    parser.add_argument(
+        '--test_virtual_rate_manifest',
+        default=argparse.SUPPRESS,
+        help='Frozen test endpoint-selection manifest.')
+    parser.add_argument(
+        '--kitti_hv_interval',
+        default=argparse.SUPPRESS,
+        help="Official KITTI-HV interval (1/2/3/5/10 or 'all').")
+    parser.add_argument(
+        '--train_kitti_hv_interval',
+        default=argparse.SUPPRESS,
+        help="Role-specific KITTI-HV training interval.")
+    parser.add_argument(
+        '--val_kitti_hv_interval',
+        default=argparse.SUPPRESS,
+        help="Role-specific KITTI-HV validation interval.")
+    parser.add_argument(
+        '--test_kitti_hv_interval',
+        default=argparse.SUPPRESS,
+        help="Role-specific KITTI-HV test interval.")
     parser.add_argument(
         '--m4_variant',
         choices=('off', 'filter', 'tube', 'filter_tube'),
