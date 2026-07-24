@@ -136,10 +136,50 @@ def parse_config():
     parser.add_argument(
         '--dynamics_fixed_delta_t', type=float, default=argparse.SUPPRESS,
         help='Constant adjacent-observation step used by fixed mode.')
+    parser.add_argument(
+        '--m4_variant',
+        choices=('off', 'filter', 'tube', 'filter_tube'),
+        default=argparse.SUPPRESS,
+        help='Evaluation-only M4 ablation selector.')
+    parser.add_argument(
+        '--m4_time_mode',
+        choices=('fixed', 'real'),
+        default=argparse.SUPPRESS,
+        help='M4 state-transition clock control.')
+    parser.add_argument(
+        '--m4_fixed_delta_t', type=float, default=argparse.SUPPRESS,
+        help='Fixed state-transition step for M4.')
+    parser.add_argument(
+        '--m3_path_weight', type=float, default=argparse.SUPPRESS,
+        help='M3 endpoint path-distillation weight.')
+    parser.add_argument(
+        '--m3_variant',
+        choices=('off', 'distill'),
+        default=argparse.SUPPRESS,
+        help='M3 single-view or asymmetric-distillation selector.')
+    parser.add_argument(
+        '--m3_irregular_supervision_weight',
+        type=float,
+        default=argparse.SUPPRESS,
+        help='Optional supervised-loss weight for the irregular M3 view.')
 
     args = parser.parse_args()
     config = load_yaml(args.cfg)
     config.update(vars(args))  # override the configuration using the value in args
+    m3_variant = config.get('m3_variant')
+    if m3_variant is not None:
+        if m3_variant not in ('off', 'distill'):
+            raise ValueError("m3_variant must be off or distill")
+        config['use_m3_path_distillation'] = m3_variant == 'distill'
+    m4_variant = config.get('m4_variant')
+    if m4_variant is not None:
+        if m4_variant not in ('off', 'filter', 'tube', 'filter_tube'):
+            raise ValueError(
+                "m4_variant must be off, filter, tube, or filter_tube")
+        config['use_m4_state_filter'] = m4_variant in (
+            'filter', 'filter_tube')
+        config['use_m4_trajectory_tube'] = m4_variant in (
+            'tube', 'filter_tube')
 
     return EasyDict(config)
 

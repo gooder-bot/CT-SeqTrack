@@ -21,7 +21,15 @@ from datasets.misc_utils import (
     build_effective_time_fields,
     build_main_time_fields,
     build_time_fields,
+    normalize_timestamp,
     normalize_dynamics_time_mode,
+)
+from models.state_filter import (
+    FixedContinuousDiscreteFilter,
+    box_yaw,
+    build_trajectory_tube_box,
+    point_inside_oriented_crop,
+    union_point_clouds,
 )
 
 import time
@@ -46,19 +54,25 @@ class BaseModelMF(pl.LightningModule):
 
 
     def configure_optimizers(self):
+        # M3 keeps a frozen EMA teacher as a registered submodule so that its
+        # state is checkpointed.  Filtering here prevents frozen teacher
+        # tensors from entering optimizer parameter groups.
+        trainable_parameters = [
+            parameter for parameter in self.parameters() if parameter.requires_grad
+        ]
         if self.config.optimizer.lower() == 'sgd':
-            optimizer = torch.optim.SGD(self.parameters(), lr=self.config.lr, momentum=0.9, weight_decay=self.config.wd)
+            optimizer = torch.optim.SGD(trainable_parameters, lr=self.config.lr, momentum=0.9, weight_decay=self.config.wd)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.config.lr_decay_step,
                                                     gamma=self.config.lr_decay_rate)
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         elif self.config.optimizer.lower() == 'adam':
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.config.lr, weight_decay=self.config.wd,
+            optimizer = torch.optim.Adam(trainable_parameters, lr=self.config.lr, weight_decay=self.config.wd,
                                          betas=(0.5, 0.999), eps=1e-06)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.config.lr_decay_step,
                                                     gamma=self.config.lr_decay_rate)
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         elif self.config.optimizer.lower() == 'adamonecycle':
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.config.lr, weight_decay=self.config.wd,
+            optimizer = torch.optim.Adam(trainable_parameters, lr=self.config.lr, weight_decay=self.config.wd,
                                          betas=(0.5, 0.999), eps=1e-06)
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
                 optimizer,
@@ -105,6 +119,13 @@ class BaseModelMF(pl.LightningModule):
         distances = []
 
         results_bbs = []
+        m4_filter_enabled = bool(
+            getattr(self.config, "use_m4_state_filter", False))
+        m4_tube_enabled = bool(
+            getattr(self.config, "use_m4_trajectory_tube", False))
+        m4_enabled = m4_filter_enabled or m4_tube_enabled
+        m4_filter = self._build_m4_filter() if m4_enabled else None
+        m4_diagnostics = []
         for frame_id in range(len(sequence)):  # tracklet
             if frame_id == 0:
                 # the first frame
@@ -112,19 +133,135 @@ class BaseModelMF(pl.LightningModule):
                 prev_bb = sequence[frame_id]["3d_bbox"]
                 results_bbs.append(this_bb)
                 new_refboxs = [prev_bb] # Update in special cases
+                if m4_filter is not None:
+                    initial_timestamp = self._m4_timestamp(sequence, frame_id)
+                    m4_filter.initialize(
+                        this_bb.center,
+                        box_yaw(this_bb),
+                        initial_timestamp,
+                    )
+                    m4_diagnostics.append({
+                        "frame_id": frame_id,
+                        "initialized": True,
+                        "reason": "first_frame_initialization",
+                    })
             else:
                 this_bb = sequence[frame_id]["3d_bbox"]
+                current_timestamp = (
+                    self._m4_timestamp(sequence, frame_id)
+                    if m4_filter is not None else None)
+                m4_prediction = (
+                    m4_filter.predict(current_timestamp)
+                    if m4_filter is not None else None
+                )
 
                 # construct input dict
-                data_dict, ref_bb = self.build_input_dict(sequence, frame_id, results_bbs)
+                if m4_enabled:
+                    data_dict, ref_bb = self.build_input_dict(
+                        sequence,
+                        frame_id,
+                        results_bbs,
+                        m4_prediction=m4_prediction,
+                    )
+                else:
+                    data_dict, ref_bb = self.build_input_dict(
+                        sequence, frame_id, results_bbs)
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
-                    results_bbs.append(ref_bb)
+                    if (m4_filter_enabled
+                            and m4_prediction is not None
+                            and m4_prediction.get("valid", False)
+                            and bool(getattr(
+                                self.config, "m4_use_filtered_output", True))):
+                        results_bbs.append(m4_filter.box_from_state(ref_bb))
+                    else:
+                        results_bbs.append(ref_bb)
+                    if (m4_filter is not None
+                            and not bool(
+                                m4_prediction
+                                and m4_prediction.get("valid", False))):
+                        m4_filter.initialize(
+                            ref_bb.center,
+                            box_yaw(ref_bb),
+                            current_timestamp,
+                        )
                     print("Empty pointcloud!")
                     new_refboxs = [ref_bb]
+                    m4_diagnostics.append({
+                        "frame_id": frame_id,
+                        "initialized": True,
+                        "prediction_valid": bool(
+                            m4_prediction and m4_prediction.get("valid", False)),
+                        "measurement_accepted": False,
+                        "reason": "empty_pointcloud",
+                    })
                 else:
                     candidate_box,*_ = self.evaluate_one_sample(data_dict, ref_box=ref_bb)
-                    results_bbs.append(candidate_box)
+                    if m4_filter_enabled:
+                        if (m4_prediction is not None
+                                and m4_prediction.get("valid", False)):
+                            update = m4_filter.update(
+                                candidate_box.center, box_yaw(candidate_box))
+                        else:
+                            m4_filter.initialize(
+                                candidate_box.center,
+                                box_yaw(candidate_box),
+                                current_timestamp,
+                            )
+                            update = {
+                                "accepted": True,
+                                "reason": "invalid_delta_t_reinitialized",
+                                "mahalanobis": 0.0,
+                            }
+                        if bool(getattr(
+                                self.config, "m4_use_filtered_output", True)):
+                            candidate_box = m4_filter.box_from_state(candidate_box)
+                        results_bbs.append(candidate_box)
+                        m4_diagnostics.append({
+                            "frame_id": frame_id,
+                            "initialized": True,
+                            "prediction_valid": bool(
+                                m4_prediction and m4_prediction.get("valid", False)),
+                            "measurement_accepted": bool(update["accepted"]),
+                            "reason": update.get("reason", ""),
+                            "mahalanobis": float(update.get("mahalanobis", 0.0)),
+                        })
+                    elif m4_tube_enabled:
+                        m4_filter.observe_direct(
+                            candidate_box.center,
+                            box_yaw(candidate_box),
+                            current_timestamp,
+                            velocity_momentum=float(getattr(
+                                self.config,
+                                "m4_tube_velocity_momentum",
+                                0.5,
+                            )),
+                        )
+                        results_bbs.append(candidate_box)
+                        m4_diagnostics.append({
+                            "frame_id": frame_id,
+                            "initialized": True,
+                            "prediction_valid": bool(
+                                m4_prediction and m4_prediction.get("valid", False)),
+                            "measurement_accepted": True,
+                            "reason": "tube_only_direct_observation",
+                        })
+                    else:
+                        results_bbs.append(candidate_box)
+
+                if m4_enabled:
+                    diagnostic = m4_diagnostics[-1]
+                    for key in (
+                            "m4_num_points_search_baseline",
+                            "m4_num_points_search_tube",
+                            "m4_num_points_search_union",
+                            "m4_tube_width",
+                            "m4_tube_length"):
+                        if key in data_dict:
+                            diagnostic[key] = float(
+                                data_dict[key].detach().cpu().reshape(-1)[0])
+                    diagnostic.update(getattr(
+                        self, "_m4_last_input_diagnostics", {}))
 
             
             this_overlap = estimateOverlap(this_bb, results_bbs[-1], dim=self.config.IoU_space,
@@ -135,7 +272,88 @@ class BaseModelMF(pl.LightningModule):
             ious.append(this_overlap)
             distances.append(this_accuracy)
 
+        self._m4_sequence_diagnostics = m4_diagnostics
         return ious, distances, results_bbs
+
+    def _m4_timestamp(self, sequence, frame_id):
+        time_mode = str(getattr(
+            self.config, "m4_time_mode", "fixed")).strip().lower()
+        if time_mode not in ("fixed", "real"):
+            raise ValueError("m4_time_mode must be 'fixed' or 'real'")
+        default_step = float(getattr(
+            self.config, "m4_fixed_delta_t",
+            getattr(
+                self.config, "default_time_step",
+                getattr(self.config, "time_step", 0.5))))
+        if default_step <= 0:
+            raise ValueError("m4_fixed_delta_t must be positive")
+        timestamp = None
+        if time_mode == "real":
+            timestamp = normalize_timestamp(
+                sequence[frame_id].get("timestamp"))
+        if timestamp is None:
+            timestamp = float(frame_id) * default_step
+        return float(timestamp)
+
+    def _build_m4_filter(self):
+        return FixedContinuousDiscreteFilter(
+            acceleration_variance=float(getattr(
+                self.config, "m4_acceleration_variance", 2.0)),
+            yaw_acceleration_variance=float(getattr(
+                self.config, "m4_yaw_acceleration_variance", 0.5)),
+            measurement_position_variance=float(getattr(
+                self.config, "m4_measurement_position_variance", 0.25)),
+            measurement_yaw_variance=float(getattr(
+                self.config, "m4_measurement_yaw_variance", 0.09)),
+            initial_position_variance=float(getattr(
+                self.config, "m4_initial_position_variance", 0.25)),
+            initial_velocity_variance=float(getattr(
+                self.config, "m4_initial_velocity_variance", 4.0)),
+            initial_yaw_variance=float(getattr(
+                self.config, "m4_initial_yaw_variance", 0.09)),
+            initial_yaw_rate_variance=float(getattr(
+                self.config, "m4_initial_yaw_rate_variance", 1.0)),
+            mahalanobis_gate=float(getattr(
+                self.config, "m4_mahalanobis_gate", 0.0)),
+            max_delta_t=float(getattr(
+                self.config, "m4_max_delta_t", 5.0)),
+            covariance_jitter=float(getattr(
+                self.config, "m4_covariance_jitter", 1e-8)),
+        )
+
+    def _log_m4_diagnostics(self):
+        if not self._m4_sequence_diagnostics:
+            return
+        diagnostics = self._m4_sequence_diagnostics
+        for source_key, log_key in (
+                ("prediction_valid", "m4/prediction_valid_ratio"),
+                ("measurement_accepted", "m4/measurement_accept_ratio"),
+                ("m4_oracle_target_center_in_baseline",
+                 "m4/oracle_center_recall_baseline"),
+                ("m4_oracle_target_center_in_tube",
+                 "m4/oracle_center_recall_tube"),
+                ("m4_oracle_target_center_in_union",
+                 "m4/oracle_center_recall_union"),
+                ("m4_num_points_search_baseline",
+                 "m4/search_points_baseline"),
+                ("m4_num_points_search_tube",
+                 "m4/search_points_tube"),
+                ("m4_num_points_search_union",
+                 "m4/search_points_union"),
+                ("m4_tube_width", "m4/tube_width"),
+                ("m4_tube_length", "m4/tube_length")):
+            values = [item[source_key]
+                      for item in diagnostics if source_key in item]
+            if values:
+                value = torch.tensor(
+                    values, device=self.device, dtype=torch.float32).mean()
+                self.log(
+                    log_key,
+                    value,
+                    on_step=False,
+                    on_epoch=True,
+                    batch_size=len(values),
+                )
 
     def validation_step(self, batch, batch_idx):
         sequence = batch[0]  # unwrap the batch with batch size = 1
@@ -155,6 +373,7 @@ class BaseModelMF(pl.LightningModule):
 
         self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
         self.log('precision/test_step', self.prec_step, on_step=True, on_epoch=False)
+        self._log_m4_diagnostics()
 
         self.runtime(torch.tensor(runtime, device=self.device),
                      torch.tensor(n_frames, device=self.device))
@@ -193,6 +412,7 @@ class BaseModelMF(pl.LightningModule):
 
         self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
         self.log('precision/test_step', self.prec_step, on_step=True, on_epoch=False)
+        self._log_m4_diagnostics()
 
         self.success_step.reset()
         self.prec_step.reset()
@@ -222,7 +442,7 @@ class MotionBaseModelMF(BaseModelMF):
         super().__init__(config, **kwargs)
         self.save_hyperparameters()
 
-    def build_input_dict(self, sequence, frame_id, results_bbs): # Note: There may be cases of input with empty point clouds
+    def build_input_dict(self, sequence, frame_id, results_bbs, **kwargs): # Note: There may be cases of input with empty point clouds
         assert frame_id > 0, "no need to construct an input_dict at frame 0"
 
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(frame_id,self.hist_num)
@@ -241,9 +461,61 @@ class MotionBaseModelMF(BaseModelMF):
                                                         offset=self.config.bb_offset)
             prev_frame_pcs.append(prev_frame_pc)
 
-        this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(this_pc, ref_boxs[0], ref_boxs[0],
-                                                        scale=self.config.bb_scale,
-                                                        offset=self.config.bb_offset)
+        this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(
+            this_pc, ref_boxs[0], ref_boxs[0],
+            scale=self.config.bb_scale,
+            offset=self.config.bb_offset)
+        num_points_in_search_baseline = this_frame_pc.nbr_points()
+        num_points_in_search_tube = 0
+        tube_box = None
+        m4_diagnostics_enabled = bool(
+            getattr(self.config, "use_m4_state_filter", False)
+            or getattr(self.config, "use_m4_trajectory_tube", False))
+        target_center = None
+        target_center_in_baseline = False
+        target_center_in_tube = False
+        if m4_diagnostics_enabled:
+            target_center = np.asarray(
+                this_frame["3d_bbox"].center, dtype=np.float64)
+            target_center_in_baseline = point_inside_oriented_crop(
+                ref_boxs[0],
+                target_center,
+                scale=self.config.bb_scale,
+                offset=self.config.bb_offset,
+            )
+        m4_prediction = kwargs.get("m4_prediction")
+        if (bool(getattr(self.config, "use_m4_trajectory_tube", False))
+                and m4_prediction is not None
+                and m4_prediction.get("valid", False)):
+            tube_box = build_trajectory_tube_box(
+                ref_boxs[0],
+                m4_prediction,
+                base_length=float(getattr(
+                    self.config, "m4_tube_base_length", 4.0)),
+                base_width=float(getattr(
+                    self.config, "m4_tube_base_width", 2.0)),
+                sigma_parallel_scale=float(getattr(
+                    self.config, "m4_tube_sigma_parallel_scale", 2.0)),
+                sigma_perpendicular_scale=float(getattr(
+                    self.config, "m4_tube_sigma_perpendicular_scale", 2.0)),
+                max_length=float(getattr(
+                    self.config, "m4_tube_max_length", 20.0)),
+                max_width=float(getattr(
+                    self.config, "m4_tube_max_width", 8.0)),
+                min_speed=float(getattr(
+                    self.config, "m4_tube_min_speed", 0.2)),
+            )
+            tube_pc = points_utils.generate_subwindow_with_aroundboxs(
+                this_pc,
+                tube_box,
+                ref_boxs[0],
+                scale=1.0,
+                offset=0.0,
+            )
+            num_points_in_search_tube = tube_pc.nbr_points()
+            this_frame_pc = union_point_clouds(this_frame_pc, tube_pc)
+            target_center_in_tube = point_inside_oriented_crop(
+                tube_box, target_center)
         num_points_in_search = this_frame_pc.nbr_points()
 
         # canonical_box = points_utils.transform_box(ref_boxs[0], ref_boxs[0])
@@ -365,6 +637,50 @@ class MotionBaseModelMF(BaseModelMF):
                      ], device=self.device, dtype=torch.int64),
                      "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
                      }
+        if m4_diagnostics_enabled:
+            data_dict.update({
+                "m4_num_points_search_baseline": torch.tensor(
+                    [num_points_in_search_baseline], device=self.device,
+                    dtype=torch.float32),
+                "m4_num_points_search_tube": torch.tensor(
+                    [num_points_in_search_tube], device=self.device,
+                    dtype=torch.float32),
+                "m4_num_points_search_union": torch.tensor(
+                    [num_points_in_search], device=self.device,
+                    dtype=torch.float32),
+                "m4_prediction_valid": torch.tensor(
+                    [bool(
+                        m4_prediction
+                        and m4_prediction.get("valid", False))],
+                    device=self.device, dtype=torch.float32),
+            })
+            # Evaluation-only oracle diagnostics stay outside model input.
+            # They are never visible to ``forward`` or tracker decisions.
+            self._m4_last_input_diagnostics = {
+                "m4_oracle_target_center_in_baseline": float(
+                    target_center_in_baseline),
+                "m4_oracle_target_center_in_tube": float(
+                    target_center_in_tube),
+                "m4_oracle_target_center_in_union": float(
+                    target_center_in_baseline or target_center_in_tube),
+            }
+        else:
+            self._m4_last_input_diagnostics = {}
+        if tube_box is not None:
+            data_dict.update({
+                "m4_tube_center": torch.tensor(
+                    np.asarray(tube_box.center)[None, :],
+                    device=self.device, dtype=torch.float32),
+                "m4_tube_size": torch.tensor(
+                    np.asarray(tube_box.wlh)[None, :],
+                    device=self.device, dtype=torch.float32),
+                "m4_tube_width": torch.tensor(
+                    [float(tube_box.wlh[0])],
+                    device=self.device, dtype=torch.float32),
+                "m4_tube_length": torch.tensor(
+                    [float(tube_box.wlh[1])],
+                    device=self.device, dtype=torch.float32),
+            })
 
         if getattr(self.config, 'box_aware', False):
             stack_points_split = np.split(stack_points, num_hist + 1, axis=0)

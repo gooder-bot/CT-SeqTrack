@@ -1,26 +1,67 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-22
+更新时间：2026-07-24
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 0. 当前总判断
 
-### 2026-07-22 M1/M2 E0–E6 状态
+### 2026-07-24 M2 standard / gap1124 八组正式控制
+
+commit `473738f` 的 R1 epoch60 `last.ckpt` 已完成 standard/gap1124 的 `true/fixed/shuffled`，并在相同 endpoint 上导出 matched A1。结果包通过 `89/89` artifact hash；8 份 CSV 的 endpoint key/order、GT 与 real-time 字段在协议内 exact match，原始 CSV 独立复算与服务器 summary 最大绝对误差为 0。
+
+| protocol | comparison | ΔSuccess | ΔPrecision | tracklet 95% CI（S / P） |
+| --- | --- | ---: | ---: | --- |
+| standard | M2 true − A1 | **+4.133** | **+9.445** | `[1.920,5.454] / [4.486,10.634]` |
+| gap1124 | M2 true − A1 | **+2.279** | **+4.143** | `[0.687,3.940] / [1.452,6.022]` |
+| standard | true − fixed | +0.031 | −0.010 | 均跨 0 |
+| standard | true − shuffled | +0.068 | +0.085 | 均跨 0 |
+| gap1124 | true − fixed | −0.127 | +0.014 | 均跨 0 |
+| gap1124 | true − shuffled | −0.318 | −0.209 | 均跨 0 |
+
+冻结门槛给出明确分叉：
+
+```text
+STANDARD_GUARDRAIL_PASS
+GAP1124_COMPLEMENTARITY_PASS
+PHYSICAL_TIME_CAUSAL_GATE_FAIL
+M2_TRACKING_SIGNAL_POSITIVE
+PHYSICAL_TIME_CAUSAL_CLAIM_NO_GO
+METHOD_ATTRIBUTION_HOLD
+```
+
+时间路径不是失活：gap1124 true 的 effective-`dt` CV 为 `62.2%`，约 `90.8%` 非初始 endpoint 实际应用 innovation，平均 radius 从 fixed 的 `0.750 m` 增至 `0.962 m`；true/fixed 与 true/shuffled 分别有约 `31.6%/32.5%` endpoint 的预测中心改变超过 1 cm。但正确时间没有带来 alignment 优势，gap shuffled 反而在两项主指标上都高于 true。因此当前涨点更可能来自 continuation、联合表征或通用 proposal correction，不能归因于正确 physical time。
+
+gap1124 的 M2−A1 在四个 real-`dt` 桶都为正，而 true−shuffled 的 Success 在四桶都为负；`≥4 m` GT 位移桶只有 28 个 endpoint，M2−A1 的 Success/Precision 增益均为 0。这与既有 crop-reachability 结论一致：大位移时瓶颈常发生在网络 forward 前，末端 correction 无法稳定追回离开 crop 的目标。
+
+正式决定：不为 physical-time claim 补 seed43/44，不用 burst-drop 推翻 gap1124 因果失败，不启动 timestamp-conditioned M3/M4。下一步转为 M2 正信号归因：R1 运行时 2×2、A1-init W0 continuation、current-code legacy W0、proposal target/gradient/recursive-error audit。完整报告见 `compare_results/reports/m2_standard_gap8_analysis_20260724.md`。
+
+### 2026-07-23 M2 三组训练结果
 
 M1/M2 已通过 E0–E5 服务器工程门禁。E6 的参数与配置静态冻结也已完成：mini_train M0-3 的既有 `1311 endpoints / 213 tracklets` 只用于确认一个预声明规则，正式值固定为 `alpha=0.75`、`R(dt)=min(0.5+0.5dt,2.0)`、adapter/innovation 共享 warmup=5。该规则的 endpoint mean gain 为 `0.288 m`，tracklet-equal mean gain 为 `0.263 m`，bootstrap 95% CI `[0.230,0.296] m`；但 clamp rate 为 `34.48%`，属于安全而保守的首轮规则，不声称最优。
 
-当前仍没有新的 tracking Success/Precision 结果，但服务器门禁已从 HOLD 进入训练：
+commit `473738f` 的三组训练均已完成并通过本地完整性审计：
 
 ```text
 PASS_M1_M2_E0_E5_ENGINEERING_GATES
 FREEZE_M2_ALPHA_RADIUS
 E6_STATIC_FREEZE_READY
 PASS_E6_SERVER_MANIFESTS_PREFLIGHT_COMMIT_473738f
-M2_FORMAL_AND_SCRATCH_CONTROLS_RUNNING
+R1_R2_R3_TRAINING_INTEGRITY_PASS
+M2_STANDARD_SIGNAL_POSITIVE
+METHOD_ATTRIBUTION_AND_CAUSAL_TIME_HOLD
 ```
 
-R1 A1-init seed42 M2 formal 已在 GPU2 启动，输出根为 `output/m2_formal_true_seed42_473738f_20260722_112536`。用户另报告 R2 M2 scratch 与 R3 matched W0 scratch 在 GPU3 运行；二者的精确输出根/provenance 尚待拉回。当前只等待训练、核对 final 完整性并执行冻结评测；fixed/shuffled 仍只评测 R1 同一个 epoch60 `last.ckpt`。
+| run | 初始化/结构 | Final Success | Final Precision | Late mean Success | Late mean Precision |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 历史 A1 | scratch / SeqTrack3D order-time | 51.229 | 57.863 | 50.975 | 58.123 |
+| R1 | A1-init / full M2 | **55.303** | **67.182** | **54.677** | **66.514** |
+| R2 | scratch / full M2 | 53.318 | 62.503 | 51.894 | 60.254 |
+| R3 | scratch / shared-SE(2) W0 | 28.999 | 28.023 | 27.664 | 26.488 |
+
+R1 相对历史 A1 final 为 `+4.074/+9.318`，R2 相对历史 A1 为 `+2.090/+4.640`，R2 相对 R3 为 `+24.319/+34.480`。R1/R2/R3 都是 clean `473738f`、退出码 0、epoch59/global step75720、12 个评测点与 75720 条 loss；R1 的 35 项 artifact manifest 全匹配。
+
+这推进了 standard 性能信号，但没有完成方法归因。R1 在 A1 60 epoch 后又训练 60 epoch，缺少 A1-init W0 continuation；R3 又不是历史 A1，而是当前 shared-SE(2) 下明显塌陷的 W0。后续 2026-07-24 formal controls 已将 physical-time claim 从 HOLD 更新为 No-Go；本节只保留训练阶段证据。完整数据、图表和结论见 `compare_results/reports/m2_three_run_analysis_20260723.md`。
 
 标准 protocol 的本地 `delta_t` 为 `0.4974±0.0228 s`，CV 仅 `4.59%`，物理时间分支在该分布上很难被单独辨识。standard 因此是 normal-cadence guardrail；主要方法证据必须来自 strong/held-out cadence 和同 checkpoint `true/fixed/shuffled`。完整 HTV/丢帧边界与执行计划见 `compare_results/reports/htv_identifiability_and_execution_plan_20260722.md`。
 
@@ -767,15 +808,29 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 
 这只证明公式、数据路径、回退和优化器机制可安全运行；不能证明 tracking 指标上涨，也不能用随机初始化 DynamicsEncoder 下的 clamp ratio 调整 alpha/半径。完整复核见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。
 
+### 10.14 M2 R1/R2/R3 standard 结果
+
+三组训练的 checkpoint、event、provenance 与 config 已完成统一复核，均可进入比较。冻结 epoch60 `last.ckpt` 口径下：
+
+- R1 A1-init M2：`55.303/67.182`，相对历史 A1 `+4.074/+9.318`。
+- R2 scratch M2：`53.318/62.503`，相对历史 A1 `+2.090/+4.640`。
+- R3 scratch W0：`28.999/28.023`；R2−R3 为 `+24.319/+34.480`。
+- 后 5 个评测点均值仍保持 R1 > R2 > A1 >> R3，正差不是最后一次评测独有。
+
+正式解释是 `M2 STANDARD SIGNAL POSITIVE / METHOD ATTRIBUTION AND CAUSAL-TIME HOLD`。R1−A1 混有额外 60 epoch，R2−R3 则受到 shared-SE(2) W0 collapse 的强交互影响；当前不把任一差值写成 M2 相对 SeqTrack3D 的因果净收益。
+
 ## 11. 当前各实验共同说明了什么
 
 可以支持的结论：
 
-- 真实时间方向不能被一个实验普遍否定，但 P0-C 已证明当前 frozen feature-concat A2 的正确 `delta_t` alignment 没有超过 fixed/shuffled 负对照，不能作为方法贡献。
+- P0-C 与 M2 R1 两轮独立控制都显示正确 `delta_t` alignment 没有超过 fixed/shuffled；当前 physical-time method claim 已 No-Go，不再通过追加 seed 或复杂时间模块补救。
 - SeqTrack3D 主干对原始 order-time token 很敏感，直接替换为 real-time token 会破坏已学到的时间/顺序语义。
 - feature-concat A2 仍是失败消融：它在强 gap/burst 下不稳且 P0-C promotion No-Go；但 M0-3 表明冻结 DynamicsEncoder proposal 在严格 offline cohort 中有明显信息，因此保留它作为 M2 proposal source，不复活旧 feature concat 或 hand-crafted Gate。
 - 当前 `cand1` 结果不支持简单移除非 0 candidate；multi-candidate 训练暂时应保留。
-- M1/M2 的 shared-SE(2)、canonical label、strict fallback、warmup、受界 innovation 和 optimizer 路径已通过 E0–E6，R1 formal 已启动；这仍只是工程/执行进度，不是性能结论。
+- M1/M2 的 shared-SE(2)、canonical label、strict fallback、warmup、受界 innovation 和 optimizer 路径已通过 E0–E6；R1 formal 在 standard/gap1124 相对 matched A1 都有正信号，逐 tracklet bootstrap 的 Success/Precision CI 均为正。
+- R1 同 checkpoint 时间控制确实改变预测和 innovation 半径，但 true 没有优于 fixed/shuffled；这排除了“时间分支完全没工作”，也否定了“正确物理时间造成涨点”的当前解释。
+- R2 能从 scratch 达到 `53.318/62.503`，说明 full M2 不依赖 A1 初始化才可工作；R1 的更高结果说明 A1 初始化提供了有利起点，但还不能排除 extra continuation。
+- R3 在 shared-SE(2) 下严重塌陷，说明 M1 数据定义与 M2 结构存在强交互；R2−R3 不能被当成标准 SeqTrack3D baseline 差值。
 - 小权重 displacement 辅助监督不伤主线，并给 precision 带来温和正向信号，但不是主要收益来源。
 - 旧 TWC 只有 validity mask 生效，坐标共享仍有缺陷；旧 A1 正向和 A2 负向信号均已撤回。
 - corrected-TWC 的共享 offset、`coordinate_anchor` fail-fast 和 optimizer-step 对齐已实现；同提交 A/B/C 已证明 `C-B` 为正，但 C 仍显著低于 single-view A，主方法 promotion No-Go。
@@ -793,8 +848,9 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 - 还不能说 TWC 已稳定有效或能与 dynamics 组合；当前只确认 A1 paired control 内 `C-B` 的单 seed 净效应，端到端 `C-A` 仍明显为负。
 - 还不能说 gate 有效；gate-safe final 不够好，conf-res best 复测未确认，但仍可做困难样本诊断。
 - 64-batch residual 分桶显示 candidate0 的 observation error 中位数略低，但四个 candidate 都有大长尾；这不足以彻底解释 candidate noise，也不支持简单移除 nonzero candidate。
-- active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；M0-3 已确认 gap1124 proposal 互补性与 correction 方向，但 online recursive 转化、standard/burst guardrail 仍未知。
-- M1/M2 E0–E6 和训练启动不能说明 tracking Success/Precision 已改善，也不能说明 true-dt 优于 fixed/shuffled；这些只允许由 R1 final 的同 checkpoint time-control 回答。
+- active dual-anchor 已在预注册入口处停止，不应再列为待补性能结果；M0-3 与 R1 formal 已确认 proposal 有 aggregate 互补性，但 long-displacement crop recovery 与 burst robustness 仍未建立。
+- R1 相对 matched A1 出现 tracking 正信号，但由于训练预算和 augmentation 不完全匹配，仍不能写成 M2 结构的因果净增益；同 checkpoint controls 已明确回答 true-dt 不优于 fixed/shuffled。
+- 还不能说 burst-drop 会给 physical-time 更明显的正结果；gap1124 已提供高 `dt` 变异且 causal gate 失败，burst 只能作为通用 proposal/crop robustness 的条件性补充。
 - 还不能说 displacement loss 是必要模块，因为当前只是小幅、不决定性的正向信号。
 - 还不能说 physical `delta_t` 提高了 reliability prediction；raw `current_delta_t` 在当前 standard-only calibrator 中反而造成强协议过触发。
 - 不能把 observation-only trigger 写成最终 uncertainty model；P0-B4 独立 mini_val 已 No-Go，且标签只覆盖 target visible 条件下的 crop miss。
@@ -806,10 +862,11 @@ HOLD_FORMAL_TRAINING_PENDING_E6
 ```text
 1. P0-C frozen triplet 与 TWC A/B/C standard seed42 均已完整归档；两条方法 promotion 都为 No-Go，不扩展训练 seed。
 2. P0-C-D1 的 long-gap、首次失控、连续失败和 empty fallback 定位已完成；并行复用同一 endpoint/per-tracklet logger，对冻结 A/B/C final checkpoint 做 standard/gap1124/burst-drop/unseen-fixed-gap 与 path-variance 收尾，不改模型或 checkpoint。M0-2 不阻塞写代码，但阻塞 M0 完成。
-3. 等待 R1 A1-init M2、R2 M2 scratch、R3 matched W0 scratch 完成；不启动第四个训练、不读取中间 best 调参。
-4. 核对每个任务的 epoch/global step、last.ckpt/hash、退出码、resolved config、events 与 provenance；比较 `R1-A1` 和 `R2-R3` 的 standard final。
-5. 只对 R1 final 运行 same-checkpoint standard/gap/burst `true/fixed/shuffled` 与 matched A1，随后做 per-tracklet bootstrap、delta_t/位移/稀疏分桶和递归失败定位。
-6. 只有 matched effect、causal time、strong cadence 和 standard guardrail 同时成立，才补多 seed/full data/M3；否则转 benchmark/diagnosis，不增加复杂时间模块。
+3. R1/R2/R3 以及 R1 standard/gap1124 八组 controls 已完成；冻结 `tracking positive / physical-time No-Go / attribution Hold`，不再用 best epoch或修改 alpha/R 重解释。
+4. 固定 R1 权重完成 full/adapter-only/innovation-only/both-off 运行时 2×2，并审计 `d_obs/d_dyn/d_final`、candidate-frame/canonical target、双 loss 梯度与 recursive error process。
+5. 补 A1-init W0 continuation，排除 R1 的额外 60 epoch；补 current-code scratch legacy-candidate W0，解释 R3 的 shared-SE(2) collapse。
+6. burst-drop 只在通用 proposal 归因仍成立时补作 robustness/crop 证据；不补 physical-time seed，不启动 timestamp-conditioned M3/M4。
+7. 若 matched attribution 也不支持结构净增益，则转 variable-rate benchmark/diagnosis；若支持，则围绕 time-agnostic bounded proposal correction 重新预注册，而不是恢复已失败的时间主张。
 ```
 
 可选复核：

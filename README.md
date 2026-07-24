@@ -2,13 +2,15 @@
 
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
-当前仓库是研究快照：旧 reliability、feature-concat true-dt 与 TWC 主方法 promotion 均已 No-Go，项目仍处于 **M0 收口 + M2 formal 运行**。M0-3 gap1124 proposal oracle 得到 **`GO_M2_PROPOSAL_INNOVATION`**，M0-4 得到 **`FREEZE_M1_SHARED_SE2`**。2026-07-22，M1/M2 在 clean commit `9a0b26d` 上完成 E0–E5；commit `473738f` 已完成服务器 cadence/shuffled manifests 与 E6 preflight，并启动唯一 A1-init seed42 true-dt formal 训练。服务器另有 M2 scratch 与 matched W0 scratch 两个初始化消融由用户报告运行中，结果和精确 provenance 尚待拉回。正式状态为 **`M2 formal/scratch controls RUNNING; tracking and causal-time result pending`**，仍不能宣称 tracking 涨点、正确 `delta_t` 有效或跨 cadence 泛化。M0-2 A/B/C 四协议/path-variance 尚未完成，M0 整体仍为进行中。
+当前仓库是研究快照：2026-07-24，commit `473738f` 的 R1 final 已完成 standard/gap1124 同 checkpoint `true/fixed/shuffled` 与 matched A1，M2−A1 分别为 **`+4.133/+9.445`** 和 **`+2.279/+4.143`**（Success/Precision），逐 tracklet bootstrap 的两项主指标 95% CI 均为正；正确时间本身没有稳定优于 fixed/shuffled。历史 No-Go 现在只作为归因控制，不再阻塞涨分方向。项目已进入 **M 阶段工程与实验**：M3 使用 time-agnostic canonical-to-irregular EMA endpoint distillation，M4 使用固定状态滤波与 predictive trajectory tube；matched A/B/C 训练、四臂在线递归评测和一键 runner 均已实现，等待服务器训练结果确认涨分。
 
 ## 文档导航
 
 | 文件 | 作用 |
 | --- | --- |
 | `README.md` | 项目入口、当前主线、环境和命令索引 |
+| `M_STAGE_RUNBOOK.md` | M3/M4 方法臂、服务器一键命令、输出与正式判读 |
+| `M3_M4_IMPLEMENTATION.md` | M3/M4 设计、实现细节与工程边界 |
 | `refined_plan.md` | 研究定位、论文边界、贡献叙事和 related work 边界 |
 | `sum_results.md` | 按时间顺序总结已有实验说明了什么 |
 | `need_to_do.md` | 当前和未来任务，只放还没有完成的事情 |
@@ -22,6 +24,9 @@ CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟�
 | `compare_results/reports/m1_m2_e0_e5_validation_20260722.md` | M1/M2 服务器 E0–E5 provenance、JSONL 独立复算、解锁边界与 E6 阻塞 |
 | `compare_results/reports/m2_e6_parameter_freeze_20260722.md` | 既有 mini_train M0-3 向量的单规则复算、alpha/R/warmup 冻结与保守性边界 |
 | `compare_results/reports/htv_identifiability_and_execution_plan_20260722.md` | 标准 `delta_t` 可辨识性、HTV/丢帧论文边界、正式协议、三任务登记与结果分叉 |
+| `compare_results/reports/m2_three_run_analysis_20260723.md` | R1/R2/R3 完整性、standard 曲线、final/late 指标、归因边界与冻结下一步 |
+| `compare_results/reports/m2_three_run_analysis_20260723/report.html` | 三组训练的自包含可视化技术报告（桌面/390px QA 通过） |
+| `compare_results/reports/m2_standard_gap8_analysis_20260724.md` | R1 standard/gap1124 八组 endpoint、独立复算、bootstrap、时间负对照、代码机制与正式 No-Go 判定 |
 
 ---
 
@@ -42,30 +47,34 @@ state = f(observations, real delta_t)
 当前论文边界应收窄为：
 
 ```text
-CT-SeqTrack studies within-track variable-rate 3D SOT by conditioning
-SeqTrack3D on physical elapsed time.
+CT-SeqTrack studies within-track variable-rate 3D SOT with matched
+time interventions, failure diagnosis, and bounded proposal correction.
+The current model is time-sensitive, but correct physical time has not
+shown a causal advantage over fixed or shuffled controls.
 ```
 
 也就是说，本项目当前不主打更大的 backbone，也不宣称完整 Neural ODE / SDE / CDE tracker，更不把普通 fixed-step benchmark 的全局涨点作为唯一目标。更稳的论文路线是：先构造 variable-rate / long-gap / sparse 协议并审计 fixed-step 3D SOT 的 rate-robustness；方法贡献优先筛选 endpoint history-resampling consistency。只有显式 `delta_t` 分支在 `true/fixed/shuffled` 中形成因果正信号，才恢复 timestamp-conditioned dynamics 的方法主张。
 
 ---
 
-## 最新候选贡献框架（未验证）
+## 当前贡献分叉
 
-P0-B4、P0-C 和同提交 TWC A/B/C 的 No-Go 不变。若继续做方法论文，新的贡献层级为：
+P0-B4、P0-C、同提交 TWC A/B/C 与 R1 physical-time 结果保留为历史证据和负对照，但不再作为 M 阶段停止条件。当前贡献层级为：
 
 1. **Matched variable-rate protocol**：within-track irregular cadence、matched endpoint 和 `true/fixed/shuffled` 时间因果控制。
-2. **Dual-clock continuous-discrete state update**：保留 SeqTrack3D order clock，真实时间只进入 zero-init adapter、显式 `F(delta_t)` 状态传播和 search support。
-3. **Endpoint-consistent asymmetric path distillation**：canonical EMA teacher 监督 irregular true-time student，第一轮不再给困难 B view 等权 supervised loss。
+2. **Bounded proposal correction candidate**：保留 SeqTrack3D order clock，先归因 continuation、联合表征与 proposal innovation；不再预设正确秒数是收益来源。
+3. **Endpoint/path robustness**：time-agnostic EMA teacher 从 canonical history 向 irregular history 蒸馏共同 endpoint，并用 matched A/B/C 分离 paired-path 与蒸馏净效应。
+4. **Persistent state and search support**：固定 Q/R filter 与有界 trajectory tube 在同 checkpoint 上做 off/filter/tube/filter+tube 四臂比较。
 
 方法主线：
 
 ```text
-physical-consistent candidate augmentation
-    -> zero-init dual-clock adapter
-    -> proposal innovation
-    -> asymmetric endpoint path distillation
-    -> optional calibrated state filter / trajectory tube
+selected M2 checkpoint
+    -> M3 A single-view continuation
+    -> M3 B paired-path weight0
+    -> M3 C EMA endpoint distillation
+    -> standard/gap1124 paired endpoint bootstrap
+    -> M4 off/filter/tube/filter+tube on the selected checkpoint
 ```
 
 当前 `d_obs + alpha*d_dyn` 的完整位移相加只保留为历史实现；正式候选必须改为：
@@ -75,7 +84,9 @@ innovation = clip_norm(d_dyn - stopgrad(d_obs), R(delta_t))
 d_final    = d_obs + alpha * innovation
 ```
 
-旧 hand-crafted observability Gate 已停止，不再列贡献。只有 state prior、time controls、M2 predicted-history tube oracle 和 uncertainty calibration 都通过后，才允许研究 covariance-derived Kalman gain。M4 固定按 `tube oracle -> fixed-Q/R filter -> filter+tube -> learned Q/R` 逐级推进，不允许一次同时引入 filter、tube 和 learned covariance。完整定义见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
+这里还需要一个尚未完成的语义 gate：innovation 两端必须位于同一 anchor frame 并预测同一个量。当前 canonical `d_phys` 与 candidate-frame `d_box` 在 candidate0 中相同，但在非零 candidate 或递归 anchor 有误差时通常不同。R1 time controls 已完成并否定 physical-time promotion；后续只有 matched audit 证实该语义问题，才在新的 M1.5 分支中把 physical motion 与 candidate correction 分头建模，并用 mini_train recursive errors 预注册相关误差轨迹增强。
+
+旧 hand-crafted observability Gate 已停止，不再列贡献。M4 已按通用 state prior 实现为 `off -> fixed-Q/R filter -> tube -> filter+tube` 的 evaluation-only matched matrix；`real/fixed` 两种时钟同时报告，不把正确 physical time 预设为收益来源。完整历史定义见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。
 
 ---
 
@@ -218,7 +229,9 @@ use_observability_gate: False
 | M0-4 | candidate dynamics audit | `FREEZE_M1_SHARED_SE2`；独立 candidate offset 制造强伪导数，M1 第一版排除 smooth drift |
 | M0 整体 | 冻结输出、oracle 与 candidate 审计 | **进行中**；P0-C-D1/M0-3/M0-4 已完成，只剩 M0-2 四协议输出/path variance 与 provenance 收口 |
 | M1 engineering | shared world-SE(2)、canonical label、zero-init dual-clock adapter | E0–E6 通过；共享 5-epoch warmup 与唯一 formal 配置已冻结并用于 R1 |
-| M2 engineering | bounded proposal innovation | E0–E6 通过；R1 A1-init formal 与 R2/R3 scratch 配对运行中，tracking/time-control 结果待定 |
+| M2 engineering | bounded proposal innovation | E0–E6 与 R1/R2/R3 完整性通过；standard/gap1124 相对 A1 均为正，但 true 未超过 fixed/shuffled，physical-time causal claim No-Go，归因仍 Hold |
+| M3 engineering | EMA canonical-to-irregular endpoint distillation | 代码、hybrid confidence、coarse/refined loss、A/B/C matched 训练与评测 runner 已完成；等待服务器分数 |
+| M4 engineering | fixed filter + predictive trajectory tube | off/filter/tube/filter+tube 在线递归导出与 real/fixed 时钟控制已完成；等待服务器分数 |
 
 当前已完成的关键消融：
 
@@ -246,18 +259,18 @@ use_observability_gate: False
 21. M0-4 candidate dynamics audit：伪速度/伪加速度、matched proposal penalty、candidate balance 与 shared SE(2) 冻结决策
 22. M1/M2 E0–E5：clean commit 服务器硬门禁、五组 JSONL 独立复算、warmup/invalid/empty/resampled/三协议/2-step/bound 验收
 23. M2 E6 静态冻结：1311 endpoints / 213 tracklets 的单规则复算、tracklet bootstrap、唯一 formal true 配置与 fail-closed server workflow
+24. R1 standard/gap1124 八组正式控制：89/89 artifact hash、8 组 endpoint exact match、原始 CSV 独立复算、tracklet bootstrap 与 physical-time causal No-Go
 ```
 
 当前下一步：
 
 ```text
-1. 不再启动新训练或修改 alpha/R；等待 R1 A1-init M2 formal、R2 M2 scratch、R3 matched W0 scratch 三个任务完成。
-2. 分别核对 epoch60/global_step、last.ckpt、退出码、resolved config、训练步数、SHA256 与 provenance；不完整任务不进入比较。
-3. 先做 R1/R2/R3 standard final；用 R2-R3 隔离 scratch 条件下 M2 的结构净效应，用 R1-A1 检查 continuation 收益。
-4. 对 R1 final checkpoint 运行 `tools/run_m2_formal_time_controls_gpu3.sh`；导出 standard/gap/burst 的 true/fixed/shuffled 与 matched A1。fixed/shuffled 不训练。
-5. 做 per-tracklet paired/bootstrap、delta_t/位移/稀疏分桶、首次失控和连续失败；在看到结果前冻结 standard non-inferiority margin。
-6. 只有 strong cadence、true controls、standard guardrail 与 matched scratch baseline 同时支持方法，才补 seed43/44、full nuScenes 和第二数据集；否则转 benchmark/diagnosis。
-7. M3/M4 继续锁定；不依据 mini_val/test 反调 alpha/R，不用扩大 crop 或新增 Gate 掩盖失败。
+1. 从选定 M2 `last.ckpt` 运行 `tools/run_m_stage_pipeline.sh`，完成 M3 A/B/C 60 epoch matched 训练。
+2. 在 standard 与 gap1124 上读取 `C-B`、`C-A`、`A-INIT`、`C-INIT` 的 tracklet-bootstrap 差值。
+3. 默认用 C checkpoint 跑 M4 off/filter/tube/filter+tube，并同时报告 real/fixed 状态时钟。
+4. 若 C-B 为正但 C-A 为负，只调 C 的 `M3_WEIGHT=0.02/0.05/0.10`，A/B 保持冻结。
+5. 若 tube 增加 coverage 却不涨 Success/Precision，只调固定 Q/R 与 tube 上限，不改网络和 checkpoint。
+6. 第一轮选出候选后补独立 seed；不把同一 mini_val 上反复选择后的最好点直接当最终论文结论。
 ```
 
 ---
@@ -438,7 +451,7 @@ python tools/check_train_steps.py \
 
 ### M2 E6 唯一正式工作流
 
-当前 formal 入口是 fail-closed 的三步流程。2026-07-22，commit `473738f` 已完成前两步并启动 R1，输出根为 `output/m2_formal_true_seed42_473738f_20260722_112536`；以下命令保留作复现合同，不应在当前任务未结束时重复启动。先确认服务器位于已评审的新 clean commit，并设置：
+formal 入口是 fail-closed 的三步流程。2026-07-24，commit `473738f` 的 R1 训练与 standard/gap1124 八组 same-checkpoint controls 均已完成，不要重复启动。结果根为 `output/m2_standard_gap8_473738f_20260723_235400`，本地验证见 `compare_results/reports/m2_standard_gap8_analysis_20260724.md`。以下命令只保留为原始复现合同；本轮发现 exporter 的 `observed_keys` 未登记每条 tracklet 的 GT 初始化帧，导致带 reference 的任务在完成推理后误报缺少 106/91 endpoints。正式重跑前应先在新提交修复该 validator，而不是使用 `--allow-partial-reference` 绕过。先确认服务器位于已评审的新 clean commit，并设置：
 
 ```bash
 PROJECT_ROOT=/home/lishengjie/study/lcyu/CT-SeqTrack
@@ -466,7 +479,7 @@ nohup bash tools/run_m2_formal_seed42_gpu2.sh \
 echo $!
 ```
 
-第三步在训练成功并确认 `final_checkpoint.json` 后，只在 GPU3 对同一个 `last.ckpt` 做 true/fixed/shuffled，同时导出相同 endpoint 的 A1 baseline。fixed/shuffled 不训练：
+第三步原设计是在训练成功并确认 `final_checkpoint.json` 后，只在 GPU3 对同一个 `last.ckpt` 做 true/fixed/shuffled，同时导出相同 endpoint 的 A1 baseline。fixed/shuffled 不训练。下方原命令因上述初始化帧 validator 缺陷暂不应直接复跑：
 
 ```bash
 export FINAL_CKPT="$(find "$OUT_ROOT" -type f -name last.ckpt -print -quit)"
@@ -654,29 +667,32 @@ compare_results/reports/related_comparisons.md
 - TrajTrack 当前本地结果相对 SeqTrack3D 提升了 13.96 / 19.11（该差值包含 GT oracle 信息）
 - P0-B3 已证明 timestamp-aware reliability 或 active dual-anchor 有效
 - raw predicted-history CV 可以作为正式第二搜索锚点
+- 当前 M2 涨点由正确 physical time 导致
+- M3/M4 已经涨分或优于 matched baseline（必须等待新 runner 的服务器结果）
 
 更稳的贡献表述是：
 
 ```text
-We study within-track variable-rate LiDAR 3D SOT and condition a
-Seq2Seq tracker on physical timestamps.
+We study within-track variable-rate LiDAR 3D SOT using matched time
+interventions and diagnose when timestamp-conditioned tracking fails.
 ```
 
 当前更具体的实验表述是：
 
 ```text
-Preserving SeqTrack3D's order-time semantics while injecting real delta_t
-through a timestamp-conditioned dynamics prior is currently more stable than
-directly replacing the main branch time tokens with raw timestamps.
+Preserving SeqTrack3D's order-time semantics avoids the failures caused by
+replacing main-branch time tokens with raw timestamps. The current bounded
+proposal model improves matched tracking metrics, but true delta_t does not
+outperform fixed or shuffled time controls.
 ```
 
 当前更稳的投稿叙事是：
 
 ```text
-Fixed-step 3D SOT hides the physical meaning of irregular frame intervals.
-CT-SeqTrack studies this problem with within-track variable-rate evaluation,
-timestamp-conditioned trajectory guidance before search cropping, and bounded
-observation refinement. GT-free long-gap gains remain an experimental hypothesis.
+Fixed-step 3D SOT hides failures under irregular frame intervals. CT-SeqTrack
+provides within-track variable-rate evaluation, matched time interventions, and
+crop/trajectory failure diagnosis. A bounded proposal correction shows positive
+tracking signal, while its physical-time causal interpretation is rejected.
 ```
 
 ---

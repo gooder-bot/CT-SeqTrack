@@ -1,0 +1,5 @@
+﻿protocol,metric,historical_a1_final,current_scratch_m2_true_final,m2_true_minus_historical_a1,comparison_status
+random20,Success,40.71880722045898,44.852943420410156,4.134136199951179,Context only: older A1 lacks matched current-code provenance and is not a causal control.
+random20,Precision,42.71440505981445,44.81308364868164,2.0986785888671875,Context only: older A1 lacks matched current-code provenance and is not a causal control.
+gap1124,Success,45.19291687011719,44.858787536621094,-0.33412933349609375,Context only: older A1 lacks matched current-code provenance and is not a causal control.
+gap1124,Precision,49.20644378662109,48.28162384033203,-0.9248199462890554,Context only: older A1 lacks matched current-code provenance and is not a causal control.

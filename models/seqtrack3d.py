@@ -3,6 +3,8 @@ from models import base_model
 from models.backbone.pointnet import MiniPointNet, SegPointNet, FeaturePointNet
 from models.attn.Models import Seq2SeqFormer
 
+import copy
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -20,6 +22,12 @@ from models.dynamics import (
 )
 from models.observability import ObservabilityGate
 from models.time_encoding import TimeEncoding
+from models.path_distillation import (
+    endpoint_path_terms,
+    freeze_batchnorm_running_stats,
+    teacher_endpoint_confidence_terms,
+    update_ema_module,
+)
 
 # import vis_tool as vt
 
@@ -39,6 +47,62 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
         self.use_physical_time_adapter = bool(
             getattr(config, 'use_physical_time_adapter', False))
+        self.use_m3_path_distillation = bool(getattr(
+            config, 'use_m3_path_distillation', False))
+        self.m3_irregular_supervision_weight = float(getattr(
+            config, 'm3_irregular_supervision_weight', 0.0))
+        self.m3_path_weight = float(getattr(config, 'm3_path_weight', 0.0))
+        self.m3_theta_weight = float(getattr(config, 'm3_theta_weight', 0.5))
+        self.m3_coarse_weight = float(getattr(
+            config, 'm3_coarse_weight', 0.0))
+        self.m3_teacher_momentum = float(getattr(
+            config, 'm3_teacher_momentum', 0.996))
+        self.m3_teacher_update_interval = int(getattr(
+            config, 'm3_teacher_update_interval', 1))
+        self.m3_teacher_confidence_mode = str(getattr(
+            config, 'm3_teacher_confidence_mode', 'foreground_topk'))
+        self.m3_teacher_confidence_topk = int(getattr(
+            config, 'm3_teacher_confidence_topk', 32))
+        self.m3_teacher_confidence_floor = float(getattr(
+            config, 'm3_teacher_confidence_floor', 0.05))
+        self.m3_teacher_agreement_center_scale = float(getattr(
+            config, 'm3_teacher_agreement_center_scale', 1.0))
+        self.m3_teacher_agreement_yaw_scale = float(getattr(
+            config, 'm3_teacher_agreement_yaw_scale', 0.5))
+        self.m3_freeze_irregular_bn_stats = bool(getattr(
+            config, 'm3_freeze_irregular_bn_stats', True))
+        self.m3_warmup_epoch = int(getattr(config, 'm3_warmup_epoch', 0))
+        self.m3_ramp_epochs = int(getattr(config, 'm3_ramp_epochs', 5))
+        if self.use_m3_path_distillation and bool(getattr(config, 'use_twc', False)):
+            raise ValueError(
+                "M3 asymmetric path distillation and legacy symmetric TWC "
+                "must be evaluated as separate objectives.")
+        if min(
+                self.m3_irregular_supervision_weight,
+                self.m3_path_weight,
+                self.m3_theta_weight,
+                self.m3_coarse_weight) < 0:
+            raise ValueError("M3 loss weights must be non-negative")
+        if not 0.0 <= self.m3_teacher_momentum < 1.0:
+            raise ValueError("m3_teacher_momentum must be in [0, 1)")
+        if self.m3_teacher_update_interval <= 0:
+            raise ValueError("m3_teacher_update_interval must be positive")
+        if self.m3_warmup_epoch < 0 or self.m3_ramp_epochs <= 0:
+            raise ValueError("M3 warmup must be non-negative and ramp positive")
+        if not 0.0 <= self.m3_teacher_confidence_floor <= 1.0:
+            raise ValueError("m3_teacher_confidence_floor must be in [0, 1]")
+        if self.m3_teacher_confidence_topk <= 0:
+            raise ValueError("m3_teacher_confidence_topk must be positive")
+        if min(
+                self.m3_teacher_agreement_center_scale,
+                self.m3_teacher_agreement_yaw_scale) <= 0:
+            raise ValueError("M3 teacher agreement scales must be positive")
+        if (self.m3_teacher_confidence_mode.strip().lower().replace("-", "_")
+                not in (
+                    "fixed", "uniform", "ones", "foreground",
+                    "foreground_topk", "segmentation", "agreement",
+                    "proposal_agreement", "hybrid")):
+            raise ValueError("unsupported m3_teacher_confidence_mode")
         self.obs_gate_fusion_mode = str(getattr(config, 'obs_gate_fusion_mode', 'feature')).lower()
         self.obs_gate_fusion_mode = self.obs_gate_fusion_mode.replace('-', '_')
         if self.obs_gate_fusion_mode == 'conf_res':
@@ -211,6 +275,84 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.Transformer = Seq2SeqFormer(d_word_vec=64, d_model=64, d_inner=512,
             n_layers=3, n_head=4, d_k=64, d_v=64, n_position = 1024*4)
 
+        self.m3_teacher = None
+        if self.use_m3_path_distillation:
+            teacher_config = copy.deepcopy(config)
+            teacher_config.use_m3_path_distillation = False
+            teacher_config.use_twc = False
+            teacher_config.m3_path_weight = 0.0
+            self.m3_teacher = SEQTRACK3D(
+                teacher_config,
+                train_dataloader_length=kwargs.get(
+                    'train_dataloader_length', None),
+            )
+            for parameter in self.m3_teacher.parameters():
+                parameter.requires_grad_(False)
+            self.m3_teacher.eval()
+            self.register_buffer(
+                "m3_teacher_updates",
+                torch.zeros((), dtype=torch.long),
+            )
+            self._m3_last_ema_global_step = -1
+
+    @torch.no_grad()
+    def _initialize_m3_teacher(self, force=False):
+        if not self.use_m3_path_distillation:
+            return
+        if not force and int(self.m3_teacher_updates.item()) > 0:
+            return
+        student_state = {
+            key: value
+            for key, value in self.state_dict().items()
+            if not key.startswith("m3_teacher.")
+            and key != "m3_teacher_updates"
+        }
+        teacher_state = self.m3_teacher.state_dict()
+        matched = {
+            key: value
+            for key, value in student_state.items()
+            if key in teacher_state
+            and hasattr(value, "shape")
+            and teacher_state[key].shape == value.shape
+        }
+        teacher_state.update(matched)
+        self.m3_teacher.load_state_dict(teacher_state, strict=True)
+        self.m3_teacher.eval()
+
+    def on_fit_start(self):
+        if self.use_m3_path_distillation:
+            self._initialize_m3_teacher()
+
+    def on_load_checkpoint(self, checkpoint):
+        if self.use_m3_path_distillation:
+            return
+        state_dict = checkpoint.get("state_dict", {})
+        teacher_keys = [
+            key for key in state_dict
+            if key.startswith("m3_teacher.")
+            or key == "m3_teacher_updates"
+        ]
+        for key in teacher_keys:
+            state_dict.pop(key)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if not self.use_m3_path_distillation:
+            return
+        current_step = int(self.global_step)
+        if current_step == self._m3_last_ema_global_step:
+            return
+        if current_step % self.m3_teacher_update_interval != 0:
+            return
+        self._initialize_m3_teacher()
+        update_ema_module(
+            self.m3_teacher,
+            self,
+            self.m3_teacher_momentum,
+        )
+        self.m3_teacher_updates.add_(1)
+        self._m3_last_ema_global_step = current_step
+        self.m3_teacher.eval()
+
     def encode_point_time(self, points):
         encoded_time = self.time_encoder(points[..., 3:4])
         return torch.cat((points[..., :3], encoded_time, points[..., 4:]), dim=-1)
@@ -357,10 +499,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         """
         if self.is_paired_batch(input_dict):
-            return {
-                "view_a": self.forward(input_dict["view_a"]),
-                "view_b": self.forward(input_dict["view_b"]),
+            output_a = self.forward(input_dict["view_a"])
+            if (self.use_m3_path_distillation
+                    and self.training
+                    and self.m3_freeze_irregular_bn_stats):
+                with freeze_batchnorm_running_stats(self):
+                    output_b = self.forward(input_dict["view_b"])
+            else:
+                output_b = self.forward(input_dict["view_b"])
+            paired_output = {
+                "view_a": output_a,
+                "view_b": output_b,
             }
+            if self.use_m3_path_distillation and self.training:
+                self._initialize_m3_teacher()
+                self.m3_teacher.eval()
+                with torch.no_grad():
+                    paired_output["teacher_a"] = self.m3_teacher(
+                        input_dict["view_a"])
+            return paired_output
 
         output_dict = {}
         points = self.encode_point_time(input_dict["points"])
@@ -563,6 +720,140 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         return output_dict
 
+    def _compute_pair_validity(self, output_a, output_b, data_a, data_b):
+        box_a = output_a["aux_estimation_boxes"]
+        box_b = output_b["aux_estimation_boxes"]
+        valid = torch.ones(
+            box_a.shape[0], device=box_a.device, dtype=torch.bool)
+
+        def paired_setting(suffix, default):
+            if self.use_m3_path_distillation:
+                m3_key = f"m3_{suffix}"
+                if hasattr(self.config, m3_key):
+                    return getattr(self.config, m3_key)
+            return getattr(self.config, f"twc_{suffix}", default)
+
+        eps = paired_setting("timestamp_eps", 1e-6)
+        anchor_eps = paired_setting("anchor_eps", 1e-4)
+        delta_eps = paired_setting("delta_eps", 1e-5)
+
+        if "current_timestamp" in data_a and "current_timestamp" in data_b:
+            current_gap = torch.abs(
+                data_a["current_timestamp"].to(box_a.device)
+                - data_b["current_timestamp"].to(box_a.device))
+            valid = valid & (current_gap.view(-1) <= eps)
+
+        anchor_gap = box_a.new_zeros((box_a.shape[0],))
+        if "coordinate_anchor" in data_a and "coordinate_anchor" in data_b:
+            anchor_gap = torch.max(
+                torch.abs(
+                    data_a["coordinate_anchor"].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["coordinate_anchor"].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+            if (paired_setting("fail_on_anchor_mismatch", True)
+                    and bool(torch.any(anchor_gap > anchor_eps).item())):
+                raise RuntimeError(
+                    "Paired history views do not share coordinate_anchor. "
+                    f"max gap={float(anchor_gap.max().item()):.6g}, "
+                    f"eps={anchor_eps:.6g}.")
+            valid = valid & (anchor_gap <= anchor_eps)
+        elif paired_setting("require_coordinate_anchor", True):
+            raise KeyError(
+                "Paired history training requires coordinate_anchor in both views.")
+        elif "ref_boxs" in data_a and "ref_boxs" in data_b:
+            anchor_gap = torch.max(
+                torch.abs(
+                    data_a["ref_boxs"][:, 0].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["ref_boxs"][:, 0].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+            valid = valid & (anchor_gap <= anchor_eps)
+
+        current_point_gap = box_a.new_zeros((box_a.shape[0],))
+        point_eps = paired_setting("point_eps", 1e-6)
+        if "points" in data_a and "points" in data_b:
+            point_sample_size = int(getattr(
+                self.config, "point_sample_size", 0))
+            if point_sample_size <= 0:
+                raise ValueError(
+                    "Shared-current-point check requires point_sample_size > 0.")
+            current_xyz_a = data_a["points"][:, -point_sample_size:, :3].to(
+                box_a.device, dtype=box_a.dtype)
+            current_xyz_b = data_b["points"][:, -point_sample_size:, :3].to(
+                box_a.device, dtype=box_a.dtype)
+            current_point_gap = torch.amax(
+                torch.abs(current_xyz_a - current_xyz_b), dim=(1, 2))
+            if (paired_setting("fail_on_current_point_mismatch", True)
+                    and bool(torch.any(current_point_gap > point_eps).item())):
+                raise RuntimeError(
+                    "Paired views do not share sampled current XYZ points. "
+                    f"max gap={float(current_point_gap.max().item()):.6g}, "
+                    f"eps={point_eps:.6g}.")
+            valid = valid & (current_point_gap <= point_eps)
+        elif paired_setting("require_shared_current_points", True):
+            raise KeyError(
+                "Paired history training requires points in both views.")
+
+        history_gap = None
+        if "history_offsets" in data_a and "history_offsets" in data_b:
+            history_gap = torch.max(
+                torch.abs(
+                    data_a["history_offsets"].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["history_offsets"].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "delta_T_real" in data_a and "delta_T_real" in data_b:
+            history_gap = torch.max(
+                torch.abs(
+                    data_a["delta_T_real"].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["delta_T_real"].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "timestamps_real" in data_a and "timestamps_real" in data_b:
+            history_gap = torch.max(
+                torch.abs(
+                    data_a["timestamps_real"][:, :-1].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["timestamps_real"][:, :-1].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        elif "delta_T" in data_a and "delta_T" in data_b:
+            history_gap = torch.max(
+                torch.abs(
+                    data_a["delta_T"].to(
+                        box_a.device, dtype=box_a.dtype)
+                    - data_b["delta_T"].to(
+                        box_a.device, dtype=box_a.dtype)),
+                dim=1,
+            ).values
+        if history_gap is not None:
+            valid = valid & (history_gap > delta_eps)
+
+        if paired_setting("full_history_only", True):
+            full_a = (
+                data_a["valid_mask"].to(box_a.device).sum(dim=1)
+                >= data_a["valid_mask"].shape[1])
+            full_b = (
+                data_b["valid_mask"].to(box_a.device).sum(dim=1)
+                >= data_b["valid_mask"].shape[1])
+            valid = valid & full_a & full_b
+        return {
+            "valid": valid,
+            "anchor_gap": anchor_gap,
+            "current_point_gap": current_point_gap,
+            "history_gap": history_gap,
+        }
+
     def compute_twc_loss(self, output_a, output_b, data_a, data_b):
         box_a = output_a["aux_estimation_boxes"]
         box_b = output_b["aux_estimation_boxes"]
@@ -580,98 +871,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             + getattr(self.config, "twc_theta_weight", 0.5) * loss_theta_per_sample
         )
 
-        valid = torch.ones_like(loss_twc_per_sample, dtype=torch.bool)
-        eps = getattr(self.config, "twc_timestamp_eps", 1e-6)
-        anchor_eps = getattr(self.config, "twc_anchor_eps", 1e-4)
-        delta_eps = getattr(self.config, "twc_delta_eps", 1e-5)
-
-        if "current_timestamp" in data_a and "current_timestamp" in data_b:
-            current_gap = torch.abs(data_a["current_timestamp"].to(box_a.device)
-                                    - data_b["current_timestamp"].to(box_a.device))
-            valid = valid & (current_gap.view(-1) <= eps)
-
-        anchor_gap = torch.zeros_like(loss_twc_per_sample)
-        if "coordinate_anchor" in data_a and "coordinate_anchor" in data_b:
-            anchor_gap = torch.max(
-                torch.abs(data_a["coordinate_anchor"].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["coordinate_anchor"].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-            if (getattr(self.config, "twc_fail_on_anchor_mismatch", True)
-                    and bool(torch.any(anchor_gap > anchor_eps).item())):
-                raise RuntimeError(
-                    "TWC paired views do not share the same coordinate_anchor. "
-                    f"max gap={float(anchor_gap.max().item()):.6g}, eps={anchor_eps:.6g}.")
-            valid = valid & (anchor_gap <= anchor_eps)
-        elif getattr(self.config, "twc_require_coordinate_anchor", True):
-            raise KeyError(
-                "TWC requires the unnormalized coordinate_anchor in both views. "
-                "Rebuild paired batches with the shared-coordinate sampler.")
-        elif "ref_boxs" in data_a and "ref_boxs" in data_b:
-            anchor_gap = torch.max(
-                torch.abs(data_a["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["ref_boxs"][:, 0].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-            valid = valid & (anchor_gap <= anchor_eps)
-
-        current_point_gap = torch.zeros_like(loss_twc_per_sample)
-        point_eps = getattr(self.config, "twc_point_eps", 1e-6)
-        if "points" in data_a and "points" in data_b:
-            point_sample_size = int(getattr(self.config, "point_sample_size", 0))
-            if point_sample_size <= 0:
-                raise ValueError(
-                    "TWC shared-current-point check requires point_sample_size > 0.")
-            current_xyz_a = data_a["points"][:, -point_sample_size:, :3].to(
-                box_a.device, dtype=box_a.dtype)
-            current_xyz_b = data_b["points"][:, -point_sample_size:, :3].to(
-                box_a.device, dtype=box_a.dtype)
-            current_point_gap = torch.amax(
-                torch.abs(current_xyz_a - current_xyz_b), dim=(1, 2))
-            if (getattr(self.config, "twc_fail_on_current_point_mismatch", True)
-                    and bool(torch.any(current_point_gap > point_eps).item())):
-                raise RuntimeError(
-                    "TWC paired views do not share the same sampled current XYZ points. "
-                    f"max gap={float(current_point_gap.max().item()):.6g}, "
-                    f"eps={point_eps:.6g}.")
-            valid = valid & (current_point_gap <= point_eps)
-        elif getattr(self.config, "twc_require_shared_current_points", True):
-            raise KeyError(
-                "TWC requires points in both views to verify shared current-frame sampling.")
-
-        history_gap = None
-        if "history_offsets" in data_a and "history_offsets" in data_b:
-            history_gap = torch.max(
-                torch.abs(data_a["history_offsets"].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["history_offsets"].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-        elif "delta_T_real" in data_a and "delta_T_real" in data_b:
-            history_gap = torch.max(
-                torch.abs(data_a["delta_T_real"].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["delta_T_real"].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-        elif "timestamps_real" in data_a and "timestamps_real" in data_b:
-            history_gap = torch.max(
-                torch.abs(data_a["timestamps_real"][:, :-1].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["timestamps_real"][:, :-1].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-        elif "delta_T" in data_a and "delta_T" in data_b:
-            history_gap = torch.max(
-                torch.abs(data_a["delta_T"].to(box_a.device, dtype=box_a.dtype)
-                          - data_b["delta_T"].to(box_a.device, dtype=box_a.dtype)),
-                dim=1,
-            ).values
-
-        if history_gap is not None:
-            valid = valid & (history_gap > delta_eps)
-
-        if getattr(self.config, "twc_full_history_only", True):
-            full_a = data_a["valid_mask"].to(box_a.device).sum(dim=1) >= data_a["valid_mask"].shape[1]
-            full_b = data_b["valid_mask"].to(box_a.device).sum(dim=1) >= data_b["valid_mask"].shape[1]
-            valid = valid & full_a & full_b
+        pair_validity = self._compute_pair_validity(
+            output_a, output_b, data_a, data_b)
+        valid = pair_validity["valid"]
+        anchor_gap = pair_validity["anchor_gap"]
+        current_point_gap = pair_validity["current_point_gap"]
 
         valid_float = valid.to(dtype=box_a.dtype)
         valid_count = valid_float.sum().clamp_min(1.0)
@@ -692,12 +896,141 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "twc_current_point_gap_max": current_point_gap.max(),
         }
 
+    def compute_m3_path_loss(self, teacher_output, student_output,
+                             data_a, data_b):
+        """Distil the canonical-history endpoint into the irregular path.
+
+        The teacher branch is detached inside ``endpoint_path_terms`` and the
+        confidence is computed without labels, so M3 cannot leak GT quality
+        into its sample weights.
+        """
+        refined_terms = endpoint_path_terms(
+            teacher_output["aux_estimation_boxes"],
+            student_output["aux_estimation_boxes"],
+            theta_weight=self.m3_theta_weight,
+        )
+        coarse_terms = endpoint_path_terms(
+            teacher_output["estimation_boxes"],
+            student_output["estimation_boxes"],
+            theta_weight=self.m3_theta_weight,
+        )
+        combined_path = (
+            refined_terms["total"]
+            + self.m3_coarse_weight * coarse_terms["total"]
+        ) / (1.0 + self.m3_coarse_weight)
+        pair_validity = self._compute_pair_validity(
+            teacher_output, student_output, data_a, data_b)
+        valid = pair_validity["valid"]
+        confidence_terms = teacher_endpoint_confidence_terms(
+            teacher_output,
+            point_sample_size=int(getattr(
+                self.config, "point_sample_size", 0)),
+            mode=self.m3_teacher_confidence_mode,
+            topk=self.m3_teacher_confidence_topk,
+            floor=self.m3_teacher_confidence_floor,
+            agreement_center_scale=self.m3_teacher_agreement_center_scale,
+            agreement_yaw_scale=self.m3_teacher_agreement_yaw_scale,
+        )
+        confidence = confidence_terms["confidence"].to(
+            dtype=combined_path.dtype)
+
+        valid_float = valid.to(dtype=combined_path.dtype)
+        sample_weight = valid_float * confidence
+        weight_sum = sample_weight.sum().clamp_min(1e-6)
+
+        def weighted_mean(value):
+            return (value * sample_weight).sum() / weight_sum
+
+        history_gap = pair_validity["history_gap"]
+        if history_gap is None:
+            history_gap_mean = combined_path.new_zeros(())
+        else:
+            history_gap_mean = weighted_mean(history_gap)
+
+        return {
+            "loss_m3_path": weighted_mean(combined_path),
+            "m3_center_loss": weighted_mean(refined_terms["center_loss"]),
+            "m3_yaw_loss": weighted_mean(refined_terms["yaw_loss"]),
+            "m3_center_gap": weighted_mean(refined_terms["center_gap"]),
+            "m3_yaw_gap": weighted_mean(refined_terms["yaw_gap"]),
+            "m3_coarse_center_loss": weighted_mean(
+                coarse_terms["center_loss"]),
+            "m3_coarse_yaw_loss": weighted_mean(coarse_terms["yaw_loss"]),
+            "m3_coarse_center_gap": weighted_mean(
+                coarse_terms["center_gap"]),
+            "m3_coarse_yaw_gap": weighted_mean(coarse_terms["yaw_gap"]),
+            "m3_coarse_weight": combined_path.new_tensor(
+                self.m3_coarse_weight),
+            "m3_valid_ratio": valid_float.mean(),
+            "m3_teacher_confidence": (
+                confidence * valid_float).sum()
+                / valid_float.sum().clamp_min(1.0),
+            "m3_teacher_foreground_confidence": weighted_mean(
+                confidence_terms["foreground"].to(
+                    dtype=combined_path.dtype)),
+            "m3_teacher_agreement_confidence": weighted_mean(
+                confidence_terms["agreement"].to(
+                    dtype=combined_path.dtype)),
+            "m3_teacher_internal_center_gap": weighted_mean(
+                confidence_terms["coarse_refined_center_gap"].to(
+                    dtype=combined_path.dtype)),
+            "m3_teacher_internal_yaw_gap": weighted_mean(
+                confidence_terms["coarse_refined_yaw_gap"].to(
+                    dtype=combined_path.dtype)),
+            "m3_effective_sample_weight": sample_weight.mean(),
+            "m3_anchor_gap": pair_validity["anchor_gap"].mean(),
+            "m3_current_point_gap": (
+                pair_validity["current_point_gap"].mean()),
+            "m3_history_gap": history_gap_mean,
+        }
+
+    def _m3_effective_path_weight(self):
+        current_epoch = int(getattr(self, "current_epoch", 0))
+        if current_epoch < self.m3_warmup_epoch:
+            return 0.0
+        ramp_progress = (
+            current_epoch - self.m3_warmup_epoch + 1
+        ) / float(self.m3_ramp_epochs)
+        return self.m3_path_weight * min(max(ramp_progress, 0.0), 1.0)
+
     def compute_paired_loss(self, data, output):
         data_a, data_b = data["view_a"], data["view_b"]
         output_a, output_b = output["view_a"], output["view_b"]
 
         loss_a = self.compute_loss(data_a, output_a)
         loss_b = self.compute_loss(data_b, output_b)
+
+        if self.use_m3_path_distillation:
+            if "teacher_a" not in output:
+                raise KeyError(
+                    "M3 training requires a canonical EMA teacher output.")
+            beta = self.m3_irregular_supervision_weight
+            loss_total_sup = (
+                loss_a["loss_total"] + beta * loss_b["loss_total"]
+            ) / (1.0 + beta)
+            m3_loss_dict = self.compute_m3_path_loss(
+                output["teacher_a"], output_b, data_a, data_b)
+            effective_weight = self._m3_effective_path_weight()
+            loss_total = (
+                loss_total_sup
+                + effective_weight * m3_loss_dict["loss_m3_path"]
+            )
+            loss_dict = {
+                "loss_total": loss_total,
+                "loss_total_sup": loss_total_sup,
+                "loss_total_a": loss_a["loss_total"],
+                "loss_total_b": loss_b["loss_total"],
+                "m3_path_weight_effective": loss_total.new_tensor(
+                    effective_weight),
+                "m3_teacher_updates": self.m3_teacher_updates.to(
+                    dtype=loss_total.dtype),
+            }
+            for key, value in loss_a.items():
+                loss_dict[f"view_a_{key}"] = value
+            for key, value in loss_b.items():
+                loss_dict[f"view_b_{key}"] = value
+            loss_dict.update(m3_loss_dict)
+            return loss_dict
 
         loss_total_sup = 0.5 * (loss_a["loss_total"] + loss_b["loss_total"])
         twc_loss_dict = self.compute_twc_loss(output_a, output_b, data_a, data_b)

@@ -1,0 +1,235 @@
+nohup: ignoring input
+preloading data into memory
+loading from saved file /home/lishengjie/data/nuscenes-mini/preload_nuscenes_Car_mini_val_v1.0-mini_-1_1.dat.
+{
+  "schema": "ct_seqtrack.m0_endpoint_export",
+  "schema_version": 1,
+  "run_label": "A1",
+  "protocol": "standard_true",
+  "time_mode": "true",
+  "cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a1_order.yaml",
+  "cfg_sha256": "bddbb6ad26188dfd09371067af110f3254ca059d08620f99208431a6a3b4beff",
+  "resolved_cfg_sha256": "97eec6d02c0f34aee71837acec34fdb66eae92d434b7ba2f867472f04e6ff356",
+  "protocol_cfg": null,
+  "protocol_cfg_sha256": null,
+  "weights": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/20260531-2322-seqtrack3d_nuscenes_a1_order-ct_a1_order_car_60ep_bs16_gpu1/lightning_logs/version_0/checkpoints/last.ckpt",
+  "weights_sha256": "a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82",
+  "split": "mini_val",
+  "version": "v1.0-mini",
+  "seed": 42,
+  "device": "cuda:0",
+  "tracklet_limit": 106,
+  "logged_row_count": 2285,
+  "active_frame_count": 2285,
+  "active_empty_fallback_count": 229,
+  "active_metrics": {
+    "success": 51.14989059080962,
+    "precision": 57.760393873085334,
+    "mean_iou": 0.5092833418385764,
+    "mean_center_error": 2.9120915221995034
+  },
+  "passive_path_variance": {
+    "enabled": false,
+    "path_a_offsets": [
+      1,
+      2,
+      3
+    ],
+    "path_b_offsets": [
+      1,
+      3,
+      5
+    ],
+    "eligible_count": 0,
+    "center_gap": {
+      "count": 0,
+      "mean": null,
+      "min": null,
+      "p25": null,
+      "p50": null,
+      "p75": null,
+      "p95": null,
+      "max": null
+    },
+    "yaw_gap": {
+      "count": 0,
+      "mean": null,
+      "min": null,
+      "p25": null,
+      "p50": null,
+      "p75": null,
+      "p95": null,
+      "max": null
+    },
+    "anchor_gap_max": null,
+    "current_point_gap_max": null
+  },
+  "require_full_history": false,
+  "omit_initial_frame": false,
+  "reference_endpoints_csv": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/references/m2_standard_true_noninitial_reference.csv",
+  "reference_endpoints_sha256": "659884adb12f90370196fff47c1ec4912aee9a328dea5103ba15bdb7557460b2",
+  "reference_match": {
+    "reference_endpoint_count": 2179,
+    "observed_endpoint_count": 2179,
+    "missing_endpoint_count": 0,
+    "unexpected_endpoint_count": 0,
+    "allow_partial_reference": false,
+    "exact_match": true
+  },
+  "dataset": {
+    "virtual_rate_summary": {
+      "mode": "none",
+      "tracklets_before": 106,
+      "tracklets_after": 106,
+      "frames_before": 2285,
+      "frames_after": 2285,
+      "dropped_frame_ratio": 0.0,
+      "min_tracklet_len": 1,
+      "mean_tracklet_len": 21.556603773584907,
+      "cache_tag": "none"
+    },
+    "virtual_rate_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+    "virtual_rate_manifest_content_sha256": "",
+    "virtual_rate_manifest_file_sha256": "",
+    "dynamics_time_summary": {
+      "mode": "true",
+      "fixed_delta_t": 0.5,
+      "manifest": "",
+      "manifest_content_sha256": "",
+      "manifest_file_sha256": "",
+      "permutation_sha256": ""
+    },
+    "dynamics_time_manifest_content_sha256": "",
+    "dynamics_time_manifest_file_sha256": "",
+    "dynamics_time_permutation_sha256": ""
+  },
+  "git": {
+    "commit": "473738fa2cf3def246e4e6b1bce35d8692c416c7",
+    "dirty": false,
+    "status_porcelain": ""
+  },
+  "exporter_sha256": "6eafac11abf42bd139aefa66f0163573ccdd88e636a04c89ef87e3b899eea5f5",
+  "runtime_seconds": 166.25385975837708,
+  "note": "Only the active canonical prediction updates recursive history. Passive path A/B forwards, when enabled, are evaluation-only and cannot alter later endpoints."
+}
+endpoint csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_standard_true_seed42/m0_endpoints.csv
+summary json: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_standard_true_seed42/m0_summary.json
+resolved config: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_standard_true_seed42/resolved_config.json
+loaded virtual-rate manifest protocols/manifests/m2_nuscenes_mini_test_gap1124_seed42.json content_sha256=e87b92da2c9c26127862770f78d793cc1253dc45a664384e82f8e3a47c8d7814
+virtual-rate mode=gap_pattern tracklets=91/106 frames=1257/2285 drop=0.450 tag=vr_manifest_m2_nuscenes_mini_test_gap1124_seed42_a41cb6f6
+preloading data into memory
+loading from saved file /home/lishengjie/data/nuscenes-mini/preload_nuscenes_Car_mini_val_v1.0-mini_-1_1_vr_manifest_m2_nuscenes_mini_test_gap1124_seed42_a41cb6f6.dat.
+{
+  "schema": "ct_seqtrack.m0_endpoint_export",
+  "schema_version": 1,
+  "run_label": "A1",
+  "protocol": "gap1124_true",
+  "time_mode": "true",
+  "cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a1_order.yaml",
+  "cfg_sha256": "bddbb6ad26188dfd09371067af110f3254ca059d08620f99208431a6a3b4beff",
+  "resolved_cfg_sha256": "6ab352de79e5f58e91c98b1ea755eff24e0fff9d6c5fcdff8f09dc9735241472",
+  "protocol_cfg": "/home/lishengjie/study/lcyu/CT-SeqTrack/cfgs/seqtrack3d_nuscenes_a1_order_vr_gap1124.yaml",
+  "protocol_cfg_sha256": "7998968a0495191b722b85162c04d48d4f62d4277ae500441d76e608e448554e",
+  "weights": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/20260531-2322-seqtrack3d_nuscenes_a1_order-ct_a1_order_car_60ep_bs16_gpu1/lightning_logs/version_0/checkpoints/last.ckpt",
+  "weights_sha256": "a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82",
+  "split": "mini_val",
+  "version": "v1.0-mini",
+  "seed": 42,
+  "device": "cuda:0",
+  "tracklet_limit": 91,
+  "logged_row_count": 1257,
+  "active_frame_count": 1257,
+  "active_empty_fallback_count": 107,
+  "active_metrics": {
+    "success": 56.78400954653938,
+    "precision": 66.71439936356404,
+    "mean_iou": 0.566363499368625,
+    "mean_center_error": 2.2490239085542885
+  },
+  "passive_path_variance": {
+    "enabled": false,
+    "path_a_offsets": [
+      1,
+      2,
+      3
+    ],
+    "path_b_offsets": [
+      1,
+      3,
+      5
+    ],
+    "eligible_count": 0,
+    "center_gap": {
+      "count": 0,
+      "mean": null,
+      "min": null,
+      "p25": null,
+      "p50": null,
+      "p75": null,
+      "p95": null,
+      "max": null
+    },
+    "yaw_gap": {
+      "count": 0,
+      "mean": null,
+      "min": null,
+      "p25": null,
+      "p50": null,
+      "p75": null,
+      "p95": null,
+      "max": null
+    },
+    "anchor_gap_max": null,
+    "current_point_gap_max": null
+  },
+  "require_full_history": false,
+  "omit_initial_frame": false,
+  "reference_endpoints_csv": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/references/m2_gap1124_true_noninitial_reference.csv",
+  "reference_endpoints_sha256": "2f0c4e3bc95c5b54cbef6183022e7175375e218c639da00abd0954a4a1c15294",
+  "reference_match": {
+    "reference_endpoint_count": 1166,
+    "observed_endpoint_count": 1166,
+    "missing_endpoint_count": 0,
+    "unexpected_endpoint_count": 0,
+    "allow_partial_reference": false,
+    "exact_match": true
+  },
+  "dataset": {
+    "virtual_rate_summary": {
+      "mode": "gap_pattern",
+      "tracklets_before": 106,
+      "tracklets_after": 91,
+      "frames_before": 2285,
+      "frames_after": 1257,
+      "dropped_frame_ratio": 0.449890590809628,
+      "min_tracklet_len": 6,
+      "mean_tracklet_len": 13.813186813186814,
+      "cache_tag": "vr_manifest_m2_nuscenes_mini_test_gap1124_seed42_a41cb6f6"
+    },
+    "virtual_rate_selection_sha256": "85e5603c941030b050adab7876a275e654d9da328c859c1101e32940f9649f6f",
+    "virtual_rate_manifest_content_sha256": "e87b92da2c9c26127862770f78d793cc1253dc45a664384e82f8e3a47c8d7814",
+    "virtual_rate_manifest_file_sha256": "a41cb6f691758421d3c16e88fcd72567fd4e0b4632ed65c62c48b88665beea92",
+    "dynamics_time_summary": {
+      "mode": "true",
+      "fixed_delta_t": 0.5,
+      "manifest": "",
+      "manifest_content_sha256": "",
+      "manifest_file_sha256": "",
+      "permutation_sha256": ""
+    },
+    "dynamics_time_manifest_content_sha256": "",
+    "dynamics_time_manifest_file_sha256": "",
+    "dynamics_time_permutation_sha256": ""
+  },
+  "git": {
+    "commit": "473738fa2cf3def246e4e6b1bce35d8692c416c7",
+    "dirty": false,
+    "status_porcelain": ""
+  },
+  "exporter_sha256": "6eafac11abf42bd139aefa66f0163573ccdd88e636a04c89ef87e3b899eea5f5",
+  "runtime_seconds": 80.76239347457886,
+  "note": "Only the active canonical prediction updates recursive history. Passive path A/B forwards, when enabled, are evaluation-only and cannot alter later endpoints."
+}
+endpoint csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_gap1124_true_seed42/m0_endpoints.csv
+summary json: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_gap1124_true_seed42/m0_summary.json
+resolved config: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/endpoints/a1_gap1124_true_seed42/resolved_config.json

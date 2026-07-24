@@ -1,0 +1,157 @@
+# M3 engineering configuration: canonical EMA teacher A -> irregular student B.
+# This is path-robustness distillation, not a physical-time causal experiment.
+# Initialize with the selected M2 checkpoint using --init_checkpoint; do not
+# treat this file as a frozen formal protocol before the engineering gates pass.
+
+dataset: nuscenes_mf
+path: /home/lishengjie/data/nuscenes-mini
+version: v1.0-mini
+category_name: Car
+bb_scale: 1.25
+bb_offset: 2
+point_sample_size: 1024
+degrees: false
+coordinate_mode: velodyne
+up_axis: [0, 0, 1]
+preload_offset: 10
+data_limit_box: true
+key_frame_only: true
+train_split: mini_train
+val_split: mini_val
+test_split: mini_val
+train_type: train_motion_mf
+num_candidates: 4
+candidate_trajectory_mode: shared_se2
+motion_threshold: 0.15
+use_augmentation: false
+hist_num: 3
+empty_box_limit: 3
+limit_num_points_in_prev_box: 1
+
+use_real_time: true
+main_time_source: order
+main_time_current: 0.1
+default_time_step: 0.5
+pseudo_time_step: 0.1
+time_encoding: raw
+time_scale: 0.5
+time_clip: 4.0
+time_fourier_bands: 4
+time_hidden_dim: 16
+dynamics_time_mode: "true"
+dynamics_fixed_delta_t: 0.5
+
+use_dynamics_encoder: true
+dynamics_hidden_dim: 128
+dynamics_eps: 0.001
+dynamics_use_query_gap: true
+dynamics_use_acceleration: false
+dynamics_motion_mode: proposal_innovation
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.01
+
+use_physical_time_adapter: true
+physical_time_adapter_hidden_dim: 128
+physical_time_adapter_scale: 1.0
+# This config is continuation from a trained M2 checkpoint: do not re-disable
+# its already-trained adapter/innovation during the new epoch counter.
+physical_time_adapter_warmup_epoch: 0
+dynamics_innovation_alpha: 0.75
+dynamics_innovation_scale: 1.0
+dynamics_innovation_radius_base: 0.5
+dynamics_innovation_radius_per_second: 0.5
+dynamics_innovation_radius_max: 2.0
+dynamics_innovation_warmup_epoch: 0
+dynamics_innovation_disable_on_empty_search: true
+
+dynamics_residual_scale: 0.1
+dynamics_max_residual_norm: 1.0
+dynamics_warmup_epoch: 0
+dynamics_long_gap_only: false
+dynamics_min_delta_t: 1.0
+dynamics_sparse_only: false
+dynamics_sparse_point_threshold: 128
+dynamics_max_alpha: 0.2
+dynamics_residual_gate_hidden_dim: 16
+dynamics_residual_init_alpha: 0.0
+dynamics_residual_detach_stats: true
+
+use_observability_gate: false
+obs_gate_hidden_dim: 64
+obs_gate_num_stats: 5
+obs_gate_entropy_weight: 0.0
+obs_gate_init_obs_bias: 1.0
+obs_gate_min_dyn_valid: 0.5
+obs_gate_log_stats: true
+obs_stats_detach_seg: true
+
+# Legacy symmetric TWC remains a separate negative-control method.
+use_twc: false
+
+# M3: do not supervise B by default; B learns the canonical endpoint through
+# a detached, label-free-confidence-weighted EMA teacher.
+use_m3_path_distillation: true
+m3_variant: distill
+m3_view_a_offsets: [1, 2, 3]
+m3_view_b_offsets: [1, 3, 5]
+m3_candidate_zero_only: false
+m3_irregular_supervision_weight: 0.0
+m3_path_weight: 0.05
+m3_theta_weight: 0.5
+# SeqTrack3D is a two-stage tracker.  Distilling a small amount of the coarse
+# motion endpoint prevents all path supervision from arriving only after the
+# Transformer while keeping the refined endpoint as the primary target.
+m3_coarse_weight: 0.25
+m3_teacher_momentum: 0.996
+m3_teacher_update_interval: 1
+# Hybrid confidence is GT-free: current-frame foreground confidence is combined
+# with coarse/refined proposal agreement, following the local/global agreement
+# principle used by trajectory-prior trackers.
+m3_teacher_confidence_mode: hybrid
+m3_teacher_confidence_topk: 32
+m3_teacher_confidence_floor: 0.05
+m3_teacher_agreement_center_scale: 1.0
+m3_teacher_agreement_yaw_scale: 0.5
+m3_freeze_irregular_bn_stats: true
+m3_warmup_epoch: 5
+m3_ramp_epochs: 5
+m3_timestamp_eps: 1.0e-06
+m3_anchor_eps: 0.0001
+m3_delta_eps: 1.0e-05
+m3_require_coordinate_anchor: true
+m3_fail_on_anchor_mismatch: true
+m3_require_shared_current_points: true
+m3_fail_on_current_point_mismatch: true
+m3_point_eps: 1.0e-06
+m3_full_history_only: true
+
+# M4 is evaluation-only and disabled during the M3 training experiment.
+m4_variant: "off"
+m4_time_mode: fixed
+m4_fixed_delta_t: 0.5
+
+net_model: seqtrack3d
+box_aware: true
+center_weight: 2
+angle_weight: 10.0
+seg_weight: 0.1
+bc_weight: 1
+ref_center_weight: 0.2
+ref_angle_weight: 1
+motion_cls_seg_weight: 0.1
+
+use_z: true
+limit_box: false
+IoU_space: 3
+
+batch_size: 16
+workers: 12
+epoch: 60
+from_epoch: 0
+lr: 0.0001
+max_lr: 0.001
+optimizer: Adam
+lr_decay_step: 20
+lr_decay_rate: 0.1
+wd: 0
+gradient_clip_val: 0.0

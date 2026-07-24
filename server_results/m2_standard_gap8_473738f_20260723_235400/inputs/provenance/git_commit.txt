@@ -1,0 +1,7 @@
+commit 473738fa2cf3def246e4e6b1bce35d8692c416c7
+Author:     LiChengYu <lichengyu@bupt.edu.cn>
+AuthorDate: Wed Jul 22 11:08:03 2026 +0800
+Commit:     LiChengYu <lichengyu@bupt.edu.cn>
+CommitDate: Wed Jul 22 11:08:03 2026 +0800
+
+    freeze M2 formal E6 workflow

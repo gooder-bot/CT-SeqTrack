@@ -1,0 +1,9 @@
+{
+  "epoch": 59,
+  "global_step": 75720,
+  "path": "/home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_formal_true_seed42_473738f_20260722_112536/lightning_logs/version_0/checkpoints/last.ckpt",
+  "schema": "ct_seqtrack.m2_formal_final_checkpoint",
+  "schema_version": 1,
+  "selection_rule": "last.ckpt at epoch60/step75720; no best-checkpoint selection",
+  "sha256": "362b3314ad056f289509818606af30fcc43d2331eb9156405ed2727bfe49658f"
+}

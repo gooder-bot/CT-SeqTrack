@@ -1,0 +1,86 @@
+{
+  "schema": "ct_seqtrack.m2_standard_gap8_local_validation",
+  "formal_commit": "473738fa2cf3def246e4e6b1bce35d8692c416c7",
+  "artifact_manifest": {
+    "checked": 89,
+    "failures": []
+  },
+  "run_count": 8,
+  "max_abs_metric_error_vs_server": 0.0,
+  "protocol_endpoint_identity_exact": true,
+  "matched_ground_truth_and_real_time_exact": true,
+  "runs": {
+    "m2_standard_true_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_standard_true_seed42\\m0_endpoints.csv",
+      "sha256": "0bdbeea5b7bfd59614767c7757aa693199b74c41ac74b236a1feedc0c56f56fa",
+      "rows": 2285,
+      "tracklets": 106,
+      "initial_rows": 106,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "m2_standard_fixed_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_standard_fixed_seed42\\m0_endpoints.csv",
+      "sha256": "53295d1087d331e9e6e694d8e3bc516dc4e13b4a349b2bd89004bebc5b747606",
+      "rows": 2285,
+      "tracklets": 106,
+      "initial_rows": 106,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "m2_standard_shuffled_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_standard_shuffled_seed42\\m0_endpoints.csv",
+      "sha256": "d1fffe417e21612bce48ffc89fd649db000fcb537fd4fb09ddf6d63658488381",
+      "rows": 2285,
+      "tracklets": 106,
+      "initial_rows": 106,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "a1_standard_true_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\a1_standard_true_seed42\\m0_endpoints.csv",
+      "sha256": "46b276b1717e153bedb8df5114cc92dd6437f4190589c727a65a9cecf9459be3",
+      "rows": 2285,
+      "tracklets": 106,
+      "initial_rows": 106,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "m2_gap1124_true_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_gap1124_true_seed42\\m0_endpoints.csv",
+      "sha256": "29ca2b8ecd6d4eb37e3b812f59bb70757ab71eada7cd19c2df0fb60585c06ee2",
+      "rows": 1257,
+      "tracklets": 91,
+      "initial_rows": 91,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "m2_gap1124_fixed_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_gap1124_fixed_seed42\\m0_endpoints.csv",
+      "sha256": "c29519630ad0a6a995fab95991621ca6aeda8d5c7212166416e9592cf96bb90f",
+      "rows": 1257,
+      "tracklets": 91,
+      "initial_rows": 91,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "m2_gap1124_shuffled_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\m2_gap1124_shuffled_seed42\\m0_endpoints.csv",
+      "sha256": "625070d75fa19fe80ef4ca783474910e6848e17f0fea528fb4dbc00766890da5",
+      "rows": 1257,
+      "tracklets": 91,
+      "initial_rows": 91,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    },
+    "a1_gap1124_true_seed42": {
+      "csv": "D:\\desktop\\research\\CT-SeqTrack\\server_results\\m2_standard_gap8_473738f_20260723_235400\\endpoints\\a1_gap1124_true_seed42\\m0_endpoints.csv",
+      "sha256": "616ff393848778e19d2c4ef0608cabc5cadd318e88591a9c8dd286a34ea108ff",
+      "rows": 1257,
+      "tracklets": 91,
+      "initial_rows": 91,
+      "duplicate_endpoints": 0,
+      "core_nonfinite": 0
+    }
+  }
+}

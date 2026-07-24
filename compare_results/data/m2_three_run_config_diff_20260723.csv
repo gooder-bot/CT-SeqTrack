@@ -1,0 +1,16 @@
+field,A1,R1,R2,R3
+candidate_trajectory_mode,legacy per-candidate (field absent),shared_se2,shared_se2,shared_se2
+use_dynamics_encoder,False,True,True,False
+use_physical_time_adapter,False,True,True,False
+dynamics_motion_mode,feature,proposal_innovation,proposal_innovation,feature
+dynamics_time_mode,not available in legacy run,true,true,true
+dynamics_innovation_alpha,n/a,0.75,0.75,0.75
+dynamics_innovation_warmup_epoch,n/a,5,5,5
+velocity_weight,0.05,0.05,0.05,0.0
+dynamics_displacement_weight,0.0,0.01,0.01,0.0
+seed,42,42,42,42
+batch_size,16,16,16,16
+workers,12,12,12,12
+epoch,60,60,60,60
+check_val_every_n_epoch,5,5,5,5
+save_top_k,5,0,0,0

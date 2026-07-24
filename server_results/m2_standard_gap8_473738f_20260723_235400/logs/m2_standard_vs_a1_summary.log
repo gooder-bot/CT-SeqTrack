@@ -1,0 +1,187 @@
+{
+  "runs": [
+    {
+      "run": "A1",
+      "endpoint_count": 2285,
+      "tracklet_count": 106,
+      "success": 51.14989059080962,
+      "precision": 57.760393873085334,
+      "mean_iou": 0.5092833418385764,
+      "mean_center_error": 2.9120915221995034,
+      "empty_fallback_count": 229,
+      "path_center_gap_mean": null,
+      "path_yaw_gap_mean": null
+    },
+    {
+      "run": "M2",
+      "endpoint_count": 2285,
+      "tracklet_count": 106,
+      "success": 55.283369803063465,
+      "precision": 67.20568927789932,
+      "mean_iou": 0.5510138414374861,
+      "mean_center_error": 2.282068284960332,
+      "empty_fallback_count": 217,
+      "path_center_gap_mean": null,
+      "path_yaw_gap_mean": null
+    }
+  ],
+  "comparisons": {
+    "M2:A1": {
+      "left": "M2",
+      "right": "A1",
+      "identity": {
+        "left_count": 2285,
+        "right_count": 2285,
+        "common_count": 2285,
+        "left_only_count": 0,
+        "right_only_count": 0,
+        "same_order": true,
+        "exact_match": true,
+        "left_only_first": [],
+        "right_only_first": []
+      },
+      "endpoint_delta_count": 2285,
+      "tracklet_delta_count": 106,
+      "aggregate_delta": {
+        "success_left_minus_right": 4.133479212253846,
+        "precision_left_minus_right": 9.44529540481399,
+        "mean_center_error_left_minus_right": -0.6300232372391714,
+        "empty_fallback_left_minus_right": -12
+      },
+      "tracklet_statistics": {
+        "success_delta_left_minus_right": {
+          "distribution": {
+            "count": 106,
+            "mean": 3.715924457161895,
+            "min": -30.21739130434782,
+            "p25": 0.0,
+            "p50": 3.0141129032258007,
+            "p75": 7.398648648648631,
+            "p95": 17.401315789473685,
+            "max": 30.652173913043484
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": 3.715924457161895,
+            "low": 1.951780333458227,
+            "high": 5.4437278447206365
+          }
+        },
+        "precision_delta_left_minus_right": {
+          "distribution": {
+            "count": 106,
+            "mean": 7.5806435232046345,
+            "min": -53.19444444444444,
+            "p25": 0.0,
+            "p50": 3.6864837398374064,
+            "p75": 18.098529411764698,
+            "p95": 31.507211538461533,
+            "max": 53.043478260869556
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": 7.5806435232046345,
+            "low": 4.462649925553014,
+            "high": 10.663636000434462
+          }
+        },
+        "center_error_delta_left_minus_right": {
+          "distribution": {
+            "count": 106,
+            "mean": -0.4497110792989719,
+            "min": -22.91151033231811,
+            "p25": -0.39573244795980844,
+            "p50": -0.11780304667006702,
+            "p75": 0.0055509494092516355,
+            "p95": 0.5528123843318982,
+            "max": 5.823861288073293
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": -0.4497110792989719,
+            "low": -0.9876192145202327,
+            "high": -0.08662050172502239
+          }
+        },
+        "center_error_gain_left_over_right": {
+          "distribution": {
+            "count": 106,
+            "mean": 0.4497110792989719,
+            "min": -5.823861288073293,
+            "p25": -0.0055509494092516355,
+            "p50": 0.11780304667006702,
+            "p75": 0.39573244795980844,
+            "p95": 1.7051822859088024,
+            "max": 22.91151033231811
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": 0.4497110792989719,
+            "low": 0.08499360954569782,
+            "high": 0.9927123436350532
+          }
+        },
+        "empty_fallback_delta_left_minus_right": {
+          "distribution": {
+            "count": 106,
+            "mean": -0.11320754716981132,
+            "min": -16.0,
+            "p25": 0.0,
+            "p50": 0.0,
+            "p75": 0.0,
+            "p95": 0.0,
+            "max": 14.0
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": -0.11320754716981132,
+            "low": -0.5377358490566038,
+            "high": 0.27358490566037735
+          }
+        },
+        "max_failure_streak_delta_left_minus_right": {
+          "distribution": {
+            "count": 106,
+            "mean": -0.6509433962264151,
+            "min": -27.0,
+            "p25": 0.0,
+            "p50": 0.0,
+            "p75": 0.0,
+            "p95": 3.0,
+            "max": 17.0
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 106,
+            "mean": -0.6509433962264151,
+            "low": -1.5566037735849056,
+            "high": 0.18867924528301888
+          }
+        },
+        "path_center_gap_delta_left_minus_right": {
+          "distribution": {
+            "count": 0,
+            "mean": null,
+            "min": null,
+            "p25": null,
+            "p50": null,
+            "p75": null,
+            "p95": null,
+            "max": null
+          },
+          "tracklet_bootstrap_mean_95ci": {
+            "count": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          }
+        }
+      }
+    }
+  }
+}
+summary json: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_summary.json
+report markdown: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_report.md
+run csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_runs.csv
+tracklet csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_tracklets.csv
+endpoint delta csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_endpoint_deltas.csv
+tracklet delta csv: /home/lishengjie/study/lcyu/CT-SeqTrack/output/m2_standard_gap8_473738f_20260723_235400/analysis/m2_standard_vs_a1_tracklet_deltas.csv

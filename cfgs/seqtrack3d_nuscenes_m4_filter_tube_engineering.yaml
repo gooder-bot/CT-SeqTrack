@@ -1,0 +1,142 @@
+# M4 evaluation-only configuration on the selected M2/M3 checkpoint.
+# Use --m4_variant off|filter|tube|filter_tube to run the four matched arms.
+# The matched runner evaluates both real and fixed clocks; this file keeps a
+# deterministic fixed default for direct one-off invocations.
+
+dataset: nuscenes_mf
+path: /home/lishengjie/data/nuscenes-mini
+version: v1.0-mini
+category_name: Car
+bb_scale: 1.25
+bb_offset: 2
+point_sample_size: 1024
+degrees: false
+coordinate_mode: velodyne
+up_axis: [0, 0, 1]
+preload_offset: 10
+data_limit_box: true
+key_frame_only: true
+train_split: mini_train
+val_split: mini_val
+test_split: mini_val
+train_type: train_motion_mf
+num_candidates: 4
+candidate_trajectory_mode: shared_se2
+motion_threshold: 0.15
+use_augmentation: false
+hist_num: 3
+empty_box_limit: 3
+limit_num_points_in_prev_box: 1
+
+use_real_time: true
+main_time_source: order
+main_time_current: 0.1
+default_time_step: 0.5
+pseudo_time_step: 0.1
+time_encoding: raw
+time_scale: 0.5
+time_clip: 4.0
+time_fourier_bands: 4
+time_hidden_dim: 16
+dynamics_time_mode: "true"
+dynamics_fixed_delta_t: 0.5
+
+use_dynamics_encoder: true
+dynamics_hidden_dim: 128
+dynamics_eps: 0.001
+dynamics_use_query_gap: true
+dynamics_use_acceleration: false
+dynamics_motion_mode: proposal_innovation
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.01
+
+use_physical_time_adapter: true
+physical_time_adapter_hidden_dim: 128
+physical_time_adapter_scale: 1.0
+physical_time_adapter_warmup_epoch: 5
+dynamics_innovation_alpha: 0.75
+dynamics_innovation_scale: 1.0
+dynamics_innovation_radius_base: 0.5
+dynamics_innovation_radius_per_second: 0.5
+dynamics_innovation_radius_max: 2.0
+dynamics_innovation_warmup_epoch: 5
+dynamics_innovation_disable_on_empty_search: true
+
+dynamics_residual_scale: 0.1
+dynamics_max_residual_norm: 1.0
+dynamics_warmup_epoch: 0
+dynamics_long_gap_only: false
+dynamics_min_delta_t: 1.0
+dynamics_sparse_only: false
+dynamics_sparse_point_threshold: 128
+dynamics_max_alpha: 0.2
+dynamics_residual_gate_hidden_dim: 16
+dynamics_residual_init_alpha: 0.0
+dynamics_residual_detach_stats: true
+
+use_observability_gate: false
+obs_gate_hidden_dim: 64
+obs_gate_num_stats: 5
+obs_gate_entropy_weight: 0.0
+obs_gate_init_obs_bias: 1.0
+obs_gate_min_dyn_valid: 0.5
+obs_gate_log_stats: true
+obs_stats_detach_seg: true
+
+use_twc: false
+use_m3_path_distillation: false
+
+# M4-0/M4-1 matched evaluation matrix. This selector is resolved by main.py.
+m4_variant: filter_tube
+m4_time_mode: fixed
+m4_fixed_delta_t: 0.5
+m4_use_filtered_output: true
+
+# Fixed state model: [x,y,z,vx,vy,vz,yaw,yaw_rate].
+m4_acceleration_variance: 2.0
+m4_yaw_acceleration_variance: 0.5
+m4_measurement_position_variance: 0.25
+m4_measurement_yaw_variance: 0.09
+m4_initial_position_variance: 0.25
+m4_initial_velocity_variance: 4.0
+m4_initial_yaw_variance: 0.09
+m4_initial_yaw_rate_variance: 1.0
+m4_mahalanobis_gate: 0.0
+m4_max_delta_t: 5.0
+m4_covariance_jitter: 1.0e-08
+
+# Fixed-budget union: the union is still regularized to point_sample_size.
+m4_tube_base_length: 4.0
+m4_tube_base_width: 2.0
+m4_tube_sigma_parallel_scale: 2.0
+m4_tube_sigma_perpendicular_scale: 2.0
+m4_tube_max_length: 20.0
+m4_tube_max_width: 8.0
+m4_tube_min_speed: 0.2
+m4_tube_velocity_momentum: 0.5
+
+net_model: seqtrack3d
+box_aware: true
+center_weight: 2
+angle_weight: 10.0
+seg_weight: 0.1
+bc_weight: 1
+ref_center_weight: 0.2
+ref_angle_weight: 1
+motion_cls_seg_weight: 0.1
+
+use_z: true
+limit_box: false
+IoU_space: 3
+
+batch_size: 16
+workers: 12
+epoch: 60
+from_epoch: 0
+lr: 0.0001
+max_lr: 0.001
+optimizer: Adam
+lr_decay_step: 20
+lr_decay_rate: 0.1
+wd: 0
+gradient_clip_val: 0.0

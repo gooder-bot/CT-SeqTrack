@@ -1,0 +1,11 @@
+nohup: ignoring input
+preloading data into memory
+loading from saved file /home/lishengjie/data/nuscenes-mini/preload_nuscenes_Car_mini_val_v1.0-mini_-1_1.dat.
+Traceback (most recent call last):
+  File "/home/lishengjie/study/lcyu/CT-SeqTrack/tools/export_m0_endpoints.py", line 1283, in <module>
+    main()
+  File "/home/lishengjie/study/lcyu/CT-SeqTrack/tools/export_m0_endpoints.py", line 1196, in main
+    reference_report = rec_diag.validate_reference(
+  File "/home/lishengjie/study/lcyu/CT-SeqTrack/tools/diagnose_recursive_crop_reachability.py", line 208, in validate_reference
+    raise RuntimeError(
+RuntimeError: Missing 106 reference endpoints; first=[(0, 0, '274b134fb2324486ae253eb6e24f900d'), (1, 0, '12c5d6c3dc424561b9192b76b45af6fd'), (2, 0, 'ba7fb622e77447f6aa58ab1fff9ed0cf')]. Use --allow-partial-reference only for an intentional smoke run.

@@ -668,23 +668,42 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         super().__init__(dataset, random_sample=False, config=config, **kwargs)
         self.processing = motion_processing_mf
         self.use_twc = getattr(self.config, 'use_twc', False)
+        self.use_m3_path_distillation = bool(getattr(
+            self.config, 'use_m3_path_distillation', False))
+        self.use_paired_history = bool(
+            self.use_twc or self.use_m3_path_distillation)
         self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
             getattr(self.config, 'candidate_trajectory_mode', 'independent'))
-        self.twc_candidate_zero_only = getattr(self.config, 'twc_candidate_zero_only', True)
+        self.paired_candidate_zero_only = bool(getattr(
+            self.config,
+            'm3_candidate_zero_only'
+            if self.use_m3_path_distillation else 'twc_candidate_zero_only',
+            getattr(self.config, 'twc_candidate_zero_only', True),
+        ))
         default_twc_b_offsets = [1 + 2 * i for i in range(self.dataset.hist_num)]
-        self.twc_view_a_offsets = list(getattr(self.config, 'twc_view_a_offsets',
-                                               list(range(1, self.dataset.hist_num + 1))))
-        self.twc_view_b_offsets = list(getattr(self.config, 'twc_view_b_offsets',
-                                               default_twc_b_offsets))
-        if self.use_twc and getattr(self.config, "use_augmentation", False):
-            raise ValueError("P4 TWC paired views require shared transforms; keep use_augmentation=False for now.")
-        if self.use_twc:
+        self.twc_view_a_offsets = list(getattr(
+            self.config,
+            'm3_view_a_offsets' if self.use_m3_path_distillation else 'twc_view_a_offsets',
+            getattr(
+                self.config,
+                'twc_view_a_offsets',
+                list(range(1, self.dataset.hist_num + 1)))))
+        self.twc_view_b_offsets = list(getattr(
+            self.config,
+            'm3_view_b_offsets' if self.use_m3_path_distillation else 'twc_view_b_offsets',
+            getattr(self.config, 'twc_view_b_offsets', default_twc_b_offsets)))
+        if self.use_paired_history and getattr(self.config, "use_augmentation", False):
+            raise ValueError(
+                "Paired history views require explicit shared transforms; "
+                "keep use_augmentation=False.")
+        if self.use_paired_history:
             if (len(self.twc_view_a_offsets) != self.dataset.hist_num
                     or len(self.twc_view_b_offsets) != self.dataset.hist_num):
-                raise ValueError("Each TWC view must provide exactly hist_num history offsets.")
+                raise ValueError(
+                    "Each paired history view must provide exactly hist_num offsets.")
             if self.twc_view_a_offsets[0] != 1 or self.twc_view_b_offsets[0] != 1:
                 raise ValueError(
-                    "TWC views must share the nearest t-1 anchor as their first history frame.")
+                    "Paired views must share the nearest t-1 anchor.")
 
     def _locate_tracklet(self, anno_id):
         for i in range(0, self.dataset.get_num_tracklets()):
@@ -732,8 +751,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             tracklet_id, this_frame_id = self._locate_tracklet(anno_id)
             frame_ids = (0, this_frame_id)
             first_frame, this_frame = self.dataset.get_frames(tracklet_id, frame_ids=frame_ids)
-            if self.use_twc:
-                paired_candidate_id = 0 if self.twc_candidate_zero_only else candidate_id
+            if self.use_paired_history:
+                paired_candidate_id = (
+                    0 if self.paired_candidate_zero_only else candidate_id)
                 prev_frame_ids_a, _ = get_history_frame_ids_and_masks(
                     this_frame_id, self.dataset.hist_num, offsets=self.twc_view_a_offsets)
                 prev_frame_ids_b, _ = get_history_frame_ids_and_masks(

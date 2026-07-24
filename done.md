@@ -1,6 +1,6 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-22
+更新时间：2026-07-24
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
@@ -30,6 +30,12 @@
 - [x] 2026-07-22 M1/M2 E0–E5 服务器硬门禁完成：A1 strict-zero 等价、shared-SE(2)/canonical label、warmup 两步 exact-zero、invalid/empty fallback、resampled coverage、三协议 finite/active 2-step 与 correction bound 全部通过。
 - [x] 2026-07-22 M2 E6 静态冻结完成：只验证预声明的 `alpha=0.75` 与 `R(dt)=min(0.5+0.5dt,2.0)`；`1311 endpoints / 213 tracklets` 上 tracklet-equal mean gain `0.263 m`、bootstrap 95% CI `[0.230,0.296] m`。共享 warmup=5、唯一 formal true config、75720-step/last-only contract、server manifests/preflight/train/same-checkpoint control scripts已固定。
 - [x] 2026-07-22 commit `473738f` 的 cadence/shuffled manifests 与 E6 server preflight 已通过；R1 A1-init M2 formal 已成功进入 GPU2 训练，输出根为 `output/m2_formal_true_seed42_473738f_20260722_112536`。这只记录启动与 preflight 完成，训练完整性和 tracking 结果仍在 `need_to_do.md`。
+- [x] 2026-07-23 R1/R2/R3 三个训练全部结束并通过本地完整性复核：clean `473738f`、退出码 0、epoch59/global step75720、各 12 个 Success/Precision 点与 75720 条 loss；checkpoint SHA256 分别为 `362b3314...9658f`、`00a10b88...e48ae`、`d1ce4ea8...34280`，R1 的 35 项 artifact manifest 全匹配。
+- [x] 2026-07-23 完成三组 standard 指标、late mean、训练 loss、配置差异和归因边界分析：R1 `55.303/67.182`，R2 `53.318/62.503`，R3 `28.999/28.023`，历史 A1 `51.229/57.863`；判定为 `M2 STANDARD SIGNAL POSITIVE / METHOD ATTRIBUTION AND CAUSAL-TIME HOLD`。报告、CSV、图表、已执行 notebook 与自包含 HTML 见 `compare_results/reports/m2_three_run_analysis_20260723.md`。
+- [x] 2026-07-24 完成 R1 standard/gap1124 八组 same-checkpoint controls 的本地归档与独立复核：压缩包 SHA256 匹配，包内 `89/89` artifact hash 通过，8 份 endpoint CSV 在协议内 key/order/GT/real-time exact match，原始 CSV 指标复算与服务器 summary 完全一致。
+- [x] 2026-07-24 完成正式配对统计：M2−A1 在 standard 为 `+4.133/+9.445`、gap1124 为 `+2.279/+4.143`，两协议的 tracklet-bootstrap Success/Precision 95% CI 均为正；standard/gap1124 的 true−fixed/shuffled 均未达到因果门槛，所有时间控制 CI 跨 0。
+- [x] 2026-07-24 冻结结论为 `M2 TRACKING SIGNAL POSITIVE / PHYSICAL-TIME CAUSAL CLAIM NO-GO / METHOD ATTRIBUTION HOLD`。时间路径会改变预测且 gap true 会扩大 innovation radius，但 correct time 没有优于 fixed/shuffled；timestamp-conditioned M3/M4 不解锁。报告与可复算数据见 `compare_results/reports/m2_standard_gap8_analysis_20260724.md`、`compare_results/data/m2_standard_gap8_*_20260724.*`。
+- [x] 2026-07-24 识别 formal exporter 的 reference-validator 初始帧登记缺陷：`observed_keys` 未包含每条 tracklet 的 GT 初始化帧，导致首次运行误报缺少 106/91 endpoints。恢复只过滤 reference validator 的初始化行，最终 8 份 CSV 仍保留完整初始化帧；正式重跑前应修 validator，不使用 `--allow-partial-reference` 绕过。
 - [x] 当前六组新消融 YAML 已创建：
 
 ```text
@@ -68,10 +74,9 @@ cfgs/seqtrack3d_nuscenes_a2_residual_dyn_vr_random20.yaml
 ### 当前结论
 
 ```text
-真实时间方向没有被否定；
-当前最稳论文边界仍是保留 SeqTrack3D 主干的 order-time 语义，
-把真实 delta_t 的主张收窄为冻结协议下的因果消融，
-末端 bounded residual 暂时只保留为一次性机制收尾。
+当前 R1 tracker 在 standard/gap1124 相对 matched A1 有正信号；
+但 frozen true/fixed/shuffled 已否定 correct physical time 的因果 promotion，
+当前最稳论文边界是 variable-rate 协议、失败诊断与待归因的通用 proposal correction。
 但最新复核显示 A2-order-dyn 仍有明显 seed sensitivity，
 普通 fixed-step 全局涨点把握不高；
 递归 predicted-history 已证明 raw CV 恒开启不足；P0-B3 又证明 raw-CV 被动互补增益不足 5 pp，
