@@ -647,6 +647,7 @@ class MotionBaseModelMF(BaseModelMF):
                 "expansion_available_count": 0,
             }
             ct_search_active = False
+        search_has_usable_points = num_points_in_search > 2
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
         # Here we use 0.2/0.8 instead of 0/1 to indicate that the previous box is not GT.
@@ -716,6 +717,9 @@ class MotionBaseModelMF(BaseModelMF):
                          {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]
                      ], device=self.device, dtype=torch.int64),
                      "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
+                     "search_has_usable_points": torch.tensor(
+                         [search_has_usable_points],
+                         device=self.device, dtype=torch.float32),
                      "ct_search_used": torch.tensor(
                          [ct_search_active],
                          device=self.device, dtype=torch.float32),

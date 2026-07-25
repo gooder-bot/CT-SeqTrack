@@ -24,6 +24,8 @@ use_m4_state_filter: false
 use_m4_trajectory_tube: false
 
 # Fixed search budget. Expansion never increases the Transformer token count.
+ct_history_training_mode: canonical
+ct_history_correlation: 0.75
 ct_search_baseline_ratio: 0.75
 ct_search_min_expansion_points: 32
 ct_search_training_history: canonical

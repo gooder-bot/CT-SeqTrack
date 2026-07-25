@@ -391,6 +391,8 @@ def output_fields(output):
         "dynamics_innovation_applied_mask": None,
         "dynamics_innovation_invalid_fallback": None,
         "dynamics_innovation_valid": None,
+        "ct_fusion_alpha": None,
+        "ct_fusion_alpha_applied": None,
         "physical_time_adapter_norm": None,
         "physical_time_adapter_scale_effective": None,
         "obs_num_points_search": None,
@@ -499,6 +501,12 @@ def output_fields(output):
             ),
             "dynamics_innovation_valid": tensor_scalar(
                 output, "dynamics_innovation_valid"
+            ),
+            "ct_fusion_alpha": tensor_scalar(
+                output, "ct_fusion_alpha"
+            ),
+            "ct_fusion_alpha_applied": tensor_scalar(
+                output, "ct_fusion_alpha_applied"
             ),
             "physical_time_adapter_norm": tensor_scalar(
                 output, "physical_time_adapter_norm"
@@ -836,6 +844,8 @@ def self_test():
         "dynamics_innovation_clamp_mask",
         "dynamics_innovation_applied_mask",
         "dynamics_innovation_valid",
+        "ct_fusion_alpha",
+        "ct_fusion_alpha_applied",
         "physical_time_adapter_norm",
         "physical_time_adapter_scale_effective",
     }

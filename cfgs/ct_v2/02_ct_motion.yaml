@@ -4,6 +4,7 @@ experiment_name: ct_motion
 use_ct_v2: true
 use_dynamics_encoder: true
 use_time_guided_search: false
+ct_history_training_mode: correlated_candidate
 dynamics_motion_mode: proposal_innovation
 velocity_weight: 0.05
 dynamics_displacement_weight: 0.01

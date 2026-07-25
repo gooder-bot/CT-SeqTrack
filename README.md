@@ -13,7 +13,7 @@ SeqTrack3D
 
 ## 当前模型
 
-1. **Continuous-Time Motion Prior**：从历史框和真实 `delta_t` 学习速度，按当前时间间隔生成候选帧位移先验。
+1. **Continuous-Time Motion Prior**：从历史框和真实 `delta_t` 学习速度，按当前时间间隔生成候选帧位移先验；训练时以 clean/correlated history 混合替代纯 GT history。
 2. **Time-Guided Search Expansion**：保留 SeqTrack3D 原搜索区域，额外构造有界轨迹 tube；总点数仍为 1024，其中默认 75% 来自原搜索区域。
 3. **Adaptive Proposal Fusion**：根据观测特征、运动特征、proposal disagreement、点云可靠性、时间间隔和扩展比例，预测小幅有界修正。
 
@@ -62,6 +62,11 @@ python tools/ct_v2/run.py train \
 
 时间负对照使用同一 checkpoint。`fixed` 可直接运行；`shuffled` 先生成冻结 manifest：
 
+> 2026-07-25 以前的 B3 时间控制会通过 observation statistics
+> 继续读取真实 `dt`，不能作为 v2 因果证据。修复后的 gate、motion、
+> innovation radius 与 search tube 均只消费 `current_delta_t_effective`，
+> 因此必须用新代码重新运行三路控制。
+
 ```bash
 python tools/build_dynamics_time_manifest.py \
   --cfg cfgs/ct_v2/04_ct_seqtrack_v2.yaml \
@@ -94,6 +99,7 @@ python tools/ct_v2/run.py test \
 ```text
 models/ct_v2/       连续时间运动与自适应融合
 utils/ct_search.py  训练/评测共享的时间引导搜索
+utils/ct_history.py 轻量的相关历史误差契约
 cfgs/ct_v2/         当前唯一活跃的消融配置
 tools/ct_v2/run.py  当前唯一推荐运行入口
 docs/legacy/        旧阶段计划和运行说明
@@ -105,6 +111,8 @@ compare_results/    历史结果与正式分析
 - 现有 M2 相对历史 A1 在 standard 和 gap1124 有正信号，但包含训练路径混杂。
 - 正确时间尚未稳定优于 fixed/shuffled，因此当前不能声称“真实时间已被证明产生因果收益”。
 - v2 必须用同代码 baseline、同数据、同 seed、同训练步数重新建立结论。
+- B1–B3 使用 candidate0 clean、其余 candidate correlated 的历史混合；
+  canonical displacement/velocity 标签不随该输入扰动改变。
 
 历史细节见 [sum_results.md](sum_results.md) 和 [done.md](done.md)。
 ## 相关工作

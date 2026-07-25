@@ -29,6 +29,10 @@ from models.path_distillation import (
     update_ema_module,
 )
 from models.ct_v2 import ContinuousTimeMotionEncoder, ProposalFusionGate
+from models.ct_v2.contracts import (
+    build_search_usable_mask,
+    resolve_observation_delta_t,
+)
 
 # import vis_tool as vt
 
@@ -434,11 +438,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         valid_history_ratio = input_dict["valid_mask"].to(device=device, dtype=dtype).mean(dim=1)
         default_time_scale = getattr(self.config, 'default_time_step', getattr(self.config, 'time_step', 0.5))
         time_scale = max(float(getattr(self.config, "time_scale", default_time_scale)), 1e-6)
-        if "current_delta_t" in input_dict:
-            current_delta_t = input_dict["current_delta_t"].to(device=device, dtype=dtype).reshape(B)
-        else:
-            current_delta_t = seg_logits.new_full((B,), float(default_time_scale))
-        current_delta_t_ratio = current_delta_t / time_scale
+        observation_delta_t, real_delta_t, effective_delta_t = (
+            resolve_observation_delta_t(
+                input_dict,
+                seg_logits,
+                use_ct_v2=self.use_ct_v2,
+                default_time_step=default_time_scale,
+            ))
+        current_delta_t_ratio = observation_delta_t / time_scale
+        real_delta_t_ratio = real_delta_t / time_scale
+        effective_delta_t_ratio = effective_delta_t / time_scale
 
         obs_stats = torch.stack((
             torch.log1p(torch.clamp(num_points, min=0.0)),
@@ -457,6 +466,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "obs_mean_fg_score": mean_fg_score,
             "obs_valid_history_ratio": valid_history_ratio,
             "obs_current_delta_t_ratio": current_delta_t_ratio,
+            "obs_current_delta_t_real_ratio": real_delta_t_ratio,
+            "obs_current_delta_t_effective_ratio": effective_delta_t_ratio,
         }
         return obs_stats, obs_aux
 
@@ -601,13 +612,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if (
                     self.use_ct_v2
                     and self.training
-                    and "canonical_ref_boxs" in input_dict):
-                # Training history is expressed relative to the latest
-                # historical GT box.  Evaluation history is expressed
-                # relative to the latest predicted box.  Both therefore use
-                # the same "history relative to current anchor" semantics,
-                # without injecting independent candidate jitter as velocity.
-                dynamics_ref_boxs = input_dict["canonical_ref_boxs"]
+                    and (
+                        "ct_motion_ref_boxs" in input_dict
+                        or "canonical_ref_boxs" in input_dict)):
+                # New CT-v2 batches provide a canonical-anchored history with
+                # smooth relative trajectory errors. Old batches fall back to
+                # the exact canonical history for checkpoint/YAML compatibility.
+                dynamics_ref_boxs = input_dict.get(
+                    "ct_motion_ref_boxs",
+                    input_dict["canonical_ref_boxs"],
+                )
             z_dyn, velocity_pred, dynamics_displacement_pred, dynamics_valid = self.dynamics_encoder(
                 dynamics_ref_boxs,
                 input_dict.get("delta_t_effective", input_dict["delta_t"]),
@@ -698,11 +712,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 innovation_scale = 0.0
             innovation_valid = output_dict['dynamics_valid']
             if self.dynamics_innovation_disable_on_empty_search:
-                nonempty = (obs_aux['obs_num_points_search'] > 0).to(
-                    device=innovation_valid.device,
-                    dtype=innovation_valid.dtype,
-                ).reshape_as(innovation_valid)
-                innovation_valid = innovation_valid * nonempty
+                innovation_valid = innovation_valid * build_search_usable_mask(
+                    input_dict, obs_aux, innovation_valid)
             output_dict['dynamics_innovation_valid'] = innovation_valid
             innovation_alpha = self.dynamics_innovation_alpha
             if self.use_ct_v2 and self.ct_fusion_mode == 'adaptive':
@@ -723,7 +734,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 output_dict['ct_fusion_alpha'] = motion_pred.new_full(
                     (motion_pred.shape[0],),
                     float(self.dynamics_innovation_alpha),
-                ) * innovation_valid.reshape(motion_pred.shape[0])
+                )
             final_center, innovation_aux = apply_proposal_innovation(
                 motion_pred[:, :3],
                 output_dict['dynamics_displacement_pred'],
@@ -741,6 +752,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output_dict['motion_obs_pred'] = motion_pred
             output_dict['dynamics_innovation_scale_effective'] = motion_pred.new_tensor(
                 innovation_scale)
+            if 'ct_fusion_alpha' in output_dict:
+                # ``dynamics_innovation_alpha`` is the authoritative effective
+                # coefficient after both the valid mask and warmup scale.
+                output_dict['ct_fusion_alpha_applied'] = innovation_aux[
+                    'dynamics_innovation_alpha']
             output_dict.update(innovation_aux)
             motion_pred = torch.cat((final_center, motion_pred[:, 3:4]), dim=1)
 
@@ -803,7 +819,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "ct_search_baseline_points",
                 "ct_search_expansion_points",
                 "ct_search_query_delta_t",
-                "ct_search_predicted_displacement"):
+                "ct_search_predicted_displacement",
+                "search_has_usable_points"):
             if key in input_dict:
                 output_dict[key] = input_dict[key]
 
@@ -1271,6 +1288,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "obs_mean_fg_score": "obs_mean_fg_score",
                 "obs_valid_history_ratio": "obs_valid_history_ratio",
                 "obs_current_delta_t_ratio": "obs_current_delta_t_ratio",
+                "obs_current_delta_t_real_ratio":
+                    "obs_current_delta_t_real_ratio",
+                "obs_current_delta_t_effective_ratio":
+                    "obs_current_delta_t_effective_ratio",
             }
             for log_key, output_key in obs_log_map.items():
                 if output_key in output:
@@ -1330,6 +1351,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "ct_fusion_alpha_min": output["ct_fusion_alpha"].min(),
                 "ct_fusion_alpha_max": output["ct_fusion_alpha"].max(),
             })
+        if "ct_fusion_alpha_applied" in output:
+            loss_dict.update({
+                "ct_fusion_alpha_applied_mean": output[
+                    "ct_fusion_alpha_applied"].mean(),
+                "ct_fusion_alpha_applied_max": output[
+                    "ct_fusion_alpha_applied"].max(),
+            })
         if "dynamics_innovation_applied_norm" in output:
             loss_dict.update({
                 "ct_innovation_applied_norm": output[
@@ -1347,7 +1375,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "ct_search_baseline_points",
                 "ct_search_expansion_points",
                 "ct_search_query_delta_t",
-                "ct_search_predicted_displacement"):
+                "ct_search_predicted_displacement",
+                "search_has_usable_points"):
             if key in output:
                 loss_dict[f"{key}_mean"] = output[key].float().mean()
 

@@ -2,7 +2,19 @@
 
 更新时间：2026-07-25
 
-只执行下面四个部分。旧阶段的细碎任务已移到 `docs/legacy/need_to_do_20260724.md`，不再作为当前待办。
+只执行下面五个部分。旧阶段的细碎任务已移到 `docs/legacy/need_to_do_20260724.md`，不再作为当前待办。
+
+## 0. v2 逻辑修复门禁（代码已完成）
+
+- [x] B3 observation statistics 改用 effective `dt`，真实 `dt` 只保留为监督和诊断。
+- [x] B1–B3 加入 candidate0 clean / 非零 candidate correlated 的训练历史；motion 标签仍为 canonical。
+- [x] correlated search history 从实际 candidate anchor 出发，不再使用 GT anchor 构造 tube。
+- [x] 0、1、2 个可用搜索点时关闭 proposal innovation，并记录 nominal/applied alpha。
+- [x] 轻量单元测试覆盖时间 fallback、相关历史、invalid transition 和空搜索边界。
+
+完成条件：本地单测、配置解析和编译检查通过；服务器真实 batch 两步
+optimizer smoke 与 2-tracklet 三时间模式 smoke 通过后，才能开始 B0–B3。
+修复前的 B3 `true/fixed/shuffled` 存在真实时间旁路，不能作为 v2 因果证据。
 
 ## 1. 正常数据四组消融
 

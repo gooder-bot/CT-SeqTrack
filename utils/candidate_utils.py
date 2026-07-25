@@ -11,6 +11,11 @@ import copy
 import numpy as np
 from pyquaternion import Quaternion
 
+from utils.ct_history import (
+    build_ct_history_offsets,
+    normalize_ct_history_training_mode,
+)
+
 
 _CANDIDATE_TRAJECTORY_MODES = {
     "independent": "independent",
@@ -146,6 +151,78 @@ def equivalent_local_offsets(boxes, transformed_boxes, degrees=False):
             box_yaw(transformed, degrees) - box_yaw(box, degrees), degrees)
         offsets.append([local_translation[0], local_translation[1], delta_yaw])
     return np.asarray(offsets, dtype=np.float32)
+
+
+def apply_local_candidate_offset(box, offset, degrees=False):
+    """Apply an in-range SeqTrack3D-style local ``dx,dy,dyaw`` offset."""
+    offset = np.asarray(offset, dtype=np.float64)
+    if offset.shape != (3,) or not np.isfinite(offset).all():
+        raise ValueError("local candidate offset must be a finite [3] vector")
+    if np.array_equal(offset, np.zeros(3, dtype=offset.dtype)):
+        return copy.deepcopy(box)
+
+    transformed = copy.deepcopy(box)
+    center = np.asarray(box.center, dtype=np.float64)
+    rotation = Quaternion(matrix=box.rotation_matrix)
+    transformed.translate(-center)
+    transformed.rotate(rotation.inverse)
+    delta_rotation = (
+        Quaternion(axis=[0, 0, 1], degrees=float(offset[2]))
+        if degrees else Quaternion(axis=[0, 0, 1], radians=float(offset[2]))
+    )
+    transformed.rotate(delta_rotation)
+    transformed.translate(np.asarray([offset[0], offset[1], 0.0]))
+    transformed.rotate(rotation)
+    transformed.translate(center)
+    return transformed
+
+
+def build_ct_training_histories(
+        canonical_boxes,
+        candidate_boxes,
+        candidate_offsets,
+        candidate_id,
+        candidate_trajectory_mode,
+        training_mode="canonical",
+        correlation=0.75,
+        degrees=False):
+    """Build motion/search histories without changing canonical supervision.
+
+    Motion history stays anchored to the latest canonical box, so its physical
+    displacement target remains in the correct coordinate frame.  Search
+    history stays anchored to the actual candidate crop, matching the recursive
+    predicted-box path used at evaluation.
+    """
+    if not canonical_boxes:
+        raise ValueError("CT history construction requires at least one box")
+    if len(canonical_boxes) != len(candidate_boxes):
+        raise ValueError("canonical and candidate histories must have equal length")
+
+    candidate_trajectory_mode = normalize_candidate_trajectory_mode(
+        candidate_trajectory_mode)
+    candidate_offsets = np.asarray(candidate_offsets, dtype=np.float32)
+    if candidate_offsets.shape != (len(canonical_boxes), 3):
+        raise ValueError(
+            "candidate offsets must match the historical box sequence")
+    motion_offsets, search_offsets = build_ct_history_offsets(
+        candidate_offsets,
+        candidate_id,
+        candidate_trajectory_mode,
+        training_mode=normalize_ct_history_training_mode(training_mode),
+        correlation=correlation,
+    )
+    motion_boxes = [
+        apply_local_candidate_offset(box, offset, degrees=degrees)
+        for box, offset in zip(canonical_boxes, motion_offsets)
+    ]
+    if search_offsets is None:
+        search_boxes = [copy.deepcopy(box) for box in candidate_boxes]
+    else:
+        search_boxes = [
+            apply_local_candidate_offset(box, offset, degrees=degrees)
+            for box, offset in zip(canonical_boxes, search_offsets)
+        ]
+    return motion_boxes, search_boxes
 
 
 def canonical_dynamics_targets(previous_boxes, current_box, current_delta_t,

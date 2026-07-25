@@ -122,10 +122,13 @@ class ProposalFusionGate(nn.Module):
         ), dim=1)
         gate_input = torch.nan_to_num(
             gate_input, nan=0.0, posinf=0.0, neginf=0.0)
-        alpha = self.max_alpha * torch.sigmoid(self.gate(gate_input))
-        alpha = alpha * valid
-        return alpha, {
-            "ct_fusion_alpha": alpha.squeeze(1),
+        nominal_alpha = self.max_alpha * torch.sigmoid(self.gate(gate_input))
+        effective_alpha = nominal_alpha * valid
+        return effective_alpha, {
+            # Keep the learned gate output separate from runtime safety masks.
+            # The caller records the coefficient that was actually applied
+            # after validity and warmup as ``ct_fusion_alpha_applied``.
+            "ct_fusion_alpha": nominal_alpha.squeeze(1),
             "ct_fusion_disagreement": disagreement.squeeze(1),
             "ct_fusion_search_ratio": expansion_ratio.squeeze(1),
             "ct_fusion_valid": valid.squeeze(1),

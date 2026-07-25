@@ -26,6 +26,7 @@ from utils.twc_utils import (
 from utils.candidate_utils import (
     apply_shared_se2_to_boxes,
     boxes_to_anchor_parameters,
+    build_ct_training_histories,
     canonical_dynamics_targets,
     equivalent_local_offsets,
     normalize_candidate_trajectory_mode,
@@ -316,8 +317,25 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
+    ct_motion_history_boxs, ct_search_history_boxs = build_ct_training_histories(
+        canonical_prev_boxs,
+        ref_boxs,
+        candidate_offsets,
+        candidate_id,
+        candidate_trajectory_mode,
+        training_mode=getattr(
+            config, 'ct_history_training_mode', 'canonical'),
+        correlation=float(getattr(
+            config, 'ct_history_correlation', 0.75)),
+        degrees=config.degrees,
+    )
     canonical_ref_boxs = boxes_to_anchor_parameters(
         canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
+    ct_motion_ref_boxs = boxes_to_anchor_parameters(
+        ct_motion_history_boxs,
+        canonical_prev_boxs[0],
+        degrees=config.degrees,
+    )
 
     real_time_fields = build_time_fields(
         prev_timestamps, current_timestamp,
@@ -385,14 +403,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'ct_search_training_history',
             'canonical',
         )).strip().lower()
-        if search_history_mode not in ('canonical', 'candidate'):
+        if search_history_mode not in (
+                'canonical', 'candidate', 'correlated_candidate'):
             raise ValueError(
-                "ct_search_training_history must be canonical or candidate")
-        search_history_boxes = (
-            canonical_prev_boxs
-            if search_history_mode == 'canonical'
-            else ref_boxs
-        )
+                "ct_search_training_history must be canonical, candidate, "
+                "or correlated_candidate")
+        if search_history_mode == 'canonical':
+            search_history_boxes = canonical_prev_boxs
+        elif search_history_mode == 'candidate':
+            search_history_boxes = ref_boxs
+        else:
+            search_history_boxes = ct_search_history_boxs
         ct_search_box, ct_search_diagnostics = build_time_guided_search_box(
             search_history_boxes,
             effective_delta_t_list,
@@ -474,6 +495,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if ct_search_active:
         num_points_in_search += int(
             ct_search_sampling['expansion_available_count'])
+    search_has_usable_points = num_points_in_search > 2
 
     seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
@@ -587,6 +609,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'dynamics_time_mode_id': np.int64(
             {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]),
         'num_points_in_search': np.float32(num_points_in_search),
+        'search_has_usable_points': np.float32(search_has_usable_points),
         'ct_search_used': np.float32(ct_search_active),
         'ct_search_expansion_ratio': np.float32(
             ct_search_sampling['expansion_sample_count']
@@ -602,6 +625,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'velocity_label': velocity_label,
         'dynamics_displacement_label': dynamics_displacement_label,
         'canonical_ref_boxs': canonical_ref_boxs,
+        'ct_motion_ref_boxs': ct_motion_ref_boxs,
         'candidate_id': np.int64(candidate_id),
         'candidate_trajectory_mode_id': np.int64(
             {'independent': 0, 'shared_se2': 1}[candidate_trajectory_mode]),
