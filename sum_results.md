@@ -1,8 +1,12 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-24
+更新时间：2026-07-25
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
+
+## 2026-07-25 v2 重构说明
+
+CT-SeqTrack 已收敛为 baseline、CT Motion、CT Motion + Search、完整 Adaptive Fusion 四组正常数据消融。当前只完成代码与实验合同，**尚无 v2 分数**；因此下方 M2/M3/M4 数值继续作为历史证据，不能当作新 v2 的结果。v2 的正式结论必须由同代码 B0–B3 重新建立。
 
 ## 0. 当前总判断
 

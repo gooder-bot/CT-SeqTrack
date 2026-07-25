@@ -1,0 +1,12 @@
+_base_: 04_ct_seqtrack_v2.yaml
+
+# Full nuScenes is the formal dataset. Run only after the mini promotion gate.
+path: /home/lishengjie/data/nuscenes
+version: v1.0-trainval
+train_split: train_track
+val_split: val
+test_split: val
+batch_size: 16
+workers: 12
+epoch: 60
+

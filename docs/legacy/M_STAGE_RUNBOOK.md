@@ -1,4 +1,4 @@
-# CT-SeqTrack M 阶段运行手册
+# CT-SeqTrack 历史 M 阶段运行手册
 
 当前工程状态：M3 matched A/B/C 训练、standard/gap1124 配对评测、M4 四臂在线递归评测均已接通。代码已经通过 dataset-free invariants、配置合同、自测、Python 编译和 Bash 语法检查；本机没有 nuScenes 数据与 CUDA，因此最终训练分数需要在服务器产生。
 

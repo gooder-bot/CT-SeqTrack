@@ -1,0 +1,107 @@
+run_id,run,run_label,metric,step,epoch,value
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,6310,5,45.35667419433594
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,12620,10,52.65755081176758
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,18930,15,39.280094146728516
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,25240,20,48.18709182739258
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,31550,25,45.8512077331543
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,37860,30,57.185997009277344
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,44170,35,47.759300231933594
+B,M3-w0,"M2 + paired EMA path, weight 0",Precision,50480,40,62.28775405883789
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,6310,5,34.602848052978516
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,12620,10,40.13676452636719
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,18930,15,41.495628356933594
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,25240,20,37.0557975769043
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,31550,25,45.86980438232422
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,37860,30,47.926700592041016
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,44170,35,46.45186233520508
+B,M3-w0,"M2 + paired EMA path, weight 0",Success,50480,40,49.64223098754883
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,6310,5,24.868711471557617
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,12620,10,66.77571868896484
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,18930,15,34.60175323486328
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,25240,20,35.6181640625
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,31550,25,51.29650115966797
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,37860,30,58.057987213134766
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,44170,35,51.45076370239258
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,50480,40,58.10065841674805
+C,M3-w.05,M2 + M3 endpoint distillation,Precision,56790,45,55.95623779296875
+C,M3-w.05,M2 + M3 endpoint distillation,Success,6310,5,26.478116989135742
+C,M3-w.05,M2 + M3 endpoint distillation,Success,12620,10,37.773521423339844
+C,M3-w.05,M2 + M3 endpoint distillation,Success,18930,15,39.55908203125
+C,M3-w.05,M2 + M3 endpoint distillation,Success,25240,20,30.99452781677246
+C,M3-w.05,M2 + M3 endpoint distillation,Success,31550,25,48.94858169555664
+C,M3-w.05,M2 + M3 endpoint distillation,Success,37860,30,47.987972259521484
+C,M3-w.05,M2 + M3 endpoint distillation,Success,44170,35,48.1455192565918
+C,M3-w.05,M2 + M3 endpoint distillation,Success,50480,40,48.72757339477539
+C,M3-w.05,M2 + M3 endpoint distillation,Success,56790,45,51.03610610961914
+M2,M2,M2 dynamics bundle,Precision,6310,5,61.551414489746094
+M2,M2,M2 dynamics bundle,Precision,12620,10,48.48249816894531
+M2,M2,M2 dynamics bundle,Precision,18930,15,32.89824676513672
+M2,M2,M2 dynamics bundle,Precision,25240,20,46.082054138183594
+M2,M2,M2 dynamics bundle,Precision,31550,25,43.43763732910156
+M2,M2,M2 dynamics bundle,Precision,37860,30,63.01750946044922
+M2,M2,M2 dynamics bundle,Precision,44170,35,54.829322814941406
+M2,M2,M2 dynamics bundle,Precision,50480,40,55.824947357177734
+M2,M2,M2 dynamics bundle,Precision,56790,45,57.95077133178711
+M2,M2,M2 dynamics bundle,Precision,63100,50,62.660831451416016
+M2,M2,M2 dynamics bundle,Precision,69410,55,59.272430419921875
+M2,M2,M2 dynamics bundle,Precision,75720,60,62.09300231933594
+M2,M2,M2 dynamics bundle,Success,6310,5,50.198028564453125
+M2,M2,M2 dynamics bundle,Success,12620,10,43.259300231933594
+M2,M2,M2 dynamics bundle,Success,18930,15,34.85011291503906
+M2,M2,M2 dynamics bundle,Success,25240,20,37.955142974853516
+M2,M2,M2 dynamics bundle,Success,31550,25,43.85667419433594
+M2,M2,M2 dynamics bundle,Success,37860,30,50.707881927490234
+M2,M2,M2 dynamics bundle,Success,44170,35,47.71882247924805
+M2,M2,M2 dynamics bundle,Success,50480,40,48.0010986328125
+M2,M2,M2 dynamics bundle,Success,56790,45,50.742889404296875
+M2,M2,M2 dynamics bundle,Success,63100,50,52.69255828857422
+M2,M2,M2 dynamics bundle,Success,69410,55,50.867610931396484
+M2,M2,M2 dynamics bundle,Success,75720,60,52.57877731323242
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,6310,5,41.869808197021484
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,12620,10,65.21444702148438
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,18930,15,50.54158020019531
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,25240,20,49.23085403442383
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,31550,25,60.63239669799805
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,37860,30,53.90918731689453
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,44170,35,62.339168548583984
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,50480,40,51.1739616394043
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,56790,45,59.610504150390625
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,63100,50,57.308536529541016
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,69410,55,59.318382263183594
+SEQ,SeqTrack,SeqTrack historical baseline,Precision,75720,60,59.96171188354492
+SEQ,SeqTrack,SeqTrack historical baseline,Success,6310,5,40.696937561035156
+SEQ,SeqTrack,SeqTrack historical baseline,Success,12620,10,46.09081268310547
+SEQ,SeqTrack,SeqTrack historical baseline,Success,18930,15,45.729759216308594
+SEQ,SeqTrack,SeqTrack historical baseline,Success,25240,20,42.8851203918457
+SEQ,SeqTrack,SeqTrack historical baseline,Success,31550,25,51.736324310302734
+SEQ,SeqTrack,SeqTrack historical baseline,Success,37860,30,48.92888259887695
+SEQ,SeqTrack,SeqTrack historical baseline,Success,44170,35,52.28337097167969
+SEQ,SeqTrack,SeqTrack historical baseline,Success,50480,40,46.47811508178711
+SEQ,SeqTrack,SeqTrack historical baseline,Success,56790,45,50.462799072265625
+SEQ,SeqTrack,SeqTrack historical baseline,Success,63100,50,50.2024040222168
+SEQ,SeqTrack,SeqTrack historical baseline,Success,69410,55,49.13457489013672
+SEQ,SeqTrack,SeqTrack historical baseline,Success,75720,60,50.98577880859375
+W0,W0,W0 shared-SE(2),Precision,6310,5,29.912471771240234
+W0,W0,W0 shared-SE(2),Precision,12620,10,28.92560386657715
+W0,W0,W0 shared-SE(2),Precision,18930,15,33.176151275634766
+W0,W0,W0 shared-SE(2),Precision,25240,20,30.725383758544922
+W0,W0,W0 shared-SE(2),Precision,31550,25,27.446388244628906
+W0,W0,W0 shared-SE(2),Precision,37860,30,30.50984764099121
+W0,W0,W0 shared-SE(2),Precision,44170,35,30.038293838500977
+W0,W0,W0 shared-SE(2),Precision,50480,40,25.083148956298828
+W0,W0,W0 shared-SE(2),Precision,56790,45,27.062362670898438
+W0,W0,W0 shared-SE(2),Precision,63100,50,26.735231399536133
+W0,W0,W0 shared-SE(2),Precision,69410,55,26.298686981201172
+W0,W0,W0 shared-SE(2),Precision,75720,60,27.203502655029297
+W0,W0,W0 shared-SE(2),Success,6310,5,26.147703170776367
+W0,W0,W0 shared-SE(2),Success,12620,10,28.736326217651367
+W0,W0,W0 shared-SE(2),Success,18930,15,32.729759216308594
+W0,W0,W0 shared-SE(2),Success,25240,20,29.642230987548828
+W0,W0,W0 shared-SE(2),Success,31550,25,27.902624130249023
+W0,W0,W0 shared-SE(2),Success,37860,30,29.58534049987793
+W0,W0,W0 shared-SE(2),Success,44170,35,29.955142974853516
+W0,W0,W0 shared-SE(2),Success,50480,40,26.077682495117188
+W0,W0,W0 shared-SE(2),Success,56790,45,27.701313018798828
+W0,W0,W0 shared-SE(2),Success,63100,50,27.49562644958496
+W0,W0,W0 shared-SE(2),Success,69410,55,26.9135684967041
+W0,W0,W0 shared-SE(2),Success,75720,60,28.1455135345459

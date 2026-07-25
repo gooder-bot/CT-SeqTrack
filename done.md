@@ -1,12 +1,23 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-24
+更新时间：2026-07-25
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
 注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
 
 ---
+
+## 2026-07-25：CT-SeqTrack v2 工程收敛
+
+- [x] 当前方法收敛为 Continuous-Time Motion Prior、Time-Guided Search Expansion、Adaptive Proposal Fusion 三个模块。
+- [x] 搜索扩展接入训练和递归评测，保留 baseline crop，并固定 1024 点预算。
+- [x] 新增 observation-first 自适应有界 proposal gate；旧 Gate、TWC、M3、M4 与 v2 互斥。
+- [x] 新增 `_base_` YAML 继承、`cfgs/ct_v2/` 四组消融和统一运行入口。
+- [x] 根目录计划与待办已精简；旧阶段材料移动到 `docs/legacy/`。
+- [x] v2 单元测试、Python 编译、配置解析和 runner dry-run 已通过。
+
+注意：以上是工程完成，不是模型涨点结论。B0–B3 正常数据实验尚未运行。
 
 ## 0. 完成总览
 

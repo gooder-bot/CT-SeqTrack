@@ -8,7 +8,6 @@ import argparse
 
 # import pytorch_lightning.utilities.distributed
 import torch
-import yaml
 from easydict import EasyDict
 import os
 import json
@@ -30,6 +29,7 @@ import sys
 
 import datetime
 import time
+from utils.config import load_yaml_config
 
 def generate_log_folder_name(cfg):
     if cfg.get('log_dir'):
@@ -41,12 +41,7 @@ def generate_log_folder_name(cfg):
     return folder_name
 
 def load_yaml(file_name):
-    with open(file_name, 'r') as f:
-        try:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-        except:
-            config = yaml.load(f)
-    return config
+    return load_yaml_config(file_name)
 
 
 def load_initial_weights(model, checkpoint_path, report_path=None):
@@ -111,11 +106,21 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
 
 def parse_config():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=100, help='input batch size')
-    parser.add_argument('--epoch', type=int, default=60, help='number of epochs')
-    parser.add_argument('--save_top_k', type=int, default=5, help='save top k checkpoints')
-    parser.add_argument('--check_val_every_n_epoch', type=int, default=1, help='check_val_every_n_epoch')
-    parser.add_argument('--workers', type=int, default=10, help='number of data loading workers')
+    parser.add_argument(
+        '--batch_size', type=int, default=argparse.SUPPRESS,
+        help='input batch size (YAML value is used when omitted)')
+    parser.add_argument(
+        '--epoch', type=int, default=argparse.SUPPRESS,
+        help='number of epochs (YAML value is used when omitted)')
+    parser.add_argument(
+        '--save_top_k', type=int, default=argparse.SUPPRESS,
+        help='save top k checkpoints')
+    parser.add_argument(
+        '--check_val_every_n_epoch', type=int, default=argparse.SUPPRESS,
+        help='validation interval')
+    parser.add_argument(
+        '--workers', type=int, default=argparse.SUPPRESS,
+        help='number of data loading workers')
     parser.add_argument('--cfg', type=str, help='the config_file')
     parser.add_argument(
         '--path', type=str, default=argparse.SUPPRESS,
@@ -155,6 +160,21 @@ def parse_config():
         '--test_virtual_rate_manifest',
         default=argparse.SUPPRESS,
         help='Frozen test endpoint-selection manifest.')
+    parser.add_argument(
+        '--test_virtual_rate_drop_prob',
+        type=float,
+        default=argparse.SUPPRESS,
+        help='Random-drop probability for test_virtual_rate_mode=random_drop.')
+    parser.add_argument(
+        '--test_virtual_rate_seed',
+        type=int,
+        default=argparse.SUPPRESS,
+        help='Random-drop seed for the test protocol.')
+    parser.add_argument(
+        '--test_virtual_rate_max_gap',
+        type=int,
+        default=argparse.SUPPRESS,
+        help='Maximum retained-frame gap for random-drop evaluation.')
     parser.add_argument(
         '--kitti_hv_interval',
         default=argparse.SUPPRESS,
@@ -201,6 +221,15 @@ def parse_config():
     args = parser.parse_args()
     config = load_yaml(args.cfg)
     config.update(vars(args))  # override the configuration using the value in args
+    defaults = {
+        'batch_size': 100,
+        'epoch': 60,
+        'save_top_k': 5,
+        'check_val_every_n_epoch': 1,
+        'workers': 10,
+    }
+    for key, value in defaults.items():
+        config.setdefault(key, value)
     m3_variant = config.get('m3_variant')
     if m3_variant is not None:
         if m3_variant not in ('off', 'distill'):

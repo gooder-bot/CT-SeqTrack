@@ -12,11 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset  # noqa: E402
+from utils.config import load_yaml_config  # noqa: E402
 
 
 def load_config(path):
-    with open(path, "r") as handle:
-        cfg = EasyDict(yaml.load(handle, Loader=yaml.FullLoader))
+    cfg = EasyDict(load_yaml_config(path))
     cfg.preloading = False
     if "tiny" not in cfg:
         cfg.tiny = False

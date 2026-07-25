@@ -1,0 +1,20 @@
+_base_: nuscenes_mini_base.yaml
+
+experiment_name: ct_motion
+use_ct_v2: true
+use_dynamics_encoder: true
+use_time_guided_search: false
+dynamics_motion_mode: proposal_innovation
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.01
+
+# Fixed fusion isolates the value of the continuous-time motion prior before
+# introducing a learned gate.
+ct_fusion_mode: fixed
+dynamics_innovation_alpha: 0.75
+dynamics_innovation_scale: 1.0
+dynamics_innovation_warmup_epoch: 5
+dynamics_innovation_radius_base: 0.5
+dynamics_innovation_radius_per_second: 0.5
+dynamics_innovation_radius_max: 2.0
+dynamics_innovation_disable_on_empty_search: true

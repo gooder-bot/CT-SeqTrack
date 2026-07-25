@@ -1,10 +1,12 @@
-""" 
-__init__.py
-Created by zenn at 2021/7/15 21:40
+"""Model registry.
+
+Models are imported lazily so geometry/config utilities can be tested without
+initializing PyTorch Lightning, nuScenes, or CUDA extensions.
 """
 
-from models import seqtrack3d
+import importlib
+
 
 def get_model(name):
-    model = globals()[name.lower()].__getattribute__(name.upper())
-    return model
+    module = importlib.import_module(f"models.{name.lower()}")
+    return getattr(module, name.upper())

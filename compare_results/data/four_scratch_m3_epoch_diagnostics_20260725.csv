@@ -1,0 +1,811 @@
+epoch,value,points,metric,run_id,run
+1,0.9611170689196056,1262,M3 path loss,B,M3-w0
+2,0.2851057126660567,1262,M3 path loss,B,M3-w0
+3,0.29488454613002185,1262,M3 path loss,B,M3-w0
+4,0.2811172602619982,1262,M3 path loss,B,M3-w0
+5,0.24776600323792358,1262,M3 path loss,B,M3-w0
+6,0.12204874807429276,1262,M3 path loss,B,M3-w0
+7,0.0693813695198902,1262,M3 path loss,B,M3-w0
+8,0.0654878509083317,1262,M3 path loss,B,M3-w0
+9,0.05433319789791412,1262,M3 path loss,B,M3-w0
+10,0.03898313520133064,1262,M3 path loss,B,M3-w0
+11,0.0448243646617173,1262,M3 path loss,B,M3-w0
+12,0.03823864393001909,1262,M3 path loss,B,M3-w0
+13,0.03325331809489749,1262,M3 path loss,B,M3-w0
+14,0.031520631850028125,1262,M3 path loss,B,M3-w0
+15,0.0333186016970044,1262,M3 path loss,B,M3-w0
+16,0.029096725899187433,1262,M3 path loss,B,M3-w0
+17,0.03303942173247472,1262,M3 path loss,B,M3-w0
+18,0.033298724079266616,1262,M3 path loss,B,M3-w0
+19,0.034031605406659886,1262,M3 path loss,B,M3-w0
+20,0.03169351485634419,1262,M3 path loss,B,M3-w0
+21,0.025978076314376874,1262,M3 path loss,B,M3-w0
+22,0.026212045326731177,1262,M3 path loss,B,M3-w0
+23,0.0269756093000895,1262,M3 path loss,B,M3-w0
+24,0.027059723562029635,1262,M3 path loss,B,M3-w0
+25,0.02820209810736651,1262,M3 path loss,B,M3-w0
+26,0.028838290939112703,1262,M3 path loss,B,M3-w0
+27,0.028274209327214816,1262,M3 path loss,B,M3-w0
+28,0.028251926799498686,1262,M3 path loss,B,M3-w0
+29,0.02806885100793844,1262,M3 path loss,B,M3-w0
+30,0.027554550231351383,1262,M3 path loss,B,M3-w0
+31,0.028108058166651427,1262,M3 path loss,B,M3-w0
+32,0.027730025984321036,1262,M3 path loss,B,M3-w0
+33,0.02778260891873994,1262,M3 path loss,B,M3-w0
+34,0.026926904244999852,1262,M3 path loss,B,M3-w0
+35,0.02743513544648,1262,M3 path loss,B,M3-w0
+36,0.025991506004467476,1262,M3 path loss,B,M3-w0
+37,0.02719954734470451,1262,M3 path loss,B,M3-w0
+38,0.02760600539363154,1262,M3 path loss,B,M3-w0
+39,0.02695778526503712,1262,M3 path loss,B,M3-w0
+40,0.026350843488760316,1262,M3 path loss,B,M3-w0
+41,0.026687082993644275,1262,M3 path loss,B,M3-w0
+42,0.028131777753742787,1262,M3 path loss,B,M3-w0
+43,0.027420704464447315,1262,M3 path loss,B,M3-w0
+44,0.026870537342187088,531,M3 path loss,B,M3-w0
+1,6.953595249097434,1262,Irregular view B diagnostic GT loss,B,M3-w0
+2,4.84190592533435,1262,Irregular view B diagnostic GT loss,B,M3-w0
+3,3.982890242394857,1262,Irregular view B diagnostic GT loss,B,M3-w0
+4,3.338069895415223,1262,Irregular view B diagnostic GT loss,B,M3-w0
+5,3.1415769141610186,1262,Irregular view B diagnostic GT loss,B,M3-w0
+6,1.925737610414459,1262,Irregular view B diagnostic GT loss,B,M3-w0
+7,1.3849325977773561,1262,Irregular view B diagnostic GT loss,B,M3-w0
+8,1.3110240717225143,1262,Irregular view B diagnostic GT loss,B,M3-w0
+9,1.2382839876632967,1262,Irregular view B diagnostic GT loss,B,M3-w0
+10,1.0906743869752211,1262,Irregular view B diagnostic GT loss,B,M3-w0
+11,1.1116876956163986,1262,Irregular view B diagnostic GT loss,B,M3-w0
+12,1.013723389235238,1262,Irregular view B diagnostic GT loss,B,M3-w0
+13,0.9453115259694221,1262,Irregular view B diagnostic GT loss,B,M3-w0
+14,0.89949865793889,1262,Irregular view B diagnostic GT loss,B,M3-w0
+15,0.9169160552122135,1262,Irregular view B diagnostic GT loss,B,M3-w0
+16,0.8407853402894008,1262,Irregular view B diagnostic GT loss,B,M3-w0
+17,0.9014928490868084,1262,Irregular view B diagnostic GT loss,B,M3-w0
+18,0.8708662646579101,1262,Irregular view B diagnostic GT loss,B,M3-w0
+19,0.8925806271139586,1262,Irregular view B diagnostic GT loss,B,M3-w0
+20,0.843137577707435,1262,Irregular view B diagnostic GT loss,B,M3-w0
+21,0.7240361638142833,1262,Irregular view B diagnostic GT loss,B,M3-w0
+22,0.7236997827462462,1262,Irregular view B diagnostic GT loss,B,M3-w0
+23,0.7418803009433338,1262,Irregular view B diagnostic GT loss,B,M3-w0
+24,0.7442846781856095,1262,Irregular view B diagnostic GT loss,B,M3-w0
+25,0.7790711890498734,1262,Irregular view B diagnostic GT loss,B,M3-w0
+26,0.7856532414274057,1262,Irregular view B diagnostic GT loss,B,M3-w0
+27,0.7766049468207945,1262,Irregular view B diagnostic GT loss,B,M3-w0
+28,0.7799095197000707,1262,Irregular view B diagnostic GT loss,B,M3-w0
+29,0.7767989181525261,1262,Irregular view B diagnostic GT loss,B,M3-w0
+30,0.7633215169910867,1262,Irregular view B diagnostic GT loss,B,M3-w0
+31,0.7638054435243224,1262,Irregular view B diagnostic GT loss,B,M3-w0
+32,0.7368081090366689,1262,Irregular view B diagnostic GT loss,B,M3-w0
+33,0.7542054730153122,1262,Irregular view B diagnostic GT loss,B,M3-w0
+34,0.7196256421955093,1262,Irregular view B diagnostic GT loss,B,M3-w0
+35,0.7476735555769052,1262,Irregular view B diagnostic GT loss,B,M3-w0
+36,0.7382084881080972,1262,Irregular view B diagnostic GT loss,B,M3-w0
+37,0.7417191036470624,1262,Irregular view B diagnostic GT loss,B,M3-w0
+38,0.7487848830688302,1262,Irregular view B diagnostic GT loss,B,M3-w0
+39,0.7349936145869941,1262,Irregular view B diagnostic GT loss,B,M3-w0
+40,0.7194304277975756,1262,Irregular view B diagnostic GT loss,B,M3-w0
+41,0.7112406927814763,1262,Irregular view B diagnostic GT loss,B,M3-w0
+42,0.7361305796035024,1262,Irregular view B diagnostic GT loss,B,M3-w0
+43,0.7302961455932604,1262,Irregular view B diagnostic GT loss,B,M3-w0
+44,0.732910530288716,533,Irregular view B diagnostic GT loss,B,M3-w0
+1,5.44936203182027,1262,Canonical view A supervised loss,B,M3-w0
+2,2.559617827887014,1262,Canonical view A supervised loss,B,M3-w0
+3,1.4841403586173019,1262,Canonical view A supervised loss,B,M3-w0
+4,1.0465071893720732,1262,Canonical view A supervised loss,B,M3-w0
+5,0.8681035688155805,1262,Canonical view A supervised loss,B,M3-w0
+6,0.6856341642311371,1262,Canonical view A supervised loss,B,M3-w0
+7,0.6151494745832238,1262,Canonical view A supervised loss,B,M3-w0
+8,0.5467667497115921,1262,Canonical view A supervised loss,B,M3-w0
+9,0.5306976670532143,1262,Canonical view A supervised loss,B,M3-w0
+10,0.48953538134150953,1262,Canonical view A supervised loss,B,M3-w0
+11,0.4695304459323974,1262,Canonical view A supervised loss,B,M3-w0
+12,0.4278667416016198,1262,Canonical view A supervised loss,B,M3-w0
+13,0.40910239703658074,1262,Canonical view A supervised loss,B,M3-w0
+14,0.38234482026067096,1262,Canonical view A supervised loss,B,M3-w0
+15,0.38138645013614236,1262,Canonical view A supervised loss,B,M3-w0
+16,0.3673136909440656,1262,Canonical view A supervised loss,B,M3-w0
+17,0.3513912895189601,1262,Canonical view A supervised loss,B,M3-w0
+18,0.3271481206141731,1262,Canonical view A supervised loss,B,M3-w0
+19,0.32846531672211343,1262,Canonical view A supervised loss,B,M3-w0
+20,0.3044525040298842,1262,Canonical view A supervised loss,B,M3-w0
+21,0.2656917974010417,1262,Canonical view A supervised loss,B,M3-w0
+22,0.24253168593495847,1262,Canonical view A supervised loss,B,M3-w0
+23,0.2347149692605679,1262,Canonical view A supervised loss,B,M3-w0
+24,0.23187703321645076,1262,Canonical view A supervised loss,B,M3-w0
+25,0.2282539306359038,1262,Canonical view A supervised loss,B,M3-w0
+26,0.223361035191975,1262,Canonical view A supervised loss,B,M3-w0
+27,0.22447703126965537,1262,Canonical view A supervised loss,B,M3-w0
+28,0.21533839295953275,1262,Canonical view A supervised loss,B,M3-w0
+29,0.21777791888253814,1262,Canonical view A supervised loss,B,M3-w0
+30,0.21756456712063066,1262,Canonical view A supervised loss,B,M3-w0
+31,0.21251149597192528,1262,Canonical view A supervised loss,B,M3-w0
+32,0.20792584637218345,1262,Canonical view A supervised loss,B,M3-w0
+33,0.2106675408638884,1262,Canonical view A supervised loss,B,M3-w0
+34,0.21050988640724763,1262,Canonical view A supervised loss,B,M3-w0
+35,0.20669842573405256,1262,Canonical view A supervised loss,B,M3-w0
+36,0.20231220102536887,1262,Canonical view A supervised loss,B,M3-w0
+37,0.19970278780193035,1262,Canonical view A supervised loss,B,M3-w0
+38,0.1951429688514885,1262,Canonical view A supervised loss,B,M3-w0
+39,0.20074544758454743,1262,Canonical view A supervised loss,B,M3-w0
+40,0.1939356494311202,1262,Canonical view A supervised loss,B,M3-w0
+41,0.19467535872372507,1262,Canonical view A supervised loss,B,M3-w0
+42,0.194459076905874,1262,Canonical view A supervised loss,B,M3-w0
+43,0.1884850051531512,1262,Canonical view A supervised loss,B,M3-w0
+44,0.19066663449139973,532,Canonical view A supervised loss,B,M3-w0
+1,2.4739306232583504,1262,Center endpoint gap (m),B,M3-w0
+2,1.0950941606860154,1262,Center endpoint gap (m),B,M3-w0
+3,1.1383327641502234,1262,Center endpoint gap (m),B,M3-w0
+4,1.11430959967917,1262,Center endpoint gap (m),B,M3-w0
+5,1.0025472557629722,1262,Center endpoint gap (m),B,M3-w0
+6,0.6208121011626985,1262,Center endpoint gap (m),B,M3-w0
+7,0.4424700843385774,1262,Center endpoint gap (m),B,M3-w0
+8,0.4175662410204932,1262,Center endpoint gap (m),B,M3-w0
+9,0.3689843634063771,1262,Center endpoint gap (m),B,M3-w0
+10,0.31916011625490553,1262,Center endpoint gap (m),B,M3-w0
+11,0.33005444974699033,1262,Center endpoint gap (m),B,M3-w0
+12,0.3074132004861975,1262,Center endpoint gap (m),B,M3-w0
+13,0.28622032110999956,1262,Center endpoint gap (m),B,M3-w0
+14,0.27932561880269824,1262,Center endpoint gap (m),B,M3-w0
+15,0.2842737725166908,1262,Center endpoint gap (m),B,M3-w0
+16,0.2686904785348761,1262,Center endpoint gap (m),B,M3-w0
+17,0.2804828674876369,1262,Center endpoint gap (m),B,M3-w0
+18,0.277595254411056,1262,Center endpoint gap (m),B,M3-w0
+19,0.28183188661932945,1262,Center endpoint gap (m),B,M3-w0
+20,0.2672734866405818,1262,Center endpoint gap (m),B,M3-w0
+21,0.22207390664000706,1262,Center endpoint gap (m),B,M3-w0
+22,0.22539679280138336,1262,Center endpoint gap (m),B,M3-w0
+23,0.22929721746871193,1262,Center endpoint gap (m),B,M3-w0
+24,0.22904406232602906,1262,Center endpoint gap (m),B,M3-w0
+25,0.2327807852275162,1262,Center endpoint gap (m),B,M3-w0
+26,0.23442164276285235,1262,Center endpoint gap (m),B,M3-w0
+27,0.23189474250560424,1262,Center endpoint gap (m),B,M3-w0
+28,0.23125301814518526,1262,Center endpoint gap (m),B,M3-w0
+29,0.23088382029531024,1262,Center endpoint gap (m),B,M3-w0
+30,0.22976273445563064,1262,Center endpoint gap (m),B,M3-w0
+31,0.2301661815382127,1262,Center endpoint gap (m),B,M3-w0
+32,0.22990454816319958,1262,Center endpoint gap (m),B,M3-w0
+33,0.22971158519257362,1262,Center endpoint gap (m),B,M3-w0
+34,0.22913241996274886,1262,Center endpoint gap (m),B,M3-w0
+35,0.2288143289955879,1262,Center endpoint gap (m),B,M3-w0
+36,0.22237214477062697,1262,Center endpoint gap (m),B,M3-w0
+37,0.22763309494345765,1262,Center endpoint gap (m),B,M3-w0
+38,0.2288014747515297,1262,Center endpoint gap (m),B,M3-w0
+39,0.226589011028409,1262,Center endpoint gap (m),B,M3-w0
+40,0.22366636619857394,1262,Center endpoint gap (m),B,M3-w0
+41,0.22393939721733094,1262,Center endpoint gap (m),B,M3-w0
+42,0.22729831544325205,1262,Center endpoint gap (m),B,M3-w0
+43,0.2262746204316569,1262,Center endpoint gap (m),B,M3-w0
+44,0.2240715693431289,534,Center endpoint gap (m),B,M3-w0
+1,1.0764899030416353,1262,Yaw endpoint gap (rad),B,M3-w0
+2,0.18497868922204017,1262,Yaw endpoint gap (rad),B,M3-w0
+3,0.11684587506338269,1262,Yaw endpoint gap (rad),B,M3-w0
+4,0.07341204986283216,1262,Yaw endpoint gap (rad),B,M3-w0
+5,0.05970173248675801,1262,Yaw endpoint gap (rad),B,M3-w0
+6,0.04607651887015807,1262,Yaw endpoint gap (rad),B,M3-w0
+7,0.04058071982304429,1262,Yaw endpoint gap (rad),B,M3-w0
+8,0.03652125201298724,1262,Yaw endpoint gap (rad),B,M3-w0
+9,0.03504970306811025,1262,Yaw endpoint gap (rad),B,M3-w0
+10,0.03200471445861997,1262,Yaw endpoint gap (rad),B,M3-w0
+11,0.031870990001969926,1262,Yaw endpoint gap (rad),B,M3-w0
+12,0.031191159418685194,1262,Yaw endpoint gap (rad),B,M3-w0
+13,0.030409979464253042,1262,Yaw endpoint gap (rad),B,M3-w0
+14,0.029713293928254496,1262,Yaw endpoint gap (rad),B,M3-w0
+15,0.029233446559852518,1262,Yaw endpoint gap (rad),B,M3-w0
+16,0.02754744836210425,1262,Yaw endpoint gap (rad),B,M3-w0
+17,0.02842623535610098,1262,Yaw endpoint gap (rad),B,M3-w0
+18,0.026871698862015493,1262,Yaw endpoint gap (rad),B,M3-w0
+19,0.026314228223695783,1262,Yaw endpoint gap (rad),B,M3-w0
+20,0.025826485551932087,1262,Yaw endpoint gap (rad),B,M3-w0
+21,0.01306765147454582,1262,Yaw endpoint gap (rad),B,M3-w0
+22,0.012756410897628252,1262,Yaw endpoint gap (rad),B,M3-w0
+23,0.01260739367008032,1262,Yaw endpoint gap (rad),B,M3-w0
+24,0.012223677387665485,1262,Yaw endpoint gap (rad),B,M3-w0
+25,0.012643767175413727,1262,Yaw endpoint gap (rad),B,M3-w0
+26,0.012667722848027047,1262,Yaw endpoint gap (rad),B,M3-w0
+27,0.012466578324075947,1262,Yaw endpoint gap (rad),B,M3-w0
+28,0.012317401023984558,1262,Yaw endpoint gap (rad),B,M3-w0
+29,0.012632085774949916,1262,Yaw endpoint gap (rad),B,M3-w0
+30,0.012594071705235249,1262,Yaw endpoint gap (rad),B,M3-w0
+31,0.013043734107001223,1262,Yaw endpoint gap (rad),B,M3-w0
+32,0.013001525552652587,1262,Yaw endpoint gap (rad),B,M3-w0
+33,0.012579778487360173,1262,Yaw endpoint gap (rad),B,M3-w0
+34,0.012479777558575341,1262,Yaw endpoint gap (rad),B,M3-w0
+35,0.012742992183533032,1262,Yaw endpoint gap (rad),B,M3-w0
+36,0.012577756522215974,1262,Yaw endpoint gap (rad),B,M3-w0
+37,0.012517082764510296,1262,Yaw endpoint gap (rad),B,M3-w0
+38,0.012837416627267213,1262,Yaw endpoint gap (rad),B,M3-w0
+39,0.01260526119192646,1262,Yaw endpoint gap (rad),B,M3-w0
+40,0.01213285919199897,1262,Yaw endpoint gap (rad),B,M3-w0
+41,0.010693034802145795,1262,Yaw endpoint gap (rad),B,M3-w0
+42,0.010848433357975616,1262,Yaw endpoint gap (rad),B,M3-w0
+43,0.010863701575295483,1262,Yaw endpoint gap (rad),B,M3-w0
+44,0.010799033006105758,541,Yaw endpoint gap (rad),B,M3-w0
+1,0.7492571315372425,1262,Valid pair ratio,B,M3-w0
+2,0.7489104595879557,1262,Valid pair ratio,B,M3-w0
+3,0.7499504754358162,1262,Valid pair ratio,B,M3-w0
+4,0.749702852614897,1262,Valid pair ratio,B,M3-w0
+5,0.7477218700475435,1262,Valid pair ratio,B,M3-w0
+6,0.750891442155309,1262,Valid pair ratio,B,M3-w0
+7,0.7498514263074485,1262,Valid pair ratio,B,M3-w0
+8,0.7493066561014263,1262,Valid pair ratio,B,M3-w0
+9,0.7509409667194928,1262,Valid pair ratio,B,M3-w0
+10,0.7492076069730587,1262,Valid pair ratio,B,M3-w0
+11,0.7498019017432647,1262,Valid pair ratio,B,M3-w0
+12,0.751188589540412,1262,Valid pair ratio,B,M3-w0
+13,0.748217115689382,1262,Valid pair ratio,B,M3-w0
+14,0.7486628367670365,1262,Valid pair ratio,B,M3-w0
+15,0.7518324088748018,1262,Valid pair ratio,B,M3-w0
+16,0.7484647385103012,1262,Valid pair ratio,B,M3-w0
+17,0.75,1262,Valid pair ratio,B,M3-w0
+18,0.7520305071315373,1262,Valid pair ratio,B,M3-w0
+19,0.7522286053882726,1262,Valid pair ratio,B,M3-w0
+20,0.7498019017432647,1262,Valid pair ratio,B,M3-w0
+21,0.7503466719492868,1262,Valid pair ratio,B,M3-w0
+22,0.7495542789223455,1262,Valid pair ratio,B,M3-w0
+23,0.7491580824088748,1262,Valid pair ratio,B,M3-w0
+24,0.7511390649762282,1262,Valid pair ratio,B,M3-w0
+25,0.750891442155309,1262,Valid pair ratio,B,M3-w0
+26,0.748811410459588,1262,Valid pair ratio,B,M3-w0
+27,0.7505447702060222,1262,Valid pair ratio,B,M3-w0
+28,0.750594294770206,1262,Valid pair ratio,B,M3-w0
+29,0.7490095087163233,1262,Valid pair ratio,B,M3-w0
+30,0.7491580824088748,1262,Valid pair ratio,B,M3-w0
+31,0.7492076069730587,1262,Valid pair ratio,B,M3-w0
+32,0.7490095087163233,1262,Valid pair ratio,B,M3-w0
+33,0.7519314580031695,1262,Valid pair ratio,B,M3-w0
+34,0.7498514263074485,1262,Valid pair ratio,B,M3-w0
+35,0.753318145800317,1262,Valid pair ratio,B,M3-w0
+36,0.7499504754358162,1262,Valid pair ratio,B,M3-w0
+37,0.7498019017432647,1262,Valid pair ratio,B,M3-w0
+38,0.7479694928684627,1262,Valid pair ratio,B,M3-w0
+39,0.7518819334389857,1262,Valid pair ratio,B,M3-w0
+40,0.751188589540412,1262,Valid pair ratio,B,M3-w0
+41,0.7515352614896988,1262,Valid pair ratio,B,M3-w0
+42,0.751485736925515,1262,Valid pair ratio,B,M3-w0
+43,0.7512381141045958,1262,Valid pair ratio,B,M3-w0
+44,0.7441081330868762,541,Valid pair ratio,B,M3-w0
+1,0.26495826936868594,1262,Teacher confidence,B,M3-w0
+2,0.6438317548383246,1262,Teacher confidence,B,M3-w0
+3,0.7885104098524042,1262,Teacher confidence,B,M3-w0
+4,0.8058731775087336,1262,Teacher confidence,B,M3-w0
+5,0.8182678413938985,1262,Teacher confidence,B,M3-w0
+6,0.8267492537642054,1262,Teacher confidence,B,M3-w0
+7,0.8229965995495369,1262,Teacher confidence,B,M3-w0
+8,0.8232649874573842,1262,Teacher confidence,B,M3-w0
+9,0.8197491947567406,1262,Teacher confidence,B,M3-w0
+10,0.822014766336432,1262,Teacher confidence,B,M3-w0
+11,0.8226010549795798,1262,Teacher confidence,B,M3-w0
+12,0.8248463836033635,1262,Teacher confidence,B,M3-w0
+13,0.8273222113468001,1262,Teacher confidence,B,M3-w0
+14,0.82716318084113,1262,Teacher confidence,B,M3-w0
+15,0.8283171291963423,1262,Teacher confidence,B,M3-w0
+16,0.8274833287943373,1262,Teacher confidence,B,M3-w0
+17,0.8288668468948779,1262,Teacher confidence,B,M3-w0
+18,0.8316034955664784,1262,Teacher confidence,B,M3-w0
+19,0.8320267596259926,1262,Teacher confidence,B,M3-w0
+20,0.8315510525945249,1262,Teacher confidence,B,M3-w0
+21,0.8339162254248481,1262,Teacher confidence,B,M3-w0
+22,0.8310557008025763,1262,Teacher confidence,B,M3-w0
+23,0.8332246339831224,1262,Teacher confidence,B,M3-w0
+24,0.8311901500126828,1262,Teacher confidence,B,M3-w0
+25,0.8323398559293732,1262,Teacher confidence,B,M3-w0
+26,0.8340945574683735,1262,Teacher confidence,B,M3-w0
+27,0.8345891566926439,1262,Teacher confidence,B,M3-w0
+28,0.8338678424407487,1262,Teacher confidence,B,M3-w0
+29,0.8331559231466423,1262,Teacher confidence,B,M3-w0
+30,0.8354261744230183,1262,Teacher confidence,B,M3-w0
+31,0.8351557712216763,1262,Teacher confidence,B,M3-w0
+32,0.8354009133180612,1262,Teacher confidence,B,M3-w0
+33,0.8353785753911346,1262,Teacher confidence,B,M3-w0
+34,0.8348260774570864,1262,Teacher confidence,B,M3-w0
+35,0.8342667355920924,1262,Teacher confidence,B,M3-w0
+36,0.8340482509646288,1262,Teacher confidence,B,M3-w0
+37,0.8331074078704589,1262,Teacher confidence,B,M3-w0
+38,0.8322961760918047,1262,Teacher confidence,B,M3-w0
+39,0.8346742289568845,1262,Teacher confidence,B,M3-w0
+40,0.8338260904497654,1262,Teacher confidence,B,M3-w0
+41,0.836119891653537,1262,Teacher confidence,B,M3-w0
+42,0.8344392793492168,1262,Teacher confidence,B,M3-w0
+43,0.8332588803465883,1262,Teacher confidence,B,M3-w0
+44,0.839350897051629,539,Teacher confidence,B,M3-w0
+1,0.1980224538745031,1262,Effective sample weight,B,M3-w0
+2,0.48226139738730694,1262,Effective sample weight,B,M3-w0
+3,0.5913299008046768,1262,Effective sample weight,B,M3-w0
+4,0.6043754874384725,1262,Effective sample weight,B,M3-w0
+5,0.6118095740439775,1262,Effective sample weight,B,M3-w0
+6,0.6210560537697585,1262,Effective sample weight,B,M3-w0
+7,0.6173589801778884,1262,Effective sample weight,B,M3-w0
+8,0.6167761672364929,1262,Effective sample weight,B,M3-w0
+9,0.6158351546091436,1262,Effective sample weight,B,M3-w0
+10,0.6162366336196803,1262,Effective sample weight,B,M3-w0
+11,0.6162613332507727,1262,Effective sample weight,B,M3-w0
+12,0.6190036622166822,1262,Effective sample weight,B,M3-w0
+13,0.6187823534295223,1262,Effective sample weight,B,M3-w0
+14,0.6193838385649604,1262,Effective sample weight,B,M3-w0
+15,0.6226753806680583,1262,Effective sample weight,B,M3-w0
+16,0.6190237118117216,1262,Effective sample weight,B,M3-w0
+17,0.6216839029558487,1262,Effective sample weight,B,M3-w0
+18,0.6255155682752703,1262,Effective sample weight,B,M3-w0
+19,0.625853815790496,1262,Effective sample weight,B,M3-w0
+20,0.6238553798425406,1262,Effective sample weight,B,M3-w0
+21,0.6260856113938258,1262,Effective sample weight,B,M3-w0
+22,0.6232132685212817,1262,Effective sample weight,B,M3-w0
+23,0.6244205077859187,1262,Effective sample weight,B,M3-w0
+24,0.6242987701754941,1262,Effective sample weight,B,M3-w0
+25,0.6255144939983703,1262,Effective sample weight,B,M3-w0
+26,0.6249189230889413,1262,Effective sample weight,B,M3-w0
+27,0.6264242477679592,1262,Effective sample weight,B,M3-w0
+28,0.6262691019312515,1262,Effective sample weight,B,M3-w0
+29,0.6239340758739296,1262,Effective sample weight,B,M3-w0
+30,0.625556950098739,1262,Effective sample weight,B,M3-w0
+31,0.6255316591678444,1262,Effective sample weight,B,M3-w0
+32,0.625648486420583,1262,Effective sample weight,B,M3-w0
+33,0.6279437773862467,1262,Effective sample weight,B,M3-w0
+34,0.6260390867096876,1262,Effective sample weight,B,M3-w0
+35,0.6285539047464893,1262,Effective sample weight,B,M3-w0
+36,0.6253840000429168,1262,Effective sample weight,B,M3-w0
+37,0.6254015805556922,1262,Effective sample weight,B,M3-w0
+38,0.6228684738703462,1262,Effective sample weight,B,M3-w0
+39,0.6277304468130347,1262,Effective sample weight,B,M3-w0
+40,0.6265559943655591,1262,Effective sample weight,B,M3-w0
+41,0.6280999643205651,1262,Effective sample weight,B,M3-w0
+42,0.6268300828767465,1262,Effective sample weight,B,M3-w0
+43,0.626138245176211,1262,Effective sample weight,B,M3-w0
+44,0.624297011886451,537,Effective sample weight,B,M3-w0
+1,0.0,1262,Effective M3 objective weight,B,M3-w0
+2,0.0,1262,Effective M3 objective weight,B,M3-w0
+3,0.0,1262,Effective M3 objective weight,B,M3-w0
+4,0.0,1262,Effective M3 objective weight,B,M3-w0
+5,0.0,1262,Effective M3 objective weight,B,M3-w0
+6,0.0,1262,Effective M3 objective weight,B,M3-w0
+7,0.0,1262,Effective M3 objective weight,B,M3-w0
+8,0.0,1262,Effective M3 objective weight,B,M3-w0
+9,0.0,1262,Effective M3 objective weight,B,M3-w0
+10,0.0,1262,Effective M3 objective weight,B,M3-w0
+11,0.0,1262,Effective M3 objective weight,B,M3-w0
+12,0.0,1262,Effective M3 objective weight,B,M3-w0
+13,0.0,1262,Effective M3 objective weight,B,M3-w0
+14,0.0,1262,Effective M3 objective weight,B,M3-w0
+15,0.0,1262,Effective M3 objective weight,B,M3-w0
+16,0.0,1262,Effective M3 objective weight,B,M3-w0
+17,0.0,1262,Effective M3 objective weight,B,M3-w0
+18,0.0,1262,Effective M3 objective weight,B,M3-w0
+19,0.0,1262,Effective M3 objective weight,B,M3-w0
+20,0.0,1262,Effective M3 objective weight,B,M3-w0
+21,0.0,1262,Effective M3 objective weight,B,M3-w0
+22,0.0,1262,Effective M3 objective weight,B,M3-w0
+23,0.0,1262,Effective M3 objective weight,B,M3-w0
+24,0.0,1262,Effective M3 objective weight,B,M3-w0
+25,0.0,1262,Effective M3 objective weight,B,M3-w0
+26,0.0,1262,Effective M3 objective weight,B,M3-w0
+27,0.0,1262,Effective M3 objective weight,B,M3-w0
+28,0.0,1262,Effective M3 objective weight,B,M3-w0
+29,0.0,1262,Effective M3 objective weight,B,M3-w0
+30,0.0,1262,Effective M3 objective weight,B,M3-w0
+31,0.0,1262,Effective M3 objective weight,B,M3-w0
+32,0.0,1262,Effective M3 objective weight,B,M3-w0
+33,0.0,1262,Effective M3 objective weight,B,M3-w0
+34,0.0,1262,Effective M3 objective weight,B,M3-w0
+35,0.0,1262,Effective M3 objective weight,B,M3-w0
+36,0.0,1262,Effective M3 objective weight,B,M3-w0
+37,0.0,1262,Effective M3 objective weight,B,M3-w0
+38,0.0,1262,Effective M3 objective weight,B,M3-w0
+39,0.0,1262,Effective M3 objective weight,B,M3-w0
+40,0.0,1262,Effective M3 objective weight,B,M3-w0
+41,0.0,1262,Effective M3 objective weight,B,M3-w0
+42,0.0,1262,Effective M3 objective weight,B,M3-w0
+43,0.0,1262,Effective M3 objective weight,B,M3-w0
+44,0.0,538,Effective M3 objective weight,B,M3-w0
+1,0.7692677778547568,1262,M3 path loss,C,M3-w.05
+2,0.25129700112252507,1262,M3 path loss,C,M3-w.05
+3,0.23386006381158997,1262,M3 path loss,C,M3-w.05
+4,0.2218902216926837,1262,M3 path loss,C,M3-w.05
+5,0.20607733184570615,1262,M3 path loss,C,M3-w.05
+6,0.12240897543426152,1262,M3 path loss,C,M3-w.05
+7,0.07350739078148284,1262,M3 path loss,C,M3-w.05
+8,0.06374930264133069,1262,M3 path loss,C,M3-w.05
+9,0.05051151417439697,1262,M3 path loss,C,M3-w.05
+10,0.0441938465638802,1262,M3 path loss,C,M3-w.05
+11,0.042368197149892116,1262,M3 path loss,C,M3-w.05
+12,0.03314844552256321,1262,M3 path loss,C,M3-w.05
+13,0.029252448071577702,1262,M3 path loss,C,M3-w.05
+14,0.03939384347592221,1262,M3 path loss,C,M3-w.05
+15,0.029729930114854503,1262,M3 path loss,C,M3-w.05
+16,0.024405619436673888,1262,M3 path loss,C,M3-w.05
+17,0.026234767389212175,1262,M3 path loss,C,M3-w.05
+18,0.021918539240800963,1262,M3 path loss,C,M3-w.05
+19,0.028950439610336973,1262,M3 path loss,C,M3-w.05
+20,0.03007005734979186,1262,M3 path loss,C,M3-w.05
+21,0.036367312260668555,1262,M3 path loss,C,M3-w.05
+22,0.024628155380249445,1262,M3 path loss,C,M3-w.05
+23,0.02047182154387775,1262,M3 path loss,C,M3-w.05
+24,0.016816826937671288,1262,M3 path loss,C,M3-w.05
+25,0.01587675549713496,1262,M3 path loss,C,M3-w.05
+26,0.015325269492663348,1262,M3 path loss,C,M3-w.05
+27,0.014638573272394867,1262,M3 path loss,C,M3-w.05
+28,0.015006597319010146,1262,M3 path loss,C,M3-w.05
+29,0.014900010690003008,1262,M3 path loss,C,M3-w.05
+30,0.01428872408000708,1262,M3 path loss,C,M3-w.05
+31,0.014337852705442,1262,M3 path loss,C,M3-w.05
+32,0.014248408263430394,1262,M3 path loss,C,M3-w.05
+33,0.014429949045267247,1262,M3 path loss,C,M3-w.05
+34,0.013908519223177892,1262,M3 path loss,C,M3-w.05
+35,0.013817541517937931,1262,M3 path loss,C,M3-w.05
+36,0.013347021462343206,1262,M3 path loss,C,M3-w.05
+37,0.0140919819105787,1262,M3 path loss,C,M3-w.05
+38,0.014069233091103733,1262,M3 path loss,C,M3-w.05
+39,0.014515321659262398,1262,M3 path loss,C,M3-w.05
+40,0.01362382791614549,1262,M3 path loss,C,M3-w.05
+41,0.013510189650387677,1262,M3 path loss,C,M3-w.05
+42,0.013818845940826139,1262,M3 path loss,C,M3-w.05
+43,0.014563035227149126,1262,M3 path loss,C,M3-w.05
+44,0.014170901715416365,1262,M3 path loss,C,M3-w.05
+45,0.013651101991756363,1262,M3 path loss,C,M3-w.05
+46,0.015595603490288814,230,M3 path loss,C,M3-w.05
+1,6.409752269932283,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+2,4.456347807179163,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+3,3.730734294974105,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+4,3.178436507962396,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+5,2.896828012661964,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+6,1.9369574202056354,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+7,1.3333558973674728,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+8,1.211405179910539,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+9,1.116973054638094,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+10,1.007976406267158,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+11,1.0159056142161462,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+12,0.957878372772182,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+13,0.8391815558040482,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+14,0.9705481378925395,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+15,0.8417240800291725,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+16,0.7686825268053215,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+17,0.7651182566127385,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+18,0.7212226981099359,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+19,0.8127570557400655,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+20,0.8252798273167595,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+21,0.8365952124001484,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+22,0.67121865113285,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+23,0.6154855424080711,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+24,0.5866569941848658,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+25,0.5762947465273922,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+26,0.5723977893496467,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+27,0.5558469611236297,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+28,0.5393530681150746,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+29,0.5453369113042502,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+30,0.5383730172910233,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+31,0.527781196835963,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+32,0.5315384270767969,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+33,0.523075730381932,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+34,0.5293308915939365,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+35,0.5194018600942499,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+36,0.5284971959664592,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+37,0.520225034149957,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+38,0.5230884069013048,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+39,0.5280293290593356,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+40,0.5228409428686707,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+41,0.5325676548558917,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+42,0.5247221802687494,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+43,0.5261766309252159,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+44,0.5242720211659766,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+45,0.5187458250311494,1262,Irregular view B diagnostic GT loss,C,M3-w.05
+46,0.5641755999933029,232,Irregular view B diagnostic GT loss,C,M3-w.05
+1,4.961017189048549,1262,Canonical view A supervised loss,C,M3-w.05
+2,2.23367328859169,1262,Canonical view A supervised loss,C,M3-w.05
+3,1.322265132246229,1262,Canonical view A supervised loss,C,M3-w.05
+4,0.9690435954300235,1262,Canonical view A supervised loss,C,M3-w.05
+5,0.795827634172092,1262,Canonical view A supervised loss,C,M3-w.05
+6,0.6521226000365478,1262,Canonical view A supervised loss,C,M3-w.05
+7,0.5844196489113258,1262,Canonical view A supervised loss,C,M3-w.05
+8,0.5359889573156361,1262,Canonical view A supervised loss,C,M3-w.05
+9,0.5089906904309185,1262,Canonical view A supervised loss,C,M3-w.05
+10,0.4753468841810234,1262,Canonical view A supervised loss,C,M3-w.05
+11,0.4511011543723558,1262,Canonical view A supervised loss,C,M3-w.05
+12,0.4194101690655654,1262,Canonical view A supervised loss,C,M3-w.05
+13,0.3924906047241151,1262,Canonical view A supervised loss,C,M3-w.05
+14,0.3867894925188905,1262,Canonical view A supervised loss,C,M3-w.05
+15,0.37496578095926536,1262,Canonical view A supervised loss,C,M3-w.05
+16,0.3623471602667625,1262,Canonical view A supervised loss,C,M3-w.05
+17,0.35221263300479877,1262,Canonical view A supervised loss,C,M3-w.05
+18,0.3304269915054037,1262,Canonical view A supervised loss,C,M3-w.05
+19,0.3288907166068603,1262,Canonical view A supervised loss,C,M3-w.05
+20,0.31256366986338574,1262,Canonical view A supervised loss,C,M3-w.05
+21,0.27252362235176203,1262,Canonical view A supervised loss,C,M3-w.05
+22,0.24581879742809595,1262,Canonical view A supervised loss,C,M3-w.05
+23,0.23887272291889092,1262,Canonical view A supervised loss,C,M3-w.05
+24,0.2353806305387413,1262,Canonical view A supervised loss,C,M3-w.05
+25,0.22809248440050287,1262,Canonical view A supervised loss,C,M3-w.05
+26,0.22690001988514857,1262,Canonical view A supervised loss,C,M3-w.05
+27,0.22206659001636242,1262,Canonical view A supervised loss,C,M3-w.05
+28,0.21212129145506445,1262,Canonical view A supervised loss,C,M3-w.05
+29,0.2151285401130724,1262,Canonical view A supervised loss,C,M3-w.05
+30,0.21464014996179687,1262,Canonical view A supervised loss,C,M3-w.05
+31,0.2108745799767423,1262,Canonical view A supervised loss,C,M3-w.05
+32,0.20957335695718812,1262,Canonical view A supervised loss,C,M3-w.05
+33,0.20848435546653774,1262,Canonical view A supervised loss,C,M3-w.05
+34,0.21025038459198034,1262,Canonical view A supervised loss,C,M3-w.05
+35,0.2017950008367963,1262,Canonical view A supervised loss,C,M3-w.05
+36,0.2009251440466395,1262,Canonical view A supervised loss,C,M3-w.05
+37,0.19970443536027108,1262,Canonical view A supervised loss,C,M3-w.05
+38,0.1936838649915865,1262,Canonical view A supervised loss,C,M3-w.05
+39,0.19895544561384787,1262,Canonical view A supervised loss,C,M3-w.05
+40,0.19376070664017778,1262,Canonical view A supervised loss,C,M3-w.05
+41,0.19308595560644584,1262,Canonical view A supervised loss,C,M3-w.05
+42,0.1931570952672588,1262,Canonical view A supervised loss,C,M3-w.05
+43,0.1903683477259948,1262,Canonical view A supervised loss,C,M3-w.05
+44,0.19262792136986548,1262,Canonical view A supervised loss,C,M3-w.05
+45,0.19151593235848255,1262,Canonical view A supervised loss,C,M3-w.05
+46,0.20572839253421488,232,Canonical view A supervised loss,C,M3-w.05
+1,2.3075603100038746,1262,Center endpoint gap (m),C,M3-w.05
+2,1.0090452776823293,1262,Center endpoint gap (m),C,M3-w.05
+3,0.930250018409995,1262,Center endpoint gap (m),C,M3-w.05
+4,0.904009837108161,1262,Center endpoint gap (m),C,M3-w.05
+5,0.8614580409509822,1262,Center endpoint gap (m),C,M3-w.05
+6,0.625399300188015,1262,Center endpoint gap (m),C,M3-w.05
+7,0.47093689158889457,1262,Center endpoint gap (m),C,M3-w.05
+8,0.42835942659344045,1262,Center endpoint gap (m),C,M3-w.05
+9,0.3694782448835116,1262,Center endpoint gap (m),C,M3-w.05
+10,0.3393581861219769,1262,Center endpoint gap (m),C,M3-w.05
+11,0.32202193632178755,1262,Center endpoint gap (m),C,M3-w.05
+12,0.28867523707508475,1262,Center endpoint gap (m),C,M3-w.05
+13,0.2666339446980914,1262,Center endpoint gap (m),C,M3-w.05
+14,0.2927489430774977,1262,Center endpoint gap (m),C,M3-w.05
+15,0.26346731622793407,1262,Center endpoint gap (m),C,M3-w.05
+16,0.2402137301938989,1262,Center endpoint gap (m),C,M3-w.05
+17,0.24605168471859676,1262,Center endpoint gap (m),C,M3-w.05
+18,0.2265074883931554,1262,Center endpoint gap (m),C,M3-w.05
+19,0.24886178095985895,1262,Center endpoint gap (m),C,M3-w.05
+20,0.24598757874238322,1262,Center endpoint gap (m),C,M3-w.05
+21,0.23853289481199297,1262,Center endpoint gap (m),C,M3-w.05
+22,0.20463466358543764,1262,Center endpoint gap (m),C,M3-w.05
+23,0.19338252871531975,1262,Center endpoint gap (m),C,M3-w.05
+24,0.18192774322173202,1262,Center endpoint gap (m),C,M3-w.05
+25,0.17816179497506937,1262,Center endpoint gap (m),C,M3-w.05
+26,0.17596734440317244,1262,Center endpoint gap (m),C,M3-w.05
+27,0.17315664461322378,1262,Center endpoint gap (m),C,M3-w.05
+28,0.174767000562321,1262,Center endpoint gap (m),C,M3-w.05
+29,0.17226492943280566,1262,Center endpoint gap (m),C,M3-w.05
+30,0.17157409511648247,1262,Center endpoint gap (m),C,M3-w.05
+31,0.17083403588864485,1262,Center endpoint gap (m),C,M3-w.05
+32,0.16977425891663966,1262,Center endpoint gap (m),C,M3-w.05
+33,0.16939788504773765,1262,Center endpoint gap (m),C,M3-w.05
+34,0.1671141080894816,1262,Center endpoint gap (m),C,M3-w.05
+35,0.16470051371446692,1262,Center endpoint gap (m),C,M3-w.05
+36,0.1631471224014076,1262,Center endpoint gap (m),C,M3-w.05
+37,0.1690658147840889,1262,Center endpoint gap (m),C,M3-w.05
+38,0.16472906465811887,1262,Center endpoint gap (m),C,M3-w.05
+39,0.1673406771311858,1262,Center endpoint gap (m),C,M3-w.05
+40,0.16316169559093643,1262,Center endpoint gap (m),C,M3-w.05
+41,0.15815502808690543,1262,Center endpoint gap (m),C,M3-w.05
+42,0.15906825280274528,1262,Center endpoint gap (m),C,M3-w.05
+43,0.16299867808004095,1262,Center endpoint gap (m),C,M3-w.05
+44,0.16084096070656498,1262,Center endpoint gap (m),C,M3-w.05
+45,0.1573171630478132,1262,Center endpoint gap (m),C,M3-w.05
+46,0.16599679147649524,234,Center endpoint gap (m),C,M3-w.05
+1,0.49357887615468915,1262,Yaw endpoint gap (rad),C,M3-w.05
+2,0.10764544016479406,1262,Yaw endpoint gap (rad),C,M3-w.05
+3,0.07188363274538716,1262,Yaw endpoint gap (rad),C,M3-w.05
+4,0.054729966034968096,1262,Yaw endpoint gap (rad),C,M3-w.05
+5,0.045851228639879005,1262,Yaw endpoint gap (rad),C,M3-w.05
+6,0.03899825427226616,1262,Yaw endpoint gap (rad),C,M3-w.05
+7,0.03541958464085229,1262,Yaw endpoint gap (rad),C,M3-w.05
+8,0.03436175551008663,1262,Yaw endpoint gap (rad),C,M3-w.05
+9,0.0330770855353298,1262,Yaw endpoint gap (rad),C,M3-w.05
+10,0.03297664041050877,1262,Yaw endpoint gap (rad),C,M3-w.05
+11,0.03128435631303291,1262,Yaw endpoint gap (rad),C,M3-w.05
+12,0.03139293954261946,1262,Yaw endpoint gap (rad),C,M3-w.05
+13,0.029030264445644008,1262,Yaw endpoint gap (rad),C,M3-w.05
+14,0.02826643919995831,1262,Yaw endpoint gap (rad),C,M3-w.05
+15,0.027860471902772334,1262,Yaw endpoint gap (rad),C,M3-w.05
+16,0.02590415826939613,1262,Yaw endpoint gap (rad),C,M3-w.05
+17,0.027260062733455524,1262,Yaw endpoint gap (rad),C,M3-w.05
+18,0.025972562042476752,1262,Yaw endpoint gap (rad),C,M3-w.05
+19,0.024806586795275448,1262,Yaw endpoint gap (rad),C,M3-w.05
+20,0.024335447430209198,1262,Yaw endpoint gap (rad),C,M3-w.05
+21,0.012350011047783193,1262,Yaw endpoint gap (rad),C,M3-w.05
+22,0.01210784683632775,1262,Yaw endpoint gap (rad),C,M3-w.05
+23,0.012332687396836569,1262,Yaw endpoint gap (rad),C,M3-w.05
+24,0.012116311591970196,1262,Yaw endpoint gap (rad),C,M3-w.05
+25,0.012223731117026376,1262,Yaw endpoint gap (rad),C,M3-w.05
+26,0.011952050527810117,1262,Yaw endpoint gap (rad),C,M3-w.05
+27,0.011615626617643256,1262,Yaw endpoint gap (rad),C,M3-w.05
+28,0.011680905374169952,1262,Yaw endpoint gap (rad),C,M3-w.05
+29,0.011922587705156197,1262,Yaw endpoint gap (rad),C,M3-w.05
+30,0.012031220652940853,1262,Yaw endpoint gap (rad),C,M3-w.05
+31,0.012024457755176831,1262,Yaw endpoint gap (rad),C,M3-w.05
+32,0.01183111426050047,1262,Yaw endpoint gap (rad),C,M3-w.05
+33,0.01175042612311355,1262,Yaw endpoint gap (rad),C,M3-w.05
+34,0.01169834160076221,1262,Yaw endpoint gap (rad),C,M3-w.05
+35,0.011758887239070624,1262,Yaw endpoint gap (rad),C,M3-w.05
+36,0.0115004722912694,1262,Yaw endpoint gap (rad),C,M3-w.05
+37,0.011756877765419602,1262,Yaw endpoint gap (rad),C,M3-w.05
+38,0.01185673787354502,1262,Yaw endpoint gap (rad),C,M3-w.05
+39,0.011641275648709546,1262,Yaw endpoint gap (rad),C,M3-w.05
+40,0.011464309912594109,1262,Yaw endpoint gap (rad),C,M3-w.05
+41,0.009984601493083566,1262,Yaw endpoint gap (rad),C,M3-w.05
+42,0.009946025962972343,1262,Yaw endpoint gap (rad),C,M3-w.05
+43,0.009828635430547945,1262,Yaw endpoint gap (rad),C,M3-w.05
+44,0.009985010245543345,1262,Yaw endpoint gap (rad),C,M3-w.05
+45,0.009836246487452086,1262,Yaw endpoint gap (rad),C,M3-w.05
+46,0.00931319574899504,239,Yaw endpoint gap (rad),C,M3-w.05
+1,0.7492571315372425,1262,Valid pair ratio,C,M3-w.05
+2,0.7489104595879557,1262,Valid pair ratio,C,M3-w.05
+3,0.7499504754358162,1262,Valid pair ratio,C,M3-w.05
+4,0.749702852614897,1262,Valid pair ratio,C,M3-w.05
+5,0.7477218700475435,1262,Valid pair ratio,C,M3-w.05
+6,0.750891442155309,1262,Valid pair ratio,C,M3-w.05
+7,0.7498514263074485,1262,Valid pair ratio,C,M3-w.05
+8,0.7493066561014263,1262,Valid pair ratio,C,M3-w.05
+9,0.7509409667194928,1262,Valid pair ratio,C,M3-w.05
+10,0.7492076069730587,1262,Valid pair ratio,C,M3-w.05
+11,0.7498019017432647,1262,Valid pair ratio,C,M3-w.05
+12,0.751188589540412,1262,Valid pair ratio,C,M3-w.05
+13,0.748217115689382,1262,Valid pair ratio,C,M3-w.05
+14,0.7486628367670365,1262,Valid pair ratio,C,M3-w.05
+15,0.7518324088748018,1262,Valid pair ratio,C,M3-w.05
+16,0.7484647385103012,1262,Valid pair ratio,C,M3-w.05
+17,0.75,1262,Valid pair ratio,C,M3-w.05
+18,0.7520305071315373,1262,Valid pair ratio,C,M3-w.05
+19,0.7522286053882726,1262,Valid pair ratio,C,M3-w.05
+20,0.7498019017432647,1262,Valid pair ratio,C,M3-w.05
+21,0.7503466719492868,1262,Valid pair ratio,C,M3-w.05
+22,0.7495542789223455,1262,Valid pair ratio,C,M3-w.05
+23,0.7491580824088748,1262,Valid pair ratio,C,M3-w.05
+24,0.7511390649762282,1262,Valid pair ratio,C,M3-w.05
+25,0.750891442155309,1262,Valid pair ratio,C,M3-w.05
+26,0.748811410459588,1262,Valid pair ratio,C,M3-w.05
+27,0.7505447702060222,1262,Valid pair ratio,C,M3-w.05
+28,0.750594294770206,1262,Valid pair ratio,C,M3-w.05
+29,0.7490095087163233,1262,Valid pair ratio,C,M3-w.05
+30,0.7491580824088748,1262,Valid pair ratio,C,M3-w.05
+31,0.7492076069730587,1262,Valid pair ratio,C,M3-w.05
+32,0.7490095087163233,1262,Valid pair ratio,C,M3-w.05
+33,0.7519314580031695,1262,Valid pair ratio,C,M3-w.05
+34,0.7498514263074485,1262,Valid pair ratio,C,M3-w.05
+35,0.753318145800317,1262,Valid pair ratio,C,M3-w.05
+36,0.7499504754358162,1262,Valid pair ratio,C,M3-w.05
+37,0.7498019017432647,1262,Valid pair ratio,C,M3-w.05
+38,0.7479694928684627,1262,Valid pair ratio,C,M3-w.05
+39,0.7518819334389857,1262,Valid pair ratio,C,M3-w.05
+40,0.751188589540412,1262,Valid pair ratio,C,M3-w.05
+41,0.7515352614896988,1262,Valid pair ratio,C,M3-w.05
+42,0.751485736925515,1262,Valid pair ratio,C,M3-w.05
+43,0.7512381141045958,1262,Valid pair ratio,C,M3-w.05
+44,0.749702852614897,1262,Valid pair ratio,C,M3-w.05
+45,0.7510895404120443,1262,Valid pair ratio,C,M3-w.05
+46,0.7437238493723849,239,Valid pair ratio,C,M3-w.05
+1,0.5067327624325613,1262,Teacher confidence,C,M3-w.05
+2,0.7374044976030402,1262,Teacher confidence,C,M3-w.05
+3,0.7847661888920562,1262,Teacher confidence,C,M3-w.05
+4,0.8137675051454886,1262,Teacher confidence,C,M3-w.05
+5,0.8166698077117962,1262,Teacher confidence,C,M3-w.05
+6,0.817995965102962,1262,Teacher confidence,C,M3-w.05
+7,0.8179573121048191,1262,Teacher confidence,C,M3-w.05
+8,0.8130877693368214,1262,Teacher confidence,C,M3-w.05
+9,0.8171047441271708,1262,Teacher confidence,C,M3-w.05
+10,0.8269448411162417,1262,Teacher confidence,C,M3-w.05
+11,0.8250487080750111,1262,Teacher confidence,C,M3-w.05
+12,0.8316227032341028,1262,Teacher confidence,C,M3-w.05
+13,0.8318713486855834,1262,Teacher confidence,C,M3-w.05
+14,0.833996633625635,1262,Teacher confidence,C,M3-w.05
+15,0.8340774794860423,1262,Teacher confidence,C,M3-w.05
+16,0.8344198002490302,1262,Teacher confidence,C,M3-w.05
+17,0.835227347024836,1262,Teacher confidence,C,M3-w.05
+18,0.8374910830223428,1262,Teacher confidence,C,M3-w.05
+19,0.8372712226233279,1262,Teacher confidence,C,M3-w.05
+20,0.8404792664829411,1262,Teacher confidence,C,M3-w.05
+21,0.8423248132463491,1262,Teacher confidence,C,M3-w.05
+22,0.8375752837929975,1262,Teacher confidence,C,M3-w.05
+23,0.8393557637977147,1262,Teacher confidence,C,M3-w.05
+24,0.8359378833919999,1262,Teacher confidence,C,M3-w.05
+25,0.8382256228459052,1262,Teacher confidence,C,M3-w.05
+26,0.8393557390962653,1262,Teacher confidence,C,M3-w.05
+27,0.8365060360703718,1262,Teacher confidence,C,M3-w.05
+28,0.8383136223027521,1262,Teacher confidence,C,M3-w.05
+29,0.8362308903796548,1262,Teacher confidence,C,M3-w.05
+30,0.8380447507565826,1262,Teacher confidence,C,M3-w.05
+31,0.8379572370870366,1262,Teacher confidence,C,M3-w.05
+32,0.8374685631406666,1262,Teacher confidence,C,M3-w.05
+33,0.8370619148441049,1262,Teacher confidence,C,M3-w.05
+34,0.8372499685846683,1262,Teacher confidence,C,M3-w.05
+35,0.8361258574314239,1262,Teacher confidence,C,M3-w.05
+36,0.8366598997932229,1262,Teacher confidence,C,M3-w.05
+37,0.8371240495926983,1262,Teacher confidence,C,M3-w.05
+38,0.8353968986004544,1262,Teacher confidence,C,M3-w.05
+39,0.8391630712619107,1262,Teacher confidence,C,M3-w.05
+40,0.8385293163748815,1262,Teacher confidence,C,M3-w.05
+41,0.8388252428329879,1262,Teacher confidence,C,M3-w.05
+42,0.8365484554255632,1262,Teacher confidence,C,M3-w.05
+43,0.8368812760724885,1262,Teacher confidence,C,M3-w.05
+44,0.8379269964201892,1262,Teacher confidence,C,M3-w.05
+45,0.8394749098458872,1262,Teacher confidence,C,M3-w.05
+46,0.8393512052648208,238,Teacher confidence,C,M3-w.05
+1,0.37986098934059426,1262,Effective sample weight,C,M3-w.05
+2,0.552060275762187,1262,Effective sample weight,C,M3-w.05
+3,0.5884555151269856,1262,Effective sample weight,C,M3-w.05
+4,0.6103349087874976,1262,Effective sample weight,C,M3-w.05
+5,0.6104880531337673,1262,Effective sample weight,C,M3-w.05
+6,0.6145140631640958,1262,Effective sample weight,C,M3-w.05
+7,0.6136892892172333,1262,Effective sample weight,C,M3-w.05
+8,0.609176295802068,1262,Effective sample weight,C,M3-w.05
+9,0.6137169390066679,1262,Effective sample weight,C,M3-w.05
+10,0.6199132208778817,1262,Effective sample weight,C,M3-w.05
+11,0.6181168667440747,1262,Effective sample weight,C,M3-w.05
+12,0.6241093952616119,1262,Effective sample weight,C,M3-w.05
+13,0.6221549768124821,1262,Effective sample weight,C,M3-w.05
+14,0.6244919349907317,1262,Effective sample weight,C,M3-w.05
+15,0.6269295758282892,1262,Effective sample weight,C,M3-w.05
+16,0.624188876213438,1262,Effective sample weight,C,M3-w.05
+17,0.6264911332948461,1262,Effective sample weight,C,M3-w.05
+18,0.6299151181938532,1262,Effective sample weight,C,M3-w.05
+19,0.6298766745440366,1262,Effective sample weight,C,M3-w.05
+20,0.6305704086121591,1262,Effective sample weight,C,M3-w.05
+21,0.6324400355575958,1262,Effective sample weight,C,M3-w.05
+22,0.6281855041884393,1262,Effective sample weight,C,M3-w.05
+23,0.6289394661524406,1262,Effective sample weight,C,M3-w.05
+24,0.6278157774742734,1262,Effective sample weight,C,M3-w.05
+25,0.6298925830804036,1262,Effective sample weight,C,M3-w.05
+26,0.6287524685995703,1262,Effective sample weight,C,M3-w.05
+27,0.6278463594036888,1262,Effective sample weight,C,M3-w.05
+28,0.6295663033465954,1262,Effective sample weight,C,M3-w.05
+29,0.6262626559156246,1262,Effective sample weight,C,M3-w.05
+30,0.6275661537887177,1262,Effective sample weight,C,M3-w.05
+31,0.627601438699358,1262,Effective sample weight,C,M3-w.05
+32,0.627200925005408,1262,Effective sample weight,C,M3-w.05
+33,0.6292253488972901,1262,Effective sample weight,C,M3-w.05
+34,0.6277912905920893,1262,Effective sample weight,C,M3-w.05
+35,0.6299949689353513,1262,Effective sample weight,C,M3-w.05
+36,0.6274666167122627,1262,Effective sample weight,C,M3-w.05
+37,0.6285116312384794,1262,Effective sample weight,C,M3-w.05
+38,0.6252154507652138,1262,Effective sample weight,C,M3-w.05
+39,0.6310132770974738,1262,Effective sample weight,C,M3-w.05
+40,0.6300596780189432,1262,Effective sample weight,C,M3-w.05
+41,0.6301145052593408,1262,Effective sample weight,C,M3-w.05
+42,0.6284980473777194,1262,Effective sample weight,C,M3-w.05
+43,0.6288051830749315,1262,Effective sample weight,C,M3-w.05
+44,0.6279857964882193,1262,Effective sample weight,C,M3-w.05
+45,0.6303626658090887,1262,Effective sample weight,C,M3-w.05
+46,0.6247638487866156,237,Effective sample weight,C,M3-w.05
+1,0.0,1262,Effective M3 objective weight,C,M3-w.05
+2,0.0,1262,Effective M3 objective weight,C,M3-w.05
+3,0.0,1262,Effective M3 objective weight,C,M3-w.05
+4,0.0,1262,Effective M3 objective weight,C,M3-w.05
+5,0.0,1262,Effective M3 objective weight,C,M3-w.05
+6,0.0,1262,Effective M3 objective weight,C,M3-w.05
+7,0.0,1262,Effective M3 objective weight,C,M3-w.05
+8,0.0,1262,Effective M3 objective weight,C,M3-w.05
+9,0.0,1262,Effective M3 objective weight,C,M3-w.05
+10,0.0,1262,Effective M3 objective weight,C,M3-w.05
+11,0.009999999776482582,1262,Effective M3 objective weight,C,M3-w.05
+12,0.019999999552965164,1262,Effective M3 objective weight,C,M3-w.05
+13,0.029999999329447746,1262,Effective M3 objective weight,C,M3-w.05
+14,0.03999999910593033,1262,Effective M3 objective weight,C,M3-w.05
+15,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+16,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+17,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+18,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+19,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+20,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+21,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+22,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+23,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+24,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+25,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+26,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+27,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+28,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+29,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+30,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+31,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+32,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+33,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+34,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+35,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+36,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+37,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+38,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+39,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+40,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+41,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+42,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+43,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+44,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+45,0.05000000074505806,1262,Effective M3 objective weight,C,M3-w.05
+46,0.05000000074505806,237,Effective M3 objective weight,C,M3-w.05

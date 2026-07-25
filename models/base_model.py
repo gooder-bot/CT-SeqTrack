@@ -31,6 +31,10 @@ from models.state_filter import (
     point_inside_oriented_crop,
     union_point_clouds,
 )
+from utils.ct_search import (
+    build_time_guided_search_box,
+    stratified_search_sample,
+)
 
 import time
 
@@ -453,6 +457,54 @@ class MotionBaseModelMF(BaseModelMF):
         prev_pcs = [frame['pc'] for frame in prev_frames]
         ref_boxs = get_last_n_bounding_boxes(results_bbs,valid_mask)
         num_hist = len(valid_mask)
+        default_time_step = getattr(
+            self.config, 'default_time_step',
+            getattr(self.config, 'time_step', 0.1))
+        pseudo_time_step = getattr(self.config, 'pseudo_time_step', 0.1)
+        use_real_time = getattr(self.config, 'use_real_time', True)
+        prev_timestamps = [frame.get('timestamp') for frame in prev_frames]
+        current_timestamp = this_frame.get('timestamp')
+        real_time_fields = build_time_fields(
+            prev_timestamps, current_timestamp,
+            frame_ids=prev_frame_ids,
+            current_frame_id=frame_id,
+            use_real_time=use_real_time,
+            default_step=default_time_step,
+            pseudo_step=pseudo_time_step)
+        relative_timestamps, delta_t_list, local_timestamps, current_timestamp = (
+            real_time_fields)
+        dynamics_time_mode = normalize_dynamics_time_mode(
+            this_frame.get(
+                '_ct_dynamics_time_mode',
+                getattr(self.config, 'dynamics_time_mode', 'true')))
+        effective_time_fields = build_effective_time_fields(
+            dynamics_time_mode,
+            real_time_fields,
+            effective_frame_timestamps=[
+                frame.get('_ct_effective_timestamp') for frame in prev_frames
+            ],
+            effective_current_timestamp=this_frame.get(
+                '_ct_effective_timestamp'),
+            frame_ids=prev_frame_ids,
+            current_frame_id=frame_id,
+            default_step=float(getattr(
+                self.config, 'dynamics_fixed_delta_t', default_time_step)),
+            pseudo_step=pseudo_time_step,
+        )
+        (effective_relative_timestamps, effective_delta_t_list,
+         effective_local_timestamps, effective_current_timestamp) = (
+            effective_time_fields)
+        main_current_value = float(
+            getattr(self.config, 'main_time_current', 0.0))
+        point_timestamps, corner_timestamps, main_timestamps = (
+            build_main_time_fields(
+                valid_mask,
+                relative_timestamps,
+                local_timestamps,
+                num_hist,
+                pseudo_step=pseudo_time_step,
+                source=getattr(self.config, 'main_time_source', 'real'),
+                current_value=main_current_value))
 
         prev_frame_pcs = []
         for i, prev_pc in enumerate(prev_pcs):
@@ -465,6 +517,48 @@ class MotionBaseModelMF(BaseModelMF):
             this_pc, ref_boxs[0], ref_boxs[0],
             scale=self.config.bb_scale,
             offset=self.config.bb_offset)
+        baseline_search_points = this_frame_pc.points.T
+        expanded_search_points = np.empty(
+            (0, baseline_search_points.shape[1]),
+            dtype=baseline_search_points.dtype,
+        )
+        ct_search_box = None
+        ct_search_diagnostics = {
+            "valid": False,
+            "query_delta_t": float(effective_delta_t_list[0]),
+        }
+        if bool(getattr(self.config, "use_time_guided_search", False)):
+            ct_search_box, ct_search_diagnostics = (
+                build_time_guided_search_box(
+                    ref_boxs,
+                    effective_delta_t_list,
+                    valid_mask=valid_mask,
+                    base_length=float(getattr(
+                        self.config, "ct_search_base_length", 4.0)),
+                    base_width=float(getattr(
+                        self.config, "ct_search_base_width", 2.0)),
+                    max_length=float(getattr(
+                        self.config, "ct_search_max_length", 16.0)),
+                    max_width=float(getattr(
+                        self.config, "ct_search_max_width", 6.0)),
+                    max_speed=float(getattr(
+                        self.config, "ct_search_max_speed", 20.0)),
+                    max_displacement=float(getattr(
+                        self.config, "ct_search_max_displacement", 12.0)),
+                    width_per_second=float(getattr(
+                        self.config, "ct_search_width_per_second", 0.25)),
+                    min_displacement=float(getattr(
+                        self.config, "ct_search_min_displacement", 0.2)),
+                ))
+            if ct_search_box is not None:
+                ct_search_pc = points_utils.generate_subwindow_with_aroundboxs(
+                    this_pc,
+                    ct_search_box,
+                    ref_boxs[0],
+                    scale=1.0,
+                    offset=0.0,
+                )
+                expanded_search_points = ct_search_pc.points.T
         num_points_in_search_baseline = this_frame_pc.nbr_points()
         num_points_in_search_tube = 0
         tube_box = None
@@ -525,9 +619,34 @@ class MotionBaseModelMF(BaseModelMF):
 
         prev_points_list = [points_utils.regularize_pc(prev_frame_pc.points.T, self.config.point_sample_size)[0] for prev_frame_pc in prev_frame_pcs] #采样到特定数量,这里的策略是在已有的点里面重复随机选，直到达到特定数量
 
-        this_points, idx_this = points_utils.regularize_pc(this_frame_pc.points.T,
-                                                           self.config.point_sample_size,
-                                                           seed=1) 
+        if bool(getattr(self.config, "use_time_guided_search", False)):
+            this_points, ct_search_sampling = stratified_search_sample(
+                baseline_search_points,
+                expanded_search_points,
+                self.config.point_sample_size,
+                baseline_ratio=float(getattr(
+                    self.config, "ct_search_baseline_ratio", 0.75)),
+                min_expansion_points=int(getattr(
+                    self.config, "ct_search_min_expansion_points", 32)),
+                seed=1,
+            )
+            ct_search_active = (
+                ct_search_sampling["expansion_sample_count"] > 0)
+            num_points_in_search = int(len(baseline_search_points))
+            if ct_search_active:
+                num_points_in_search += int(
+                    ct_search_sampling["expansion_available_count"])
+        else:
+            this_points, idx_this = points_utils.regularize_pc(
+                this_frame_pc.points.T,
+                self.config.point_sample_size,
+                seed=1)
+            ct_search_sampling = {
+                "baseline_sample_count": int(self.config.point_sample_size),
+                "expansion_sample_count": 0,
+                "expansion_available_count": 0,
+            }
+            ct_search_active = False
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
         # Here we use 0.2/0.8 instead of 0/1 to indicate that the previous box is not GT.
@@ -540,45 +659,6 @@ class MotionBaseModelMF(BaseModelMF):
                 seg_mask_prev[seg_mask_prev == 1] = 0.8
         seg_mask_this = np.full(seg_mask_prev_list[0].shape, fill_value=0.5)
 
-        default_time_step = getattr(self.config, 'default_time_step', getattr(self.config, 'time_step', 0.1))
-        pseudo_time_step = getattr(self.config, 'pseudo_time_step', 0.1)
-        use_real_time = getattr(self.config, 'use_real_time', True)
-        prev_timestamps = [frame.get('timestamp') for frame in prev_frames]
-        current_timestamp = this_frame.get('timestamp')
-        relative_timestamps, delta_t_list, local_timestamps, current_timestamp = build_time_fields(
-            prev_timestamps, current_timestamp,
-            frame_ids=prev_frame_ids,
-            current_frame_id=frame_id,
-            use_real_time=use_real_time,
-            default_step=default_time_step,
-            pseudo_step=pseudo_time_step)
-        dynamics_time_mode = normalize_dynamics_time_mode(
-            this_frame.get('_ct_dynamics_time_mode',
-                           getattr(self.config, 'dynamics_time_mode', 'true')))
-        effective_time_fields = build_effective_time_fields(
-            dynamics_time_mode,
-            (relative_timestamps, delta_t_list, local_timestamps, current_timestamp),
-            effective_frame_timestamps=[
-                frame.get('_ct_effective_timestamp') for frame in prev_frames
-            ],
-            effective_current_timestamp=this_frame.get('_ct_effective_timestamp'),
-            frame_ids=prev_frame_ids,
-            current_frame_id=frame_id,
-            default_step=float(getattr(
-                self.config, 'dynamics_fixed_delta_t', default_time_step)),
-            pseudo_step=pseudo_time_step,
-        )
-        (effective_relative_timestamps, effective_delta_t_list,
-         effective_local_timestamps, effective_current_timestamp) = effective_time_fields
-        main_current_value = float(getattr(self.config, 'main_time_current', 0.0))
-        point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
-            valid_mask,
-            relative_timestamps,
-            local_timestamps,
-            num_hist,
-            pseudo_step=pseudo_time_step,
-            source=getattr(self.config, 'main_time_source', 'real'),
-            current_value=main_current_value)
         timestamp_prev_list = [
             np.full((self.config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
             for timestamp in point_timestamps
@@ -636,6 +716,26 @@ class MotionBaseModelMF(BaseModelMF):
                          {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]
                      ], device=self.device, dtype=torch.int64),
                      "num_points_in_search": torch.tensor([num_points_in_search], device=self.device, dtype=torch.float32),
+                     "ct_search_used": torch.tensor(
+                         [ct_search_active],
+                         device=self.device, dtype=torch.float32),
+                     "ct_search_expansion_ratio": torch.tensor(
+                         [ct_search_sampling["expansion_sample_count"]
+                          / float(self.config.point_sample_size)],
+                         device=self.device, dtype=torch.float32),
+                     "ct_search_baseline_points": torch.tensor(
+                         [len(baseline_search_points)],
+                         device=self.device, dtype=torch.float32),
+                     "ct_search_expansion_points": torch.tensor(
+                         [ct_search_sampling["expansion_available_count"]],
+                         device=self.device, dtype=torch.float32),
+                     "ct_search_query_delta_t": torch.tensor(
+                         [ct_search_diagnostics.get(
+                             "query_delta_t", effective_delta_t_list[0])],
+                         device=self.device, dtype=torch.float32),
+                     "ct_search_predicted_displacement": torch.tensor(
+                         [ct_search_diagnostics.get("displacement", 0.0)],
+                         device=self.device, dtype=torch.float32),
                      }
         if m4_diagnostics_enabled:
             data_dict.update({

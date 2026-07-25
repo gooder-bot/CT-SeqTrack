@@ -32,6 +32,10 @@ from utils.candidate_utils import (
     shared_se2_world_translation,
     validate_shared_se2_transform,
 )
+from utils.ct_search import (
+    build_time_guided_search_box,
+    stratified_search_sample,
+)
 
 
 def no_processing(data, *args):
@@ -315,6 +319,44 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     canonical_ref_boxs = boxes_to_anchor_parameters(
         canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
 
+    real_time_fields = build_time_fields(
+        prev_timestamps, current_timestamp,
+        frame_ids=prev_frame_ids,
+        current_frame_id=this_frame_id,
+        use_real_time=use_real_time,
+        default_step=default_time_step,
+        pseudo_step=pseudo_time_step)
+    relative_timestamps, delta_t_list, local_timestamps, current_timestamp = (
+        real_time_fields)
+    dynamics_time_mode = normalize_dynamics_time_mode(
+        this_frame.get('_ct_dynamics_time_mode',
+                       getattr(config, 'dynamics_time_mode', 'true')))
+    effective_time_fields = build_effective_time_fields(
+        dynamics_time_mode,
+        real_time_fields,
+        effective_frame_timestamps=[
+            prev_frames[key].get('_ct_effective_timestamp')
+            for key in sorted_prev_keys
+        ],
+        effective_current_timestamp=this_frame.get('_ct_effective_timestamp'),
+        frame_ids=prev_frame_ids,
+        current_frame_id=this_frame_id,
+        default_step=float(getattr(
+            config, 'dynamics_fixed_delta_t', default_time_step)),
+        pseudo_step=pseudo_time_step,
+    )
+    (effective_relative_timestamps, effective_delta_t_list,
+     effective_local_timestamps, effective_current_timestamp) = (
+        effective_time_fields)
+    main_current_value = float(getattr(config, 'main_time_current', 0.0))
+    point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
+        valid_mask,
+        relative_timestamps,
+        local_timestamps,
+        num_hist,
+        pseudo_step=pseudo_time_step,
+        source=getattr(config, 'main_time_source', 'real'),
+        current_value=main_current_value)
 
     prev_frame_pcs = []
     for i, prev_pc in enumerate(prev_pcs):
@@ -323,10 +365,64 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                                                     offset=config.bb_offset)
         prev_frame_pcs.append(prev_frame_pc)
 
-    this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(this_pc, ref_boxs[0], ref_boxs[0],
-                                                    scale=config.bb_scale,
-                                                    offset=config.bb_offset)
-    num_points_in_search = this_frame_pc.nbr_points()
+    this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(
+        this_pc, ref_boxs[0], ref_boxs[0],
+        scale=config.bb_scale,
+        offset=config.bb_offset)
+    baseline_search_points = this_frame_pc.points.T
+    ct_search_box = None
+    ct_search_diagnostics = {
+        'valid': False,
+        'query_delta_t': float(effective_delta_t_list[0]),
+    }
+    expanded_search_points = np.empty(
+        (0, baseline_search_points.shape[1]),
+        dtype=baseline_search_points.dtype,
+    )
+    if bool(getattr(config, 'use_time_guided_search', False)):
+        search_history_mode = str(getattr(
+            config,
+            'ct_search_training_history',
+            'canonical',
+        )).strip().lower()
+        if search_history_mode not in ('canonical', 'candidate'):
+            raise ValueError(
+                "ct_search_training_history must be canonical or candidate")
+        search_history_boxes = (
+            canonical_prev_boxs
+            if search_history_mode == 'canonical'
+            else ref_boxs
+        )
+        ct_search_box, ct_search_diagnostics = build_time_guided_search_box(
+            search_history_boxes,
+            effective_delta_t_list,
+            valid_mask=valid_mask,
+            base_length=float(getattr(
+                config, 'ct_search_base_length', 4.0)),
+            base_width=float(getattr(
+                config, 'ct_search_base_width', 2.0)),
+            max_length=float(getattr(
+                config, 'ct_search_max_length', 16.0)),
+            max_width=float(getattr(
+                config, 'ct_search_max_width', 6.0)),
+            max_speed=float(getattr(
+                config, 'ct_search_max_speed', 20.0)),
+            max_displacement=float(getattr(
+                config, 'ct_search_max_displacement', 12.0)),
+            width_per_second=float(getattr(
+                config, 'ct_search_width_per_second', 0.25)),
+            min_displacement=float(getattr(
+                config, 'ct_search_min_displacement', 0.2)),
+        )
+        if ct_search_box is not None:
+            expanded_search_pc = points_utils.generate_subwindow_with_aroundboxs(
+                this_pc,
+                ct_search_box,
+                ref_boxs[0],
+                scale=1.0,
+                offset=0.0,
+            )
+            expanded_search_points = expanded_search_pc.points.T
 
     # Preserve the pre-normalization anchor: ref_boxs[0] becomes approximately
     # zero after transform_box(), so the normalized tensor cannot prove that
@@ -351,11 +447,33 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             prev_frame_pc.points.T, config.point_sample_size, seed=seed)[0]
         for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
     ]
-    this_points = points_utils.regularize_pc(
-        this_frame_pc.points.T,
-        config.point_sample_size,
-        seed=current_sampling_seed,
-    )[0]
+    if bool(getattr(config, 'use_time_guided_search', False)):
+        this_points, ct_search_sampling = stratified_search_sample(
+            baseline_search_points,
+            expanded_search_points,
+            config.point_sample_size,
+            baseline_ratio=float(getattr(
+                config, 'ct_search_baseline_ratio', 0.75)),
+            min_expansion_points=int(getattr(
+                config, 'ct_search_min_expansion_points', 32)),
+            seed=current_sampling_seed,
+        )
+    else:
+        this_points = points_utils.regularize_pc(
+            baseline_search_points,
+            config.point_sample_size,
+            seed=current_sampling_seed,
+        )[0]
+        ct_search_sampling = {
+            'baseline_sample_count': int(config.point_sample_size),
+            'expansion_sample_count': 0,
+            'expansion_available_count': 0,
+        }
+    ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
+    num_points_in_search = int(len(baseline_search_points))
+    if ct_search_active:
+        num_points_in_search += int(
+            ct_search_sampling['expansion_available_count'])
 
     seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
@@ -368,41 +486,6 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             seg_mask_prev[seg_mask_prev == 1] = 0.8
     seg_mask_this = np.full(seg_mask_prev_list[0].shape, fill_value=0.5)
 
-
-    relative_timestamps, delta_t_list, local_timestamps, current_timestamp = build_time_fields(
-        prev_timestamps, current_timestamp,
-        frame_ids=prev_frame_ids,
-        current_frame_id=this_frame_id,
-        use_real_time=use_real_time,
-        default_step=default_time_step,
-        pseudo_step=pseudo_time_step)
-    dynamics_time_mode = normalize_dynamics_time_mode(
-        this_frame.get('_ct_dynamics_time_mode',
-                       getattr(config, 'dynamics_time_mode', 'true')))
-    effective_time_fields = build_effective_time_fields(
-        dynamics_time_mode,
-        (relative_timestamps, delta_t_list, local_timestamps, current_timestamp),
-        effective_frame_timestamps=[
-            prev_frames[key].get('_ct_effective_timestamp') for key in sorted_prev_keys
-        ],
-        effective_current_timestamp=this_frame.get('_ct_effective_timestamp'),
-        frame_ids=prev_frame_ids,
-        current_frame_id=this_frame_id,
-        default_step=float(getattr(
-            config, 'dynamics_fixed_delta_t', default_time_step)),
-        pseudo_step=pseudo_time_step,
-    )
-    (effective_relative_timestamps, effective_delta_t_list,
-     effective_local_timestamps, effective_current_timestamp) = effective_time_fields
-    main_current_value = float(getattr(config, 'main_time_current', 0.0))
-    point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
-        valid_mask,
-        relative_timestamps,
-        local_timestamps,
-        num_hist,
-        pseudo_step=pseudo_time_step,
-        source=getattr(config, 'main_time_source', 'real'),
-        current_value=main_current_value)
     timestamp_prev_list = [
         np.full((config.point_sample_size, 1), fill_value=timestamp, dtype=np.float32)
         for timestamp in point_timestamps
@@ -504,6 +587,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'dynamics_time_mode_id': np.int64(
             {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]),
         'num_points_in_search': np.float32(num_points_in_search),
+        'ct_search_used': np.float32(ct_search_active),
+        'ct_search_expansion_ratio': np.float32(
+            ct_search_sampling['expansion_sample_count']
+            / float(config.point_sample_size)),
+        'ct_search_baseline_points': np.float32(len(baseline_search_points)),
+        'ct_search_expansion_points': np.float32(
+            ct_search_sampling['expansion_available_count']),
+        'ct_search_query_delta_t': np.float32(
+            ct_search_diagnostics.get(
+                'query_delta_t', effective_delta_t_list[0])),
+        'ct_search_predicted_displacement': np.float32(
+            ct_search_diagnostics.get('displacement', 0.0)),
         'velocity_label': velocity_label,
         'dynamics_displacement_label': dynamics_displacement_label,
         'canonical_ref_boxs': canonical_ref_boxs,

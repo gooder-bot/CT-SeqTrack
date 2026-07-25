@@ -1,0 +1,15 @@
+field,W0,M2,B,C
+candidate_trajectory_mode,shared_se2,shared_se2,shared_se2,shared_se2
+use_dynamics_encoder,False,True,True,True
+use_physical_time_adapter,False,True,True,True
+dynamics_motion_mode,feature,proposal_innovation,proposal_innovation,proposal_innovation
+m3_variant,off,off,distill,distill
+m3_path_weight,0.0,0.0,0.0,0.05
+m3_irregular_supervision_weight,0.0,0.0,0.0,0.0
+m3_warmup_epoch,field absent,10,10,10
+m3_ramp_epochs,field absent,5,5,5
+seed,42,42,42,42
+batch_size,16,16,16,16
+workers,12,12,12,12
+epoch,60,60,60,60
+check_val_every_n_epoch,5,5,5,5

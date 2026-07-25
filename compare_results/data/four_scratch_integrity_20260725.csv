@@ -1,0 +1,6 @@
+run_id,run,status,checkpoint_epoch,checkpoint_step,latest_loss_step,estimated_latest_train_epoch,validation_points,last_validation_epoch,state_tensors,checkpoint_mib,checkpoint_sha256,git_commit,dirty_tracked,provenance,seqtrack_w0_state_schema_equal
+SEQ,SeqTrack,COMPLETE,60,75720,75719,59.99920760697306,12,60,320,42.75471496582031,915293bf06b7105abfa7d9a571da97b86335c4b6a0dcfd44fa5f78d7355befa3,unrecorded,,legacy,True
+W0,W0,COMPLETE,60,75720,75719,59.99920760697306,12,60,320,42.75593948364258,aae9cce1232e685228bc3626c54be54c375447b655d5bafb401f0cd3c93c9d38,aaf16d9b9d8262d5614cd99bcfae09bbc719cb55,False,current recorded,True
+M2,M2,COMPLETE,60,75720,75719,59.99920760697306,12,60,334,44.15914535522461,4f8b69cad018c84282bffe61f2176fc29e7e298015df435e7c3536afc17bbc66,aaf16d9b9d8262d5614cd99bcfae09bbc719cb55,False,current recorded,
+B,M3-w0,PARTIAL,40,50480,54796,43.419968304278925,8,40,669,58.93427753448486,0ec7e16269a5d0658afc20077cb33199f3037181209e75500ecbcfbca3402853,aaf16d9b9d8262d5614cd99bcfae09bbc719cb55,False,current recorded,
+C,M3-w.05,PARTIAL,45,56790,57020,45.182250396196515,9,45,669,58.93427753448486,8227e1b8834a83576f88209f9adfaad464f72465bc4f50004e99807ce3df0155,aaf16d9b9d8262d5614cd99bcfae09bbc719cb55,False,current recorded,

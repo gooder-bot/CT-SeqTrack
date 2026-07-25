@@ -28,6 +28,7 @@ from models.path_distillation import (
     teacher_endpoint_confidence_terms,
     update_ema_module,
 )
+from models.ct_v2 import ContinuousTimeMotionEncoder, ProposalFusionGate
 
 # import vis_tool as vt
 
@@ -45,6 +46,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "dynamics_use_acceleration is not implemented or consumed by "
                 "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
+        self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
+        self.use_time_guided_search = bool(getattr(
+            config, 'use_time_guided_search', False))
         self.use_physical_time_adapter = bool(
             getattr(config, 'use_physical_time_adapter', False))
         self.use_m3_path_distillation = bool(getattr(
@@ -141,6 +145,35 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError(
                 "The zero-init physical-time adapter is currently isolated to "
                 "dynamics_motion_mode='proposal_innovation'.")
+        self.ct_fusion_mode = str(
+            getattr(config, 'ct_fusion_mode', 'adaptive')).strip().lower()
+        if self.ct_fusion_mode not in ('fixed', 'adaptive'):
+            raise ValueError("ct_fusion_mode must be 'fixed' or 'adaptive'")
+        if self.use_ct_v2:
+            if not self.use_dynamics_encoder:
+                raise ValueError("use_ct_v2=True requires use_dynamics_encoder=True")
+            if self.dynamics_motion_mode != 'proposal_innovation':
+                raise ValueError(
+                    "CT-SeqTrack v2 requires "
+                    "dynamics_motion_mode='proposal_innovation'")
+            incompatible = {
+                'use_observability_gate': self.use_observability_gate,
+                'use_physical_time_adapter': self.use_physical_time_adapter,
+                'use_twc': bool(getattr(config, 'use_twc', False)),
+                'use_m3_path_distillation': self.use_m3_path_distillation,
+                'use_m4_state_filter': bool(getattr(
+                    config, 'use_m4_state_filter', False)),
+                'use_m4_trajectory_tube': bool(getattr(
+                    config, 'use_m4_trajectory_tube', False)),
+            }
+            enabled = [name for name, value in incompatible.items() if value]
+            if enabled:
+                raise ValueError(
+                    "CT-SeqTrack v2 keeps legacy modules disabled: "
+                    + ", ".join(enabled))
+        elif self.use_time_guided_search:
+            raise ValueError(
+                "use_time_guided_search=True requires use_ct_v2=True")
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
         self.dynamics_residual_scale = float(getattr(config, 'dynamics_residual_scale', 0.1))
         self.dynamics_max_residual_norm = float(
@@ -223,11 +256,27 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         motion_feature_dim = 256
         if self.use_dynamics_encoder:
-            self.dynamics_encoder = DynamicsEncoder(
+            dynamics_encoder_class = (
+                ContinuousTimeMotionEncoder if self.use_ct_v2 else DynamicsEncoder)
+            self.dynamics_encoder = dynamics_encoder_class(
                 hidden_dim=self.dynamics_hidden_dim,
                 eps=getattr(config, 'dynamics_eps', 1e-3),
                 use_query_gap=getattr(config, 'dynamics_use_query_gap', True),
             )
+            if self.use_ct_v2 and self.ct_fusion_mode == 'adaptive':
+                self.ct_proposal_fusion = ProposalFusionGate(
+                    observation_dim=256,
+                    dynamics_dim=self.dynamics_hidden_dim,
+                    observation_stats_dim=5,
+                    hidden_dim=getattr(config, 'ct_fusion_hidden_dim', 64),
+                    context_dim=getattr(config, 'ct_fusion_context_dim', 16),
+                    max_alpha=getattr(config, 'ct_fusion_max_alpha', 0.75),
+                    init_alpha=getattr(config, 'ct_fusion_init_alpha', 0.25),
+                    time_scale=getattr(
+                        config, 'time_scale', default_time_scale),
+                    detach_context=getattr(
+                        config, 'ct_fusion_detach_context', True),
+                )
             if self.use_physical_time_adapter:
                 self.physical_time_adapter = ZeroInitPhysicalTimeAdapter(
                     feature_dim=256,
@@ -548,8 +597,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         point_feature = self.mini_pointnet(mask_points) #N*256
         motion_feature = point_feature
         if self.use_dynamics_encoder:
+            dynamics_ref_boxs = input_dict["ref_boxs"]
+            if (
+                    self.use_ct_v2
+                    and self.training
+                    and "canonical_ref_boxs" in input_dict):
+                # Training history is expressed relative to the latest
+                # historical GT box.  Evaluation history is expressed
+                # relative to the latest predicted box.  Both therefore use
+                # the same "history relative to current anchor" semantics,
+                # without injecting independent candidate jitter as velocity.
+                dynamics_ref_boxs = input_dict["canonical_ref_boxs"]
             z_dyn, velocity_pred, dynamics_displacement_pred, dynamics_valid = self.dynamics_encoder(
-                input_dict["ref_boxs"],
+                dynamics_ref_boxs,
                 input_dict.get("delta_t_effective", input_dict["delta_t"]),
                 input_dict["valid_mask"],
                 input_dict.get(
@@ -644,6 +704,26 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 ).reshape_as(innovation_valid)
                 innovation_valid = innovation_valid * nonempty
             output_dict['dynamics_innovation_valid'] = innovation_valid
+            innovation_alpha = self.dynamics_innovation_alpha
+            if self.use_ct_v2 and self.ct_fusion_mode == 'adaptive':
+                innovation_alpha, fusion_aux = self.ct_proposal_fusion(
+                    point_feature,
+                    z_dyn,
+                    motion_pred[:, :3],
+                    output_dict['dynamics_displacement_pred'],
+                    obs_stats,
+                    innovation_valid,
+                    input_dict.get(
+                        'current_delta_t_effective',
+                        input_dict.get('current_delta_t')),
+                    input_dict.get('ct_search_expansion_ratio'),
+                )
+                output_dict.update(fusion_aux)
+            elif self.use_ct_v2:
+                output_dict['ct_fusion_alpha'] = motion_pred.new_full(
+                    (motion_pred.shape[0],),
+                    float(self.dynamics_innovation_alpha),
+                ) * innovation_valid.reshape(motion_pred.shape[0])
             final_center, innovation_aux = apply_proposal_innovation(
                 motion_pred[:, :3],
                 output_dict['dynamics_displacement_pred'],
@@ -651,7 +731,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 input_dict.get(
                     'current_delta_t_effective',
                     input_dict.get('current_delta_t')),
-                alpha=self.dynamics_innovation_alpha,
+                alpha=innovation_alpha,
                 enabled_scale=innovation_scale,
                 base_radius=self.dynamics_innovation_radius_base,
                 radius_per_second=self.dynamics_innovation_radius_per_second,
@@ -717,6 +797,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             'updated_ref_boxs':updated_ref_boxs,
                             })
         output_dict.update(obs_aux)
+        for key in (
+                "ct_search_used",
+                "ct_search_expansion_ratio",
+                "ct_search_baseline_points",
+                "ct_search_expansion_points",
+                "ct_search_query_delta_t",
+                "ct_search_predicted_displacement"):
+            if key in input_dict:
+                output_dict[key] = input_dict[key]
 
         return output_dict
 
@@ -1234,6 +1323,33 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     "dynamics_residual_applied_mask"].mean(),
                 "obs_dyn_center_gap": output["obs_dyn_center_gap"].mean(),
             })
+
+        if "ct_fusion_alpha" in output:
+            loss_dict.update({
+                "ct_fusion_alpha_mean": output["ct_fusion_alpha"].mean(),
+                "ct_fusion_alpha_min": output["ct_fusion_alpha"].min(),
+                "ct_fusion_alpha_max": output["ct_fusion_alpha"].max(),
+            })
+        if "dynamics_innovation_applied_norm" in output:
+            loss_dict.update({
+                "ct_innovation_applied_norm": output[
+                    "dynamics_innovation_applied_norm"].mean(),
+                "ct_innovation_radius": output[
+                    "dynamics_innovation_radius"].mean(),
+                "ct_innovation_clamp_ratio": output[
+                    "dynamics_innovation_clamp_mask"].mean(),
+                "ct_innovation_applied_ratio": output[
+                    "dynamics_innovation_applied_mask"].mean(),
+            })
+        for key in (
+                "ct_search_used",
+                "ct_search_expansion_ratio",
+                "ct_search_baseline_points",
+                "ct_search_expansion_points",
+                "ct_search_query_delta_t",
+                "ct_search_predicted_displacement"):
+            if key in output:
+                loss_dict[f"{key}_mean"] = output[key].float().mean()
 
         return loss_dict
 
