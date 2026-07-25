@@ -71,8 +71,17 @@ class ProposalFusionGate(nn.Module):
             value = torch.as_tensor(
                 value, device=reference.device, dtype=reference.dtype)
         value = value.to(device=reference.device, dtype=reference.dtype)
+        # Validation is recursive and uses batch size 1. Its scalar fields can
+        # therefore arrive as [1], [1, 1], or a rank-0 tensor. Flatten before
+        # broadcasting so repeat() never receives fewer dimensions than the
+        # input tensor.
+        value = value.reshape(-1)
         if value.numel() == 1:
             value = value.repeat(batch_size)
+        elif value.numel() != batch_size:
+            raise ValueError(
+                "fusion scalar must contain either one value or one value "
+                f"per batch item, got {value.numel()} for batch {batch_size}")
         return value.reshape(batch_size, 1)
 
     def forward(

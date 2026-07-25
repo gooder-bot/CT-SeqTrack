@@ -84,6 +84,30 @@ class SearchExpansionTest(unittest.TestCase):
 
 
 class ProposalFusionTest(unittest.TestCase):
+    def test_gate_accepts_singleton_column_scalars_during_validation(self):
+        gate = ProposalFusionGate(
+            observation_dim=8,
+            dynamics_dim=4,
+            observation_stats_dim=5,
+            max_alpha=0.35,
+            init_alpha=0.05,
+        )
+        alpha, diagnostics = gate(
+            torch.zeros(1, 8),
+            torch.zeros(1, 4),
+            torch.zeros(1, 3),
+            torch.ones(1, 3),
+            torch.zeros(1, 5),
+            torch.tensor([[1.0]]),
+            torch.tensor([[0.5]]),
+            torch.tensor([[0.25]]),
+        )
+        self.assertEqual(tuple(alpha.shape), (1, 1))
+        self.assertAlmostEqual(alpha.item(), 0.05, places=5)
+        self.assertAlmostEqual(
+            diagnostics["ct_fusion_alpha"].item(), 0.05, places=5)
+        self.assertEqual(diagnostics["ct_fusion_valid"].item(), 1.0)
+
     def test_gate_keeps_nominal_alpha_separate_from_valid_mask(self):
         gate = ProposalFusionGate(
             observation_dim=8,
