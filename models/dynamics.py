@@ -36,6 +36,30 @@ def build_innovation_radius(current_delta_t, base_radius=0.5,
     return radius
 
 
+def _as_batch_column(value, reference, batch_size, name):
+    """Normalize one scalar per sample to ``[batch_size, 1]``.
+
+    Recursive validation uses batch size one, where collated scalar fields and
+    adaptive-gate outputs may be rank-0, ``[1]``, or ``[1, 1]``. Flatten before
+    broadcasting so a singleton column never reaches ``repeat(batch_size)``
+    with too few repeat dimensions.
+    """
+    if not torch.is_tensor(value):
+        value = torch.as_tensor(
+            value, device=reference.device, dtype=reference.dtype)
+    else:
+        value = value.to(
+            device=reference.device, dtype=reference.dtype)
+    value = value.reshape(-1)
+    if value.numel() == 1:
+        value = value.expand(batch_size)
+    elif value.numel() != batch_size:
+        raise ValueError(
+            f"{name} must contain either one value or one value per batch "
+            f"item, got {value.numel()} for batch {batch_size}")
+    return value.reshape(batch_size, 1)
+
+
 def apply_proposal_innovation(
         observation_displacement,
         dynamics_displacement,
@@ -62,20 +86,18 @@ def apply_proposal_innovation(
     device = observation_displacement.device
     dtype = observation_displacement.dtype
     batch_size = observation_displacement.shape[0]
-    if not torch.is_tensor(current_delta_t):
-        current_delta_t = torch.as_tensor(current_delta_t, device=device, dtype=dtype)
-    current_delta_t = current_delta_t.to(device=device, dtype=dtype)
-    if current_delta_t.numel() == 1:
-        current_delta_t = current_delta_t.repeat(batch_size)
-    current_delta_t = current_delta_t.reshape(batch_size, 1)
-
-    if torch.is_tensor(alpha):
-        alpha_tensor = alpha.to(device=device, dtype=dtype)
-        if alpha_tensor.numel() == 1:
-            alpha_tensor = alpha_tensor.repeat(batch_size)
-        alpha_tensor = alpha_tensor.reshape(batch_size, 1)
-    else:
-        alpha_tensor = observation_displacement.new_full((batch_size, 1), float(alpha))
+    current_delta_t = _as_batch_column(
+        current_delta_t,
+        observation_displacement,
+        batch_size,
+        "current_delta_t",
+    )
+    alpha_tensor = _as_batch_column(
+        alpha,
+        observation_displacement,
+        batch_size,
+        "proposal innovation alpha",
+    )
     if torch.any((alpha_tensor < 0.0) | (alpha_tensor > 1.0)):
         raise ValueError("proposal innovation alpha must be in [0, 1]")
     enabled_scale = float(enabled_scale)

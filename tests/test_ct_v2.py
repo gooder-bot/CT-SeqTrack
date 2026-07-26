@@ -108,6 +108,48 @@ class ProposalFusionTest(unittest.TestCase):
             diagnostics["ct_fusion_alpha"].item(), 0.05, places=5)
         self.assertEqual(diagnostics["ct_fusion_valid"].item(), 1.0)
 
+    def test_innovation_accepts_singleton_columns_from_adaptive_gate(self):
+        observation = torch.zeros(1, 3)
+        dynamics = torch.tensor([[1.0, 0.0, 0.0]])
+        gate = ProposalFusionGate(
+            observation_dim=8,
+            dynamics_dim=4,
+            observation_stats_dim=5,
+            max_alpha=0.75,
+            init_alpha=0.25,
+        )
+        alpha, _ = gate(
+            torch.zeros(1, 8),
+            torch.zeros(1, 4),
+            observation,
+            dynamics,
+            torch.zeros(1, 5),
+            torch.tensor([[1.0]]),
+            torch.tensor([[0.5]]),
+            torch.tensor([[0.25]]),
+        )
+        final, diagnostics = apply_proposal_innovation(
+            observation,
+            dynamics,
+            dynamics_valid=torch.tensor([[1.0]]),
+            current_delta_t=torch.tensor([[0.5]]),
+            alpha=alpha,
+            enabled_scale=1.0,
+        )
+        self.assertEqual(tuple(final.shape), (1, 3))
+        torch.testing.assert_close(
+            diagnostics["dynamics_innovation_alpha"],
+            torch.tensor([0.25]),
+        )
+        torch.testing.assert_close(
+            diagnostics["dynamics_innovation_radius"],
+            torch.tensor([0.75]),
+        )
+        torch.testing.assert_close(
+            diagnostics["dynamics_innovation_applied_norm"],
+            torch.tensor([0.1875]),
+        )
+
     def test_gate_keeps_nominal_alpha_separate_from_valid_mask(self):
         gate = ProposalFusionGate(
             observation_dim=8,
