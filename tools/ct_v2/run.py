@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGS = {
     "baseline": ROOT / "cfgs/ct_v2/01_seqtrack3d_baseline.yaml",
+    "search_only": ROOT / "cfgs/ct_v2/05_seqtrack3d_search_only.yaml",
     "baseline_full": ROOT / "cfgs/ct_v2/01_seqtrack3d_baseline_full.yaml",
     "motion": ROOT / "cfgs/ct_v2/02_ct_motion.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",

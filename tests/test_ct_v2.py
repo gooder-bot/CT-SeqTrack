@@ -364,6 +364,22 @@ class CorrelatedHistoryTest(unittest.TestCase):
 
 
 class ConfigCompositionTest(unittest.TestCase):
+    def test_search_only_keeps_baseline_model_and_correlated_search(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/05_seqtrack3d_search_only.yaml")
+        self.assertFalse(config["use_ct_v2"])
+        self.assertFalse(config["use_dynamics_encoder"])
+        self.assertTrue(config["use_time_guided_search"])
+        self.assertEqual(config["dynamics_motion_mode"], "feature")
+        self.assertEqual(config["velocity_weight"], 0.0)
+        self.assertEqual(config["dynamics_displacement_weight"], 0.0)
+        self.assertEqual(config["dynamics_innovation_alpha"], 0.0)
+        self.assertEqual(config["dynamics_innovation_scale"], 0.0)
+        self.assertEqual(
+            config["ct_history_training_mode"], "correlated_candidate")
+        self.assertEqual(
+            config["ct_search_training_history"], "correlated_candidate")
+
     def test_v2_full_config_resolves_ablation_chain(self):
         config = load_yaml_config(
             ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml")

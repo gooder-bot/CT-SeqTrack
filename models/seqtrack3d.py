@@ -175,9 +175,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise ValueError(
                     "CT-SeqTrack v2 keeps legacy modules disabled: "
                     + ", ".join(enabled))
-        elif self.use_time_guided_search:
-            raise ValueError(
-                "use_time_guided_search=True requires use_ct_v2=True")
+        # Time-guided search changes only the data-side crop and fixed token
+        # allocation.  It is intentionally allowed without the CT-v2 motion
+        # encoder so a baseline + search-only arm keeps exactly the baseline
+        # model parameters and isolates the search contribution.
         self.dynamics_hidden_dim = int(getattr(config, 'dynamics_hidden_dim', 128))
         self.dynamics_residual_scale = float(getattr(config, 'dynamics_residual_scale', 0.1))
         self.dynamics_max_residual_norm = float(
