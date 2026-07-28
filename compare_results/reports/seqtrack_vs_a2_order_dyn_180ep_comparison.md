@@ -20,6 +20,4 @@
 - `../data/seqtrack_vs_a2_order_dyn_180ep_metrics_points.csv`
 - `../data/seqtrack_vs_a2_order_dyn_180ep_metrics_summary.csv`
 - `../figures/line_charts/seqtrack_vs_a2_order_dyn_180ep_curves.png`
-- `../figures/line_charts/seqtrack_vs_a2_order_dyn_180ep_success_curve.png`
-- `../figures/line_charts/seqtrack_vs_a2_order_dyn_180ep_precision_curve.png`
 - `../figures/bar_charts/seqtrack_vs_a2_order_dyn_180ep_best_final_summary.png`

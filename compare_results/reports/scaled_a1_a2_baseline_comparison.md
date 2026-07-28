@@ -17,8 +17,6 @@ Validation points are plotted at epochs 5, 10, ..., 60. Baseline values are reus
 
 ## Figures
 - `../figures/line_charts/scaled_a1_a2_baseline_curves.png`
-- `../figures/line_charts/scaled_a1_a2_baseline_success_curve.png`
-- `../figures/scaled_a1_a2_baseline_precision_curve.png`
 - `../figures/bar_charts/scaled_a1_a2_baseline_best_final_summary.png`
 
 ## Data files

@@ -125,7 +125,7 @@ TWC 的确让训练期 paired-view gap 更低，但幅度温和。`center/angle 
 - `compare_results/data/twc_abc_seed42_deltas.csv`
 - `compare_results/data/twc_abc_seed42_diagnostics_summary.csv`
 - `compare_results/data/twc_abc_seed42_diagnostics_block_points.csv`
-- PNG/SVG 图表位于 `compare_results/figures/line_charts/`、`delta_charts/` 和 `diagnostics/`。
+- PNG 图表位于 `compare_results/figures/line_charts/`、`delta_charts/` 和 `diagnostics/`。
 
 运行：
 

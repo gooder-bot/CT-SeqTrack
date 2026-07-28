@@ -23,6 +23,20 @@ m4_variant: "off"
 use_m4_state_filter: false
 use_m4_trajectory_tube: false
 
+# Training-only fourth-module candidate: canonical point-feature temporal
+# consistency.  Defaults are inert so all existing B0--B3 runs keep their
+# original state dict and forward path.
+use_point_feature_tc: false
+pftc_weight: 1.0
+pftc_distance_threshold: 0.3
+pftc_min_correspondences: 3
+pftc_time_weighting: true
+pftc_time_scale: 0.5
+pftc_time_weight_min: 0.5
+pftc_time_weight_max: 3.0
+pftc_ramp_epochs: 5
+pftc_time_field: effective
+
 # Fixed search budget. Expansion never increases the Transformer token count.
 ct_history_training_mode: canonical
 ct_history_correlation: 0.75

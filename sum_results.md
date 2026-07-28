@@ -1,14 +1,65 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-25
+更新时间：2026-07-27
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
 ## 2026-07-25 v2 重构说明
 
-CT-SeqTrack 已收敛为 baseline、CT Motion、CT Motion + Search、完整 Adaptive Fusion 四组正常数据消融。当前只完成代码与实验合同，**尚无 v2 分数**；因此下方 M2/M3/M4 数值继续作为历史证据，不能当作新 v2 的结果。v2 的正式结论必须由同代码 B0–B3 重新建立。
+CT-SeqTrack 已完成 baseline、CT Motion、CT Motion + Search、完整
+Adaptive Fusion 四组正常数据消融。下方 2026-07-24 及更早的 M2/M3/M4
+数值只保留为历史证据；当前决策以新的 B0–B3 normal-mini 首筛和后续
+Search-only A1 为准。
 
 ## 0. 当前总判断
+
+### 2026-07-27 Search-only A1 normal-mini
+
+A1 已完成 75,720 个训练 step、12 个验证点和 epoch60 `last.ckpt`：
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline | **53.360** | **64.382** | **52.905** | **63.104** |
+| A1 Search-only | 27.036 | 25.596 | 27.933 | 26.400 |
+| B1 motion-only | 26.021 | 24.972 | 26.080 | 25.299 |
+| B2 motion + search | 47.973 | 52.088 | 46.437 | 49.818 |
+
+A1 相对 B0 final 为 `−26.324/−38.786`，late-3 为
+`−24.972/−36.705`；best 也只有 `29.257/30.202`，当前 Search-only 明确
+No-Go。A1 与 B0 的 epoch60 mean training loss 仅差约 0.0013；训练侧
+search-used ratio 为 3.460%，与 B2 的 3.458% 一致。失败不是 search 未启用
+或常规训练发散，更可能来自训练历史与递归预测历史下的搜索分布错位，或
+motion×search 强交互。
+
+B2−B1 的 `+21.952/+27.116` 只能解释为交互恢复，不能作为 search 独立
+收益。下一步不训练 A2；先用现有 B0/A1 checkpoint 做 Search 开/关 2×2，
+并补验证阶段逐 endpoint search diagnostics。完整报告见
+`compare_results/reports/ct_search_only_seed42_20260727.md`。
+
+### 2026-07-27 CT-SeqTrack v2 B0–B3 normal-mini
+
+四组均完成 75,720 个训练 step、12 个验证点和 epoch60 `last.ckpt`：
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline | **53.360** | **64.382** | **52.905** | **63.104** |
+| B1 + motion | 26.021 | 24.972 | 26.080 | 25.299 |
+| B2 + search | 47.973 | 52.088 | 46.437 | 49.818 |
+| B3 + adaptive gate | 25.537 | 24.707 | 26.321 | 25.104 |
+
+B1 相对 B0 为 `−27.339/−39.410`；B2 相对 B1 恢复
+`+21.952/+27.116`，但相对 B0 仍低 `−5.387/−12.294`；B3 相对 B2
+再次下降 `−22.435/−27.381`，最终基本退回 B1 水平。
+
+B3 gate 在 epoch5 仍为初始 nominal alpha 0.25，epoch6 升到 0.707，
+epoch7 已为 0.749；epoch60 的 batch-min mean 仍是 0.749998。它实际
+退化成最大权重常数 gate，没有学到条件可靠性。B3 的 epoch60 mean training
+loss 还略低于 B2（0.206 vs 0.213），但验证显著更差，更符合
+train/recursive-validation mismatch 或 co-adaptation，而不是训练不足。
+
+本节当时的正式决定是先补 Search-only；该实验现已完成并在上一节判定
+No-Go。当前决策以 Search-only 技术复核为准，不再训练 A2。B0–B3 完整报告
+仍见 `compare_results/reports/ct_v2_ablation_seed42_20260727.md`。
 
 ### 2026-07-24 M2 standard / gap1124 八组正式控制
 

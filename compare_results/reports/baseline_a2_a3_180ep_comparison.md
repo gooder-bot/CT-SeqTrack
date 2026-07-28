@@ -15,10 +15,6 @@
 
 ![curves](../figures/line_charts/baseline_a2_a3_180ep_curves.svg)
 
-![success](../figures/line_charts/baseline_a2_a3_180ep_success_curve.svg)
-
-![precision](../figures/line_charts/baseline_a2_a3_180ep_precision_curve.svg)
-
 ![best final](../figures/bar_charts/baseline_a2_a3_180ep_best_final_summary.svg)
 
 ## Files
@@ -26,6 +22,4 @@
 - `../data/baseline_a2_a3_180ep_metrics_points.csv`
 - `../data/baseline_a2_a3_180ep_metrics_summary.csv`
 - `../figures/line_charts/baseline_a2_a3_180ep_curves.svg`
-- `../figures/line_charts/baseline_a2_a3_180ep_success_curve.svg`
-- `../figures/line_charts/baseline_a2_a3_180ep_precision_curve.svg`
 - `../figures/bar_charts/baseline_a2_a3_180ep_best_final_summary.svg`

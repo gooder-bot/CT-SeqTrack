@@ -251,7 +251,6 @@ def diagnostic_data() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 def save_figure(fig: plt.Figure, directory: Path, stem: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     fig.savefig(directory / f"{stem}.png", dpi=180, bbox_inches="tight")
-    fig.savefig(directory / f"{stem}.svg", bbox_inches="tight")
     plt.close(fig)
 
 

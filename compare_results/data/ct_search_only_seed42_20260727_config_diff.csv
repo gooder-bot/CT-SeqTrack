@@ -1,0 +1,7 @@
+field,B0,A1
+cfg,"""cfgs/ct_v2/01_seqtrack3d_baseline.yaml""","""cfgs/ct_v2/05_seqtrack3d_search_only.yaml"""
+ct_history_training_mode,"""canonical""","""correlated_candidate"""
+ct_search_training_history,"""canonical""","""correlated_candidate"""
+experiment_name,"""seqtrack3d_baseline""","""seqtrack3d_search_only"""
+tag,"""ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16""","""ctv2_052ae8d_a1_search_only_car_seed42_60ep_bs16"""
+use_time_guided_search,false,true

@@ -285,7 +285,7 @@ class FeaturePointNet(nn.Module):
         if output_size >= 0:
             self.fc = nn.Conv1d(in_channel, output_size, 1) 
 
-    def forward(self, x):
+    def forward(self, x, return_point_features=False):
         """
 
         :param x: B,C,N
@@ -306,6 +306,8 @@ class FeaturePointNet(nn.Module):
             x = mlp(x)
         if self.output_size > 0:
             x = self.fc(x)
+        if return_point_features:
+            return x, second_layer_out
         if self.return_intermediate:
             return x, pooled_feature.squeeze(dim=-1)
         return x

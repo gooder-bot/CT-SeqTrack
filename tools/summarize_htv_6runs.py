@@ -3,7 +3,7 @@
 
 The script discovers the three A1/A2 protocol pairs under ``output/``, reads
 their TensorBoard scalar files, validates within-protocol step alignment, and
-writes CSV tables, a Markdown report, and publication-ready PNG/SVG figures.
+writes CSV tables, a Markdown report, and publication-ready PNG figures.
 """
 
 from __future__ import annotations
@@ -266,7 +266,6 @@ def build_deltas(
 def save_figure(fig: plt.Figure, directory: Path, stem: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     fig.savefig(directory / f"{stem}.png", dpi=180, bbox_inches="tight")
-    fig.savefig(directory / f"{stem}.svg", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -594,7 +593,7 @@ def main() -> None:
 
     print(f"Wrote {REPORT_DIR / f'{PREFIX}_comparison.md'}")
     print(f"Wrote CSV summaries under {DATA_DIR}")
-    print(f"Wrote PNG/SVG figures under {COMPARE_DIR / 'figures'}")
+    print(f"Wrote PNG figures under {COMPARE_DIR / 'figures'}")
 
 
 if __name__ == "__main__":

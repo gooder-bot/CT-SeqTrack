@@ -43,8 +43,6 @@ M3/M4: LOCKED
 | R2 | scratch | full M2 | 53.318 | 62.503 | +2.090 / +4.640 |
 | R3 | scratch | W0、M2/adapter/dynamics loss 关闭 | 28.999 | 28.023 | −22.230 / −29.840 |
 
-![Final scores](../figures/bar_charts/m2_three_run_final_scores_20260723.png)
-
 ### 训练后期稳定性
 
 “后期均值”固定为 epoch 40/45/50/55/60 五个评测点的算术平均，不进行 best-checkpoint 选择。

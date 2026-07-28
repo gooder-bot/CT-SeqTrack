@@ -1,59 +1,84 @@
-# CT-SeqTrack v2 下一步
+# CT-SeqTrack 下一步
 
-更新时间：2026-07-25
+更新时间：2026-07-28
 
-只执行下面五个部分。旧阶段的细碎任务已移到 `docs/legacy/need_to_do_20260724.md`，不再作为当前待办。
+真实时间投入产出、Random-20% 现实边界、近期方法借鉴和模块兼容性总审计见
+[`docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md`](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
-## 0. v2 逻辑修复门禁（代码已完成）
+旧阶段的细碎任务保留在 `docs/legacy/need_to_do_20260724.md`。当前只维护
+一个最小决策链，不再扩展实验树。
 
-- [x] B3 observation statistics 改用 effective `dt`，真实 `dt` 只保留为监督和诊断。
-- [x] B1–B3 加入 candidate0 clean / 非零 candidate correlated 的训练历史；motion 标签仍为 canonical。
-- [x] correlated search history 从实际 candidate anchor 出发，不再使用 GT anchor 构造 tube。
-- [x] 0、1、2 个可用搜索点时关闭 proposal innovation，并记录 nominal/applied alpha。
-- [x] 轻量单元测试覆盖时间 fallback、相关历史、invalid transition 和空搜索边界。
+## 0. B0–B3 与 Search-only 已完成：当前新增模块均不晋级
 
-完成条件：本地单测、配置解析和编译检查通过；服务器真实 batch 两步
-optimizer smoke 与 2-tracklet 三时间模式 smoke 通过后，才能开始 B0–B3。
-修复前的 B3 `true/fixed/shuffled` 存在真实时间旁路，不能作为 v2 因果证据。
+| 组别 | final Success | final Precision | 关键比较 | 结论 |
+|---|---:|---:|---|---|
+| B0 | 53.360 | 64.382 | — | 当前唯一晋级基线 |
+| A1 Search-only | 27.036 | 25.596 | −26.324 / −38.786 vs B0 | 当前独立搜索否决 |
+| B1 | 26.021 | 24.972 | −27.339 / −39.410 vs B0 | 固定 0.75 motion correction 否决 |
+| B2 | 47.973 | 52.088 | +21.952 / +27.116 vs B1 | search 有恢复作用，但仍低于 B0 |
+| B3 | 25.537 | 24.707 | −22.435 / −27.381 vs B2 | adaptive gate 否决 |
 
-## 1. 正常数据四组消融
+五组均有 75,720 个训练 step、12 个验证点和 epoch60 `last.ckpt`。A1
+late-3 为 27.933 / 26.400，仍比 B0 低 24.972 / 36.705；best 也只有
+29.257 / 30.202，因此不是 checkpoint 选择问题。A1 的训练 search 使用率
+与 B2 相同，末轮训练 loss 又接近 B0，说明当前问题集中在递归评测语义或
+motion×search 交互，而不是 search 未启用或训练不足。
 
-- 训练 B0 `baseline`、B1 `motion`、B2 `motion_search`、B3 `full`。
-- 固定 seed42、60 epoch、candidate4、正常 nuScenes-mini 和 final checkpoint。
-- 汇总 Success/Precision、逐 tracklet paired delta、门控 alpha、search 使用率与 expansion point ratio。
+完整证据见 [`Search-only 技术复核`](compare_results/reports/ct_search_only_seed42_20260727.md)。
 
-完成条件：确认 CT Motion、Search、Adaptive Gate 各自是正贡献还是应被删除。
+## 1. 下一步只做同 checkpoint Search 开/关 2×2
 
-## 2. 真实时间控制
+不再训练 A2，也不先调 75/25、tube 或 gate。使用现有 B0 与 A1 final
+checkpoint，各自执行 baseline crop 和 search-on crop：
 
-- 只对 B3 final checkpoint 运行 `true / fixed / shuffled`。
-- 保持 endpoint、点采样 seed/预算、checkpoint 和协议一致；时间控制允许按设计改变 motion prior 与 search tube，因此实际扩展点可以变化。
-- 正常集涨点且 true 不低于两个控制，才允许进入正式多 seed。
+| checkpoint | baseline crop | search-on crop |
+|---|---|---|
+| B0 final | 已有 B0 | 待评测 |
+| A1 final | 待评测 | 已有 A1 |
 
-完成条件：给出“涨点通过/失败”和“真实时间因果通过/未通过”两个独立结论。
+这四格不需要重新训练。评测时同时记录逐 endpoint 的 search 是否启用、
+expansion-only 可用点数、实际扩展 token 数、预测 tube 位移和首次明显漂移帧。
 
-## 3. 正式实验
+- 两个 checkpoint 都只在 search-on 时下降：当前递归 search 路径是主因，
+  删除当前实现或改为更严格的 fail-closed 搜索。
+- A1 在 search-off 下仍明显低：训练期少量 expansion 暴露已改变模型，需要
+  重新设计训练分布，而不是只改推理阈值。
+- B0 search-on 不下降而 A1 两路都下降：优先检查跨 commit 初始化和优化路径。
 
-- mini 通过后，只补 B0/B3 的 seed43、44。
-- 三 seed 稳定后转 full nuScenes，正常数据作为论文主表。
-- Random-20% 仅在 full/normal 结论稳定后补作鲁棒性表，不参与选模。
+本地已验证 A1/B0 checkpoint 均为 320 个同名同 shape tensor，且 resolved
+config 的实质差异仅是 search 与其历史输入。服务器
+`search_only_model_equivalence.log` 未拉回，所以初始化 exact-equality
+preflight 只能记为“artifact 未审计”，不能补写为已通过。
 
-完成条件：同代码 baseline、完整模型、三 seed 和 full dataset 主结果齐全。
+## 2. 暂停项
 
-## 4. 第二阶段候选
+在上述 2×2 完成且有新 search 设计通过 normal-mini 前，不运行：
 
-只有前三部分通过后，才参考 [ChronoTrack](https://arxiv.org/abs/2604.13789) 依次评估下面两个候选。每次只加入一个变量，不同时引入一致性和记忆模块。
+- A2 conservative motion residual；
+- seed43/44；
+- `true / fixed / shuffled` 因果时间控制；
+- full nuScenes；
+- Random-20%；
+- M3 非对称 endpoint path distillation、ChronoTrack point-feature
+  consistency 或紧凑记忆。
 
-### 4.1 非对称时间一致性
+若当前 search 被确认失败，先删除或只重构这一个模块，不用 motion、gate 或
+memory 掩盖。正常集出现新晋级模型后，顺序仍是：同 checkpoint 时间控制 →
+seed43/44 → full nuScenes → Random-20%。
 
-- 以正常、连续历史路径作为稳定 teacher，以不规则采样或长间隔路径作为 student，只约束共同 endpoint 的 motion proposal/最终框。
-- 第一版只增加训练期 consistency loss，不增加推理网络，不恢复旧 symmetric TWC 的双路监督方式。
-- 单独比较 `B3` 与 `B3 + asymmetric consistency`；正常集不涨点或 true-time 控制退化则删除。
+## 3. 第二阶段候选
 
-### 4.2 紧凑前景记忆
+Search 归因完成后，第二阶段必须区分三种不同设计：
 
-- 一致性模块通过后，再尝试少量 recurrent foreground memory tokens，保存目标前景和运动状态，不缓存完整历史点云。
-- 历史前景特征先对齐到最近 anchor，再更新固定数量的 memory tokens；总 token/点数预算保持不变。
-- 单独比较上一阶段最佳模型与 `+ compact memory`，重点检查遮挡、稀疏点云和长时间间隔，同时保留正常集 guardrail。
+1. **现有 M3 非对称 endpoint path distillation**：canonical EMA teacher 对
+   irregular-history student，只约束共同 endpoint；它不是 ChronoTrack 的
+   temporal consistency。第一轮应移到纯 B0，保持 motion/search/gate/memory
+   全关，并做 single / paired-weight0 / distill A/B/C。
+2. **Chrono-lite point-feature consistency**：使用训练 GT box 将不同帧前景点
+   变换到 canonical coordinates，匹配对应点并约束 latent feature。只有 M3
+   或独立 feature-drift 诊断给出正信号才实现。
+3. **紧凑前景记忆 + memory cycle consistency**：只有 point-feature
+   consistency 通过后，再加入固定数量 recurrent foreground tokens；不能先用
+   memory 掩盖失败的 motion/search。
 
-完成条件：每个候选都必须相对进入该阶段的最佳模型独立涨点；失败的模块立即删除，不用另一个模块掩盖其退化。
+三个模块不能同时首测；每个候选都必须相对进入该阶段的最佳模型独立涨点。

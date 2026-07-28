@@ -505,60 +505,6 @@ def save_performance_curve(points_df: pd.DataFrame, output: Path) -> None:
     plt.close(fig)
 
 
-def save_final_scores(summary_df: pd.DataFrame, output: Path) -> None:
-    display = summary_df.set_index("run_id").loc[list(RUNS)]
-    x = np.arange(display.shape[0])
-    width = 0.34
-    fig, ax = plt.subplots(figsize=(11.2, 6.2))
-    success = ax.bar(
-        x - width / 2,
-        display["final_success"],
-        width,
-        label="Success",
-        color="#2563EB",
-    )
-    precision = ax.bar(
-        x + width / 2,
-        display["final_precision"],
-        width,
-        label="Precision",
-        color="#EA580C",
-    )
-    ax.bar_label(success, fmt="%.2f", padding=3, fontsize=9)
-    ax.bar_label(precision, fmt="%.2f", padding=3, fontsize=9)
-    ax.set_xticks(x, [RUNS[run]["short_label"] for run in display.index])
-    ax.set_ylabel("Final score at epoch 60 (points)")
-    ax.set_ylim(0, max(display["final_precision"].max() * 1.17, 72))
-    ax.legend(frameon=False, ncol=2, loc="upper right")
-    style_axes(ax)
-    fig.suptitle(
-        "Final standard mini_val scores",
-        x=0.07,
-        y=0.98,
-        ha="left",
-        fontsize=16,
-        fontweight="bold",
-    )
-    fig.text(
-        0.07,
-        0.92,
-        "A1-init M2 is strongest; scratch M2 remains competitive with A1, but scratch W0 is not a valid proxy for historical SeqTrack3D.",
-        fontsize=10.5,
-        color="#4B5563",
-    )
-    fig.text(
-        0.99,
-        0.01,
-        "Checkpoint rule: epoch-60 last.ckpt; no best-epoch selection.",
-        ha="right",
-        fontsize=8.5,
-        color="#6B7280",
-    )
-    fig.tight_layout(rect=(0.03, 0.06, 0.99, 0.88))
-    fig.savefig(output, dpi=220, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-
-
 def save_deltas(comparisons_df: pd.DataFrame, output: Path) -> None:
     display = comparisons_df[comparisons_df["scope"] == "final"].copy()
     pivot = display.pivot(index="comparison", columns="metric", values="delta").loc[
@@ -1195,10 +1141,9 @@ def run_analysis(repo_root: Path, write_notebook: bool = True) -> dict[str, Any]
     repo_root = repo_root.resolve()
     data_dir = repo_root / "compare_results/data"
     line_dir = repo_root / "compare_results/figures/line_charts"
-    bar_dir = repo_root / "compare_results/figures/bar_charts"
     delta_dir = repo_root / "compare_results/figures/delta_charts"
     notebook_dir = repo_root / "compare_results/notebooks"
-    for directory in [data_dir, line_dir, bar_dir, delta_dir, notebook_dir]:
+    for directory in [data_dir, line_dir, delta_dir, notebook_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
     points_df, summary_df = collect_metrics(repo_root)
@@ -1227,14 +1172,12 @@ def run_analysis(repo_root: Path, write_notebook: bool = True) -> dict[str, Any]
 
     figure_paths = [
         line_dir / f"m2_three_run_standard_curves_{ANALYSIS_DATE}.png",
-        bar_dir / f"m2_three_run_final_scores_{ANALYSIS_DATE}.png",
         delta_dir / f"m2_three_run_final_deltas_{ANALYSIS_DATE}.png",
         line_dir / f"m2_three_run_loss_curves_{ANALYSIS_DATE}.png",
     ]
     save_performance_curve(points_df, figure_paths[0])
-    save_final_scores(summary_df, figure_paths[1])
-    save_deltas(comparisons_df, figure_paths[2])
-    save_loss_curves(loss_df, figure_paths[3])
+    save_deltas(comparisons_df, figure_paths[1])
+    save_loss_curves(loss_df, figure_paths[2])
 
     artifact_path = write_artifact_json(
         repo_root,

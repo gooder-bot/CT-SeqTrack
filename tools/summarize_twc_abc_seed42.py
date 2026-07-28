@@ -5,7 +5,7 @@ The experiment separates single-view training (A), paired-view training with
 zero consistency weight (B), and paired-view training with corrected TWC (C).
 This script validates the local run provenance, parses TensorBoard scalar
 events, writes analysis-ready CSV files, and renders publication-oriented
-PNG/SVG figures under ``compare_results``.
+PNG figures under ``compare_results``.
 """
 
 from __future__ import annotations
@@ -364,7 +364,6 @@ def assert_diagnostic_integrity(summaries: list[dict[str, Any]]) -> None:
 def save_figure(fig: plt.Figure, directory: Path, stem: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     fig.savefig(directory / f"{stem}.png", dpi=200, bbox_inches="tight")
-    fig.savefig(directory / f"{stem}.svg", bbox_inches="tight")
     plt.close(fig)
 
 

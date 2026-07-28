@@ -28,7 +28,11 @@ from models.path_distillation import (
     teacher_endpoint_confidence_terms,
     update_ema_module,
 )
-from models.ct_v2 import ContinuousTimeMotionEncoder, ProposalFusionGate
+from models.ct_v2 import (
+    ContinuousTimeMotionEncoder,
+    PointFeatureTemporalConsistencyLoss,
+    ProposalFusionGate,
+)
 from models.ct_v2.contracts import (
     build_search_usable_mask,
     resolve_observation_delta_t,
@@ -57,6 +61,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             getattr(config, 'use_physical_time_adapter', False))
         self.use_m3_path_distillation = bool(getattr(
             config, 'use_m3_path_distillation', False))
+        self.use_point_feature_tc = bool(getattr(
+            config, 'use_point_feature_tc', False))
+        self.pftc_weight = float(getattr(config, 'pftc_weight', 1.0))
+        self.pftc_ramp_epochs = int(getattr(
+            config, 'pftc_ramp_epochs', 5))
+        self.pftc_time_field = str(getattr(
+            config, 'pftc_time_field', 'effective')).strip().lower()
+        if self.pftc_time_field not in ('effective', 'real'):
+            raise ValueError("pftc_time_field must be 'effective' or 'real'")
+        if self.pftc_weight < 0:
+            raise ValueError("pftc_weight must be non-negative")
+        if self.pftc_ramp_epochs < 0:
+            raise ValueError("pftc_ramp_epochs must be non-negative")
+        if self.use_point_feature_tc and (
+                bool(getattr(config, 'use_twc', False))
+                or self.use_m3_path_distillation):
+            raise ValueError(
+                "PFTC, legacy paired-view TWC, and M3 EMA path distillation "
+                "must be evaluated as separate training objectives.")
         self.m3_irregular_supervision_weight = float(getattr(
             config, 'm3_irregular_supervision_weight', 0.0))
         self.m3_path_weight = float(getattr(config, 'm3_path_weight', 0.0))
@@ -325,6 +348,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             per_point_mlp1=[64, 64, 64, 128, 1024],
             per_point_mlp2=[512, 256, 128, 128],
             output_size=128)
+        if self.use_point_feature_tc:
+            self.point_feature_tc = PointFeatureTemporalConsistencyLoss(
+                distance_threshold=float(getattr(
+                    config, 'pftc_distance_threshold', 0.3)),
+                min_correspondences=int(getattr(
+                    config, 'pftc_min_correspondences', 3)),
+                time_weighting=bool(getattr(
+                    config, 'pftc_time_weighting', True)),
+                time_scale=float(getattr(
+                    config, 'pftc_time_scale', 0.5)),
+                time_weight_min=float(getattr(
+                    config, 'pftc_time_weight_min', 0.5)),
+                time_weight_max=float(getattr(
+                    config, 'pftc_time_weight_max', 3.0)),
+                degrees=bool(getattr(config, 'degrees', False)),
+            )
 
         self.Transformer = Seq2SeqFormer(d_word_vec=64, d_model=64, d_inner=512,
             n_layers=3, n_head=4, d_k=64, d_v=64, n_position = 1024*4)
@@ -794,8 +833,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         box_seq_corners = torch.cat((box_seq_corners,corner_stamps),dim=-1) # B*(L*8)*4 where 4 represents features for x, y, z, and timestamp
 
         solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds
-        feature = self.feature_pointnet(solo_x) #(B*num) * C * N Note: N is the number of points per frame
-        feature = feature.transpose(1,2) 
+        collect_pftc_features = self.use_point_feature_tc and self.training
+        feature_result = self.feature_pointnet(
+            solo_x, return_point_features=collect_pftc_features)
+        if collect_pftc_features:
+            feature, point_aligned_feature = feature_result
+            output_dict["pftc_point_features"] = (
+                point_aligned_feature.transpose(1, 2).reshape(
+                    B, L, chunk_size, -1))
+        else:
+            feature = feature_result
+        # (B*num) * C * N; N is the fixed Transformer token count per frame.
+        feature = feature.transpose(1,2)
         NEW_N = feature.shape[1]
         points_feature = feature.reshape(B,L*NEW_N,-1)
 
@@ -1100,6 +1149,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         ) / float(self.m3_ramp_epochs)
         return self.m3_path_weight * min(max(ramp_progress, 0.0), 1.0)
 
+    def _pftc_ramp(self):
+        if self.pftc_ramp_epochs == 0:
+            return 1.0
+        current_epoch = int(getattr(self, "current_epoch", 0))
+        return min(max(
+            (current_epoch + 1) / float(self.pftc_ramp_epochs),
+            0.0), 1.0)
+
     def compute_paired_loss(self, data, output):
         data_a, data_b = data["view_a"], data["view_b"]
         output_a, output_b = output["view_a"], output["view_b"]
@@ -1279,6 +1336,61 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_dict.update({
                 "loss_total": loss_total,
                 "loss_bc": loss_bc
+            })
+
+        if self.use_point_feature_tc:
+            if "pftc_point_features" not in output:
+                raise KeyError(
+                    "PFTC requires training-time point-aligned features.")
+            time_key = f"timestamps_{self.pftc_time_field}"
+            required = (
+                "points", "seg_label", "box_label_prev", "box_label",
+                "valid_mask", time_key)
+            missing = [key for key in required if key not in data]
+            if missing:
+                raise KeyError(
+                    "PFTC input is missing: " + ", ".join(missing))
+
+            batch_size = output["pftc_point_features"].shape[0]
+            num_frames = output["pftc_point_features"].shape[1]
+            num_points = output["pftc_point_features"].shape[2]
+            expected_points = num_frames * num_points
+            if data["points"].shape[1] != expected_points:
+                raise ValueError(
+                    "PFTC point features no longer align with sampled XYZ: "
+                    f"expected {expected_points}, got {data['points'].shape[1]}")
+            boxes = torch.cat((
+                data["box_label_prev"],
+                data["box_label"].unsqueeze(1),
+            ), dim=1)
+            pftc_terms = self.point_feature_tc(
+                point_features=output["pftc_point_features"],
+                points=data["points"][..., :3].reshape(
+                    batch_size, num_frames, num_points, 3),
+                seg_mask=data["seg_label"].reshape(
+                    batch_size, num_frames, num_points),
+                boxes=boxes,
+                history_valid_mask=data["valid_mask"],
+                timestamps=data[time_key],
+            )
+            pftc_ramp = self._pftc_ramp()
+            pftc_effective_weight = self.pftc_weight * pftc_ramp
+            loss_total_sup = loss_total
+            loss_total = (
+                loss_total_sup
+                + pftc_effective_weight * pftc_terms["loss"])
+            loss_dict.update({
+                "loss_total": loss_total,
+                "loss_total_sup": loss_total_sup,
+                "loss_pftc": pftc_terms["loss"],
+                "pftc_ramp": loss_total.new_tensor(pftc_ramp),
+                "pftc_lambda": loss_total.new_tensor(self.pftc_weight),
+                "pftc_effective_weight": loss_total.new_tensor(
+                    pftc_effective_weight),
+            })
+            loss_dict.update({
+                key: value for key, value in pftc_terms.items()
+                if key != "loss"
             })
 
         if getattr(self.config, "obs_gate_log_stats", False):

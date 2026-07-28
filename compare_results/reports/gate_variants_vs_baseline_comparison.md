@@ -12,10 +12,6 @@ Compared models: SeqTrack baseline, gate-safe, and conf-res gate.
 
 ![curves](../figures/line_charts/gate_variants_vs_baseline_curves.png)
 
-![success](../figures/line_charts/gate_variants_vs_baseline_success_curve.png)
-
-![precision](../figures/line_charts/gate_variants_vs_baseline_precision_curve.png)
-
 ![best final](../figures/bar_charts/gate_variants_vs_baseline_best_final_summary.png)
 
 ## Data

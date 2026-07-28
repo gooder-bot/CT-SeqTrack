@@ -1,12 +1,46 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-25
+更新时间：2026-07-27
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
 注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
 
 ---
+
+## 2026-07-27：Search-only A1 首筛完成
+
+- [x] A1 完成 seed42 normal nuScenes-mini Car、60 epoch、75,720 training
+  steps、12 次验证和 epoch60 `last.ckpt`。
+- [x] final 为 `27.036/25.596`，late-3 为 `27.933/26.400`，相对 B0
+  final 下降 `26.324/38.786`，当前 Search-only 判定 No-Go。
+- [x] best Success/Precision 仅为 `29.257/30.202`，排除单个 final
+  checkpoint 偶然失效。
+- [x] A1/B0 末轮 mean training loss 为 `0.2221/0.2208`；A1/B2 的训练
+  search-used ratio 为 `3.460%/3.458%`，排除 search 未执行和常规训练发散。
+- [x] A1/B0 checkpoint 拓扑均为 320 个同名同 shape tensors；服务器
+  initialization-equivalence preflight 日志未拉回，按 artifact 未审计记录。
+- [x] `tools/analyze_ct_search_only.py` 已生成独立报告、6 份 CSV 和验证曲线。
+
+当前结论：B2 对 B1 的恢复属于模块交互，不能证明 search 独立有效。下一步只
+做现有 B0/A1 checkpoint 的 Search 开/关 2×2 与验证 endpoint diagnostics，
+不训练 A2。
+
+## 2026-07-27：CT-SeqTrack v2 B0–B3 首筛完成
+
+- [x] B0–B3 均完成 seed42 normal nuScenes-mini Car、60 epoch、
+  75,720 training steps、12 次验证和 epoch60 `last.ckpt`。
+- [x] final 结果：B0 `53.360/64.382`、B1 `26.021/24.972`、
+  B2 `47.973/52.088`、B3 `25.537/24.707`。
+- [x] B2 相对失败的 B1 恢复 `+21.952/+27.116`，但相对 B0 仍低
+  `−5.387/−12.294`；不能把 search 表述为独立涨点。
+- [x] B3 gate 在 epoch7 已饱和到 nominal alpha 0.749，epoch60
+  batch-min mean 为 0.749998；adaptive reliability 失败，B3 判定 No-Go。
+- [x] 本地报告、原始验证标量 CSV、完整性/诊断 CSV 和四组曲线已由
+  `tools/analyze_ct_v2_ablation.py` 统一生成。
+
+本节当时决定补跑 baseline 与 search-only；该实验已在上一节完成并判定
+No-Go。当前仍只有 B0 保留。
 
 ## 2026-07-25：CT-SeqTrack v2 工程收敛
 
@@ -17,7 +51,8 @@
 - [x] 根目录计划与待办已精简；旧阶段材料移动到 `docs/legacy/`。
 - [x] v2 单元测试、Python 编译、配置解析和 runner dry-run 已通过。
 
-注意：以上是工程完成，不是模型涨点结论。B0–B3 正常数据实验尚未运行。
+注意：以上只记录 2026-07-25 当时的工程状态；B0–B3 已于
+2026-07-27 完成，结论见上一节。
 
 ## 0. 完成总览
 

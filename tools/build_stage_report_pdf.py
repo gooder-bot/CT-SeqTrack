@@ -1688,15 +1688,6 @@ def build_story(chart_paths: dict[str, Path]):
             sty["Body"],
         )
     )
-    m2_scores_chart = ROOT / "compare_results" / "figures" / "bar_charts" / "m2_three_run_final_scores_20260723.png"
-    story.extend(
-        figure_block(
-            m2_scores_chart,
-            "图 8  R1/R2/R3 与历史 A1 的 epoch60 final。来源：[S16]。",
-            sty,
-            max_height=88 * mm,
-        )
-    )
     story.append(
         callout(
             "<b>此时最重要的两个缺失对照：</b>"
@@ -1736,7 +1727,7 @@ def build_story(chart_paths: dict[str, Path]):
     story.extend(
         figure_block(
             chart_paths["formal_controls"],
-            "图 9  R1 matched tracking 增益与 same-checkpoint 时间负对照。来源：[S17]。",
+            "图 8  R1 matched tracking 增益与 same-checkpoint 时间负对照。来源：[S17]。",
             sty,
             max_height=86 * mm,
         )
@@ -1800,7 +1791,7 @@ def build_story(chart_paths: dict[str, Path]):
     story.extend(
         figure_block(
             chart_paths["scratch_time"],
-            "图 10  Scratch true-time 相对 shuffled-time 的 final 与 late delta。来源：[S18]。",
+            "图 9  Scratch true-time 相对 shuffled-time 的 final 与 late delta。来源：[S18]。",
             sty,
             max_height=80 * mm,
         )

@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import math
 import struct
+import tempfile
 from pathlib import Path
 
 
@@ -364,10 +365,6 @@ def write_report(summary_rows: list[dict[str, object]]) -> None:
         "",
         f"![curves](../figures/line_charts/{PREFIX}_curves.svg)",
         "",
-        f"![success](../figures/line_charts/{PREFIX}_success_curve.svg)",
-        "",
-        f"![precision](../figures/line_charts/{PREFIX}_precision_curve.svg)",
-        "",
         f"![best final](../figures/bar_charts/{PREFIX}_best_final_summary.svg)",
         "",
         "## Files",
@@ -375,8 +372,6 @@ def write_report(summary_rows: list[dict[str, object]]) -> None:
         f"- `../data/{PREFIX}_metrics_points.csv`",
         f"- `../data/{PREFIX}_metrics_summary.csv`",
         f"- `../figures/line_charts/{PREFIX}_curves.svg`",
-        f"- `../figures/line_charts/{PREFIX}_success_curve.svg`",
-        f"- `../figures/line_charts/{PREFIX}_precision_curve.svg`",
         f"- `../figures/bar_charts/{PREFIX}_best_final_summary.svg`",
         "",
     ]
@@ -384,12 +379,13 @@ def write_report(summary_rows: list[dict[str, object]]) -> None:
 
 
 def svg_combined(path: Path, rows: list[dict[str, object]]) -> None:
-    success_path = LINE_DIR / f"{PREFIX}_success_curve.svg"
-    precision_path = LINE_DIR / f"{PREFIX}_precision_curve.svg"
-    svg_line_chart(success_path, rows, "success/test", "180ep Success")
-    svg_line_chart(precision_path, rows, "precision/test", "180ep Precision")
-    success = success_path.read_text(encoding="utf-8")
-    precision = precision_path.read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        success_path = Path(temp_dir) / "success.svg"
+        precision_path = Path(temp_dir) / "precision.svg"
+        svg_line_chart(success_path, rows, "success/test", "180ep Success")
+        svg_line_chart(precision_path, rows, "precision/test", "180ep Precision")
+        success = success_path.read_text(encoding="utf-8")
+        precision = precision_path.read_text(encoding="utf-8")
     # SVG nesting keeps the two hand-drawn charts intact.
     path.write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" width="920" height="960" viewBox="0 0 920 960">\n'
@@ -453,8 +449,6 @@ def main() -> None:
     ]
     write_csv(DATA_DIR / f"{PREFIX}_metrics_points.csv", all_points, point_fields)
     write_csv(DATA_DIR / f"{PREFIX}_metrics_summary.csv", summaries, summary_fields)
-    svg_line_chart(LINE_DIR / f"{PREFIX}_success_curve.svg", all_points, "success/test", "180ep Success")
-    svg_line_chart(LINE_DIR / f"{PREFIX}_precision_curve.svg", all_points, "precision/test", "180ep Precision")
     svg_combined(LINE_DIR / f"{PREFIX}_curves.svg", all_points)
     svg_bar_chart(BAR_DIR / f"{PREFIX}_best_final_summary.svg", summaries)
     write_report(summaries)

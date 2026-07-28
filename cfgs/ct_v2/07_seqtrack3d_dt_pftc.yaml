@@ -1,0 +1,7 @@
+_base_: 01_seqtrack3d_baseline.yaml
+
+experiment_name: seqtrack3d_dt_pftc
+use_point_feature_tc: true
+pftc_time_weighting: true
+pftc_weight: 1.0
+pftc_time_field: effective

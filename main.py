@@ -113,6 +113,9 @@ def parse_config():
         '--epoch', type=int, default=argparse.SUPPRESS,
         help='number of epochs (YAML value is used when omitted)')
     parser.add_argument(
+        '--limit_train_batches', type=int, default=argparse.SUPPRESS,
+        help='limit training batches (used by bounded loss preflight runs)')
+    parser.add_argument(
         '--save_top_k', type=int, default=argparse.SUPPRESS,
         help='save top k checkpoints')
     parser.add_argument(
@@ -217,6 +220,9 @@ def parse_config():
         type=float,
         default=argparse.SUPPRESS,
         help='Optional supervised-loss weight for the irregular M3 view.')
+    parser.add_argument(
+        '--pftc_weight', type=float, default=argparse.SUPPRESS,
+        help='PFTC loss lambda; use zero for the 200-batch loss preflight.')
 
     args = parser.parse_args()
     config = load_yaml(args.cfg)
@@ -295,7 +301,9 @@ if not cfg.test:
                          default_root_dir=run_root_dir,
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,
                          num_sanity_val_steps=0,
-                         gradient_clip_val=cfg.gradient_clip_val,
+                          gradient_clip_val=cfg.gradient_clip_val,
+                         limit_train_batches=getattr(
+                             cfg, 'limit_train_batches', 1.0),
                          fast_dev_run=False)
     # init model
     train_dataloader_length = len(train_loader) #用于设置OneCycle学习率
