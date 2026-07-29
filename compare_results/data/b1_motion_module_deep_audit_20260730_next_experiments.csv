@@ -1,0 +1,6 @@
+order,cost,experiment,decision
+1,无训练,同 checkpoint alpha 开/关 2×2,区分推理时直接 correction 伤害与训练期 co-adaptation；不再扫新 alpha。
+2,一次验证导出,逐 endpoint proposal attribution,计算 dyn-vs-obs helpful rate、residual cosine、oracle α、首次漂移与分桶稳定性。
+3,短训练/离线,冻结 baseline 生成 recursive-history roll-in,用真实预测误差替代 0.1 m 量级合成扰动，先测 prior 在闭环历史上的可预测性。
+4,5 epoch kill-test,有序 trajectory encoder + 4DoF/uncertainty,只有 endpoint 诊断存在稳定受益子群时才实现；否则永久关闭 direct fusion。
+5,结构重设计,motion 前移到搜索区域或独立 tube/proxy branch,若目标是失联恢复，prior 必须在 crop 前影响可见点集合，并保留 exact baseline path。

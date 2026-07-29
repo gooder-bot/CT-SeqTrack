@@ -1,12 +1,33 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-27
+更新时间：2026-07-30
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
 注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
 
 ---
+
+## 2026-07-30：Motion alpha=0/0.25 scratch 复核完成
+
+- [x] alpha0 与 alpha0.25 均完成 seed42 normal nuScenes-mini Car、
+  scratch 60 epoch、75,720 training steps、12 次验证和 epoch60
+  `last.ckpt`。
+- [x] 两组来自同一 commit `5f260e7`，tracked source clean；resolved
+  config 仅 cfg、tag 和 alpha 不同，训练/验证 selection hash 一致。
+- [x] alpha0 final/late-3 为 `47.049/49.184`、`46.828/49.669`。
+- [x] alpha0.25 final/late-3 为 `29.581/28.862`、`29.472/28.849`；
+  相对 alpha0 分别下降 `17.468/20.322`、`17.357/20.820`。
+- [x] alpha0.25 post-warmup applied alpha 为 0.184、applied ratio 为
+  73.7%、平均 correction norm 为 0.083 m；较小修正仍持续退化。
+- [x] 末轮 training loss 随 alpha 增大而降低，但递归验证反向下降，当前
+  固定全局 proposal innovation 判定 No-Go。
+- [x] 两份服务器临时 alpha YAML 已按 provenance SHA256 精确还原；新增
+  `tools/analyze_motion_alpha_sweep.py`、7 份 CSV、统一曲线和完整报告。
+
+当前只否定 fixed global innovation。alpha0 是 correction-off control，不是
+motion 涨点；与 B0 的差仍受共享初始化影响。后续只做同 checkpoint alpha
+on/off 2×2 与 endpoint attribution，不再启动新的 60-epoch alpha sweep。
 
 ## 2026-07-27：Search-only A1 首筛完成
 
@@ -1804,3 +1825,20 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - standard/gap1124/burst-drop active 各完成 2 次 optimizer update；encoder/adapter 梯度非零、修正非平凡，最大 bound violation 为 float32 舍入量级 `5.96e-8`。
 - 五个 JSONL 共 61 个 batch/122 个样本，所有 loss/gradient finite；sample/fallback/applied/clamp/optimizer/bound 已从原始记录本地独立复算并与五个 summary 完全一致，全部 `requirements_passed=true`。
 - 正式判定为 `PASS_M1_M2_E0_E5_ENGINEERING_GATES`；E6 的唯一 formal config、alpha/R、true/fixed/shuffled、manifest/sampling/optimizer/final checkpoint 与完整归档仍未冻结，因此维持 `HOLD_FORMAL_TRAINING_PENDING_E6`。完整报告见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。
+## 2026-07-30：Δt-PFTC seed42 部分运行复核
+
+- [x] 核对 provenance：clean commit `5f260e74...`、mini_train/mini_val、Car、
+  seed42、batch16、true time、PFTC weight1.0 与 preloading 均符合启动合同。
+- [x] 确认 artifact 非完整 60 epoch：29,092 step（约 epoch23.05）、4 个验证点、
+  `last.ckpt` 为 epoch19。
+- [x] 整理验证表：epoch20 为 `49.056/63.870`，相对 B0 epoch60 为
+  `-4.304/-0.512`，不能判定涨点。
+- [x] 量化训练诊断：feature std `0.0947→0.0210`、有效样本率约 63%、
+  weighted/raw 差异中位数 0.074%、单卡 step time 约为 B0 的 10.2 倍。
+- [x] 发现 canonical yaw 实现使用 `R(+yaw)`，与项目 object-local 的
+  `R(-yaw)` 约定相反；现有单测按错误公式的逆构造输入，未发现该问题。
+- [x] 决策冻结为 `NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA /`
+  `NO_EVIDENCE_FOR_PHYSICAL_TIME`，不续训旧 checkpoint。
+
+完整报告见
+`compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md`。

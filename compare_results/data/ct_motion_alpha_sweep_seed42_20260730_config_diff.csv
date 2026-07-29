@@ -1,0 +1,4 @@
+field,alpha000,alpha025
+cfg,"""cfgs/ct_v2/02_ct_motion_alpha000.yaml""","""cfgs/ct_v2/02_ct_motion_alpha025.yaml"""
+dynamics_innovation_alpha,0.0,0.25
+tag,"""ctv2_b1_motion_alpha000_car_seed42_60ep_bs16_gpu1_thread1_scratch""","""ctv2_b1_motion_alpha025_car_seed42_60ep_bs16_gpu3_thread1_scratch"""

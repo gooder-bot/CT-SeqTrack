@@ -31,6 +31,13 @@ def parse_args():
     parser.add_argument("--path", help="override the nuScenes dataset root")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tag", default="")
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--workers", type=int)
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--preloading", action="store_true")
+    parser.add_argument("--check-val-every-n-epoch", type=int)
+    parser.add_argument("--save-top-k", type=int)
+    parser.add_argument("--limit-train-batches", type=float)
     parser.add_argument(
         "--protocol", choices=("normal", "random20", "gap1124"),
         default="normal")
@@ -90,6 +97,40 @@ def build_command(args):
     ]
     if args.path:
         command.extend(("--path", args.path))
+    if args.epochs is not None:
+        if args.mode != "train" or args.epochs <= 0:
+            raise ValueError("--epochs must be positive and is training-only")
+        command.extend(("--epoch", str(args.epochs)))
+    if args.workers is not None:
+        if args.workers < 0:
+            raise ValueError("--workers must be non-negative")
+        command.extend(("--workers", str(args.workers)))
+    if args.batch_size is not None:
+        if args.mode != "train" or args.batch_size <= 0:
+            raise ValueError(
+                "--batch-size must be positive and is training-only")
+        command.extend(("--batch_size", str(args.batch_size)))
+    if args.preloading:
+        command.append("--preloading")
+    if args.check_val_every_n_epoch is not None:
+        if args.mode != "train" or args.check_val_every_n_epoch <= 0:
+            raise ValueError(
+                "--check-val-every-n-epoch must be positive and training-only")
+        command.extend((
+            "--check_val_every_n_epoch",
+            str(args.check_val_every_n_epoch),
+        ))
+    if args.save_top_k is not None:
+        if args.mode != "train" or args.save_top_k < 0:
+            raise ValueError(
+                "--save-top-k must be non-negative and training-only")
+        command.extend(("--save_top_k", str(args.save_top_k)))
+    if args.limit_train_batches is not None:
+        if args.mode != "train" or args.limit_train_batches <= 0:
+            raise ValueError(
+                "--limit-train-batches must be positive and training-only")
+        command.extend((
+            "--limit_train_batches", str(args.limit_train_batches)))
     if args.pftc_weight is not None and not args.preflight:
         command.extend(("--pftc_weight", str(args.pftc_weight)))
     if args.preflight:

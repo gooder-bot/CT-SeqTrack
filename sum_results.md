@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-27
+更新时间：2026-07-30
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -12,6 +12,31 @@ Adaptive Fusion 四组正常数据消融。下方 2026-07-24 及更早的 M2/M3/
 Search-only A1 为准。
 
 ## 0. 当前总判断
+
+### 2026-07-30 Motion fixed-alpha scratch 复核
+
+两组新运行都完成 75,720 step、12 个验证点和 epoch60 `last.ckpt`。它们来自
+同一 commit `5f260e7`，tracked source clean，resolved config 除 cfg/tag
+外只差 `dynamics_innovation_alpha`：
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline（历史上下文） | **53.360** | **64.382** | **52.905** | **63.104** |
+| motion alpha=0 | 47.049 | 49.184 | 46.828 | 49.669 |
+| motion alpha=0.25 | 29.581 | 28.862 | 29.472 | 28.849 |
+| motion alpha=0.75（旧 B1） | 26.021 | 24.972 | 26.080 | 25.299 |
+
+`alpha=0.25 − alpha=0` final 为 `−17.468/−20.322`，late-3 为
+`−17.357/−20.820`。alpha0.25 warmup 后实际平均系数只有 0.184、平均修正
+约 0.083 m，仍在 epoch25–60 的 8/8 个验证点同时低于 alpha0。更高 alpha
+使末轮训练 loss 从 0.223 降到 0.217/0.215，但递归验证反向下降，支持
+train/recursive-history mismatch 与错误 proposal 闭环放大。
+
+当前判定为 `NO_GO_FIXED_GLOBAL_MOTION_INNOVATION`。alpha0 是精确关闭
+correction 的负对照，并不提供 motion 正贡献；它与 B0 还有共享初始化混杂。
+不再训练更小全局 alpha。下一步只做已有 alpha0/0.25 checkpoint 的推理
+on/off 2×2 和逐 endpoint proposal attribution。完整报告见
+`compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md`。
 
 ### 2026-07-27 Search-only A1 normal-mini
 
@@ -1045,3 +1070,21 @@ crop and coordinate changes.
 ```
 
 论文可行性、claim 审计与方法/benchmark 分叉见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
+## 2026-07-30 Δt-PFTC seed42 部分运行
+
+第四模块的首个 formal-named artifact 并未完成 60 epoch。训练 events 止于
+step29,091（共 29,092 step，约 epoch23.05），只验证到 epoch20，`last.ckpt`
+为 epoch19。epoch20 得到 `49.056 Success / 63.870 Precision`，相对 B0
+epoch60 的 `53.360/64.382` 仍低 `4.304/0.512`；由于 early validation 波动大且
+缺少后 40 epoch，不能判定最终涨点。
+
+机制审计发现三项决定性问题：canonical yaw 使用了与项目约定相反的
+`R(+yaw)`；foreground feature std 从 epoch1 的 `0.0947` 收缩到 epoch20 的
+`0.0210`，而 match count/distance 稳定，说明 raw SmoothL1 有平凡收缩风险；
+单卡训练为 `3.689 s/step`，约是 B0 的 10.2 倍。weighted/raw PFTC loss 差异
+中位数又只有 0.074%，尚无 physical-time 增量证据。
+
+当前决策为 `NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`。旧 epoch19
+checkpoint 不续训；修正几何、防坍缩和性能以后，先做 B0/PFTC-U/Δt-PFTC
+各 5 epoch 机制 kill-test，通过后才重启正式 60-epoch 三臂。完整报告见
+`compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md`。

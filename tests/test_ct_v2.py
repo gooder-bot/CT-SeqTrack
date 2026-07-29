@@ -3,21 +3,30 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from pyquaternion import Quaternion
 
 from models.ct_v2.contracts import (
     build_search_usable_mask,
     resolve_observation_delta_t,
 )
 from models.ct_v2.fusion import ProposalFusionGate
-from models.ct_v2.motion import ContinuousTimeMotionEncoder
+from models.ct_v2.motion import (
+    ContinuousTimeMotionEncoder,
+    OrderedTrajectoryEncoder,
+    ZeroInitTrajectoryAdapter,
+)
 from models.dynamics import apply_proposal_innovation
+from utils.candidate_utils import anchor_relative_trajectory_targets
 from utils.ct_history import (
+    build_irregular_history_offsets,
     build_ct_history_offsets,
     correlate_candidate_offsets,
 )
 from utils.config import load_yaml_config
 from utils.ct_search import (
+    build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    sample_search_extension,
     stratified_search_sample,
 )
 
@@ -36,6 +45,40 @@ class DummyOrientation:
     def __init__(self, axis=None, radians=0.0):
         self.axis = axis
         self.radians = radians
+
+
+class OrientedDummyBox:
+    def __init__(self, center, yaw):
+        self.center = np.asarray(center, dtype=np.float64)
+        self.orientation = Quaternion(axis=[0, 0, 1], radians=float(yaw))
+
+    @property
+    def rotation_matrix(self):
+        return self.orientation.rotation_matrix
+
+
+class TrajectoryTargetContractTest(unittest.TestCase):
+    def test_target_uses_actual_crop_anchor_frame(self):
+        anchor = OrientedDummyBox([1.0, 2.0, 0.0], np.pi / 2.0)
+        current = OrientedDummyBox([1.0, 4.0, 0.0], 2.0 * np.pi / 3.0)
+        displacement, velocity = anchor_relative_trajectory_targets(
+            current, anchor, current_delta_t=2.0)
+
+        np.testing.assert_allclose(
+            displacement,
+            [2.0, 0.0, 0.0, np.pi / 6.0],
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(velocity, [1.0, 0.0, 0.0], atol=1e-6)
+
+    def test_anchor_error_is_part_of_online_target(self):
+        candidate_anchor = OrientedDummyBox([0.3, -0.2, 0.0], 0.0)
+        current = OrientedDummyBox([1.0, 0.0, 0.0], 0.0)
+        displacement, _ = anchor_relative_trajectory_targets(
+            current, candidate_anchor, current_delta_t=0.5)
+
+        np.testing.assert_allclose(
+            displacement, [0.7, 0.2, 0.0, 0.0], atol=1e-6)
 
 
 class SearchExpansionTest(unittest.TestCase):
@@ -81,6 +124,44 @@ class SearchExpansionTest(unittest.TestCase):
         )
         self.assertEqual(diagnostics["expansion_available_count"], 8)
         self.assertEqual(diagnostics["expansion_sample_count"], 0)
+
+    def test_ordered_crop_is_off_for_normal_and_on_before_long_gap(self):
+        boxes = [
+            DummyBox([2.0, 0.0, 0.0]),
+            DummyBox([1.0, 0.0, 0.0]),
+            DummyBox([0.0, 0.0, 0.0]),
+        ]
+        normal, normal_diag = build_ordered_trajectory_search_box(
+            boxes,
+            delta_t=[0.5, 0.5, 0.5],
+            valid_mask=[1, 1, 1],
+        )
+        self.assertIsNone(normal)
+        self.assertEqual(normal_diag["reason"], "normal_cadence")
+
+        long_gap, long_diag = build_ordered_trajectory_search_box(
+            boxes,
+            delta_t=[1.0, 0.5, 0.5],
+            valid_mask=[1, 1, 1],
+        )
+        self.assertIsNotNone(long_gap)
+        self.assertTrue(long_diag["valid"])
+        self.assertAlmostEqual(long_diag["gap_ratio"], 2.0)
+        self.assertGreater(long_diag["displacement"], 0.0)
+
+    def test_separate_extension_does_not_change_baseline_tokens(self):
+        baseline = np.stack((
+            np.arange(20), np.zeros(20), np.zeros(20)),
+            axis=1,
+        ).astype(np.float32)
+        expanded = baseline.copy()
+        expanded[:, 1] = 5.0
+        baseline_copy = baseline.copy()
+        sampled, diagnostics = sample_search_extension(
+            baseline, expanded, sample_size=8, min_expansion_points=4, seed=4)
+        np.testing.assert_array_equal(baseline, baseline_copy)
+        self.assertEqual(sampled.shape, (8, 3))
+        self.assertTrue(diagnostics["active"])
 
 
 class ProposalFusionTest(unittest.TestCase):
@@ -255,6 +336,63 @@ class ContinuousTimeMotionTest(unittest.TestCase):
             displacement, torch.zeros_like(displacement)))
 
 
+class OrderedTrajectoryMotionTest(unittest.TestCase):
+    def test_encoder_distinguishes_acceleration_order(self):
+        torch.manual_seed(17)
+        encoder = OrderedTrajectoryEncoder(hidden_dim=16, step_dim=8)
+        # Both histories contain transition velocities {1, 3}; only their
+        # chronological order differs.
+        accelerating = torch.tensor([[[
+            4.0, 0.0, 0.0, 0.0
+        ], [
+            1.0, 0.0, 0.0, 0.0
+        ], [
+            0.0, 0.0, 0.0, 0.0
+        ]]])
+        decelerating = torch.tensor([[[
+            4.0, 0.0, 0.0, 0.0
+        ], [
+            3.0, 0.0, 0.0, 0.0
+        ], [
+            0.0, 0.0, 0.0, 0.0
+        ]]])
+        delta_t = torch.ones(1, 3)
+        valid = torch.ones(1, 3)
+        result_a = encoder.forward_trajectory(
+            accelerating, delta_t, valid, current_delta_t=torch.ones(1))
+        result_b = encoder.forward_trajectory(
+            decelerating, delta_t, valid, current_delta_t=torch.ones(1))
+        self.assertFalse(torch.equal(
+            result_a["feature"], result_b["feature"]))
+        self.assertNotEqual(
+            result_a["displacement"][0, 0].item(),
+            result_b["displacement"][0, 0].item(),
+        )
+
+    def test_zero_init_adapter_is_exact_observation_identity(self):
+        adapter = ZeroInitTrajectoryAdapter(
+            feature_dim=8,
+            trajectory_dim=4,
+            search_dim=3,
+            hidden_dim=6,
+        )
+        observation = torch.randn(2, 8)
+        adapted, diagnostics = adapter(
+            observation,
+            torch.randn(2, 4),
+            torch.randn(2, 3),
+            torch.zeros(2, 4),
+            torch.tensor([1.0, 2.0]),
+            torch.ones(2, 1),
+            torch.tensor([0.0, 1.0]),
+        )
+        self.assertTrue(torch.equal(adapted, observation))
+        self.assertTrue(torch.equal(
+            diagnostics["trajectory_adapter_correction"],
+            torch.zeros_like(observation),
+        ))
+
+
 class ContinuousTimeContractTest(unittest.TestCase):
     @staticmethod
     def _stats_input(effective=True):
@@ -352,6 +490,24 @@ class CorrelatedHistoryTest(unittest.TestCase):
         np.testing.assert_array_equal(motion[0], np.zeros(3))
         np.testing.assert_array_equal(search[0], offsets[0])
 
+    def test_recursive_history_grows_error_with_age(self):
+        offsets = self._offsets()
+        motion, search = build_ct_history_offsets(
+            offsets,
+            candidate_id=1,
+            candidate_trajectory_mode="independent",
+            training_mode="recursive_candidate",
+            correlation=0.75,
+            recursive_error_scale=4.0,
+        )
+        np.testing.assert_array_equal(motion[0], np.zeros(3))
+        np.testing.assert_array_equal(search[0], offsets[0])
+        self.assertGreater(
+            np.linalg.norm(motion[-1]),
+            np.linalg.norm(correlate_candidate_offsets(
+                offsets, 0.75, np.zeros(3))[-1]),
+        )
+
     def test_shared_se2_preserves_motion_and_reuses_search_candidate(self):
         motion, search = build_ct_history_offsets(
             self._offsets(),
@@ -362,8 +518,41 @@ class CorrelatedHistoryTest(unittest.TestCase):
         np.testing.assert_array_equal(motion, np.zeros_like(motion))
         self.assertIsNone(search)
 
+    def test_irregular_training_offsets_are_causal_and_increasing(self):
+        offsets = build_irregular_history_offsets(
+            hist_num=3, query_gap=2, transition_gaps=[1, 2, 4])
+        self.assertEqual(offsets, [2, 3, 5])
+        self.assertTrue(all(
+            newer < older
+            for newer, older in zip(offsets[:-1], offsets[1:])
+        ))
+
 
 class ConfigCompositionTest(unittest.TestCase):
+    def test_new_b1_is_ordered_precrop_without_fixed_innovation(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/02_ct_motion.yaml")
+        self.assertTrue(config["use_ordered_trajectory_encoder"])
+        self.assertTrue(config["use_trajectory_search"])
+        self.assertTrue(config["use_trajectory_adapter"])
+        self.assertFalse(config["use_time_guided_search"])
+        self.assertEqual(
+            config["dynamics_motion_mode"], "trajectory_adapter")
+        self.assertEqual(
+            config["ct_history_training_mode"], "recursive_candidate")
+        self.assertEqual(config["dynamics_innovation_alpha"], 0.0)
+        self.assertEqual(config["dynamics_innovation_scale"], 0.0)
+        self.assertFalse(config["trajectory_search_allow_normal_cadence"])
+
+    def test_rejected_alpha_controls_still_resolve_legacy_b1(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/02_ct_motion_alpha025.yaml")
+        self.assertFalse(config["use_ordered_trajectory_encoder"])
+        self.assertFalse(config["use_trajectory_search"])
+        self.assertEqual(
+            config["dynamics_motion_mode"], "proposal_innovation")
+        self.assertEqual(config["dynamics_innovation_alpha"], 0.25)
+
     def test_search_only_keeps_baseline_model_and_correlated_search(self):
         config = load_yaml_config(
             ROOT / "cfgs/ct_v2/05_seqtrack3d_search_only.yaml")

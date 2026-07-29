@@ -1,0 +1,22 @@
+_base_: nuscenes_mini_base.yaml
+
+# Frozen reproduction surface for the rejected 2026-07 B1 implementation.
+experiment_name: ct_motion_legacy_fixed
+use_ct_v2: true
+use_dynamics_encoder: true
+use_ordered_trajectory_encoder: false
+use_trajectory_search: false
+use_trajectory_adapter: false
+use_time_guided_search: false
+ct_history_training_mode: correlated_candidate
+dynamics_motion_mode: proposal_innovation
+velocity_weight: 0.05
+dynamics_displacement_weight: 0.01
+ct_fusion_mode: fixed
+dynamics_innovation_alpha: 0.75
+dynamics_innovation_scale: 1.0
+dynamics_innovation_warmup_epoch: 5
+dynamics_innovation_radius_base: 0.5
+dynamics_innovation_radius_per_second: 0.5
+dynamics_innovation_radius_max: 2.0
+dynamics_innovation_disable_on_empty_search: true

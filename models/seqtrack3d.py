@@ -30,8 +30,11 @@ from models.path_distillation import (
 )
 from models.ct_v2 import (
     ContinuousTimeMotionEncoder,
+    OrderedTrajectoryEncoder,
     PointFeatureTemporalConsistencyLoss,
     ProposalFusionGate,
+    TrajectoryPointEncoder,
+    ZeroInitTrajectoryAdapter,
 )
 from models.ct_v2.contracts import (
     build_search_usable_mask,
@@ -55,6 +58,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
         self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
+        self.use_ordered_trajectory_encoder = bool(getattr(
+            config, 'use_ordered_trajectory_encoder', False))
+        self.use_trajectory_search = bool(getattr(
+            config, 'use_trajectory_search', False))
+        self.use_trajectory_adapter = bool(getattr(
+            config, 'use_trajectory_adapter', False))
         self.use_time_guided_search = bool(getattr(
             config, 'use_time_guided_search', False))
         self.use_physical_time_adapter = bool(
@@ -148,10 +157,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self.dynamics_motion_mode = 'residual'
         if self.dynamics_motion_mode in ('innovation', 'bounded_innovation'):
             self.dynamics_motion_mode = 'proposal_innovation'
-        if self.dynamics_motion_mode not in ('feature', 'residual', 'proposal_innovation'):
+        if self.dynamics_motion_mode in (
+                'ordered_trajectory', 'trajectory', 'trajectory_residual'):
+            self.dynamics_motion_mode = 'trajectory_adapter'
+        if self.dynamics_motion_mode not in (
+                'feature', 'residual', 'proposal_innovation',
+                'trajectory_adapter'):
             raise ValueError(
-                "dynamics_motion_mode must be 'feature', 'residual', or "
-                "'proposal_innovation'.")
+                "dynamics_motion_mode must be 'feature', 'residual', "
+                "'proposal_innovation', or 'trajectory_adapter'.")
         if (self.dynamics_motion_mode in ('residual', 'proposal_innovation')
                 and not self.use_dynamics_encoder):
             raise ValueError(
@@ -167,6 +181,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_physical_time_adapter and not self.use_dynamics_encoder:
             raise ValueError(
                 "use_physical_time_adapter=True requires use_dynamics_encoder=True.")
+        if self.use_ordered_trajectory_encoder and not self.use_dynamics_encoder:
+            raise ValueError(
+                "ordered trajectory encoding requires use_dynamics_encoder=True")
+        if self.use_trajectory_adapter and not self.use_ordered_trajectory_encoder:
+            raise ValueError(
+                "trajectory adapter requires use_ordered_trajectory_encoder=True")
+        if self.use_trajectory_search and not self.use_ordered_trajectory_encoder:
+            raise ValueError(
+                "trajectory pre-crop search requires the ordered trajectory path")
         if (self.use_physical_time_adapter
                 and self.dynamics_motion_mode != 'proposal_innovation'):
             raise ValueError(
@@ -179,10 +202,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_ct_v2:
             if not self.use_dynamics_encoder:
                 raise ValueError("use_ct_v2=True requires use_dynamics_encoder=True")
-            if self.dynamics_motion_mode != 'proposal_innovation':
+            if self.dynamics_motion_mode not in (
+                    'proposal_innovation', 'trajectory_adapter'):
                 raise ValueError(
                     "CT-SeqTrack v2 requires "
-                    "dynamics_motion_mode='proposal_innovation'")
+                    "proposal innovation or the ordered trajectory adapter")
+            if (self.dynamics_motion_mode == 'trajectory_adapter'
+                    and not self.use_ordered_trajectory_encoder):
+                raise ValueError(
+                    "trajectory_adapter mode requires the ordered encoder")
             incompatible = {
                 'use_observability_gate': self.use_observability_gate,
                 'use_physical_time_adapter': self.use_physical_time_adapter,
@@ -217,6 +245,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             getattr(config, 'dynamics_residual_detach_stats', True))
         self.physical_time_adapter_scale = float(
             getattr(config, 'physical_time_adapter_scale', 1.0))
+        self.trajectory_adapter_scale = float(getattr(
+            config, 'trajectory_adapter_scale', 1.0))
+        self.trajectory_adapter_warmup_epoch = int(getattr(
+            config, 'trajectory_adapter_warmup_epoch', 0))
         self.dynamics_innovation_alpha = float(
             getattr(config, 'dynamics_innovation_alpha', 0.0))
         self.dynamics_innovation_scale = float(
@@ -242,6 +274,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError("dynamics_max_residual_norm must be positive.")
         if not 0.0 <= self.physical_time_adapter_scale <= 1.0:
             raise ValueError("physical_time_adapter_scale must be in [0, 1].")
+        if not 0.0 <= self.trajectory_adapter_scale <= 1.0:
+            raise ValueError("trajectory_adapter_scale must be in [0, 1].")
+        if self.trajectory_adapter_warmup_epoch < 0:
+            raise ValueError("trajectory_adapter_warmup_epoch must be non-negative")
         if self.physical_time_adapter_warmup_epoch < 0:
             raise ValueError("physical_time_adapter_warmup_epoch must be non-negative.")
         if not 0.0 <= self.dynamics_innovation_alpha <= 1.0:
@@ -284,14 +320,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         motion_feature_dim = 256
         if self.use_dynamics_encoder:
-            dynamics_encoder_class = (
-                ContinuousTimeMotionEncoder if self.use_ct_v2 else DynamicsEncoder)
-            self.dynamics_encoder = dynamics_encoder_class(
-                hidden_dim=self.dynamics_hidden_dim,
-                eps=getattr(config, 'dynamics_eps', 1e-3),
-                use_query_gap=getattr(config, 'dynamics_use_query_gap', True),
-            )
-            if self.use_ct_v2 and self.ct_fusion_mode == 'adaptive':
+            if not self.use_ordered_trajectory_encoder:
+                dynamics_encoder_class = (
+                    ContinuousTimeMotionEncoder if self.use_ct_v2 else DynamicsEncoder)
+                self.dynamics_encoder = dynamics_encoder_class(
+                    hidden_dim=self.dynamics_hidden_dim,
+                    eps=getattr(config, 'dynamics_eps', 1e-3),
+                    use_query_gap=getattr(config, 'dynamics_use_query_gap', True),
+                )
+            if (not self.use_ordered_trajectory_encoder
+                    and self.use_ct_v2 and self.ct_fusion_mode == 'adaptive'):
                 self.ct_proposal_fusion = ProposalFusionGate(
                     observation_dim=256,
                     dynamics_dim=self.dynamics_hidden_dim,
@@ -305,14 +343,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     detach_context=getattr(
                         config, 'ct_fusion_detach_context', True),
                 )
-            if self.use_physical_time_adapter:
+            if (not self.use_ordered_trajectory_encoder
+                    and self.use_physical_time_adapter):
                 self.physical_time_adapter = ZeroInitPhysicalTimeAdapter(
                     feature_dim=256,
                     dynamics_dim=self.dynamics_hidden_dim,
                     hidden_dim=getattr(config, 'physical_time_adapter_hidden_dim', 128),
                     time_scale=getattr(config, 'time_scale', default_time_scale),
                 )
-            if self.dynamics_motion_mode == 'residual':
+            if self.use_ordered_trajectory_encoder:
+                # Constructed after all baseline modules below so enabling B1
+                # cannot alter shared-layer initialization through RNG usage.
+                pass
+            elif self.dynamics_motion_mode == 'residual':
                 self.dynamics_residual_gate = DynamicsResidualGate(
                     stats_dim=6,
                     hidden_dim=getattr(config, 'dynamics_residual_gate_hidden_dim', 16),
@@ -367,6 +410,33 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         self.Transformer = Seq2SeqFormer(d_word_vec=64, d_model=64, d_inner=512,
             n_layers=3, n_head=4, d_k=64, d_v=64, n_position = 1024*4)
+
+        if self.use_ordered_trajectory_encoder:
+            self.dynamics_encoder = OrderedTrajectoryEncoder(
+                hidden_dim=self.dynamics_hidden_dim,
+                step_dim=int(getattr(config, 'trajectory_step_dim', 64)),
+                eps=float(getattr(config, 'dynamics_eps', 1e-3)),
+                time_scale=float(getattr(
+                    config, 'time_scale', default_time_scale)),
+                residual_velocity_scale=float(getattr(
+                    config, 'trajectory_residual_velocity_scale', 4.0)),
+                initial_sigma=float(getattr(
+                    config, 'trajectory_initial_sigma', 0.5)),
+            )
+            self.trajectory_search_encoder = TrajectoryPointEncoder(
+                input_dim=5, hidden_dim=64, output_dim=64)
+            if self.use_trajectory_adapter:
+                self.trajectory_adapter = ZeroInitTrajectoryAdapter(
+                    feature_dim=256,
+                    trajectory_dim=self.dynamics_hidden_dim,
+                    search_dim=64,
+                    hidden_dim=int(getattr(
+                        config, 'trajectory_adapter_hidden_dim', 128)),
+                    normal_scale=float(getattr(
+                        config, 'trajectory_adapter_normal_scale', 0.1)),
+                    gap_trigger=float(getattr(
+                        config, 'trajectory_adapter_gap_trigger', 1.5)),
+                )
 
         self.m3_teacher = None
         if self.use_m3_path_distillation:
@@ -662,18 +732,88 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     "ct_motion_ref_boxs",
                     input_dict["canonical_ref_boxs"],
                 )
-            z_dyn, velocity_pred, dynamics_displacement_pred, dynamics_valid = self.dynamics_encoder(
-                dynamics_ref_boxs,
-                input_dict.get("delta_t_effective", input_dict["delta_t"]),
-                input_dict["valid_mask"],
-                input_dict.get(
-                    "current_delta_t_effective",
-                    input_dict.get("current_delta_t")),
-            )
+            dynamics_delta_t = input_dict.get(
+                "delta_t_effective", input_dict["delta_t"])
+            dynamics_current_delta_t = input_dict.get(
+                "current_delta_t_effective",
+                input_dict.get("current_delta_t"))
+            if self.use_ordered_trajectory_encoder:
+                trajectory_output = self.dynamics_encoder.forward_trajectory(
+                    dynamics_ref_boxs,
+                    dynamics_delta_t,
+                    input_dict["valid_mask"],
+                    dynamics_current_delta_t,
+                )
+                z_dyn = trajectory_output["feature"]
+                velocity_pred = trajectory_output["velocity"]
+                dynamics_displacement_pred = trajectory_output["displacement"]
+                dynamics_valid = trajectory_output["valid"]
+                output_dict.update({
+                    "trajectory_displacement_pred": trajectory_output[
+                        "trajectory_displacement"],
+                    "trajectory_yaw_displacement_pred": trajectory_output[
+                        "yaw_displacement"],
+                    "trajectory_yaw_rate_pred": trajectory_output["yaw_rate"],
+                    "trajectory_log_sigma": trajectory_output["log_sigma"],
+                    "trajectory_kinematic_displacement": trajectory_output[
+                        "kinematic_displacement"],
+                    "trajectory_gap_ratio": trajectory_output["gap_ratio"],
+                })
+            else:
+                (z_dyn, velocity_pred, dynamics_displacement_pred,
+                 dynamics_valid) = self.dynamics_encoder(
+                    dynamics_ref_boxs,
+                    dynamics_delta_t,
+                    input_dict["valid_mask"],
+                    dynamics_current_delta_t,
+                )
             output_dict["velocity_pred"] = velocity_pred
             output_dict["dynamics_displacement_pred"] = dynamics_displacement_pred
             output_dict["dynamics_valid"] = dynamics_valid
-            if self.dynamics_motion_mode == 'residual':
+            if self.dynamics_motion_mode == 'trajectory_adapter':
+                motion_feature = point_feature
+                trajectory_search_points = input_dict.get(
+                    "trajectory_search_points")
+                if trajectory_search_points is None:
+                    point_count = int(getattr(
+                        self.config, "trajectory_search_point_count", 128))
+                    trajectory_search_points = point_feature.new_zeros(
+                        (B, point_count, 5))
+                trajectory_search_points = self.encode_point_time(
+                    trajectory_search_points)
+                trajectory_search_feature = self.trajectory_search_encoder(
+                    trajectory_search_points.transpose(1, 2))
+                trajectory_search_valid = input_dict.get(
+                    "trajectory_search_valid")
+                if trajectory_search_valid is None:
+                    trajectory_search_valid = point_feature.new_zeros((B,))
+                trajectory_search_feature = trajectory_search_feature * (
+                    trajectory_search_valid.to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype,
+                    ).reshape(B, 1)
+                )
+                output_dict["trajectory_search_feature"] = (
+                    trajectory_search_feature)
+                if self.use_trajectory_adapter:
+                    adapter_scale = self.trajectory_adapter_scale
+                    if (self.training
+                            and getattr(self, 'current_epoch', 0)
+                            < self.trajectory_adapter_warmup_epoch):
+                        adapter_scale = 0.0
+                    motion_feature, trajectory_adapter_aux = (
+                        self.trajectory_adapter(
+                            point_feature,
+                            z_dyn,
+                            trajectory_search_feature,
+                            trajectory_output["log_sigma"],
+                            trajectory_output["gap_ratio"],
+                            dynamics_valid,
+                            trajectory_search_valid,
+                            enabled_scale=adapter_scale,
+                        ))
+                    output_dict.update(trajectory_adapter_aux)
+            elif self.dynamics_motion_mode == 'residual':
                 motion_feature = point_feature
             elif self.dynamics_motion_mode == 'proposal_innovation':
                 motion_feature = point_feature
@@ -801,7 +941,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             motion_pred = torch.cat((final_center, motion_pred[:, 3:4]), dim=1)
 
         if self.use_motion_cls:
-            motion_state_logits = self.motion_state_mlp(point_feature)  # B,2
+            motion_state_feature = (
+                motion_feature
+                if self.dynamics_motion_mode == 'trajectory_adapter'
+                else point_feature
+            )
+            motion_state_logits = self.motion_state_mlp(
+                motion_state_feature)  # B,2
             motion_mask = torch.argmax(motion_state_logits, dim=1, keepdim=True)  # B,1
             motion_pred_masked = motion_pred * motion_mask
             output_dict['motion_cls'] = motion_state_logits # B*2
@@ -870,6 +1016,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "ct_search_expansion_points",
                 "ct_search_query_delta_t",
                 "ct_search_predicted_displacement",
+                "trajectory_search_valid",
+                "trajectory_search_gap_ratio",
+                "trajectory_search_sigma_parallel",
+                "trajectory_search_sigma_perpendicular",
                 "search_has_usable_points"):
             if key in input_dict:
                 output_dict[key] = input_dict[key]
@@ -1300,8 +1450,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "loss_angle_ref": loss_angle_ref,
         })
         if self.use_dynamics_encoder and "velocity_pred" in output and "velocity_label" in data:
-            velocity_label = data["velocity_label"].to(device=output["velocity_pred"].device,
-                                                       dtype=output["velocity_pred"].dtype)
+            velocity_label = (
+                data.get("trajectory_velocity_label", data["velocity_label"])
+                if self.use_ordered_trajectory_encoder
+                else data["velocity_label"]
+            )
+            velocity_label = velocity_label.to(
+                device=output["velocity_pred"].device,
+                dtype=output["velocity_pred"].dtype)
             loss_velocity = F.smooth_l1_loss(output["velocity_pred"], velocity_label)
             loss_total += loss_velocity * getattr(self.config, "velocity_weight", 0.05)
             loss_dict.update({
@@ -1310,8 +1466,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             })
 
         if self.use_dynamics_encoder and "dynamics_displacement_pred" in output:
-            displacement_label = data.get(
-                "dynamics_displacement_label", motion_label[:, 0, :3])
+            if (self.use_ordered_trajectory_encoder
+                    and "trajectory_displacement_label" in data):
+                displacement_label = data[
+                    "trajectory_displacement_label"][:, :3]
+            else:
+                displacement_label = data.get(
+                    "dynamics_displacement_label", motion_label[:, 0, :3])
             displacement_label = displacement_label.to(
                 device=output["dynamics_displacement_pred"].device,
                 dtype=output["dynamics_displacement_pred"].dtype,
@@ -1324,6 +1485,57 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_dict.update({
                 "loss_total": loss_total,
                 "loss_dynamics_displacement": loss_dynamics_displacement,
+            })
+
+        if (self.use_ordered_trajectory_encoder
+                and "trajectory_displacement_pred" in output
+                and "trajectory_displacement_label" in data):
+            trajectory_target = data["trajectory_displacement_label"].to(
+                device=output["trajectory_displacement_pred"].device,
+                dtype=output["trajectory_displacement_pred"].dtype,
+            )
+            trajectory_prediction = output["trajectory_displacement_pred"]
+            trajectory_error = trajectory_prediction - trajectory_target
+            trajectory_error = torch.cat((
+                trajectory_error[:, :3],
+                torch.atan2(
+                    torch.sin(trajectory_error[:, 3:4]),
+                    torch.cos(trajectory_error[:, 3:4]),
+                ),
+            ), dim=1)
+            log_sigma = torch.clamp(
+                output["trajectory_log_sigma"], min=-4.0, max=2.5)
+            trajectory_nll_per_sample = (
+                0.5 * trajectory_error.pow(2) * torch.exp(-2.0 * log_sigma)
+                + log_sigma
+            ).mean(dim=1)
+            trajectory_valid = output["dynamics_valid"].reshape(-1).to(
+                trajectory_nll_per_sample.dtype)
+            loss_trajectory_nll = (
+                trajectory_nll_per_sample * trajectory_valid
+            ).sum() / torch.clamp(trajectory_valid.sum(), min=1.0)
+            trajectory_nll_weight = float(getattr(
+                self.config, "trajectory_nll_weight", 0.0))
+            if trajectory_nll_weight != 0.0:
+                loss_total += loss_trajectory_nll * trajectory_nll_weight
+            loss_dict.update({
+                "loss_total": loss_total,
+                "loss_trajectory_nll": loss_trajectory_nll,
+                "trajectory_sigma_mean": torch.exp(log_sigma).mean(),
+            })
+
+        if "trajectory_adapter_norm" in output:
+            loss_trajectory_adapter_norm = (
+                output["trajectory_adapter_norm"].pow(2).mean())
+            adapter_l2_weight = float(getattr(
+                self.config, "trajectory_adapter_l2_weight", 0.0))
+            if adapter_l2_weight != 0.0:
+                loss_total += (
+                    loss_trajectory_adapter_norm * adapter_l2_weight)
+            loss_dict.update({
+                "loss_total": loss_total,
+                "loss_trajectory_adapter_norm":
+                    loss_trajectory_adapter_norm,
             })
 
         if self.box_aware:
@@ -1489,7 +1701,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "ct_search_expansion_points",
                 "ct_search_query_delta_t",
                 "ct_search_predicted_displacement",
+                "trajectory_search_valid",
+                "trajectory_search_gap_ratio",
+                "trajectory_search_sigma_parallel",
+                "trajectory_search_sigma_perpendicular",
                 "search_has_usable_points"):
+            if key in output:
+                loss_dict[f"{key}_mean"] = output[key].float().mean()
+        for key in (
+                "trajectory_adapter_norm",
+                "trajectory_adapter_scale",
+                "trajectory_gap_activation",
+                "trajectory_gap_ratio"):
             if key in output:
                 loss_dict[f"{key}_mean"] = output[key].float().mean()
 

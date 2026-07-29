@@ -32,7 +32,9 @@ from models.state_filter import (
     union_point_clouds,
 )
 from utils.ct_search import (
+    build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    sample_search_extension,
     stratified_search_sample,
 )
 
@@ -527,29 +529,75 @@ class MotionBaseModelMF(BaseModelMF):
             "valid": False,
             "query_delta_t": float(effective_delta_t_list[0]),
         }
-        if bool(getattr(self.config, "use_time_guided_search", False)):
-            ct_search_box, ct_search_diagnostics = (
-                build_time_guided_search_box(
-                    ref_boxs,
-                    effective_delta_t_list,
-                    valid_mask=valid_mask,
-                    base_length=float(getattr(
-                        self.config, "ct_search_base_length", 4.0)),
-                    base_width=float(getattr(
-                        self.config, "ct_search_base_width", 2.0)),
-                    max_length=float(getattr(
-                        self.config, "ct_search_max_length", 16.0)),
-                    max_width=float(getattr(
-                        self.config, "ct_search_max_width", 6.0)),
-                    max_speed=float(getattr(
-                        self.config, "ct_search_max_speed", 20.0)),
-                    max_displacement=float(getattr(
-                        self.config, "ct_search_max_displacement", 12.0)),
-                    width_per_second=float(getattr(
-                        self.config, "ct_search_width_per_second", 0.25)),
-                    min_displacement=float(getattr(
-                        self.config, "ct_search_min_displacement", 0.2)),
-                ))
+        use_trajectory_search = bool(getattr(
+            self.config, "use_trajectory_search", False))
+        if (bool(getattr(self.config, "use_time_guided_search", False))
+                and use_trajectory_search):
+            raise ValueError(
+                "legacy time-guided search and ordered trajectory search are "
+                "mutually exclusive")
+        if (bool(getattr(self.config, "use_time_guided_search", False))
+                or use_trajectory_search):
+            if use_trajectory_search:
+                ct_search_box, ct_search_diagnostics = (
+                    build_ordered_trajectory_search_box(
+                        ref_boxs,
+                        effective_delta_t_list,
+                        valid_mask=valid_mask,
+                        base_length=float(getattr(
+                            self.config, "trajectory_search_base_length", 4.0)),
+                        base_width=float(getattr(
+                            self.config, "trajectory_search_base_width", 2.0)),
+                        max_length=float(getattr(
+                            self.config, "trajectory_search_max_length", 20.0)),
+                        max_width=float(getattr(
+                            self.config, "trajectory_search_max_width", 8.0)),
+                        max_speed=float(getattr(
+                            self.config, "trajectory_search_max_speed", 20.0)),
+                        max_acceleration=float(getattr(
+                            self.config, "trajectory_search_max_acceleration", 8.0)),
+                        max_displacement=float(getattr(
+                            self.config, "trajectory_search_max_displacement", 12.0)),
+                        acceleration_weight=float(getattr(
+                            self.config, "trajectory_search_acceleration_weight", 0.5)),
+                        sigma_parallel_scale=float(getattr(
+                            self.config, "trajectory_search_sigma_parallel_scale", 2.0)),
+                        sigma_perpendicular_scale=float(getattr(
+                            self.config, "trajectory_search_sigma_perpendicular_scale", 2.0)),
+                        min_displacement=float(getattr(
+                            self.config, "trajectory_search_min_displacement", 0.2)),
+                        min_delta_t=float(getattr(
+                            self.config, "trajectory_search_min_delta_t", 0.75)),
+                        min_gap_ratio=float(getattr(
+                            self.config, "trajectory_search_min_gap_ratio", 1.5)),
+                        allow_normal_cadence=bool(getattr(
+                            self.config,
+                            "trajectory_search_allow_normal_cadence",
+                            False)),
+                    ))
+            else:
+                ct_search_box, ct_search_diagnostics = (
+                    build_time_guided_search_box(
+                        ref_boxs,
+                        effective_delta_t_list,
+                        valid_mask=valid_mask,
+                        base_length=float(getattr(
+                            self.config, "ct_search_base_length", 4.0)),
+                        base_width=float(getattr(
+                            self.config, "ct_search_base_width", 2.0)),
+                        max_length=float(getattr(
+                            self.config, "ct_search_max_length", 16.0)),
+                        max_width=float(getattr(
+                            self.config, "ct_search_max_width", 6.0)),
+                        max_speed=float(getattr(
+                            self.config, "ct_search_max_speed", 20.0)),
+                        max_displacement=float(getattr(
+                            self.config, "ct_search_max_displacement", 12.0)),
+                        width_per_second=float(getattr(
+                            self.config, "ct_search_width_per_second", 0.25)),
+                        min_displacement=float(getattr(
+                            self.config, "ct_search_min_displacement", 0.2)),
+                    ))
             if ct_search_box is not None:
                 ct_search_pc = points_utils.generate_subwindow_with_aroundboxs(
                     this_pc,
@@ -619,7 +667,46 @@ class MotionBaseModelMF(BaseModelMF):
 
         prev_points_list = [points_utils.regularize_pc(prev_frame_pc.points.T, self.config.point_sample_size)[0] for prev_frame_pc in prev_frame_pcs] #采样到特定数量,这里的策略是在已有的点里面重复随机选，直到达到特定数量
 
-        if bool(getattr(self.config, "use_time_guided_search", False)):
+        trajectory_search_points = np.zeros(
+            (int(getattr(
+                self.config, "trajectory_search_point_count", 128)),
+             baseline_search_points.shape[1]),
+            dtype=np.float32,
+        )
+        trajectory_search_sampling = {
+            "active": False,
+            "sample_count": 0,
+            "available_count": 0,
+        }
+        if use_trajectory_search:
+            this_points, idx_this = points_utils.regularize_pc(
+                baseline_search_points,
+                self.config.point_sample_size,
+                seed=1,
+            )
+            trajectory_search_points, trajectory_search_sampling = (
+                sample_search_extension(
+                    baseline_search_points,
+                    expanded_search_points,
+                    int(getattr(
+                        self.config, "trajectory_search_point_count", 128)),
+                    min_expansion_points=int(getattr(
+                        self.config, "trajectory_search_min_points", 16)),
+                    seed=1,
+                ))
+            ct_search_sampling = {
+                "baseline_sample_count": int(self.config.point_sample_size),
+                "expansion_sample_count": int(
+                    trajectory_search_sampling["sample_count"]),
+                "expansion_available_count": int(
+                    trajectory_search_sampling["available_count"]),
+            }
+            ct_search_active = bool(trajectory_search_sampling["active"])
+            num_points_in_search = int(len(baseline_search_points))
+            if ct_search_active:
+                num_points_in_search += int(
+                    trajectory_search_sampling["available_count"])
+        elif bool(getattr(self.config, "use_time_guided_search", False)):
             this_points, ct_search_sampling = stratified_search_sample(
                 baseline_search_points,
                 expanded_search_points,
@@ -674,6 +761,20 @@ class MotionBaseModelMF(BaseModelMF):
         ]
 
         this_points = np.concatenate([this_points, timestamp_this, seg_mask_this[:, None]], axis=-1)
+        trajectory_timestamp = np.full(
+            (trajectory_search_points.shape[0], 1),
+            fill_value=main_current_value,
+            dtype=np.float32,
+        )
+        trajectory_prior = np.full(
+            (trajectory_search_points.shape[0], 1),
+            fill_value=0.5,
+            dtype=np.float32,
+        )
+        trajectory_search_points = np.concatenate(
+            (trajectory_search_points, trajectory_timestamp, trajectory_prior),
+            axis=-1,
+        )
 
         stack_points_list = prev_points_list + [this_points]
         stack_points = np.concatenate(stack_points_list, axis=0)
@@ -741,6 +842,25 @@ class MotionBaseModelMF(BaseModelMF):
                          [ct_search_diagnostics.get("displacement", 0.0)],
                          device=self.device, dtype=torch.float32),
                      }
+        if (use_trajectory_search or bool(getattr(
+                self.config, "use_ordered_trajectory_encoder", False))):
+            data_dict.update({
+                "trajectory_search_points": torch.tensor(
+                    trajectory_search_points[None, :],
+                    device=self.device, dtype=torch.float32),
+                "trajectory_search_valid": torch.tensor(
+                    [trajectory_search_sampling["active"]],
+                    device=self.device, dtype=torch.float32),
+                "trajectory_search_gap_ratio": torch.tensor(
+                    [ct_search_diagnostics.get("gap_ratio", 1.0)],
+                    device=self.device, dtype=torch.float32),
+                "trajectory_search_sigma_parallel": torch.tensor(
+                    [ct_search_diagnostics.get("sigma_parallel", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "trajectory_search_sigma_perpendicular": torch.tensor(
+                    [ct_search_diagnostics.get("sigma_perpendicular", 0.0)],
+                    device=self.device, dtype=torch.float32),
+            })
         if m4_diagnostics_enabled:
             data_dict.update({
                 "m4_num_points_search_baseline": torch.tensor(

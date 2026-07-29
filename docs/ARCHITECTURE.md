@@ -129,6 +129,75 @@ B1–B3 显式选择 `correlated_candidate`。相关历史只改变输入数据�
 
 PFTC 通过后才重新评估 compact memory 和 MCC；二者不属于本轮实现。
 
+### 2026-07-30 Δt-PFTC 实现审计
+
+首个 seed42 artifact 只到约 epoch23.05，不是完整 60 epoch。代码审计还发现
+当前 `canonicalize_points` 的 yaw 方向与项目已有几何约定不一致。对中心化后的
+列向量，当前实现使用：
+
+```text
+[x', y'] = R(+yaw) [x, y]
+```
+
+但 `generate_subwindow`、`transform_pc` 和 `get_offset_points_tensor` 都使用
+box rotation 的逆，即 object-local 应为：
+
+```text
+x_local = cos(yaw) * x + sin(yaw) * y
+y_local = -sin(yaw) * x + cos(yaw) * y
+```
+
+现有 yaw 单测按当前公式的逆构造输入，未覆盖项目真实的 local→shared 约定。
+因此当前 PFTC 运行只作为失败诊断，不能视为上述架构的有效实现。
+
+训练曲线同时表明 raw SmoothL1 正对应目标存在明显的特征尺度收缩：epoch1 到
+epoch20 的前景 feature std 从 `0.0947` 降至 `0.0210`，而匹配距离和对应数量
+基本不变。修订版必须加入明确防坍缩路径（train-only projector 加 variance
+floor；必要时加入 spatial negatives 或 stop-gradient teacher），并记录同定义
+B0 feature std 与两项 loss 的 gradient norm/cosine。当前逐样本/逐帧对循环还
+使训练慢约 10.2 倍，正式重跑前必须消除循环内 GPU `.item()` 同步并批量化或
+预计算 correspondence。
+
+### 2026-07-30 Motion fixed-alpha 接入审计
+
+alpha0/0.25 两组 scratch 60 epoch 完整复核表明，当前
+`proposal_innovation` 的失败不只是 alpha0.75 过强：
+
+| alpha | final Success | final Precision | late-3 S/P |
+|---:|---:|---:|---:|
+| 0 | 47.049 | 49.184 | 46.828/49.669 |
+| 0.25 | 29.581 | 28.862 | 29.472/28.849 |
+| 0.75（旧 B1） | 26.021 | 24.972 | 26.080/25.299 |
+
+alpha0.25 warmup 后 effective alpha 均值为 0.184，73.7% 样本应用，
+correction norm 均值只有 0.083 m，仍相对 alpha0 final 下降
+17.468/20.322。结构上存在三层放大：
+
+1. 训练时 DynamicsEncoder 读取 GT/correlated 合成的
+   `ct_motion_ref_boxs`，eval 时读取 recursive `ref_boxs`；
+2. `dynamics_valid` 只表示 transition 存在，不表示 proposal 方向可靠；
+3. 修正发生在 coarse `aux_box` 和 Transformer box-corner query 之前，
+   会同时改变局部坐标和后续 refinement 查询。
+
+alpha 增大时 epoch60 training loss 从 0.223 降到 0.217/0.215，但递归验证
+反向下降，因此当前 loss 与 closed-loop stability 不对齐。alpha0 是
+`apply_proposal_innovation` 的精确零回退；其 dynamics 辅助损失只训练独立
+DynamicsEncoder。它低于 B0 不能证明“motion 即使不融合也有害”，因为插入
+DynamicsEncoder 会消耗 RNG 并改变后续共享层初始化。
+
+正式边界为 `NO_GO_FIXED_GLOBAL_MOTION_INNOVATION`。在同 checkpoint
+alpha on/off 2×2 和逐 endpoint proposal attribution 完成前，不再训练更小
+alpha 或恢复 adaptive gate。完整复核见
+[`Motion alpha 报告`](../compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)。
+
+进一步的逐行审计确认了两个结构性限制。第一，DynamicsEncoder 对 transition
+特征只做 mean+max pooling；交换同一组速度 transition 的先后顺序会得到完全
+相同的 `z_dyn/velocity/displacement`，因此当前函数族无法区分加速与减速。
+第二，当前帧 crop 在 model forward 之前已经围绕上一预测框完成，motion
+correction 只发生在 post-crop coarse query；目标已经离开 crop 时，该分支无法
+召回缺失点。完整代码、研究与决策审计见
+[`B1motion 深度审计`](../compare_results/reports/b1_motion_module_deep_audit_20260730.html)。
+
 ## 当前实证状态
 
 2026-07-27 的 seed42 normal-mini 复核表明：
@@ -154,3 +223,16 @@ endpoint diagnostics；结果出来前不训练 A2。B0–B3 复核见
 [`B0–B3 报告`](../compare_results/reports/ct_v2_ablation_seed42_20260727.md)，
 Search-only 复核见
 [`A1 报告`](../compare_results/reports/ct_search_only_seed42_20260727.md)。
+
+## 2026-07-30 B1motion-v2 修正
+
+旧固定-alpha B1 已冻结到 `02_ct_motion_legacy_fixed.yaml`。当前
+`02_ct_motion.yaml` 改为有序 GRU、crop 前第二搜索区域、独立扩区点编码和
+zero-init feature residual；它不再修改 observation proposal。B0 的 320 个
+共享 state tensors 已验证 step-0 exact match，新 adapter 初始 correction
+严格为零。2026-07-30 的二次复核进一步统一了训练坐标合同：ordered
+history、endpoint target 和 velocity target 均位于实际 candidate crop
+anchor 坐标，覆盖递归推理中最新预测框自身带误差的情形，避免把 GT-anchor
+motion feature 与 candidate-anchor observation feature 直接拼接。完整设计、
+外部代码审计、训练命令与晋级门槛见
+[`B1motion-v2 设计`](B1MOTION_V2_ORDERED_PRECROP_20260730.md)。

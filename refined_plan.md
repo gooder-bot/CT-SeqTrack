@@ -1,6 +1,6 @@
 # CT-SeqTrack v2 论文计划
 
-更新时间：2026-07-28
+更新时间：2026-07-30
 
 > 2026-07-28 决策：standard 的 `delta_t` CV 只有 4.59%，真实时间的代码
 > 代价低、因果证据代价高；Random-20% 只保留为 synthetic
@@ -8,6 +8,19 @@
 > M3 endpoint distillation 与 compact memory 不能混为同一模块。完整投入产出、
 > 模块契合审计和执行分叉见
 > [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
+
+> 2026-07-30 实证更新：首个 Δt-PFTC seed42 artifact 仅运行到约
+> epoch23.05，并发现 canonical yaw 符号错误、feature std 强收缩和约 10.2×
+> 训练开销。当前状态为 `NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`，
+> 不续训旧 checkpoint。完整诊断见
+> [Δt-PFTC seed42 部分运行诊断](compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md)。
+
+> 2026-07-30 motion 更新：alpha0/0.25 两组 scratch 60 epoch 已完成。
+> alpha0.25 相对 alpha0 final 下降 `17.468/20.322`，较小全局修正仍失败；
+> fixed global proposal innovation 正式 No-Go。motion 后续只做已有
+> checkpoint 的推理 on/off 2×2 与 endpoint attribution，不再启动 alpha
+> 长训。完整报告见
+> [Motion fixed-alpha 复核](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)。
 
 ## 论文问题
 
@@ -57,17 +70,26 @@ search 确实启用，当前失败更像训练/递归搜索分布不匹配或强
 
 ## 当前最小诊断
 
-不再训练 A2。先用现有 checkpoint 做无训练的 Search 开/关 2×2：
+Search 开/关 2×2 继续保留为旧 search 的低成本归因任务，但不再扩展 A2 或
+search 训练树。Motion 同样只保留 alpha0/0.25 checkpoint 的无训练 on/off
+2×2；alpha0.25 的 0.083 m 平均 correction 已足以造成大幅递归退化，不能再
+把失败解释成单纯 alpha0.75 过强。当前 GPU 主线收敛为修复 Δt-PFTC 后的一次
+机制 kill-test：
 
-| checkpoint | Search off | Search on |
-| --- | ---: | ---: |
-| B0 final | 已有 | 待评测 |
-| A1 final | 待评测 | 已有 |
+```text
+修正 canonical R(-yaw) 与交叉单测
+        ↓
+projector + variance floor，增加 B0 feature-std/gradient 对照
+        ↓
+把单卡开销从 10.2× 压到 ≤2× B0
+        ↓
+B0 / PFTC-U / Δt-PFTC 各 5 epoch 机制 gate
+        ↓ 全部通过
+重新预检 λ，并从 scratch 跑 60-epoch 三臂
+```
 
-评测同时导出逐 endpoint 的搜索激活、扩展点数、tube 位移和首次漂移帧。
-若崩溃只随 Search on 出现，重构或删除当前递归 search；若 A1 Search off
-仍崩溃，说明训练期 expansion exposure 已改变模型。两种情况都不应通过叠加
-motion、gate 或 memory 掩盖。
+旧 Δt-PFTC epoch19 checkpoint 不续训。当前 epoch20 的 `49.056/63.870`
+既不是 final，也来自错误 canonical geometry，不能参与论文主表。
 
 ## 晋级规则
 
@@ -89,7 +111,13 @@ motion、gate 或 memory 掩盖。
 2. 后续模块必须逐个加入并独立超过前一阶段；
 3. normal + variable-rate 的成对时间干预分析。
 
-当前 motion、search 和 adaptive proposal gate 均不能写成正向论文贡献。
+当前 fixed-global motion innovation、search 和 adaptive proposal gate 均不能
+写成正向论文贡献。更广义的 motion feature/adapter 只保留为待归因历史信号，
+不能用本次 alpha0 control 冒充正贡献。
 只有新模块通过独立消融后，才能加入最终方法描述。
+
+当前 PFTC 同样不能写成正向贡献。若修订后的 PFTC-U 涨点而 Δt-PFTC 与之
+相近，论文只能使用“canonical point-feature consistency”；只有 Δt-PFTC 在
+多 seed 且 true/fixed/shuffled 控制中持续领先，才加入真实秒数表述。
 
 若只涨点但 true 未领先控制：保留模型和鲁棒性结果，但将表述降为 time-conditioned trajectory prior，不声称正确物理时间具有已验证的因果优势。

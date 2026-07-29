@@ -7,6 +7,7 @@ from easydict import EasyDict
 from nuscenes.utils import geometry_utils
 
 import datasets.points_utils as points_utils
+from utils.ct_history import build_irregular_history_offsets
 
 from datasets.misc_utils import get_history_frame_ids_and_masks, \
     create_history_frame_dict, \
@@ -24,6 +25,7 @@ from utils.twc_utils import (
     sample_point_sampling_seed,
 )
 from utils.candidate_utils import (
+    anchor_relative_trajectory_targets,
     apply_shared_se2_to_boxes,
     boxes_to_anchor_parameters,
     build_ct_training_histories,
@@ -34,7 +36,9 @@ from utils.candidate_utils import (
     validate_shared_se2_transform,
 )
 from utils.ct_search import (
+    build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    sample_search_extension,
     stratified_search_sample,
 )
 
@@ -327,13 +331,27 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             config, 'ct_history_training_mode', 'canonical'),
         correlation=float(getattr(
             config, 'ct_history_correlation', 0.75)),
+        recursive_error_scale=float(getattr(
+            config, 'ct_history_recursive_error_scale', 1.0)),
         degrees=config.degrees,
     )
     canonical_ref_boxs = boxes_to_anchor_parameters(
         canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
+    use_ordered_trajectory = bool(getattr(
+        config, 'use_ordered_trajectory_encoder', False))
+    if use_ordered_trajectory:
+        # The online path receives recursive estimated boxes expressed in the
+        # latest estimated crop anchor.  Reuse the candidate-anchored search
+        # history here so training sees the same coordinate/error contract.
+        ordered_motion_history_boxs = ct_search_history_boxs
+        ordered_motion_anchor = ref_boxs[0]
+    else:
+        # Frozen legacy B1 checkpoints keep their original GT-anchor contract.
+        ordered_motion_history_boxs = ct_motion_history_boxs
+        ordered_motion_anchor = canonical_prev_boxs[0]
     ct_motion_ref_boxs = boxes_to_anchor_parameters(
-        ct_motion_history_boxs,
-        canonical_prev_boxs[0],
+        ordered_motion_history_boxs,
+        ordered_motion_anchor,
         degrees=config.degrees,
     )
 
@@ -397,7 +415,13 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         (0, baseline_search_points.shape[1]),
         dtype=baseline_search_points.dtype,
     )
-    if bool(getattr(config, 'use_time_guided_search', False)):
+    use_trajectory_search = bool(
+        getattr(config, 'use_trajectory_search', False))
+    if bool(getattr(config, 'use_time_guided_search', False)) and use_trajectory_search:
+        raise ValueError(
+            "legacy time-guided search and ordered trajectory search are "
+            "mutually exclusive")
+    if bool(getattr(config, 'use_time_guided_search', False)) or use_trajectory_search:
         search_history_mode = str(getattr(
             config,
             'ct_search_training_history',
@@ -414,27 +438,63 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             search_history_boxes = ref_boxs
         else:
             search_history_boxes = ct_search_history_boxs
-        ct_search_box, ct_search_diagnostics = build_time_guided_search_box(
-            search_history_boxes,
-            effective_delta_t_list,
-            valid_mask=valid_mask,
-            base_length=float(getattr(
-                config, 'ct_search_base_length', 4.0)),
-            base_width=float(getattr(
-                config, 'ct_search_base_width', 2.0)),
-            max_length=float(getattr(
-                config, 'ct_search_max_length', 16.0)),
-            max_width=float(getattr(
-                config, 'ct_search_max_width', 6.0)),
-            max_speed=float(getattr(
-                config, 'ct_search_max_speed', 20.0)),
-            max_displacement=float(getattr(
-                config, 'ct_search_max_displacement', 12.0)),
-            width_per_second=float(getattr(
-                config, 'ct_search_width_per_second', 0.25)),
-            min_displacement=float(getattr(
-                config, 'ct_search_min_displacement', 0.2)),
-        )
+        if use_trajectory_search:
+            ct_search_box, ct_search_diagnostics = (
+                build_ordered_trajectory_search_box(
+                    search_history_boxes,
+                    effective_delta_t_list,
+                    valid_mask=valid_mask,
+                    base_length=float(getattr(
+                        config, 'trajectory_search_base_length', 4.0)),
+                    base_width=float(getattr(
+                        config, 'trajectory_search_base_width', 2.0)),
+                    max_length=float(getattr(
+                        config, 'trajectory_search_max_length', 20.0)),
+                    max_width=float(getattr(
+                        config, 'trajectory_search_max_width', 8.0)),
+                    max_speed=float(getattr(
+                        config, 'trajectory_search_max_speed', 20.0)),
+                    max_acceleration=float(getattr(
+                        config, 'trajectory_search_max_acceleration', 8.0)),
+                    max_displacement=float(getattr(
+                        config, 'trajectory_search_max_displacement', 12.0)),
+                    acceleration_weight=float(getattr(
+                        config, 'trajectory_search_acceleration_weight', 0.5)),
+                    sigma_parallel_scale=float(getattr(
+                        config, 'trajectory_search_sigma_parallel_scale', 2.0)),
+                    sigma_perpendicular_scale=float(getattr(
+                        config, 'trajectory_search_sigma_perpendicular_scale', 2.0)),
+                    min_displacement=float(getattr(
+                        config, 'trajectory_search_min_displacement', 0.2)),
+                    min_delta_t=float(getattr(
+                        config, 'trajectory_search_min_delta_t', 0.75)),
+                    min_gap_ratio=float(getattr(
+                        config, 'trajectory_search_min_gap_ratio', 1.5)),
+                    allow_normal_cadence=bool(getattr(
+                        config, 'trajectory_search_allow_normal_cadence', False)),
+                ))
+        else:
+            ct_search_box, ct_search_diagnostics = build_time_guided_search_box(
+                search_history_boxes,
+                effective_delta_t_list,
+                valid_mask=valid_mask,
+                base_length=float(getattr(
+                    config, 'ct_search_base_length', 4.0)),
+                base_width=float(getattr(
+                    config, 'ct_search_base_width', 2.0)),
+                max_length=float(getattr(
+                    config, 'ct_search_max_length', 16.0)),
+                max_width=float(getattr(
+                    config, 'ct_search_max_width', 6.0)),
+                max_speed=float(getattr(
+                    config, 'ct_search_max_speed', 20.0)),
+                max_displacement=float(getattr(
+                    config, 'ct_search_max_displacement', 12.0)),
+                width_per_second=float(getattr(
+                    config, 'ct_search_width_per_second', 0.25)),
+                min_displacement=float(getattr(
+                    config, 'ct_search_min_displacement', 0.2)),
+            )
         if ct_search_box is not None:
             expanded_search_pc = points_utils.generate_subwindow_with_aroundboxs(
                 this_pc,
@@ -468,7 +528,41 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             prev_frame_pc.points.T, config.point_sample_size, seed=seed)[0]
         for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
     ]
-    if bool(getattr(config, 'use_time_guided_search', False)):
+    trajectory_search_points = np.zeros(
+        (int(getattr(config, 'trajectory_search_point_count', 128)),
+         baseline_search_points.shape[1]),
+        dtype=np.float32,
+    )
+    trajectory_search_sampling = {
+        'active': False,
+        'sample_count': 0,
+        'available_count': 0,
+    }
+    if use_trajectory_search:
+        # Keep every baseline token exactly as in B0.  The extension is encoded
+        # by a separate lightweight branch instead of stealing a fixed quota.
+        this_points = points_utils.regularize_pc(
+            baseline_search_points,
+            config.point_sample_size,
+            seed=current_sampling_seed,
+        )[0]
+        trajectory_search_points, trajectory_search_sampling = (
+            sample_search_extension(
+                baseline_search_points,
+                expanded_search_points,
+                int(getattr(config, 'trajectory_search_point_count', 128)),
+                min_expansion_points=int(getattr(
+                    config, 'trajectory_search_min_points', 16)),
+                seed=current_sampling_seed,
+            ))
+        ct_search_sampling = {
+            'baseline_sample_count': int(config.point_sample_size),
+            'expansion_sample_count': int(
+                trajectory_search_sampling['sample_count']),
+            'expansion_available_count': int(
+                trajectory_search_sampling['available_count']),
+        }
+    elif bool(getattr(config, 'use_time_guided_search', False)):
         this_points, ct_search_sampling = stratified_search_sample(
             baseline_search_points,
             expanded_search_points,
@@ -523,6 +617,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     ]
     this_points = np.concatenate(
         [this_points, timestamp_this, seg_mask_this[:, None]], axis=-1)
+    trajectory_timestamp = np.full(
+        (trajectory_search_points.shape[0], 1),
+        fill_value=main_current_value,
+        dtype=np.float32,
+    )
+    trajectory_prior = np.full(
+        (trajectory_search_points.shape[0], 1),
+        fill_value=0.5,
+        dtype=np.float32,
+    )
+    trajectory_search_points = np.concatenate(
+        (trajectory_search_points, trajectory_timestamp, trajectory_prior),
+        axis=-1,
+    )
 
     stack_points_list = prev_points_list + [this_points]
     stack_points = np.concatenate(stack_points_list, axis=0)
@@ -581,6 +689,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         degrees=config.degrees,
         eps=1e-3,
     )
+    trajectory_displacement_label, trajectory_velocity_label = (
+        anchor_relative_trajectory_targets(
+            canonical_this_box,
+            coordinate_anchor_box,
+            current_delta_t_real,
+            degrees=config.degrees,
+            eps=1e-3,
+        ))
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -635,6 +751,24 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             candidate_shared_transform, dtype=np.float32),
         'candidate_shared_world_translation': candidate_shared_world_translation,
     }
+    if (use_trajectory_search
+            or bool(getattr(config, 'use_ordered_trajectory_encoder', False))):
+        data_dict.update({
+            'trajectory_displacement_label':
+                trajectory_displacement_label.astype('float32'),
+            'trajectory_velocity_label':
+                trajectory_velocity_label.astype('float32'),
+            'trajectory_search_points':
+                trajectory_search_points.astype('float32'),
+            'trajectory_search_valid': np.float32(
+                trajectory_search_sampling['active']),
+            'trajectory_search_gap_ratio': np.float32(
+                ct_search_diagnostics.get('gap_ratio', 1.0)),
+            'trajectory_search_sigma_parallel': np.float32(
+                ct_search_diagnostics.get('sigma_parallel', 0.0)),
+            'trajectory_search_sigma_perpendicular': np.float32(
+                ct_search_diagnostics.get('sigma_perpendicular', 0.0)),
+        })
     if prev_frame_ids is not None:
         data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
     if this_frame_id is not None:
@@ -793,6 +927,28 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.use_twc or self.use_m3_path_distillation)
         self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
             getattr(self.config, 'candidate_trajectory_mode', 'independent'))
+        self.trajectory_training_irregular_probability = float(getattr(
+            self.config, 'trajectory_training_irregular_probability', 0.0))
+        self.trajectory_training_query_gaps = [
+            int(value) for value in getattr(
+                self.config, 'trajectory_training_query_gaps', [2, 4])
+        ]
+        self.trajectory_training_transition_gaps = [
+            int(value) for value in getattr(
+                self.config, 'trajectory_training_transition_gaps',
+                [1, 1, 2, 4])
+        ]
+        if not 0.0 <= self.trajectory_training_irregular_probability <= 1.0:
+            raise ValueError(
+                "trajectory_training_irregular_probability must be in [0,1]")
+        if (any(value <= 0 for value in self.trajectory_training_query_gaps)
+                or any(value <= 0 for value in
+                       self.trajectory_training_transition_gaps)):
+            raise ValueError("trajectory training gaps must be positive")
+        if (self.trajectory_training_irregular_probability > 0
+                and not self.trajectory_training_query_gaps):
+            raise ValueError(
+                "irregular trajectory training requires query gap choices")
         self.paired_candidate_zero_only = bool(getattr(
             self.config,
             'm3_candidate_zero_only'
@@ -829,6 +985,30 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             if self.tracklet_start_ids[i] <= anno_id < self.tracklet_start_ids[i + 1]:
                 return i, anno_id - self.tracklet_start_ids[i]
         raise IndexError(f"anno_id {anno_id} is outside tracklet ranges.")
+
+    def _sample_history_offsets(self):
+        normal = list(range(1, self.dataset.hist_num + 1))
+        if self.trajectory_training_irregular_probability <= 0:
+            return normal
+        if torch.rand(()) >= self.trajectory_training_irregular_probability:
+            return normal
+        query_index = torch.randint(
+            0, len(self.trajectory_training_query_gaps), size=(1,)).item()
+        query_gap = self.trajectory_training_query_gaps[query_index]
+        if len(self.trajectory_training_transition_gaps) > 1:
+            start = torch.randint(
+                0,
+                len(self.trajectory_training_transition_gaps),
+                size=(1,),
+            ).item()
+            transition_gaps = (
+                self.trajectory_training_transition_gaps[start:]
+                + self.trajectory_training_transition_gaps[:start]
+            )
+        else:
+            transition_gaps = self.trajectory_training_transition_gaps
+        return build_irregular_history_offsets(
+            self.dataset.hist_num, query_gap, transition_gaps)
 
     def _build_view(self, tracklet_id, this_frame_id, first_frame, this_frame,
                     candidate_id, offsets, candidate_offset_map=None,
@@ -908,7 +1088,7 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                           candidate_shared_transform=candidate_shared_transform)
                 return {"view_a": view_a, "view_b": view_b}
 
-            offsets = list(range(1, self.dataset.hist_num + 1))
+            offsets = self._sample_history_offsets()
             return self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
                                     candidate_id, offsets)
         except AssertionError:

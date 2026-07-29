@@ -1,0 +1,1001 @@
+#!/usr/bin/env python3
+"""Build the portable technical audit for the CT-v2 B1 motion module."""
+
+from __future__ import annotations
+
+import csv
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT / "compare_results" / "data"
+REPORT_DIR = ROOT / "compare_results" / "reports"
+ALPHA_STEM = "ct_motion_alpha_sweep_seed42_20260730"
+OUTPUT_PATH = REPORT_DIR / "b1_motion_module_deep_audit_20260730_artifact.json"
+FAILURE_MODES_PATH = DATA_DIR / "b1_motion_module_deep_audit_20260730_failure_modes.csv"
+LITERATURE_PATH = DATA_DIR / "b1_motion_module_deep_audit_20260730_literature.csv"
+NEXT_EXPERIMENTS_PATH = DATA_DIR / "b1_motion_module_deep_audit_20260730_next_experiments.csv"
+
+RUN_LABELS = {
+    "B0": "B0 baseline",
+    "A0": "B1 motion α=0",
+    "A025": "B1 motion α=0.25",
+    "A075": "B1 motion α=0.75 (historical)",
+}
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def optional_float(value: str) -> float | None:
+    return None if value == "" else float(value)
+
+
+def write_csv(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def main() -> None:
+    metrics_rows = read_csv(DATA_DIR / f"{ALPHA_STEM}_metrics.csv")
+    summary_rows = read_csv(DATA_DIR / f"{ALPHA_STEM}_summary.csv")
+    diagnostic_rows = read_csv(DATA_DIR / f"{ALPHA_STEM}_diagnostics.csv")
+
+    validation_metrics = [
+        {
+            "run_id": row["run_id"],
+            "arm": RUN_LABELS[row["run_id"]],
+            "epoch": int(row["epoch"]),
+            "step": int(row["step"]),
+            "success": round(float(row["success"]), 6),
+            "precision": round(float(row["precision"]), 6),
+        }
+        for row in metrics_rows
+    ]
+    run_summary = [
+        {
+            "run_id": row["run_id"],
+            "arm": RUN_LABELS[row["run_id"]],
+            "alpha": optional_float(row["alpha"]),
+            "final_success": round(float(row["final_success"]), 6),
+            "final_precision": round(float(row["final_precision"]), 6),
+            "best_success": round(float(row["best_success"]), 6),
+            "best_success_epoch": int(row["best_success_epoch"]),
+            "best_precision": round(float(row["best_precision"]), 6),
+            "best_precision_epoch": int(row["best_precision_epoch"]),
+            "late3_success": round(float(row["late3_success"]), 6),
+            "late3_precision": round(float(row["late3_precision"]), 6),
+        }
+        for row in summary_rows
+    ]
+
+    selected_metrics = {
+        "fusion_alpha_applied": "Post-warmup effective α",
+        "innovation_applied_ratio": "Post-warmup applied ratio",
+        "innovation_norm": "Post-warmup correction norm (m)",
+        "innovation_clamp_ratio": "Post-warmup clamp ratio",
+        "training_loss_total": "Epoch-60 mean training loss",
+    }
+    intervention_diagnostics = []
+    for row in diagnostic_rows:
+        if row["run_id"] not in {"A0", "A025", "A075"}:
+            continue
+        if row["metric"] not in selected_metrics:
+            continue
+        value_field = (
+            "late_epoch_mean"
+            if row["metric"] == "training_loss_total"
+            else "post_warmup_mean"
+        )
+        intervention_diagnostics.append(
+            {
+                "run_id": row["run_id"],
+                "arm": RUN_LABELS[row["run_id"]],
+                "metric": selected_metrics[row["metric"]],
+                "value": round(float(row[value_field]), 6),
+            }
+        )
+
+    failure_modes = [
+        {
+            "priority": 1,
+            "severity": "P0",
+            "issue": "训练/推理历史分布错位",
+            "evidence": (
+                "训练读取 GT 锚定的 ct_motion_ref_boxs；验证读取 tracker 自身递归 ref_boxs。"
+            ),
+            "consequence": "历史漂移被解释为物体速度，错误 prior 再写回下一帧。",
+            "status": "verified",
+        },
+        {
+            "priority": 2,
+            "severity": "P0",
+            "issue": "motion 位于 crop 之后",
+            "evidence": (
+                "当前点云先围绕上一预测框裁剪，之后才在 forward 中计算 proposal innovation。"
+            ),
+            "consequence": "目标已离开 crop 时，motion 无法召回缺失点，只能移动一个缺少观测的 query。",
+            "status": "verified",
+        },
+        {
+            "priority": 3,
+            "severity": "P0",
+            "issue": "固定 alpha 没有可靠性语义",
+            "evidence": (
+                "dynamics_valid 只表示至少存在一条 transition；empty fallback 只检查 crop 中总点数 > 2。"
+            ),
+            "consequence": "背景点充足、历史已漂移时仍会稳定应用错误修正。",
+            "status": "verified",
+        },
+        {
+            "priority": 4,
+            "severity": "P1",
+            "issue": "时序顺序被 mean+max pooling 抹除",
+            "evidence": (
+                "交换两段 transition 的先后顺序会得到完全相同的 z_dyn 和 displacement。"
+            ),
+            "consequence": "无法区分加速/减速或转弯趋势，只能识别 transition 集合统计量。",
+            "status": "verified",
+        },
+        {
+            "priority": 5,
+            "severity": "P1",
+            "issue": "与 SeqTrack3D 已有时序路径重复",
+            "evidence": (
+                "baseline 的 coarse motion 已读取四帧点云，Transformer 又读取历史框序列。"
+            ),
+            "consequence": "信息更少的 history-box expert 强改信息更全的 observation proposal。",
+            "status": "verified",
+        },
+        {
+            "priority": 6,
+            "severity": "P1",
+            "issue": "缺少 yaw、加速度和不确定性输出",
+            "evidence": "encoder 只预测 3D 线速度；yaw 仍完全来自 observation 分支。",
+            "consequence": "转向和多模态运动无法由 prior 表达，也无法用方差决定何时拒绝 prior。",
+            "status": "verified",
+        },
+        {
+            "priority": 7,
+            "severity": "P1",
+            "issue": "训练目标允许 observation 与 correction 共适配",
+            "evidence": (
+                "innovation 内 stopgrad(d_obs)，但 final 对 observation 的梯度为 1；没有独立 observation proposal loss。"
+            ),
+            "consequence": "局部 loss 可以降低，同时形成依赖 correction 的 coarse query，推理关闭 alpha 未必完全恢复。",
+            "status": "verified",
+        },
+        {
+            "priority": 8,
+            "severity": "P2",
+            "issue": "alpha 来自不可迁移的 offline oracle",
+            "evidence": (
+                "0.75 近似来自 mini_train、GT history、candidate0、crop-reachable cohort 的平均 oracle α=0.775。"
+            ),
+            "consequence": "它不代表 recursive validation 下统一最优的全局系数。",
+            "status": "verified",
+        },
+    ]
+
+    literature_comparison = [
+        {
+            "order": 1,
+            "method": "SeqTrack3D",
+            "current_evidence": "多帧点云 + 历史框序列",
+            "motion_source": "当前及历史点云、历史框",
+            "fusion_or_safety": "历史框误差增强；较弱历史框约束；短窗口",
+            "difference_from_b1": "B1 在已有两个时序通道上又增加 history-only expert。",
+        },
+        {
+            "order": 2,
+            "method": "M²-Track",
+            "current_evidence": "两阶段 motion-centric tracker",
+            "motion_source": "前后两帧前景点云",
+            "fusion_or_safety": "motion transformation + shape completion/refinement",
+            "difference_from_b1": "B1 不读取当前帧点云，不能视为复刻 M²-Track。",
+        },
+        {
+            "order": 3,
+            "method": "STTracker",
+            "current_evidence": "隐式多帧时空融合",
+            "motion_source": "多帧点云特征",
+            "fusion_or_safety": "稀疏 attention；保留 current feature",
+            "difference_from_b1": "其消融显示直接拼接多帧特征会大跌，专用融合结构很关键。",
+        },
+        {
+            "order": 4,
+            "method": "HVTrack",
+            "current_evidence": "高时间变化跟踪",
+            "motion_source": "relative-pose-aware memory",
+            "fusion_or_safety": "base/expansion cross-attention + 背景抑制",
+            "difference_from_b1": "说明扩展/运动 prior 必须和当前观测、背景控制联合设计。",
+        },
+        {
+            "order": 5,
+            "method": "TrajTrack",
+            "current_evidence": "历史轨迹的显式/隐式双 proposal",
+            "motion_source": "短期两帧点云 + 有序 bbox trajectory",
+            "fusion_or_safety": "Transformer/CVAE + proposal IoU 置信选择",
+            "difference_from_b1": "B1 缺有序建模、分布预测和置信选择，只保留固定插值。",
+        },
+    ]
+
+    next_experiments = [
+        {
+            "order": 1,
+            "cost": "无训练",
+            "experiment": "同 checkpoint alpha 开/关 2×2",
+            "decision": (
+                "区分推理时直接 correction 伤害与训练期 co-adaptation；不再扫新 alpha。"
+            ),
+        },
+        {
+            "order": 2,
+            "cost": "一次验证导出",
+            "experiment": "逐 endpoint proposal attribution",
+            "decision": (
+                "计算 dyn-vs-obs helpful rate、residual cosine、oracle α、首次漂移与分桶稳定性。"
+            ),
+        },
+        {
+            "order": 3,
+            "cost": "短训练/离线",
+            "experiment": "冻结 baseline 生成 recursive-history roll-in",
+            "decision": (
+                "用真实预测误差替代 0.1 m 量级合成扰动，先测 prior 在闭环历史上的可预测性。"
+            ),
+        },
+        {
+            "order": 4,
+            "cost": "5 epoch kill-test",
+            "experiment": "有序 trajectory encoder + 4DoF/uncertainty",
+            "decision": (
+                "只有 endpoint 诊断存在稳定受益子群时才实现；否则永久关闭 direct fusion。"
+            ),
+        },
+        {
+            "order": 5,
+            "cost": "结构重设计",
+            "experiment": "motion 前移到搜索区域或独立 tube/proxy branch",
+            "decision": (
+                "若目标是失联恢复，prior 必须在 crop 前影响可见点集合，并保留 exact baseline path。"
+            ),
+        },
+    ]
+    write_csv(FAILURE_MODES_PATH, failure_modes)
+    write_csv(LITERATURE_PATH, literature_comparison)
+    write_csv(NEXT_EXPERIMENTS_PATH, next_experiments)
+
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    sources = [
+        {
+            "id": "alpha_metrics_source",
+            "label": "CT-v2 B1 alpha sweep validation metrics",
+            "path": f"compare_results/data/{ALPHA_STEM}_metrics.csv",
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT run_id, epoch, step, success, precision "
+                    f"FROM read_csv_auto('compare_results/data/{ALPHA_STEM}_metrics.csv', "
+                    "header = true) ORDER BY run_id, epoch"
+                ),
+                "description": (
+                    "Read the reviewed TensorBoard validation points for B0 and "
+                    "B1 motion alpha 0, 0.25, and 0.75."
+                ),
+                "executed_at": "2026-07-30",
+                "filters": [
+                    "nuScenes v1.0-mini",
+                    "Car",
+                    "seed=42",
+                    "60 epochs",
+                    "batch size=16",
+                ],
+                "metric_definitions": [
+                    "Success: AUC of the 3D IoU threshold curve.",
+                    "Precision: AUC of the center-error threshold curve up to 2 m.",
+                    "Final: epoch-60 validation point.",
+                ],
+            },
+        },
+        {
+            "id": "alpha_summary_source",
+            "label": "CT-v2 B1 run summary",
+            "path": f"compare_results/data/{ALPHA_STEM}_summary.csv",
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT * "
+                    f"FROM read_csv_auto('compare_results/data/{ALPHA_STEM}_summary.csv', "
+                    "header = true) ORDER BY final_success DESC"
+                ),
+                "description": "Read final, best, and late-window validation summaries.",
+                "executed_at": "2026-07-30",
+                "metric_definitions": [
+                    "Late-3: arithmetic mean over epochs 50, 55, and 60.",
+                ],
+            },
+        },
+        {
+            "id": "diagnostics_source",
+            "label": "CT-v2 motion intervention diagnostics",
+            "path": f"compare_results/data/{ALPHA_STEM}_diagnostics.csv",
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT run_id, metric, post_warmup_mean, late_epoch_mean "
+                    f"FROM read_csv_auto('compare_results/data/{ALPHA_STEM}_diagnostics.csv', "
+                    "header = true) WHERE run_id IN ('A0','A025','A075')"
+                ),
+                "description": (
+                    "Read effective alpha, application rate, correction norm, "
+                    "clamp ratio, and training-loss diagnostics."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "code_dynamics_source",
+            "label": "Dynamics encoder and proposal innovation",
+            "path": "models/dynamics.py",
+            "query": {
+                "language": "Python",
+                "description": (
+                    "Reviewed DynamicsEncoder transition features, mean/max pooling, "
+                    "velocity head, query-gap scaling, and stop-gradient innovation."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "code_model_source",
+            "label": "SeqTrack3D forward integration",
+            "path": "models/seqtrack3d.py",
+            "query": {
+                "language": "Python",
+                "description": (
+                    "Reviewed the observation coarse proposal, CT-v2 dynamics branch, "
+                    "proposal fusion, aux-box construction, Transformer query, and losses."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "failure_modes_source",
+            "label": "B1motion verified code-audit findings",
+            "path": (
+                "compare_results/data/"
+                "b1_motion_module_deep_audit_20260730_failure_modes.csv"
+            ),
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT priority, severity, issue, evidence, consequence, status "
+                    "FROM read_csv_auto('compare_results/data/"
+                    "b1_motion_module_deep_audit_20260730_failure_modes.csv', "
+                    "header = true) ORDER BY priority"
+                ),
+                "description": (
+                    "Read the ranked findings derived from the reviewed B1motion "
+                    "implementation and completed alpha experiments."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "literature_comparison_source",
+            "label": "B1motion related-work comparison matrix",
+            "path": (
+                "compare_results/data/"
+                "b1_motion_module_deep_audit_20260730_literature.csv"
+            ),
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT method, current_evidence, motion_source, "
+                    "fusion_or_safety, difference_from_b1 "
+                    "FROM read_csv_auto('compare_results/data/"
+                    "b1_motion_module_deep_audit_20260730_literature.csv', "
+                    "header = true) ORDER BY \"order\""
+                ),
+                "description": (
+                    "Read the comparison matrix synthesized from the cited "
+                    "primary research papers."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "next_experiments_source",
+            "label": "B1motion decision experiment sequence",
+            "path": (
+                "compare_results/data/"
+                "b1_motion_module_deep_audit_20260730_next_experiments.csv"
+            ),
+            "query": {
+                "language": "SQL",
+                "engine": "DuckDB",
+                "sql": (
+                    "SELECT \"order\", cost, experiment, decision "
+                    "FROM read_csv_auto('compare_results/data/"
+                    "b1_motion_module_deep_audit_20260730_next_experiments.csv', "
+                    "header = true) ORDER BY \"order\""
+                ),
+                "description": (
+                    "Read the ordered diagnostic and redesign experiments "
+                    "recommended by the audit."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "code_closed_loop_source",
+            "label": "Training sampler and recursive evaluation",
+            "path": "datasets/sampler.py",
+            "query": {
+                "language": "Python",
+                "description": (
+                    "Reviewed candidate-history generation together with "
+                    "models/base_model.py recursive crop and state update."
+                ),
+                "executed_at": "2026-07-30",
+            },
+        },
+        {
+            "id": "seqtrack3d_paper_source",
+            "label": "SeqTrack3D paper (ICRA 2024)",
+            "href": "https://arxiv.org/abs/2402.16249",
+        },
+        {
+            "id": "m2track_paper_source",
+            "label": "M²-Track paper (CVPR 2022)",
+            "href": (
+                "https://openaccess.thecvf.com/content/CVPR2022/html/"
+                "Zheng_Beyond_3D_Siamese_Tracking_A_Motion-Centric_Paradigm_for_"
+                "3D_Single_CVPR_2022_paper.html"
+            ),
+        },
+        {
+            "id": "sttracker_paper_source",
+            "label": "STTracker paper",
+            "href": "https://arxiv.org/abs/2306.17440",
+        },
+        {
+            "id": "hvtrack_paper_source",
+            "label": "HVTrack paper (ECCV 2024)",
+            "href": (
+                "https://www.ecva.net/papers/eccv_2024/papers_ECCV/html/"
+                "1145_ECCV_2024_paper.php"
+            ),
+        },
+        {
+            "id": "trajtrack_paper_source",
+            "label": "TrajTrack paper (ICRA 2026)",
+            "href": "https://arxiv.org/html/2509.11453v3",
+        },
+        {
+            "id": "scheduled_sampling_source",
+            "label": "Scheduled Sampling (NeurIPS 2015)",
+            "href": (
+                "https://proceedings.neurips.cc/paper/2015/hash/"
+                "e995f98d56967d946471af29d7bf99f1-Abstract.html"
+            ),
+        },
+    ]
+
+    artifact = {
+        "surface": "report",
+        "manifest": {
+            "version": 1,
+            "surface": "report",
+            "title": "B1motion 模块深度审计：契合度、漏洞与不涨分原因",
+            "description": (
+                "CT-SeqTrack B1motion 的代码链路、训练/推理闭环、alpha 实验和相关研究对照。"
+            ),
+            "generatedAt": generated_at,
+            "sources": sources,
+            "charts": [
+                {
+                    "id": "success_by_epoch",
+                    "title": "Validation Success by epoch",
+                    "subtitle": (
+                        "减小 alpha 只减少伤害；正 alpha 没有出现持续优于零干预的区间。"
+                    ),
+                    "type": "line",
+                    "dataset": "validation_metrics",
+                    "sourceId": "alpha_metrics_source",
+                    "encodings": {
+                        "x": {
+                            "field": "epoch",
+                            "type": "quantitative",
+                            "label": "Epoch",
+                        },
+                        "y": {
+                            "field": "success",
+                            "type": "quantitative",
+                            "label": "Success",
+                        },
+                        "color": {
+                            "field": "arm",
+                            "type": "nominal",
+                            "label": "Run",
+                        },
+                        "tooltip": [
+                            {"field": "arm", "type": "nominal", "label": "Run"},
+                            {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+                            {
+                                "field": "success",
+                                "type": "quantitative",
+                                "label": "Success",
+                            },
+                        ],
+                    },
+                    "xAxisTitle": "Epoch",
+                    "yAxisTitle": "Success",
+                },
+                {
+                    "id": "precision_by_epoch",
+                    "title": "Validation Precision by epoch",
+                    "subtitle": (
+                        "Precision 对正 alpha 的退化更剧烈，符合错误中心平移被闭环传播的机制。"
+                    ),
+                    "type": "line",
+                    "dataset": "validation_metrics",
+                    "sourceId": "alpha_metrics_source",
+                    "encodings": {
+                        "x": {
+                            "field": "epoch",
+                            "type": "quantitative",
+                            "label": "Epoch",
+                        },
+                        "y": {
+                            "field": "precision",
+                            "type": "quantitative",
+                            "label": "Precision",
+                        },
+                        "color": {
+                            "field": "arm",
+                            "type": "nominal",
+                            "label": "Run",
+                        },
+                        "tooltip": [
+                            {"field": "arm", "type": "nominal", "label": "Run"},
+                            {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+                            {
+                                "field": "precision",
+                                "type": "quantitative",
+                                "label": "Precision",
+                            },
+                        ],
+                    },
+                    "xAxisTitle": "Epoch",
+                    "yAxisTitle": "Precision",
+                },
+            ],
+            "tables": [
+                {
+                    "id": "run_summary",
+                    "title": "B1motion alpha 实验汇总",
+                    "subtitle": (
+                        "alpha=0/0.25 为同提交、同 seed、同 scratch 合同；0.75 仅作历史剂量上下文。"
+                    ),
+                    "dataset": "run_summary",
+                    "sourceId": "alpha_summary_source",
+                    "density": "compact",
+                    "defaultSort": {"field": "final_success", "direction": "desc"},
+                    "columns": [
+                        {"field": "arm", "label": "Run", "type": "text"},
+                        {"field": "alpha", "label": "Alpha", "type": "number"},
+                        {
+                            "field": "final_success",
+                            "label": "Final Success",
+                            "type": "number",
+                        },
+                        {
+                            "field": "final_precision",
+                            "label": "Final Precision",
+                            "type": "number",
+                        },
+                        {
+                            "field": "late3_success",
+                            "label": "Late-3 Success",
+                            "type": "number",
+                        },
+                        {
+                            "field": "late3_precision",
+                            "label": "Late-3 Precision",
+                            "type": "number",
+                        },
+                    ],
+                },
+                {
+                    "id": "intervention_diagnostics",
+                    "title": "Motion intervention diagnostics",
+                    "subtitle": (
+                        "更强干预降低训练 loss，却使递归验证单调恶化。"
+                    ),
+                    "dataset": "intervention_diagnostics",
+                    "sourceId": "diagnostics_source",
+                    "density": "compact",
+                    "defaultSort": {"field": "arm", "direction": "asc"},
+                    "columns": [
+                        {"field": "arm", "label": "Run", "type": "text"},
+                        {"field": "metric", "label": "Metric", "type": "text"},
+                        {"field": "value", "label": "Value", "type": "number"},
+                    ],
+                },
+                {
+                    "id": "failure_modes",
+                    "title": "代码与实验漏洞优先级",
+                    "subtitle": "verified 表示由当前代码或已完成实验直接确认。",
+                    "dataset": "failure_modes",
+                    "sourceId": "failure_modes_source",
+                    "density": "compact",
+                    "defaultSort": {"field": "severity", "direction": "asc"},
+                    "columns": [
+                        {"field": "severity", "label": "Severity", "type": "text"},
+                        {"field": "issue", "label": "Issue", "type": "text"},
+                        {"field": "evidence", "label": "Evidence", "type": "text"},
+                        {
+                            "field": "consequence",
+                            "label": "Consequence",
+                            "type": "text",
+                        },
+                        {"field": "status", "label": "Status", "type": "text"},
+                    ],
+                },
+                {
+                    "id": "literature_comparison",
+                    "title": "相关方法与 B1motion 的关键差异",
+                    "subtitle": (
+                        "相似的 motion/trajectory 方向不意味着当前固定插值实现等价。"
+                    ),
+                    "dataset": "literature_comparison",
+                    "sourceId": "literature_comparison_source",
+                    "density": "compact",
+                    "defaultSort": {"field": "method", "direction": "asc"},
+                    "columns": [
+                        {"field": "method", "label": "Method", "type": "text"},
+                        {
+                            "field": "motion_source",
+                            "label": "Motion source",
+                            "type": "text",
+                        },
+                        {
+                            "field": "fusion_or_safety",
+                            "label": "Fusion / safety",
+                            "type": "text",
+                        },
+                        {
+                            "field": "difference_from_b1",
+                            "label": "Difference from B1",
+                            "type": "text",
+                        },
+                    ],
+                },
+                {
+                    "id": "next_experiments",
+                    "title": "建议执行顺序",
+                    "subtitle": "先完成无训练归因，再决定是否重写模型。",
+                    "dataset": "next_experiments",
+                    "sourceId": "next_experiments_source",
+                    "density": "compact",
+                    "defaultSort": {"field": "order", "direction": "asc"},
+                    "columns": [
+                        {"field": "order", "label": "#", "type": "number"},
+                        {"field": "cost", "label": "Cost", "type": "text"},
+                        {
+                            "field": "experiment",
+                            "label": "Experiment",
+                            "type": "text",
+                        },
+                        {"field": "decision", "label": "Decision use", "type": "text"},
+                    ],
+                },
+            ],
+            "blocks": [
+                {
+                    "id": "title",
+                    "type": "markdown",
+                    "body": "# B1motion 模块深度审计：契合度、漏洞与不涨分原因",
+                },
+                {
+                    "id": "technical_summary",
+                    "type": "markdown",
+                    "sourceId": "alpha_summary_source",
+                    "body": (
+                        "## 技术结论\n\n"
+                        "**B1motion 的代码确实生效，但当前形态不适合继续作为直接 proposal "
+                        "correction：方向与项目主题契合，数据合同和接入位置不契合。** "
+                        "它是一个 `Δt` 条件的历史框速度外推器，不是严格的连续时间状态模型。"
+                        "它读取的信息少于 SeqTrack3D 原 observation 分支，却用固定全局 alpha "
+                        "改写 coarse query。alpha=0.25 相对同构 alpha=0 final 下降 "
+                        "**17.468 Success / 20.322 Precision**；历史 alpha=0.75 更差。"
+                        "因此 `NO_GO_FIXED_GLOBAL_MOTION_INNOVATION` 是高置信结论。"
+                    ),
+                },
+                {"id": "summary_table_block", "type": "table", "tableId": "run_summary"},
+                {
+                    "id": "experiment_evidence",
+                    "type": "markdown",
+                    "sourceId": "alpha_metrics_source",
+                    "body": (
+                        "## 实验结论不是单点偶然\n\n"
+                        "四组都完成 60 epoch 和 12 个验证点。alpha=0.25 在 epoch25–60 "
+                        "的 8/8 个检查点上，Success 与 Precision 同时低于 alpha=0；"
+                        "任何正 alpha 检查点也没有同时超过同阶段 B0。alpha 越大，epoch60 "
+                        "训练 loss 反而越低，而递归验证越差，直接排除了“训练没收敛”这一解释。"
+                    ),
+                },
+                {"id": "success_chart_block", "type": "chart", "chartId": "success_by_epoch"},
+                {
+                    "id": "precision_chart_block",
+                    "type": "chart",
+                    "chartId": "precision_by_epoch",
+                },
+                {
+                    "id": "module_definition",
+                    "type": "markdown",
+                    "sourceId": "code_dynamics_source",
+                    "body": (
+                        "## B1motion 到底是什么\n\n"
+                        "对每对相邻历史框，模块构造 10 维 transition：3D displacement、"
+                        "3D velocity、angular velocity、speed、gap 和 valid mask。每段经过 "
+                        "MLP 后做 mean+max pooling，再拼接当前 gap 与“当前/最近 gap 比值”，"
+                        "最后预测 3D 线速度并乘当前 `Δt` 得到 `d_dyn`。"
+                        "`ContinuousTimeMotionEncoder` 只是 `DynamicsEncoder` 的空子类；"
+                        "没有 ODE/CDE、状态转移积分、协方差、多模态轨迹或 yaw head。更准确的"
+                        "命名是 **Δt-conditioned history-box displacement extrapolator**。"
+                    ),
+                },
+                {
+                    "id": "dataflow",
+                    "type": "markdown",
+                    "sourceId": "code_model_source",
+                    "body": (
+                        "## 完整数据流\n\n"
+                        "`四帧点云 → segmentation/mini PointNet → d_obs`；同时 "
+                        "`三帧历史框 + Δt → DynamicsEncoder → d_dyn`。固定融合为 "
+                        "`u = clip(d_dyn - stopgrad(d_obs), R(Δt))`，"
+                        "`d_final = d_obs + αu`。随后 `d_final` 生成 coarse `aux_box`，"
+                        "与历史框一起转成 box-corner query，进入 Transformer refinement；"
+                        "refined box 再写入 `results_bbs`，成为下一帧 crop 和历史状态。"
+                        "所以 correction 改变的不是最终坐标一个数，而是当前 query 与后续闭环。"
+                    ),
+                },
+                {
+                    "id": "project_fit",
+                    "type": "markdown",
+                    "sourceId": "seqtrack3d_paper_source",
+                    "body": (
+                        "## 与整个项目的契合度\n\n"
+                        "契合之处是：历史框轻量、可显式消费真实 `Δt`，也适合研究变 cadence。"
+                        "不契合之处更关键：SeqTrack3D 本身已用四帧点云生成 coarse motion，"
+                        "又用历史框序列 refinement。原论文还明确指出历史框误差会累积，"
+                        "长窗口 1+7 因训练难以模拟测试误差而退化。B1 没有提供独立新观测，"
+                        "却在 refinement 前强制偏移 query，等于提高了模型对最不可靠信息源"
+                        "的依赖。当前 standard `Δt` CV 仅约 4.6%，也不足以支撑强 continuous-time "
+                        "容量的可辨识收益。"
+                    ),
+                },
+                {
+                    "id": "critical_failures",
+                    "type": "markdown",
+                    "sourceId": "code_closed_loop_source",
+                    "body": (
+                        "## 主要漏洞\n\n"
+                        "最严重的不是某一行公式写错，而是三个正确局部组件组成了错误闭环："
+                        "teacher-forced 的小扰动历史、仅表示“transition 存在”的 valid mask，"
+                        "以及在 crop 后固定生效的 query correction。当前配置继承链已复核，"
+                        "实际 resolved `candidate_trajectory_mode=independent`，"
+                        "`correlated_candidate` 确实生效；不存在被 `shared_se2` 静默关闭的配置漏洞。"
+                    ),
+                },
+                {"id": "failure_modes_block", "type": "table", "tableId": "failure_modes"},
+                {
+                    "id": "order_loss",
+                    "type": "markdown",
+                    "sourceId": "code_dynamics_source",
+                    "body": (
+                        "## 时序编码的硬伤：顺序不可辨认\n\n"
+                        "transition MLP 之后只做 mean 和 max。我们构造了相同两段速度 "
+                        "`{1, 3} m/s`，一条轨迹按 1→3 排列，另一条按 3→1 排列；"
+                        "当前 encoder 的 `z_dyn`、velocity 和 displacement 逐元素完全相同。"
+                        "这不是训练问题，而是函数族本身不具备辨认加速/减速趋势的能力。"
+                        "angular velocity 虽作为单段特征输入，同样因无序池化无法表达转弯方向随时间的演化。"
+                    ),
+                },
+                {
+                    "id": "history_mismatch",
+                    "type": "markdown",
+                    "sourceId": "code_closed_loop_source",
+                    "body": (
+                        "## 合成误差没有模拟真实闭环\n\n"
+                        "candidate0 占 1/4 且完全干净；其余候选的最近 history anchor 也固定为 0。"
+                        "Monte Carlo 按真实配置复算后，更早两帧合成平移半径的 p95 仅约 "
+                        "**0.090 m / 0.124 m**，yaw 绝对值 p99 约 **0.37° / 0.59°**。"
+                        "验证误差则是模型自身生成、带偏、相关、非平稳，并和遮挡、背景、错误 crop "
+                        "耦合。B1 在训练中学的是“对小而平滑的 GT 附近扰动做一步预测”，"
+                        "推理时却被要求“从可能已经漂移的状态恢复”。"
+                    ),
+                },
+                {
+                    "id": "crop_and_validity",
+                    "type": "markdown",
+                    "sourceId": "code_closed_loop_source",
+                    "body": (
+                        "## 接入位置无法解决真正的 motion failure\n\n"
+                        "当前帧点云在 model forward 前已经围绕上一预测框裁剪；B1 之后才移动 "
+                        "coarse proposal。因此目标若因大位移/漂移离开 crop，网络根本看不到目标点。"
+                        "`dynamics_innovation_disable_on_empty_search` 也不是目标可见性判断："
+                        "它只要求裁剪区总点数大于 2，背景点足以让错误 prior 继续生效。"
+                        "如果 motion 的目标是失联恢复，它必须影响 crop/search，或有独立扩展分支，"
+                        "而不能只在 post-crop query 上修补。"
+                    ),
+                },
+                {
+                    "id": "optimization",
+                    "type": "markdown",
+                    "sourceId": "diagnostics_source",
+                    "body": (
+                        "## 优化逻辑为何会“训练更好、验证更差”\n\n"
+                        "stop-gradient 只出现在 `d_dyn-d_obs` 内；最终加法仍给 observation 分支"
+                        "恒等梯度 1，dynamics 分支获得 alpha 倍梯度。由于 loss 监督融合后的 "
+                        "`motion_pred`，却没有单独锚定 `motion_obs_pred`，observation 可以学习"
+                        "抵消/依赖 correction。velocity 与 displacement 辅助损失又近似重复："
+                        "`d_pred=v_pred·Δt`，标签也共享同一关系，而 standard `Δt` 近常量。"
+                        "于是局部 teacher-forced loss 能下降，却没有任何目标约束 multi-step "
+                        "closed-loop stability。"
+                    ),
+                },
+                {
+                    "id": "diagnostics_table_block",
+                    "type": "table",
+                    "tableId": "intervention_diagnostics",
+                },
+                {
+                    "id": "alpha_origin",
+                    "type": "markdown",
+                    "sourceId": "diagnostics_source",
+                    "body": (
+                        "## alpha=0.75 为什么不能迁移\n\n"
+                        "0.75 来自旧 M0-3 offline cohort 的平均 oracle alpha≈0.775；"
+                        "该 cohort 使用 mini_train、GT history、candidate0、full history、"
+                        "crop-reachable endpoint，并沿 `d_obs→d_dyn` 线段事后选最优点。"
+                        "它证明“oracle 条件下有互补空间”，不证明 recursive validation 应在每帧"
+                        "固定走 75%。本轮 0.25 的平均实际系数只有 0.184、修正仅 0.083 m，"
+                        "仍大幅掉点，说明继续试 0.1/0.05 只会逼近零干预，不会修正方向性错误。"
+                    ),
+                },
+                {
+                    "id": "old_m2",
+                    "type": "markdown",
+                    "sourceId": "diagnostics_source",
+                    "body": (
+                        "## 为什么历史 M2 正信号不与本结论冲突\n\n"
+                        "旧 R1/R2 不是当前 B1：它们使用 `shared_se2`、zero-init physical-time "
+                        "feature adapter 和 proposal innovation；R1 还从训练完成的 A1 继续训练"
+                        "额外 60 epoch。当前 B1 从 scratch、使用 independent+correlated history，"
+                        "并关闭 adapter。旧 same-checkpoint true/fixed/shuffled 又显示正确物理时间"
+                        "没有稳定优势。因此旧结果最多证明“那套联合栈或额外训练存在 tracking signal”，"
+                        "不能证明当前 history-only fixed-alpha 路径应涨点。"
+                    ),
+                },
+                {
+                    "id": "literature",
+                    "type": "markdown",
+                    "sourceId": "trajtrack_paper_source",
+                    "body": (
+                        "## 相关研究对 B1 的直接启示\n\n"
+                        "M²-Track 从当前/上一帧点云估计短期 motion，并在第二阶段 refinement；"
+                        "STTracker 强调 current feature 与专用时空融合，直接拼接反而大幅退化；"
+                        "HVTrack 在扩大搜索时显式分离 base/expansion 并抑制背景；"
+                        "TrajTrack 与 B1 最相近，但它保留有序 Transformer、轨迹分布和"
+                        "proposal 一致性选择。共同规律是：motion prior 必须和当前证据、"
+                        "时序顺序及可靠性判断共同设计，而不是固定插值。"
+                    ),
+                },
+                {
+                    "id": "literature_table_block",
+                    "type": "table",
+                    "tableId": "literature_comparison",
+                },
+                {
+                    "id": "decision",
+                    "type": "markdown",
+                    "sourceId": "alpha_summary_source",
+                    "body": (
+                        "## 模块判定\n\n"
+                        "**当前模块不能涨点；停止固定全局 proposal innovation。** "
+                        "但不要把结论扩大成“motion/trajectory prior 全部无效”。"
+                        "保留的研究问题应改成：在 recursive history 下，是否存在可被 GT-free "
+                        "信号稳定识别的 endpoint，使有序、带不确定性的 trajectory prior "
+                        "优于 observation？若不存在，motion 只保留为辅助监督或分析变量，"
+                        "不再直接写入 tracker state。"
+                    ),
+                },
+                {
+                    "id": "next_steps",
+                    "type": "markdown",
+                    "sourceId": "code_closed_loop_source",
+                    "body": (
+                        "## 下一步\n\n"
+                        "第一步不训练：用 alpha0 与 alpha0.25 两个现有 checkpoint 做推理 "
+                        "on/off 2×2。第二步导出逐 endpoint 的 `d_obs/d_dyn/d_gt`、previous "
+                        "error、foreground evidence、disagreement、Δt 和首次失控位置。"
+                        "只有 helpful subgroup 在冻结 split 上稳定存在，才允许做一个 "
+                        "5-epoch 的有序 trajectory encoder kill-test；否则 direct fusion 永久停止。"
+                        "若目标是召回大位移/遮挡目标，下一版 motion 必须前移到 crop/search，"
+                        "并保留完整 baseline identity path。"
+                    ),
+                },
+                {"id": "next_experiments_block", "type": "table", "tableId": "next_experiments"},
+                {
+                    "id": "limitations",
+                    "type": "markdown",
+                    "body": (
+                        "## 证据边界\n\n"
+                        "alpha0/0.25 的直接比较只有 seed42，但效应巨大、覆盖连续 8 个后期检查点，"
+                        "足以否决当前设计；B0 与 B1 存在可选模块改变共享初始化的混杂，所以 "
+                        "alpha0 低于 B0 不能解释为 dynamics 独立有害。当前还没有逐 endpoint "
+                        "proposal export，因此 broader motion prior 的上限仍未完成在线归因。"
+                        "20 个 CT-v2 单测全部通过，说明实现符合当前局部合同，不代表闭环研究假设成立。"
+                    ),
+                },
+                {
+                    "id": "questions",
+                    "type": "markdown",
+                    "body": (
+                        "## 仍待回答的问题\n\n"
+                        "1. A025 checkpoint 在推理时关闭 alpha 后能恢复多少？\n"
+                        "2. recursive history 下，`P(error_dyn < error_obs)` 是否在任何 "
+                        "GT-free bucket 稳定超过 50%？\n"
+                        "3. correction 与 GT residual 的方向余弦在首次失控前何时转负？\n"
+                        "4. 若 prior 前移到 search，它能增加 target recall，还是只引入更多背景？"
+                    ),
+                },
+            ],
+        },
+        "snapshot": {
+            "version": 1,
+            "status": "ready",
+            "generatedAt": generated_at,
+            "datasets": {
+                "validation_metrics": validation_metrics,
+                "run_summary": run_summary,
+                "intervention_diagnostics": intervention_diagnostics,
+                "failure_modes": failure_modes,
+                "literature_comparison": literature_comparison,
+                "next_experiments": next_experiments,
+            },
+        },
+        "sources": sources,
+        "package_info": {
+            "title": "B1motion 模块深度审计",
+            "generated_at": generated_at,
+            "source_root": str(ROOT),
+            "source_artifact": str(OUTPUT_PATH),
+        },
+    }
+
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(artifact, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    print(OUTPUT_PATH)
+
+
+if __name__ == "__main__":
+    main()

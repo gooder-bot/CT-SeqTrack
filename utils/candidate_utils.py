@@ -48,6 +48,37 @@ def wrap_yaw(angle, degrees=False):
     return float((float(angle) + half) % period - half)
 
 
+def anchor_relative_trajectory_targets(
+        current_box, anchor_box, current_delta_t, degrees=False, eps=1e-3):
+    """Express the next-box target in the actual crop-anchor coordinates.
+
+    The online tracker predicts from its latest estimated box, not from the
+    unavailable latest ground-truth box.  Training candidates therefore need
+    a target that includes both physical motion and correction of the sampled
+    anchor error.  Returning both displacement and rate keeps every ordered
+    trajectory loss in this same local frame.
+    """
+    current_delta_t = max(float(current_delta_t), float(eps))
+    world_displacement = (
+        np.asarray(current_box.center, dtype=np.float64)
+        - np.asarray(anchor_box.center, dtype=np.float64)
+    )
+    local_displacement = (
+        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T
+        @ world_displacement
+    )
+    yaw_displacement = wrap_yaw(
+        box_yaw(current_box, degrees) - box_yaw(anchor_box, degrees),
+        degrees,
+    )
+    trajectory_displacement = np.concatenate((
+        local_displacement,
+        np.asarray([yaw_displacement], dtype=np.float64),
+    )).astype(np.float32)
+    velocity = (local_displacement / current_delta_t).astype(np.float32)
+    return trajectory_displacement, velocity
+
+
 def yaw_rotation_matrix(angle, degrees=False):
     angle_rad = np.deg2rad(angle) if degrees else float(angle)
     cosine = np.cos(angle_rad)
@@ -185,6 +216,7 @@ def build_ct_training_histories(
         candidate_trajectory_mode,
         training_mode="canonical",
         correlation=0.75,
+        recursive_error_scale=1.0,
         degrees=False):
     """Build motion/search histories without changing canonical supervision.
 
@@ -210,6 +242,7 @@ def build_ct_training_histories(
         candidate_trajectory_mode,
         training_mode=normalize_ct_history_training_mode(training_mode),
         correlation=correlation,
+        recursive_error_scale=recursive_error_scale,
     )
     motion_boxes = [
         apply_local_candidate_offset(box, offset, degrees=degrees)

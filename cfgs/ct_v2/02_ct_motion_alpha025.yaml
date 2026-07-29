@@ -1,0 +1,2 @@
+_base_: 02_ct_motion_legacy_fixed.yaml
+dynamics_innovation_alpha: 0.25

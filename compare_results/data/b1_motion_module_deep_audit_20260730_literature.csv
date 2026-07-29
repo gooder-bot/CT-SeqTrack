@@ -1,0 +1,6 @@
+order,method,current_evidence,motion_source,fusion_or_safety,difference_from_b1
+1,SeqTrack3D,多帧点云 + 历史框序列,当前及历史点云、历史框,历史框误差增强；较弱历史框约束；短窗口,B1 在已有两个时序通道上又增加 history-only expert。
+2,M²-Track,两阶段 motion-centric tracker,前后两帧前景点云,motion transformation + shape completion/refinement,B1 不读取当前帧点云，不能视为复刻 M²-Track。
+3,STTracker,隐式多帧时空融合,多帧点云特征,稀疏 attention；保留 current feature,其消融显示直接拼接多帧特征会大跌，专用融合结构很关键。
+4,HVTrack,高时间变化跟踪,relative-pose-aware memory,base/expansion cross-attention + 背景抑制,说明扩展/运动 prior 必须和当前观测、背景控制联合设计。
+5,TrajTrack,历史轨迹的显式/隐式双 proposal,短期两帧点云 + 有序 bbox trajectory,Transformer/CVAE + proposal IoU 置信选择,B1 缺有序建模、分布预测和置信选择，只保留固定插值。

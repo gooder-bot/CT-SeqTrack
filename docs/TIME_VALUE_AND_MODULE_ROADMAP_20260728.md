@@ -687,3 +687,100 @@ Success/Precision 同时超过 B0、late-3 不退化、feature std 不低于 B0 
 - 旧 TWC 是 paired endpoint consistency，M3 是 EMA path distillation；
   新 PFTC 才是 canonical point-feature consistency，三者不能混称。
 - compact memory、MCC、Mamba 和新的 search 修改均锁定到 PFTC 独立通过之后。
+
+## 13. 2026-07-30 数据更新：当前 Δt-PFTC 实现暂停
+
+首个 formal-named seed42 run 的本地 artifact 路径为：
+
+```text
+output/20260728-1826-07_seqtrack3d_dt_pftc-
+dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0
+```
+
+它没有完成 60 epoch：events 止于 step 29,091（共 29,092 step，约
+epoch23.05），只有 epoch5/10/15/20 四个验证点，`last.ckpt` 停在 epoch19。
+epoch20 为 `49.056/63.870`，相对完整 B0 epoch60 的 `53.360/64.382` 仍低
+`4.304/0.512`。早期 4 个同阶段点有 3 个高于 B0，但 epoch15 又明显低于 B0，
+所以这只能算优化正信号，不能外推成 epoch60 涨点。
+
+本次审计改变了第 12 节的执行状态，但不改变其消融原则：
+
+1. 当前 canonical yaw 代码使用 `R(+yaw)`，项目 object-local 约定需要
+   `R(-yaw)`；现有 yaw 单测构造方向也随代码一起错，当前 run 无法评价正确
+   canonical correspondence。
+2. foreground feature std 从 epoch1 `0.0947` 降到 epoch20 `0.0210`，而
+   match 数和 match distance 稳定；raw SmoothL1 的无负样本目标出现强平凡
+   收缩警报。
+3. weighted/raw PFTC loss 相对差异中位数只有 `0.074%`。standard cadence
+   下当前 Δt 权重没有给出物理时间增量证据；它主要在编码 pair lag。
+4. 单卡训练约 `3.689 s/step`，B0 为 `0.362 s/step`，开销约 `10.2×`；按当前
+   速度 60 epoch 约需 77.6 小时，当前工程路径不可用于正式三臂实验。
+5. PFTC-U 和 commit `5f260e7` 的同代码 B0 尚未完成，无法分离 consistency 与
+   Δt weighting。
+
+当前正式判定为：
+
+```text
+NO-GO_CURRENT_IMPLEMENTATION
+INCONCLUSIVE_POINT_CONSISTENCY_IDEA
+NO_EVIDENCE_FOR_PHYSICAL_TIME
+```
+
+不从 epoch19 续训，不启动 seed43/44、full nuScenes、Random-20%、gap1124、
+true/fixed/shuffled 或 memory。先修正 yaw 符号和测试，加入 projector + variance
+floor 等防坍缩机制，记录 B0 feature std 与 gradient conflict，并把单卡开销降到
+B0 的 2 倍以内。之后只跑 B0/PFTC-U/Δt-PFTC 各 5 epoch 的机制 kill-test；
+全部通过才重新预检 λ 并从 scratch 开始 60-epoch 三臂实验。
+
+完整数值、根因和下一步见
+`compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md`。
+
+## 14. 2026-07-30 数据更新：固定全局 Motion innovation 停止
+
+新完成的 alpha0/0.25 两组均为 seed42、scratch、normal mini、batch16、
+60 epoch、75,720 step 和 12 个验证点。两组来自同一 commit `5f260e7`，
+tracked source clean，resolved config 仅 cfg/tag/alpha 不同：
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0（历史基线） | **53.360** | **64.382** | **52.905** | **63.104** |
+| motion alpha0 | 47.049 | 49.184 | 46.828 | 49.669 |
+| motion alpha0.25 | 29.581 | 28.862 | 29.472 | 28.849 |
+| motion alpha0.75（旧 B1） | 26.021 | 24.972 | 26.080 | 25.299 |
+
+alpha0.25 相对 alpha0 final 下降 `17.468/20.322`，late-3 下降
+`17.357/20.820`；epoch25–60 的 8/8 个验证点两项指标同时更低。
+alpha0.25 post-warmup applied alpha 均值只有 0.184、applied ratio 为
+73.7%、平均 correction norm 为 0.083 m，说明较小修正只是减少旧 0.75 的
+伤害，没有改变错误方向。
+
+更关键的是，epoch60 mean training loss 随 alpha 从 0→0.25→0.75 由
+`0.223→0.217→0.215`，递归验证却反向下降。结合代码路径：
+
+1. train 读取 canonical/correlated GT history，eval 读取 recursive predicted
+   history；
+2. valid mask 不衡量 proposal 准确性；
+3. innovation 位于 coarse proposal 和 Transformer query 之前；
+
+当前失败应归因于局部训练目标与闭环历史分布错位、错误 motion proposal 的
+递归放大，而不是训练不足。M0-3 的 oracle alpha0.775 来自 GT-history、
+candidate0、crop-reachable 条件，不能直接迁移到本入口。
+
+当前正式判定：
+
+```text
+NO_GO_FIXED_GLOBAL_MOTION_INNOVATION
+ALPHA025_REDUCES_BUT_DOES_NOT_REMOVE_FAILURE
+ALPHA000_IS_A_FALLBACK_CONTROL_NOT_A_GAIN
+BROADER_MOTION_PRIOR_IDEA_REMAINS_UNRESOLVED
+```
+
+不再训练 alpha0.05/0.1、seed43/44、full nuScenes 或 motion+search。先用
+已有 alpha0/0.25 checkpoint 做推理 alpha on/off 2×2，并导出 observation/
+dynamics/GT 的逐 endpoint attribution。若开启 0.25 立即退化、关闭后恢复，
+直接 fusion 永久停止；若关闭仍不恢复，则记录 training co-adaptation，同样
+不再扫全局 alpha。只有跨 split 存在可识别 helpful subgroup 才允许研究条件
+使用；P0-B4 已否定的旧 reliability gate 不得直接复刻。
+
+完整数值、曲线和复现数据见
+`compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md`。

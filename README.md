@@ -11,11 +11,18 @@ SeqTrack3D
 ```
 
 2026-07-27 的完整 B0–B3 首筛以及后续 Search-only A1 已经否决这套三模块
-组合及当前独立搜索设计。当前研究主线进入机制诊断：先用现有 B0/A1
-checkpoint 做 Search 开/关 2×2 评测，再决定删除还是重构搜索；不继续叠加
-motion、gate 或记忆模块。目标仍是在正常 nuScenes 上稳定涨点，再用同
-checkpoint 的 `true / fixed / shuffled` 控制检验真实时间。Random-20% 只作为
-最终鲁棒性补充，不参与选模。
+组合及当前独立搜索设计。2026-07-30 完成的 motion `alpha=0/0.25` scratch
+复核进一步确认：`alpha=0.25` 相对精确关闭 innovation 的 `alpha=0` final
+下降 `17.468/20.322`，因此问题不只是旧 `alpha=0.75` 太大，当前固定全局
+proposal innovation 正式 No-Go。
+
+同日对第四模块 Δt-PFTC 的首个 seed42 artifact 复核又发现：目录虽标记
+`60ep`，实际只运行到约 epoch23.05；同时 canonical yaw 逆变换符号与项目
+坐标约定相反，前景 feature std 到 epoch20 只剩 epoch1 的 22.2%，单卡训练
+开销约为 B0 的 10.2 倍。当前 PFTC 结论是
+`NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`：不续训旧 checkpoint，
+先修正几何、防坍缩目标与性能，再做 5-epoch kill-test。Random-20% 继续只
+作为最终鲁棒性补充，不参与选模。
 
 ## 已完成首筛的 v2 候选
 
@@ -32,6 +39,53 @@ TWC、旧 Observability Gate、M3 EMA teacher、M4 Kalman/filter 等路线保留
 现实性、ChronoTrack/近期工作借鉴顺序和现有模块审计，见
 [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
+第四模块的完整数据、实现错误、坍缩诊断和恢复路径见
+[Δt-PFTC seed42 部分运行诊断](compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md)。
+
+Motion alpha 的完整性、曲线、机制诊断和后续 2×2 见
+[Motion fixed-alpha 复核](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)；
+可独立打开的图表版见
+[便携 HTML 报告](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.html)。
+对 B1motion 的逐层代码链路、训练/推理闭环、时序表达能力、历史 M2 归因和
+SeqTrack3D/M²-Track/STTracker/HVTrack/TrajTrack 对照，见
+[B1motion 深度审计](compare_results/reports/b1_motion_module_deep_audit_20260730.html)。
+
+## Motion fixed-alpha 复核（2026-07-30）
+
+| 组别 | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline | **53.360** | **64.382** | **52.905** | **63.104** |
+| B1 motion，alpha=0 | 47.049 | 49.184 | 46.828 | 49.669 |
+| B1 motion，alpha=0.25 | 29.581 | 28.862 | 29.472 | 28.849 |
+| B1 motion，alpha=0.75 | 26.021 | 24.972 | 26.080 | 25.299 |
+
+`alpha=0/0.25` 均为 commit `5f260e7`、seed42、scratch、60 epoch、
+75,720 step，resolved config 除 cfg/tag 外只差 alpha。`alpha=0.25`
+warmup 后实际平均系数仅 0.184、平均修正约 0.083 m，仍相对 `alpha=0`
+大幅退化；epoch25–60 的 8 个验证点两项指标全部更低。与此同时它的 epoch60
+training loss 更低，说明主要矛盾是 teacher-forced 训练与 recursive tracking
+错位，而不是训练不足。
+
+当前只否定固定全局 proposal innovation，不把结论扩大为所有 motion prior
+无效。下一步不再长训更小 alpha；先用两个已有 checkpoint 做推理 alpha
+开/关 2×2，并导出逐 endpoint observation/dynamics proposal 归因。
+
+## 第四模块当前状态（2026-07-30）
+
+| 项目 | 结果 | 判断 |
+|---|---:|---|
+| 训练进度 | 29,092 / 75,720 step（约 23.05 epoch） | 非完整 60 epoch |
+| epoch20 | 49.056 Success / 63.870 Precision | 不能代替 final |
+| vs B0 epoch60 | -4.304 / -0.512 | 尚未涨点 |
+| 前景 feature std | 0.0947 → 0.0210 | 强坍缩警报 |
+| weighted/raw loss 差异中位数 | 0.074% | 没有真实时间增量证据 |
+| 单卡 step time | 3.689 s vs B0 0.362 s | 约慢 10.2 倍 |
+
+当前旧公式不再训练。下一步依次是：拉回服务器终止日志；把 canonicalization
+改为项目一致的 `R(-yaw)` 并修正单测；加入 projector/variance floor 等明确的
+防坍缩机制；把 step time 压到 B0 的 2 倍以内；最后才重新运行同代码
+B0/PFTC-U/Δt-PFTC 的短机制筛选和 60-epoch 正式三臂消融。
+
 ## 当前实验结论（2026-07-27）
 
 seed42、nuScenes-mini、Car、60 epoch 的原始 TensorBoard 标量复核结果如下。
@@ -41,7 +95,7 @@ seed42、nuScenes-mini、Car、60 epoch 的原始 TensorBoard 标量复核结果
 |---|---|---:|---:|---|
 | B0 | SeqTrack3D baseline | 53.360 | 64.382 | 完整 |
 | A1 | B0 + search expansion only | 27.036 | 25.596 | 完整，当前独立搜索不通过 |
-| B1 | B0 + motion prior | 26.021 | 24.972 | 完整，当前设计不通过 |
+| B1 | B0 + motion prior，alpha=0.75 | 26.021 | 24.972 | 完整，当前设计不通过 |
 | B2 | B1 + search expansion | 47.973 | 52.088 | 完整，交互恢复但仍低于 B0 |
 | B3 | B2 + adaptive fusion | 25.537 | 24.707 | 完整，adaptive gate 不通过 |
 
@@ -162,6 +216,10 @@ compare_results/    历史结果与正式分析
   epoch60 `last.ckpt`；本轮数据足够否决当前设计。
 - 当前固定 `alpha=0.75` 的 B1 明显低于 B0；B2 对 B1 有较大恢复，但 final
   Success/Precision 仍分别低 5.387/12.294，不能晋级。
+- 新 scratch 对照中 `alpha=0.25` 相对 `alpha=0` final 仍下降
+  17.468/20.322；固定全局 innovation 的 No-Go 不再只是“0.75 过大”。
+- `alpha=0` 是精确关闭 correction 的 fallback control，不是 motion 正向
+  贡献；它与 B0 还存在共享初始化混杂，不能把两者差值解释为 dynamics 净效应。
 - B3 gate 从初始 0.25 快速饱和为常数上限 0.75，最终结果基本退回 B1；
   当前 adaptive fusion 不具有可用的条件可靠性。
 - A1 相对 B0 final 下降 26.324/38.786，证明当前 search 不能独立涨点；
