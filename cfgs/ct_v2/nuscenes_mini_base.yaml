@@ -13,6 +13,7 @@ dynamics_time_mode: "true"
 # Legacy research branches remain callable through their old YAML files but
 # are intentionally excluded from the v2 factorial experiment.
 use_ct_v2: false
+use_b1motion_v3: false
 use_time_guided_search: false
 use_physical_time_adapter: false
 use_observability_gate: false

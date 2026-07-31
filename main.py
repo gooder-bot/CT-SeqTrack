@@ -223,6 +223,9 @@ def parse_config():
     parser.add_argument(
         '--pftc_weight', type=float, default=argparse.SUPPRESS,
         help='PFTC loss lambda; use zero for the 200-batch loss preflight.')
+    parser.add_argument(
+        '--motion_v3_fusion_scale', type=float, default=argparse.SUPPRESS,
+        help='B1motion-v3 runtime fusion scale; use zero for observation-only evaluation.')
 
     args = parser.parse_args()
     config = load_yaml(args.cfg)

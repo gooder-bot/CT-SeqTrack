@@ -4,6 +4,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pack_padded_sequence
 
 from models.dynamics import DynamicsEncoder, wrap_angle
 
@@ -202,6 +203,218 @@ class OrderedTrajectoryEncoder(nn.Module):
             result["displacement"],
             result["valid"],
         )
+
+
+class OrderedPhysicalMotionEncoder(nn.Module):
+    """Predict candidate-independent xy motion from an ordered box history.
+
+    Boxes are supplied newest-to-oldest, matching the tracker contract.  The
+    GRU consumes transitions oldest-to-newest, while a causal latest-velocity
+    extrapolation provides a useful zero-initialized cold start.  Physical time
+    is structural: transition velocities divide by their measured gaps and the
+    predicted rate is integrated over the query gap.
+    """
+
+    def __init__(
+            self,
+            hidden_dim=128,
+            step_dim=64,
+            eps=1e-3,
+            time_scale=0.5,
+            residual_velocity_scale=4.0,
+            initial_sigma=0.5):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.step_dim = int(step_dim)
+        self.eps = float(eps)
+        self.time_scale = max(float(time_scale), self.eps)
+        self.residual_velocity_scale = float(residual_velocity_scale)
+        if self.hidden_dim <= 0 or self.step_dim <= 0:
+            raise ValueError("physical motion encoder dimensions must be positive")
+        if self.residual_velocity_scale <= 0:
+            raise ValueError("physical residual velocity scale must be positive")
+        if initial_sigma <= 0:
+            raise ValueError("physical initial sigma must be positive")
+
+        # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
+        # query/pair ratio, and transition-valid flag.
+        self.step_projection = nn.Sequential(
+            nn.Linear(9, self.step_dim),
+            nn.LayerNorm(self.step_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.gru = nn.GRU(
+            input_size=self.step_dim,
+            hidden_size=self.hidden_dim,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.context = nn.Sequential(
+            nn.Linear(self.hidden_dim + 2, self.hidden_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.velocity_residual_head = nn.Linear(self.hidden_dim, 2)
+        self.log_sigma_head = nn.Linear(self.hidden_dim, 2)
+        nn.init.zeros_(self.velocity_residual_head.weight)
+        nn.init.zeros_(self.velocity_residual_head.bias)
+        nn.init.zeros_(self.log_sigma_head.weight)
+        nn.init.constant_(self.log_sigma_head.bias, math.log(initial_sigma))
+
+    def _format_query_gap(self, value, batch_size, reference):
+        if value is None:
+            value = reference.new_full((batch_size,), self.time_scale)
+        elif not torch.is_tensor(value):
+            value = torch.as_tensor(
+                value, device=reference.device, dtype=reference.dtype)
+        value = value.to(device=reference.device, dtype=reference.dtype)
+        if value.numel() == 1:
+            value = value.reshape(1).repeat(batch_size)
+        elif value.numel() != batch_size:
+            raise ValueError(
+                "current_delta_t must contain one value or one per batch item")
+        finite = torch.isfinite(value.reshape(batch_size))
+        value = torch.nan_to_num(
+            value.reshape(batch_size), nan=self.time_scale,
+            posinf=self.time_scale, neginf=self.time_scale)
+        return torch.clamp(value, min=self.eps), finite
+
+    def forward(
+            self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
+        if ref_boxs.dim() != 3 or ref_boxs.shape[-1] != 4:
+            raise ValueError("motion ref_boxs must have shape [B,H,4]")
+        batch_size, history_length, _ = ref_boxs.shape
+        if delta_t.dim() == 1:
+            delta_t = delta_t.unsqueeze(0)
+        delta_t = delta_t.to(device=ref_boxs.device, dtype=ref_boxs.dtype)
+        if delta_t.dim() != 2 or delta_t.shape[0] != batch_size:
+            raise ValueError("motion delta_t must have shape [B,H]")
+        valid_mask = valid_mask.to(
+            device=ref_boxs.device, dtype=ref_boxs.dtype)
+        if valid_mask.dim() == 1:
+            valid_mask = valid_mask.unsqueeze(0)
+        if valid_mask.shape != ref_boxs.shape[:2]:
+            raise ValueError("motion valid_mask must have shape [B,H]")
+        query_gap, query_finite = self._format_query_gap(
+            current_delta_t, batch_size, ref_boxs)
+
+        finite_row = torch.isfinite(ref_boxs).all(dim=(1, 2))
+        finite_row = finite_row & torch.isfinite(delta_t).all(dim=1)
+        finite_row = finite_row & query_finite
+        safe_boxs = torch.nan_to_num(
+            ref_boxs, nan=0.0, posinf=0.0, neginf=0.0)
+        safe_delta_t = torch.nan_to_num(
+            delta_t, nan=self.time_scale,
+            posinf=self.time_scale, neginf=self.time_scale)
+
+        zeros_xy = ref_boxs.new_zeros((batch_size, 2))
+        zeros_feature = ref_boxs.new_zeros((batch_size, self.hidden_dim))
+        initial_log_sigma = ref_boxs.new_full(
+            (batch_size, 2), self.log_sigma_head.bias[0].item())
+        if history_length < 2:
+            return {
+                "feature": zeros_feature,
+                "velocity_xy": zeros_xy,
+                "prior_xy": zeros_xy,
+                "kinematic_prior_xy": zeros_xy,
+                "log_sigma_xy": initial_log_sigma,
+                "valid": ref_boxs.new_zeros((batch_size,)),
+                "gap_ratio": ref_boxs.new_ones((batch_size,)),
+            }
+
+        if safe_delta_t.shape[1] < history_length:
+            pad = safe_delta_t[:, -1:].expand(
+                -1, history_length - safe_delta_t.shape[1])
+            safe_delta_t = torch.cat((safe_delta_t, pad), dim=1)
+        pair_gap = torch.clamp(
+            safe_delta_t[:, 1:history_length], min=self.eps)
+        pair_valid = (
+            (valid_mask[:, :-1] > 0)
+            & (valid_mask[:, 1:] > 0)
+        )
+        pair_valid_f = pair_valid.to(ref_boxs.dtype)
+
+        newer = safe_boxs[:, :-1]
+        older = safe_boxs[:, 1:]
+        displacement_xy = newer[:, :, :2] - older[:, :, :2]
+        velocity_xy = displacement_xy / pair_gap.unsqueeze(-1)
+        yaw_delta = wrap_angle(newer[:, :, 3] - older[:, :, 3])
+        query_ratio = (
+            query_gap.unsqueeze(1) / pair_gap
+        ).expand_as(pair_gap)
+        step_features = torch.cat((
+            velocity_xy,
+            displacement_xy,
+            torch.sin(yaw_delta).unsqueeze(-1),
+            (torch.cos(yaw_delta) - 1.0).unsqueeze(-1),
+            torch.log1p(pair_gap / self.time_scale).unsqueeze(-1),
+            query_ratio.unsqueeze(-1),
+            pair_valid_f.unsqueeze(-1),
+        ), dim=-1)
+        step_features = torch.nan_to_num(
+            step_features, nan=0.0, posinf=0.0, neginf=0.0)
+        step_features = step_features * pair_valid_f.unsqueeze(-1)
+
+        chronological = torch.flip(step_features, dims=(1,))
+        projected = self.step_projection(chronological)
+        chronological_valid = torch.flip(pair_valid, dims=(1,))
+        # A zero vector is not a no-op for a GRU with biases.  Compact valid
+        # transitions before packing so padded history cannot alter the state.
+        projected = projected * chronological_valid.unsqueeze(-1)
+        compact_indices = torch.argsort(
+            (~chronological_valid).to(torch.int64),
+            dim=1,
+            stable=True,
+        )
+        compact_projected = torch.gather(
+            projected,
+            dim=1,
+            index=compact_indices.unsqueeze(-1).expand_as(projected),
+        )
+        transition_count = pair_valid_f.sum(dim=1)
+        packed_projected = pack_padded_sequence(
+            compact_projected,
+            lengths=torch.clamp(
+                transition_count, min=1).to(torch.long).cpu(),
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        _, ordered_hidden = self.gru(packed_projected)
+        ordered_state = ordered_hidden[-1]
+
+        nominal_gap = (
+            (pair_gap * pair_valid_f).sum(dim=1)
+            / torch.clamp(transition_count, min=1.0)
+        )
+        gap_ratio_raw = query_gap / torch.clamp(nominal_gap, min=self.eps)
+        context = self.context(torch.cat((
+            ordered_state,
+            torch.log1p(query_gap / self.time_scale).unsqueeze(1),
+            torch.log1p(gap_ratio_raw).unsqueeze(1),
+        ), dim=1))
+
+        recent_pair_valid = pair_valid[:, 0]
+        valid = (recent_pair_valid & finite_row).to(ref_boxs.dtype)
+        base_velocity = velocity_xy[:, 0]
+        residual_velocity = self.residual_velocity_scale * torch.tanh(
+            self.velocity_residual_head(context))
+        predicted_velocity = (
+            base_velocity + residual_velocity) * valid.unsqueeze(1)
+        prior_xy = predicted_velocity * query_gap.unsqueeze(1)
+        kinematic_prior_xy = (
+            base_velocity * query_gap.unsqueeze(1) * valid.unsqueeze(1))
+        log_sigma_xy = torch.clamp(
+            self.log_sigma_head(context), min=-4.0, max=2.5)
+        gap_ratio = torch.where(
+            valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw))
+        return {
+            "feature": context * valid.unsqueeze(1),
+            "velocity_xy": predicted_velocity,
+            "prior_xy": prior_xy,
+            "kinematic_prior_xy": kinematic_prior_xy,
+            "log_sigma_xy": log_sigma_xy,
+            "valid": valid,
+            "gap_ratio": gap_ratio,
+        }
 
 
 class TrajectoryPointEncoder(nn.Module):

@@ -1,0 +1,61 @@
+_base_: nuscenes_mini_base.yaml
+
+experiment_name: ct_reliable_physical_motion_v3
+
+# Isolated post-Transformer proposal fusion.  The legacy v2 adapter, expanded
+# crop, and all other temporal plugins stay disabled so the observation path
+# is exactly B0.
+use_b1motion_v3: true
+use_ct_v2: false
+use_dynamics_encoder: false
+use_ordered_trajectory_encoder: false
+use_trajectory_adapter: false
+use_trajectory_search: false
+use_time_guided_search: false
+use_physical_time_adapter: false
+use_observability_gate: false
+use_twc: false
+use_m3_path_distillation: false
+use_point_feature_tc: false
+
+# Never replace the B0 point-cloud view.  The standard [1,2,3] view keeps its
+# original candidate sampling and order-time tokens; only a separate box-only
+# branch sees deterministic gap-2/gap-4 histories.
+trajectory_training_irregular_probability: 0.0
+motion_v3_aux_query_gaps: [2, 4]
+motion_v3_aux_transition_gaps: [1, 2]
+
+# Correlated candidate errors approximate recursive online history without the
+# rejected age-amplified 4x perturbation.
+ct_history_training_mode: correlated_candidate
+ct_history_correlation: 0.75
+ct_history_recursive_error_scale: 1.0
+motion_v3_history_training_mode: correlated_candidate
+motion_v3_history_correlation: 0.75
+
+# Shared continuous-time physical-motion encoder.  Its residual-rate head is
+# zero initialized, leaving recent velocity as the exact cold start.
+motion_v3_hidden_dim: 128
+motion_v3_step_dim: 64
+motion_v3_eps: 0.001
+motion_v3_residual_velocity_scale: 4.0
+motion_v3_initial_sigma: 0.5
+
+# Reliability-calibrated, xy-only bounded proposal correction.
+motion_v3_warmup_epoch: 10
+motion_v3_fusion_scale: 1.0
+motion_v3_gate_hidden_dim: 64
+motion_v3_gate_context_dim: 32
+motion_v3_gate_init_probability: 0.01
+motion_v3_alpha_max: 0.5
+motion_v3_radius_base: 0.25
+motion_v3_radius_per_second: 0.50
+motion_v3_radius_max: 1.25
+
+# L = L_B0 + .1 L_prior_main + .1 L_prior_aux
+#     + I(epoch>=10) * (L_fused + .1 L_gate)
+motion_v3_prior_weight: 0.1
+motion_v3_aux_prior_weight: 0.1
+motion_v3_fused_weight: 1.0
+motion_v3_gate_weight: 0.1
+motion_v3_help_margin: 0.05

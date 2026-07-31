@@ -26,14 +26,22 @@ The historical 2026-07-27 seed42 normal-mini screens are complete. B3 finishes a
 53.360 / 64.382, so it also fails the normal-mini guardrail. Do not rerun
 the legacy configs unchanged or train A2 from that chain.
 
-`02_ct_motion.yaml` now names the corrected B1motion-v2. It uses an ordered GRU,
-an uncertainty-aware pre-crop second branch that does not consume baseline
-tokens, mixed-cadence training, and an exact-zero feature adapter. Ordered
-histories and supervision use the actual candidate crop-anchor frame, matching
-recursive evaluation instead of mixing GT-anchor motion with candidate-anchor
-observation features. It does not use proposal innovation or global alpha.
-Design and commands:
-`docs/B1MOTION_V2_ORDERED_PRECROP_20260730.md`.
+`02_ct_motion.yaml` names the ordered/pre-crop B1motion-v2 experiment, but its
+seed42 60-epoch screen is now complete and rejected.  It finishes at
+20.618 Success / 19.830 Precision versus B0 at 53.360 / 64.382; its best
+checkpoint is also below B0.  Do not rerun this YAML unchanged or promote it to
+multiple seeds/full nuScenes.
+
+The initialization contract passed, but the training contract did not.  The
+35% irregular sampler replaces the whole B0 history while the main branch still
+uses gap-blind order tokens; the candidate-anchor trajectory target also
+contains a common anchor error that is not identifiable from relative history
+alone.  After epoch2 the nominally small adapter grows to about 2.07 feature-L2,
+while the pre-crop extension is valid on only 3.93% of training samples.
+Run a same-code B0 and short cadence/adapter factorial controls before changing
+the module again.  Design, completed result, and recovery plan:
+`docs/B1MOTION_V2_ORDERED_PRECROP_20260730.md`; reviewed data:
+`compare_results/reports/b1motion_v2_seed42_20260730.md`.
 
 The 2026-07-30 scratch alpha reruns are also complete. Alpha 0 finishes at
 47.049 / 49.184 and alpha 0.25 at 29.581 / 28.862, versus the historical
@@ -47,15 +55,16 @@ observation/dynamics proposal attribution. See
 PFTC is the independent fourth-module candidate; it is not B3 plus another
 module.  It is training-only and adds no inference work.
 
-The first `07_seqtrack3d_dt_pftc.yaml` seed42 artifact is **not a completed
-60-epoch run**: it stops at step 29,092 (about epoch 23.05), with the latest
-checkpoint at epoch19.  The 2026-07-30 audit also found that the current
-canonical yaw transform uses `R(+yaw)` where the project convention requires
-`R(-yaw)`, foreground feature std shrinks to 22.2% of its epoch1 value by
-epoch20, and training is about 10.2x slower than B0.  Do not resume or reproduce
-configs 06/07 unchanged.  Fix geometry, anti-collapse behavior, and runtime,
-then repeat a short three-arm kill-test before any new 60-epoch job.  See
-`compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md`.
+The first `07_seqtrack3d_dt_pftc.yaml` seed42 artifact is now a **completed
+60-epoch run**: 75,720 steps, 12 validation points, and an epoch60 checkpoint.
+It finishes at 51.189 Success / 60.886 Precision, below B0 by 2.171 / 3.496;
+late-3 is also lower by 1.507 / 2.487.  The implementation audit still finds
+`R(+yaw)` where the project convention requires `R(-yaw)`, foreground feature
+std shrinks to 16.4% of its epoch1 value, and training is 8.24x slower than B0.
+Configs 06/07 must not be reproduced unchanged.  Fix geometry, anti-collapse
+behavior, and runtime, then repeat a short same-code three-arm kill-test before
+any new 60-epoch job.  See
+`compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md`.
 
 After that correction, execute the bounded loss preflight and freeze the
 largest accepted lambda for both PFTC arms:

@@ -1,0 +1,628 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "B1motion-v3 修改方案",
+    "description": "A code-aligned redesign that preserves the SeqTrack3D baseline and isolates physical motion from anchor correction.",
+    "generatedAt": "2026-07-31T12:00:00+08:00",
+    "sources": [
+      {
+        "id": "validation_source",
+        "label": "Reviewed B1motion validation summary",
+        "path": "compare_results/data/b1motion_v2_seed42_20260730_summary.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "sql": "SELECT arm, final_success, final_precision, delta_success_vs_b0, delta_precision_vs_b0 FROM read_csv_auto('compare_results/data/b1motion_v2_seed42_20260730_summary.csv', header = true) ORDER BY final_success DESC",
+          "description": "Reads reviewed epoch-60 normal-validation metrics for B0, legacy B1 controls, and B1motion-v2.",
+          "executed_at": "2026-07-31",
+          "filters": [
+            "nuScenes v1.0-mini",
+            "Car",
+            "seed=42",
+            "normal cadence",
+            "epoch-60 final checkpoint"
+          ],
+          "metric_definitions": [
+            "Success is the standard 3D-IoU one-pass evaluation score multiplied by 100.",
+            "Precision is the standard center-distance one-pass evaluation score multiplied by 100.",
+            "Delta is the arithmetic difference from the reviewed historical B0 final score."
+          ]
+        }
+      },
+      {
+        "id": "diagnostic_source",
+        "label": "B1motion root-cause review",
+        "path": "compare_results/reports/b1motion_root_cause_review_20260731.md",
+        "query": {
+          "language": "markdown",
+          "description": "Cross-check of complete training metrics, sampler behavior, target semantics, adapter magnitude, and search availability.",
+          "executed_at": "2026-07-31"
+        }
+      },
+      {
+        "id": "design_source",
+        "label": "B1motion-v3 file-level design",
+        "path": "docs/B1MOTION_V3_MODIFICATION_PLAN_20260731.md",
+        "query": {
+          "language": "markdown",
+          "description": "Implementation contract, tensor definitions, safety invariants, tests, and staged experiments.",
+          "executed_at": "2026-07-31"
+        }
+      },
+      {
+        "id": "code_source",
+        "label": "Reviewed CT-SeqTrack implementation",
+        "path": "models/seqtrack3d.py",
+        "query": {
+          "language": "python",
+          "description": "Review covers datasets/sampler.py, models/base_model.py, models/seqtrack3d.py, models/ct_v2/motion.py, models/dynamics.py, utils/candidate_utils.py, and utils/ct_history.py.",
+          "executed_at": "2026-07-31",
+          "filters": [
+            "online recursive path",
+            "paired training path",
+            "trajectory target",
+            "feature adapter",
+            "proposal innovation"
+          ]
+        }
+      },
+      {
+        "id": "seqtrack_paper",
+        "label": "SeqTrack3D paper",
+        "href": "https://arxiv.org/abs/2402.16249",
+        "query": {
+          "language": "paper",
+          "description": "Seq2Seq point-cloud and box-sequence tracking, including the time-window ablation and cumulative-history-error discussion.",
+          "executed_at": "2026-07-31"
+        }
+      },
+      {
+        "id": "m2_paper",
+        "label": "M²-Track CVPR 2022 paper",
+        "href": "https://openaccess.thecvf.com/content/CVPR2022/html/Zheng_Beyond_3D_Siamese_Tracking_A_Motion-Centric_Paradigm_for_3D_Single_CVPR_2022_paper.html",
+        "query": {
+          "language": "paper",
+          "description": "Two-stage motion-centric proposal and refinement design.",
+          "executed_at": "2026-07-31"
+        }
+      },
+      {
+        "id": "hvtrack_paper",
+        "label": "HVTrack ECCV 2024 paper",
+        "href": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/html/1145_ECCV_2024_paper.php",
+        "query": {
+          "language": "paper",
+          "description": "High-temporal-variation tracking with relative-pose memory, base-expansion cross-attention, and background suppression.",
+          "executed_at": "2026-07-31"
+        }
+      },
+      {
+        "id": "trajtrack_paper",
+        "label": "TrajTrack arXiv v3",
+        "href": "https://arxiv.org/html/2509.11453v3",
+        "query": {
+          "language": "paper",
+          "description": "Propose-predict-refine trajectory paradigm and proposal-agreement refinement.",
+          "executed_at": "2026-07-31"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "final_score_comparison",
+        "title": "Final normal-validation scores",
+        "subtitle": "B1motion-v2 underperforms B0 on both metrics; the redesign must guarantee a structural normal-cadence fallback.",
+        "type": "bar",
+        "dataset": "final_scores",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "y": {
+            "field": "score",
+            "type": "quantitative",
+            "label": "Score"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Metric"
+          },
+          "tooltip": [
+            {
+              "field": "arm",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "metric",
+              "type": "nominal",
+              "label": "Metric"
+            },
+            {
+              "field": "score",
+              "type": "quantitative",
+              "label": "Final score"
+            },
+            {
+              "field": "delta_vs_b0",
+              "type": "quantitative",
+              "label": "Delta vs B0"
+            }
+          ]
+        },
+        "options": {
+          "orientation": "vertical",
+          "grouping": "grouped"
+        },
+        "xAxisTitle": "Run",
+        "yAxisTitle": "Score"
+      }
+    ],
+    "tables": [
+      {
+        "id": "file_changes",
+        "title": "File-level implementation map",
+        "subtitle": "The first implementation changes targets, sampling, and proposal fusion while leaving the rejected v2 config untouched.",
+        "dataset": "file_changes",
+        "source": {
+          "id": "file_changes_query",
+          "label": "File-level implementation plan rows",
+          "path": "docs/B1MOTION_V3_MODIFICATION_PLAN_20260731.md",
+          "query": {
+            "language": "sql",
+            "engine": "DuckDB",
+            "sql": "SELECT * FROM (VALUES (1, 'cfgs/ct_v2/02_ct_motion_v3.yaml', 'Add frozen-B0, paired irregular, xy prior, and bounded fusion configuration.', 'Experiment and reproduction isolation'), (2, 'utils/candidate_utils.py', 'Add physical_motion_targets while preserving the legacy target helper.', 'Separate physical motion from anchor correction'), (3, 'datasets/sampler.py', 'Keep the main view continuous and create an independent irregular motion view.', 'Protect B0 training distribution'), (4, 'models/ct_v2/motion.py', 'Add OrderedPhysicalMotionEncoder and disable the feature adapter for V3.', 'Create an independent low-dimensional prior'), (5, 'models/seqtrack3d.py', 'Apply xy-only proposal innovation after the B0 proposal and isolate irregular gradients.', 'Bound fusion in proposal space'), (6, 'models/base_model.py', 'Construct training-aligned online motion fields and force normal eligibility to zero.', 'Align training and recursive inference'), (7, 'utils/ct_history.py', 'Load frozen-B0 rollout history and disable scale-4 synthetic drift.', 'Match recursive error distribution'), (8, 'tests/test_ct_v2.py', 'Add invariance, identity, norm-cap, BN, gradient, and coordinate tests.', 'Turn safety into executable contracts')) AS t(\"order\", file, change, reason) ORDER BY \"order\"",
+            "description": "Materializes the reviewed file-level modification map from the design specification.",
+            "executed_at": "2026-07-31"
+          }
+        },
+        "density": "compact",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "order",
+            "label": "#",
+            "type": "number"
+          },
+          {
+            "field": "file",
+            "label": "File",
+            "type": "text"
+          },
+          {
+            "field": "change",
+            "label": "Required change",
+            "type": "text"
+          },
+          {
+            "field": "reason",
+            "label": "Contract fixed",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "experiment_gates",
+        "title": "Staged experiment gates",
+        "subtitle": "Short attribution and safety checks precede any new 60-epoch or multi-seed run.",
+        "dataset": "experiment_gates",
+        "source": {
+          "id": "experiment_gates_query",
+          "label": "Staged B1motion-v3 experiment plan",
+          "path": "docs/B1MOTION_V3_MODIFICATION_PLAN_20260731.md",
+          "query": {
+            "language": "sql",
+            "engine": "DuckDB",
+            "sql": "SELECT * FROM (VALUES (1, 'E0', 'Retrain same-code B0 and export normal, random20, and gap1124 endpoints.', 'Establish the matched module-on/off baseline.'), (2, 'K0', 'With search off, run irregular 0/0.35 by adapter off/on for 10-15 epochs.', 'Confirm sampler and adapter damage independently.'), (3, 'V3-A0', 'Freeze B0 and compare the learned prior with constant/latest velocity endpoint RMSE.', 'Beat the strongest analytic prior on rollout history and gap2/gap4.'), (4, 'V3-A1', 'Run xy-only fixed GT-free gate plus bounded proposal innovation.', 'Normal exact identity; gap1124 at least +1 Success/+2 Precision; random20 non-negative.'), (5, 'V3-A2', 'Evaluate one checkpoint under true, fixed, and shuffled time with tracklet bootstrap.', 'Claim physical-time causality only if true-control confidence intervals are positive.'), (6, 'V3-B', 'Audit search recall, then compare search-only, prior-only, and combined.', 'Improve both target recall and tracking in baseline-miss cases.')) AS t(\"order\", stage, test, promotion) ORDER BY \"order\"",
+            "description": "Materializes the ordered experiment gates defined in the B1motion-v3 design.",
+            "executed_at": "2026-07-31"
+          }
+        },
+        "density": "compact",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "order",
+            "label": "#",
+            "type": "number"
+          },
+          {
+            "field": "stage",
+            "label": "Stage",
+            "type": "text"
+          },
+          {
+            "field": "test",
+            "label": "Test",
+            "type": "text"
+          },
+          {
+            "field": "promotion",
+            "label": "Promotion condition",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# B1motion-v3 修改方案"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## 技术结论：重写成受保护的 proposal 插件\n\n不要继续缩小 feature adapter。B1motion-v3 应从 same-code B0 checkpoint 出发并冻结 B0：连续 cadence 下 hard gate 为零，输出逐元素等于 B0；irregular paired view 只训练独立的 physical-motion prior；prior 与 observation 仅通过已有的有界 proposal innovation 融合。第一版只修正 x/y，search、yaw、learned gate 和 joint fine-tuning 全部后置。"
+      },
+      {
+        "id": "evidence_heading",
+        "type": "markdown",
+        "sourceId": "validation_source",
+        "body": "## 当前结果要求结构性 fallback\n\nB1motion-v2 epoch60 只有 **20.618 Success / 19.830 Precision**，相对 B0 为 **-32.742 / -44.551**。它不是轻微退化，因此新版本的 normal guardrail 不应再设为“允许掉 0.5 点”，而应设为同 checkpoint、同 endpoint 的 exact identity。"
+      },
+      {
+        "id": "score_chart",
+        "type": "chart",
+        "chartId": "final_score_comparison"
+      },
+      {
+        "id": "failure_contract",
+        "type": "markdown",
+        "sourceId": "diagnostic_source",
+        "body": "## 三个合同必须同时修复\n\n35% irregular sampling 替换了整个 gap-blind B0 主视图；trajectory target 又混合了 physical motion 与相对历史不可识别的 anchor correction；随后无范数硬上限的 feature residual 把该噪声写入 coarse motion。Search 仅约 3.93% 样本可用，无法抵消这些变化。"
+      },
+      {
+        "id": "target_contract",
+        "type": "markdown",
+        "sourceId": "design_source",
+        "body": "## Target 改为可识别的物理位移\n\n令 A 为最新递归 anchor、G0 为最新历史 GT、Gt 为当前 GT。Prior 只学习 `R(A)^T(center(Gt)-center(G0))`；B0 observation 继续学习 `R(A)^T(center(Gt)-center(A))`。两者之差才是 proposal innovation。这样 anchor 平移误差留给读取当前点云的 observation 分支，不再要求 trajectory-only encoder 猜测不可见误差。"
+      },
+      {
+        "id": "architecture_contract",
+        "type": "markdown",
+        "sourceId": "code_source",
+        "body": "## 融合移到 box/proposal 空间\n\n先得到冻结 B0 的 `d_obs`，再计算 `d_final = d_obs + alpha * clip(d_prior - stopgrad(d_obs), R(delta_t))`。复用 `models/dynamics.py::apply_proposal_innovation()`，禁用 V3 的 `ZeroInitTrajectoryAdapter`。Normal、invalid prior 或 observation 可靠时 alpha 必须精确为 0。"
+      },
+      {
+        "id": "file_plan_heading",
+        "type": "markdown",
+        "sourceId": "design_source",
+        "body": "## 文件修改集中在六条路径\n\n新增 V3 配置和类，不覆盖 legacy/v2 语义。数据层拆 paired view，target helper 拆物理位移与 box displacement，模型层在 B0 proposal 后融合，并为 gradient、BatchNorm 和 normal identity 增加测试。"
+      },
+      {
+        "id": "file_plan_table",
+        "type": "table",
+        "tableId": "file_changes"
+      },
+      {
+        "id": "literature_alignment",
+        "type": "markdown",
+        "body": "## 文献支持 proposal 分离，不支持直接复制\n\nM²-Track 的可迁移原则是先产生 motion proposal，再做 refinement；TrajTrack v3 也是 local proposal 与 global trajectory proposal 的 propose-predict-refine。HVTrack 说明扩区后必须显式抑制背景。SeqTrack3D 的 Car ablation 从 1+3 的 56.73/66.01 降到 1+7 的 51.15/60.07，并把原因指向 random offsets 难以模拟测试和累计历史误差。需要注意：本地 TrajTrack `pre_w_refine()` 读取当前 GT overlap 触发和选择 proposal，所以其高分不能作为公平在线 gate 的证据。"
+      },
+      {
+        "id": "experiment_design",
+        "type": "markdown",
+        "sourceId": "design_source",
+        "body": "## 实验顺序先证明 prior，再证明 tracker\n\n先重训 same-code B0；然后做 prior-only endpoint RMSE，对比 constant/latest velocity；通过后接 fixed GT-free gate 和 bounded innovation。只有 normal exact identity 且 gap1124 达到预注册增益，才做 true/fixed/shuffled、search 和多 seed。"
+      },
+      {
+        "id": "experiment_table",
+        "type": "table",
+        "tableId": "experiment_gates"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 证据边界与稳健性要求\n\n当前最终数值来自 seed42、nuScenes-mini Car normal；B1motion-v2 尚无同轮 random20/gap1124 输出，历史 B0 也需要 current-code 重训。历史 M2 的正信号混入额外 continuation 与 candidate-path 改变，且 true time 未超过 fixed/shuffled。因此 V3 可以借用 bounded innovation primitive，但不能预先声称 physical-time 因果收益。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "sourceId": "design_source",
+        "body": "## 推荐下一步\n\n实现顺序是：target helper 与不变量测试 → V3 paired sampler → prior-only 训练 → frozen-B0 identity/BN/gradient 检查 → bounded xy fusion → same-checkpoint 三协议评测。Search 仅在离线证明 extension 能召回 baseline-miss 目标后解锁。完整张量、配置与测试合同已写入项目设计文档。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 仍需实验回答的问题\n\n真实 B0 rollout history 是否足以让 learned prior 超过解析 latest-velocity？GT-free observation weakness 阈值在不同协议上是否稳定？若 xy prior 有效，收益来自 trajectory continuity 还是正确 delta_t？这些问题分别由 A0、A1 和 true/fixed/shuffled 阶段回答，不在一个大模型中混测。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-07-31T12:00:00+08:00",
+    "datasets": {
+      "final_scores": [
+        {
+          "arm": "B0 baseline",
+          "metric": "Success",
+          "score": 53.359955,
+          "delta_vs_b0": 0.0,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "B0 baseline",
+          "metric": "Precision",
+          "score": 64.381836,
+          "delta_vs_b0": 0.0,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "Legacy alpha=0",
+          "metric": "Success",
+          "score": 47.049236,
+          "delta_vs_b0": -6.310719,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "Legacy alpha=0",
+          "metric": "Precision",
+          "score": 49.183811,
+          "delta_vs_b0": -15.198025,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "Legacy alpha=0.25",
+          "metric": "Success",
+          "score": 29.580963,
+          "delta_vs_b0": -23.778992,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "Legacy alpha=0.25",
+          "metric": "Precision",
+          "score": 28.862146,
+          "delta_vs_b0": -35.51969,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "B1motion-v2",
+          "metric": "Success",
+          "score": 20.618162,
+          "delta_vs_b0": -32.741793,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        },
+        {
+          "arm": "B1motion-v2",
+          "metric": "Precision",
+          "score": 19.830418,
+          "delta_vs_b0": -44.551418,
+          "epoch": 60,
+          "dataset": "nuScenes-mini Car",
+          "cadence": "normal",
+          "seed": 42
+        }
+      ],
+      "file_changes": [
+        {
+          "order": 1,
+          "file": "cfgs/ct_v2/02_ct_motion_v3.yaml",
+          "change": "新增 frozen-B0、paired irregular、xy prior 和 bounded fusion 配置；旧 v2 YAML 保持冻结。",
+          "reason": "实验与复现隔离"
+        },
+        {
+          "order": 2,
+          "file": "utils/candidate_utils.py",
+          "change": "新增 physical_motion_targets；保留 anchor_relative_trajectory_targets 供 legacy 使用。",
+          "reason": "分离 physical motion 与 anchor correction"
+        },
+        {
+          "order": 3,
+          "file": "datasets/sampler.py",
+          "change": "主 view 永远连续，motion view 独立 irregular；新增明确的 motion_* 张量。",
+          "reason": "防止 irregular 数据污染 B0 主训练"
+        },
+        {
+          "order": 4,
+          "file": "models/ct_v2/motion.py",
+          "change": "新增 OrderedPhysicalMotionEncoder；V3 不实例化 feature adapter。",
+          "reason": "建立独立低维 prior"
+        },
+        {
+          "order": 5,
+          "file": "models/seqtrack3d.py",
+          "change": "在 B0 proposal 后做 xy-only innovation；专用 paired loss 隔离 irregular gradient。",
+          "reason": "把融合移到可限幅的 proposal 空间"
+        },
+        {
+          "order": 6,
+          "file": "models/base_model.py",
+          "change": "在线构造与训练一致的 motion history/time 字段；normal hard eligibility 为零。",
+          "reason": "训练/递归推理一致"
+        },
+        {
+          "order": 7,
+          "file": "utils/ct_history.py",
+          "change": "接入 frozen-B0 rollout history；禁用 V3 的 scale=4 synthetic drift。",
+          "reason": "匹配真实递归误差分布"
+        },
+        {
+          "order": 8,
+          "file": "tests/test_ct_v2.py",
+          "change": "增加 target invariance、exact identity、norm cap、BN/gradient isolation 和坐标一致性测试。",
+          "reason": "把安全性变成可执行合同"
+        }
+      ],
+      "experiment_gates": [
+        {
+          "order": 1,
+          "stage": "E0",
+          "test": "当前代码重训 B0，并导出 normal/random20/gap1124 endpoint。",
+          "promotion": "成为所有 module on/off 的同 checkpoint 基线。"
+        },
+        {
+          "order": 2,
+          "stage": "K0",
+          "test": "search off，irregular 0/0.35 × adapter off/on，10–15 epoch。",
+          "promotion": "确认 sampler 与 adapter 的独立伤害，不作为方法结果。"
+        },
+        {
+          "order": 3,
+          "stage": "V3-A0",
+          "test": "frozen B0，prior-only；对比 constant/latest velocity endpoint RMSE。",
+          "promotion": "rollout history 与 gap2/gap4 上优于最强解析 prior。"
+        },
+        {
+          "order": 4,
+          "stage": "V3-A1",
+          "test": "xy-only fixed gate + bounded proposal innovation。",
+          "promotion": "normal exact identity；gap1124 至少 +1 Success/+2 Precision；random20 两项不降。"
+        },
+        {
+          "order": 5,
+          "stage": "V3-A2",
+          "test": "同 checkpoint true/fixed/shuffled 与 tracklet bootstrap。",
+          "promotion": "只有 true 相对控制的 CI 为正才声称 physical-time 因果收益。"
+        },
+        {
+          "order": 6,
+          "stage": "V3-B",
+          "test": "search target-recall audit、search-only、prior-only、combined。",
+          "promotion": "baseline-miss 子集有 target recall 和 tracking 双重增益。"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "validation_source",
+      "label": "Reviewed B1motion validation summary",
+      "path": "compare_results/data/b1motion_v2_seed42_20260730_summary.csv",
+      "query": {
+        "language": "sql",
+        "engine": "DuckDB",
+        "sql": "SELECT arm, final_success, final_precision, delta_success_vs_b0, delta_precision_vs_b0 FROM read_csv_auto('compare_results/data/b1motion_v2_seed42_20260730_summary.csv', header = true) ORDER BY final_success DESC",
+        "description": "Reads reviewed epoch-60 normal-validation metrics for B0, legacy B1 controls, and B1motion-v2.",
+        "executed_at": "2026-07-31",
+        "filters": [
+          "nuScenes v1.0-mini",
+          "Car",
+          "seed=42",
+          "normal cadence",
+          "epoch-60 final checkpoint"
+        ],
+        "metric_definitions": [
+          "Success is the standard 3D-IoU one-pass evaluation score multiplied by 100.",
+          "Precision is the standard center-distance one-pass evaluation score multiplied by 100.",
+          "Delta is the arithmetic difference from the reviewed historical B0 final score."
+        ]
+      }
+    },
+    {
+      "id": "diagnostic_source",
+      "label": "B1motion root-cause review",
+      "path": "compare_results/reports/b1motion_root_cause_review_20260731.md",
+      "query": {
+        "language": "markdown",
+        "description": "Cross-check of complete training metrics, sampler behavior, target semantics, adapter magnitude, and search availability.",
+        "executed_at": "2026-07-31"
+      }
+    },
+    {
+      "id": "design_source",
+      "label": "B1motion-v3 file-level design",
+      "path": "docs/B1MOTION_V3_MODIFICATION_PLAN_20260731.md",
+      "query": {
+        "language": "markdown",
+        "description": "Implementation contract, tensor definitions, safety invariants, tests, and staged experiments.",
+        "executed_at": "2026-07-31"
+      }
+    },
+    {
+      "id": "code_source",
+      "label": "Reviewed CT-SeqTrack implementation",
+      "path": "models/seqtrack3d.py",
+      "query": {
+        "language": "python",
+        "description": "Review covers datasets/sampler.py, models/base_model.py, models/seqtrack3d.py, models/ct_v2/motion.py, models/dynamics.py, utils/candidate_utils.py, and utils/ct_history.py.",
+        "executed_at": "2026-07-31",
+        "filters": [
+          "online recursive path",
+          "paired training path",
+          "trajectory target",
+          "feature adapter",
+          "proposal innovation"
+        ]
+      }
+    },
+    {
+      "id": "seqtrack_paper",
+      "label": "SeqTrack3D paper",
+      "href": "https://arxiv.org/abs/2402.16249",
+      "query": {
+        "language": "paper",
+        "description": "Seq2Seq point-cloud and box-sequence tracking, including the time-window ablation and cumulative-history-error discussion.",
+        "executed_at": "2026-07-31"
+      }
+    },
+    {
+      "id": "m2_paper",
+      "label": "M²-Track CVPR 2022 paper",
+      "href": "https://openaccess.thecvf.com/content/CVPR2022/html/Zheng_Beyond_3D_Siamese_Tracking_A_Motion-Centric_Paradigm_for_3D_Single_CVPR_2022_paper.html",
+      "query": {
+        "language": "paper",
+        "description": "Two-stage motion-centric proposal and refinement design.",
+        "executed_at": "2026-07-31"
+      }
+    },
+    {
+      "id": "hvtrack_paper",
+      "label": "HVTrack ECCV 2024 paper",
+      "href": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/html/1145_ECCV_2024_paper.php",
+      "query": {
+        "language": "paper",
+        "description": "High-temporal-variation tracking with relative-pose memory, base-expansion cross-attention, and background suppression.",
+        "executed_at": "2026-07-31"
+      }
+    },
+    {
+      "id": "trajtrack_paper",
+      "label": "TrajTrack arXiv v3",
+      "href": "https://arxiv.org/html/2509.11453v3",
+      "query": {
+        "language": "paper",
+        "description": "Propose-predict-refine trajectory paradigm and proposal-agreement refinement.",
+        "executed_at": "2026-07-31"
+      }
+    }
+  ],
+  "package_info": {
+    "title": "B1motion-v3 修改方案",
+    "generated_at": "2026-07-31T12:00:00+08:00"
+  }
+}

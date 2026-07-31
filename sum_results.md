@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-07-30
+更新时间：2026-08-01
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -12,6 +12,29 @@ Adaptive Fusion 四组正常数据消融。下方 2026-07-24 及更早的 M2/M3/
 Search-only A1 为准。
 
 ## 0. 当前总判断
+
+### 2026-08-01 B4 Δt-PFTC seed42 60-epoch
+
+B4 已完成 75,720 step、12 个验证点和 epoch60 `last.ckpt`；`last.ckpt` 与
+epoch59 checkpoint hash 完全一致，不是残缺运行。
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline（历史对照） | **53.360** | **64.382** | **52.905** | **63.104** |
+| B4 Δt-PFTC | 51.189 | 60.886 | 51.398 | 60.618 |
+| Δ B4−B0 | **-2.171** | **-3.496** | **-1.507** | **-2.487** |
+
+当前 B4 明确没有涨点并失败于 final/late-3 双门槛。PFTC loss 下降 99.21% 时，
+前景 feature std 从 0.0947 收缩到 0.0156，而 match distance/count 基本不变；
+canonical yaw 还使用了与项目约定相反的 `R(+yaw)`。epoch60 supervised loss
+反而比 B0 低 1.56%，说明主要问题是坏辅助目标损害泛化，不是训练没收敛。
+训练开销为 B0 的 8.24 倍。
+
+结论为 `NO_GO_CURRENT_B4_IMPLEMENTATION`。不运行 seed43/44、full、强协议或
+原样 PFTC-U；修复 geometry、anti-collapse 和 runtime 后，只允许 5-epoch
+same-code 三臂机制 kill-test。当前也没有 PFTC-U/fixed/shuffled 证据，不能声称
+真实时间有效。完整报告见
+`compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md`。
 
 ### 2026-07-30 Motion fixed-alpha scratch 复核
 
@@ -1071,6 +1094,9 @@ crop and coordinate changes.
 
 论文可行性、claim 审计与方法/benchmark 分叉见 `compare_results/reports/paper_viability_and_execution_20260720.md`。
 ## 2026-07-30 Δt-PFTC seed42 部分运行
+
+> 历史说明：本节只描述 2026-07-30 当时同步到本地的部分 artifact。该任务后来
+> 完成 60 epoch，当前指标与决策以本文顶部 2026-08-01 B4 最终复核为准。
 
 第四模块的首个 formal-named artifact 并未完成 60 epoch。训练 events 止于
 step29,091（共 29,092 step，约 epoch23.05），只验证到 epoch20，`last.ckpt`

@@ -838,10 +838,21 @@ class MotionBaseModelMF(BaseModelMF):
                          [ct_search_diagnostics.get(
                              "query_delta_t", effective_delta_t_list[0])],
                          device=self.device, dtype=torch.float32),
-                     "ct_search_predicted_displacement": torch.tensor(
-                         [ct_search_diagnostics.get("displacement", 0.0)],
-                         device=self.device, dtype=torch.float32),
-                     }
+                      "ct_search_predicted_displacement": torch.tensor(
+                          [ct_search_diagnostics.get("displacement", 0.0)],
+                          device=self.device, dtype=torch.float32),
+                      }
+        if bool(getattr(self.config, "use_b1motion_v3", False)):
+            # Online history is already recursive and expressed in the latest
+            # predicted anchor.  Expose an explicit motion contract rather than
+            # reusing legacy dynamics fields with different target semantics.
+            data_dict.update({
+                "motion_main_ref_boxs": data_dict["ref_boxs"],
+                "motion_main_delta_t": data_dict["delta_t_effective"],
+                "motion_main_current_delta_t": data_dict[
+                    "current_delta_t_effective"],
+                "motion_main_valid_mask": data_dict["valid_mask"],
+            })
         if (use_trajectory_search or bool(getattr(
                 self.config, "use_ordered_trajectory_encoder", False))):
             data_dict.update({

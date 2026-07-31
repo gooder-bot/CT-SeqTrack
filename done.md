@@ -1,12 +1,31 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-07-30
+更新时间：2026-08-01
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
 注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
 
 ---
+
+## 2026-08-01：B4 Δt-PFTC seed42 60-epoch 复核完成
+
+- [x] B4 完成 75,720 training steps、12 次验证和 epoch60 checkpoint；
+  `last.ckpt` 与 epoch59 checkpoint SHA256 exact match。
+- [x] final 为 `51.189/60.886`，相对 B0 下降 `2.171/3.496`；late-3
+  为 `51.398/60.618`，相对 B0 下降 `1.507/2.487`。
+- [x] feature std 从 epoch1 `0.0947` 收缩到 epoch60 `0.0156`；PFTC loss
+  下降 99.21%，但 match distance/count 基本稳定。
+- [x] 确认 canonical yaw 使用 `R(+yaw)`，与项目 object-local 的 `R(-yaw)`
+  约定冲突；现有单测只验证当前公式自洽。
+- [x] epoch60 supervised loss 比 B0 低 1.56%，排除未收敛作为主要解释。
+- [x] 完整运行平均 2.983 s/step，约为 B0 的 8.24 倍。
+- [x] 生成 validation、diagnostics、summary、integrity、evidence、next-steps
+  六份结构化数据和最终诊断报告。
+
+当前 B4 判定 `NO_GO_CURRENT_B4_IMPLEMENTATION`。原样 PFTC-U、seed43/44、
+full 和强协议停止；只有修正 geometry、anti-collapse 与 runtime 后，才允许一次
+5-epoch 三臂机制 kill-test。
 
 ## 2026-07-30：Motion alpha=0/0.25 scratch 复核完成
 
@@ -1825,7 +1844,10 @@ optimizer step、loss log 写出和 checkpoint 保存。P5 工程 smoke test 已
 - standard/gap1124/burst-drop active 各完成 2 次 optimizer update；encoder/adapter 梯度非零、修正非平凡，最大 bound violation 为 float32 舍入量级 `5.96e-8`。
 - 五个 JSONL 共 61 个 batch/122 个样本，所有 loss/gradient finite；sample/fallback/applied/clamp/optimizer/bound 已从原始记录本地独立复算并与五个 summary 完全一致，全部 `requirements_passed=true`。
 - 正式判定为 `PASS_M1_M2_E0_E5_ENGINEERING_GATES`；E6 的唯一 formal config、alpha/R、true/fixed/shuffled、manifest/sampling/optimizer/final checkpoint 与完整归档仍未冻结，因此维持 `HOLD_FORMAL_TRAINING_PENDING_E6`。完整报告见 `compare_results/reports/m1_m2_e0_e5_validation_20260722.md`。
-## 2026-07-30：Δt-PFTC seed42 部分运行复核
+## 2026-07-30：Δt-PFTC seed42 当时的部分同步复核
+
+> 本节记录 2026-07-30 当时只同步到 step29,091 的本地状态。服务器任务后来
+> 完成 60 epoch，当前结论已由本文顶部 2026-08-01 最终复核取代。
 
 - [x] 核对 provenance：clean commit `5f260e74...`、mini_train/mini_val、Car、
   seed42、batch16、true time、PFTC weight1.0 与 preloading 均符合启动合同。

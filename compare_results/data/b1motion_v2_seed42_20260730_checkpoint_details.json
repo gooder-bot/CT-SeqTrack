@@ -1,0 +1,15 @@
+{
+  "checkpoint_epoch": 59,
+  "checkpoint_global_step": 75720,
+  "checkpoint_state_tensors": 344,
+  "checkpoint_size_bytes": 47158771,
+  "checkpoint_sha256": "de67a0f426ba1afaf00e4b94d642bd7a6290a748d73e6b78fac7b3a63b69ffcb",
+  "dynamics_encoder_parameter_l2": 21.747453689575195,
+  "dynamics_encoder_parameter_count": 93256,
+  "trajectory_adapter_parameter_l2": 9.870575904846191,
+  "trajectory_adapter_parameter_count": 91264,
+  "trajectory_search_encoder_parameter_l2": 7.678152084350586,
+  "trajectory_search_encoder_parameter_count": 6464,
+  "trajectory_adapter_last_weight_l2": 4.91495943069458,
+  "trajectory_adapter_last_bias_l2": 0.35300248861312866
+}

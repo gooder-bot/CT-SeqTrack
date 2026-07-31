@@ -207,6 +207,12 @@ continuous-discrete state-space model。论文中必须按真实实现命名。
 
 ### 4.2 CT Motion：与问题方向契合，但当前训练/推理语义不稳
 
+> 2026-07-30 完成结果补充：有序 GRU + pre-crop second branch +
+> zero-init adapter 的 B1motion-v2 在 normal-mini epoch60 仅为
+> 20.618/19.830，相对 B0 下降 32.742/44.551。它不再是固定 alpha
+> innovation，但仍未通过。完整复核见
+> [`B1motion-v2 seed42 结果`](../compare_results/reports/b1motion_v2_seed42_20260730.md)。
+
 主要问题：
 
 1. `alpha=0.75` 过强。B1 post-warmup 约 73.7% 样本实际应用修正，40.7%
@@ -223,6 +229,19 @@ continuous-discrete state-space model。论文中必须按真实实现命名。
    不同，模块效应与数据定义混在一起。
 7. 可选 dynamics 模块在共享层初始化前消耗 RNG；当前单 seed 消融没有严格
    same-init。
+
+B1motion-v2 又暴露了三条更具体的合同问题：
+
+1. 35% irregular sampling 改变整个主干历史，而 `main_time_source=order`
+   隐藏真实 gap；因此 dual-clock 的“主干隔离”在输入帧本身被替换后不再成立；
+2. trajectory encoder 只看 candidate-anchor 相对历史，target 却包含不可由
+   相对历史识别的共同 anchor error；
+3. zero-init 只保证 step-0，相乘的 `normal_scale` 不是 correction norm
+   上限；当前 correction L2 在 epoch3 已为 1.859，epoch60 仍为 2.072。
+
+所以后续不应继续把 irregular cadence 直接混入主监督。连续 B0 view 应保持
+不变，irregular view 只能作为 paired auxiliary branch；physical motion 与
+anchor correction 也必须拆开。
 
 修复原则不是继续调很多 alpha，而是先用现有 checkpoint 完成：
 
@@ -688,7 +707,7 @@ Success/Precision 同时超过 B0、late-3 不退化、feature std 不低于 B0 
   新 PFTC 才是 canonical point-feature consistency，三者不能混称。
 - compact memory、MCC、Mamba 和新的 search 修改均锁定到 PFTC 独立通过之后。
 
-## 13. 2026-07-30 数据更新：当前 Δt-PFTC 实现暂停
+## 13. 2026-08-01 数据更新：当前 Δt-PFTC 完整运行 No-Go
 
 首个 formal-named seed42 run 的本地 artifact 路径为：
 
@@ -697,43 +716,47 @@ output/20260728-1826-07_seqtrack3d_dt_pftc-
 dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0
 ```
 
-它没有完成 60 epoch：events 止于 step 29,091（共 29,092 step，约
-epoch23.05），只有 epoch5/10/15/20 四个验证点，`last.ckpt` 停在 epoch19。
-epoch20 为 `49.056/63.870`，相对完整 B0 epoch60 的 `53.360/64.382` 仍低
-`4.304/0.512`。早期 4 个同阶段点有 3 个高于 B0，但 epoch15 又明显低于 B0，
-所以这只能算优化正信号，不能外推成 epoch60 涨点。
+当前拉回的 events 和 checkpoint 已完整覆盖 75,720 step、12 个验证点和
+epoch60。final 为 `51.189/60.886`，相对 B0 的 `53.360/64.382` 下降
+`2.171/3.496`；late-3 为 `51.398/60.618`，相对 B0 下降 `1.507/2.487`。
+B4 最好的 Success `52.728` 与 Precision `63.870` 出现在不同 epoch，且都低于
+B0 final。早期 epoch5/10/20 的同阶段正差只是优化轨迹变化，不能替代 final
+与 late-3。
 
 本次审计改变了第 12 节的执行状态，但不改变其消融原则：
 
 1. 当前 canonical yaw 代码使用 `R(+yaw)`，项目 object-local 约定需要
    `R(-yaw)`；现有 yaw 单测构造方向也随代码一起错，当前 run 无法评价正确
    canonical correspondence。
-2. foreground feature std 从 epoch1 `0.0947` 降到 epoch20 `0.0210`，而
-   match 数和 match distance 稳定；raw SmoothL1 的无负样本目标出现强平凡
-   收缩警报。
-3. weighted/raw PFTC loss 相对差异中位数只有 `0.074%`。standard cadence
+2. foreground feature std 从 epoch1 `0.0947` 降到 epoch60 `0.0156`，而
+   match 数和 match distance 稳定；PFTC loss 同期下降 99.21%，raw SmoothL1
+   的无负样本目标出现强平凡收缩警报。
+3. weighted/raw PFTC loss 相对差异中位数只有 `-0.252%`。standard cadence
    下当前 Δt 权重没有给出物理时间增量证据；它主要在编码 pair lag。
-4. 单卡训练约 `3.689 s/step`，B0 为 `0.362 s/step`，开销约 `10.2×`；按当前
-   速度 60 epoch 约需 77.6 小时，当前工程路径不可用于正式三臂实验。
+4. 单卡训练约 `2.983 s/step`，B0 为 `0.362 s/step`，开销约 `8.24×`；完整
+   events 跨度 62.74 小时，当前工程路径不可用于正式三臂实验。
 5. PFTC-U 和 commit `5f260e7` 的同代码 B0 尚未完成，无法分离 consistency 与
    Δt weighting。
+6. epoch60 supervised loss 比 B0 低 1.56%，但验证更差；问题不是训练未收敛，
+   而是当前辅助目标损害泛化表示。
 
 当前正式判定为：
 
 ```text
 NO-GO_CURRENT_IMPLEMENTATION
-INCONCLUSIVE_POINT_CONSISTENCY_IDEA
+PFTC_IDEA_NOT_YET_FAIRLY_TESTED
 NO_EVIDENCE_FOR_PHYSICAL_TIME
 ```
 
-不从 epoch19 续训，不启动 seed43/44、full nuScenes、Random-20%、gap1124、
-true/fixed/shuffled 或 memory。先修正 yaw 符号和测试，加入 projector + variance
-floor 等防坍缩机制，记录 B0 feature std 与 gradient conflict，并把单卡开销降到
-B0 的 2 倍以内。之后只跑 B0/PFTC-U/Δt-PFTC 各 5 epoch 的机制 kill-test；
-全部通过才重新预检 λ 并从 scratch 开始 60-epoch 三臂实验。
+不启动 seed43/44、full nuScenes、Random-20%、gap1124、true/fixed/shuffled、
+memory，也不原样补跑 PFTC-U。先修正 yaw 符号和测试，加入 projector +
+normalized loss + variance floor 等防坍缩机制，记录 B0 feature std 与 gradient
+conflict，并把单卡开销降到 B0 的 2 倍以内。之后只跑
+B0/PFTC-U-v2/Δt-PFTC-v2 各 5 epoch 的机制 kill-test；全部通过才重新预检 λ
+并从 scratch 开始 60-epoch 三臂实验。
 
 完整数值、根因和下一步见
-`compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md`。
+`compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md`。
 
 ## 14. 2026-07-30 数据更新：固定全局 Motion innovation 停止
 

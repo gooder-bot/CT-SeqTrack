@@ -1,0 +1,7 @@
+priority,finding,evidence,interpretation,confidence
+1,主干在 adapter 开启前已经退化,epoch1 total loss 7.721 vs B0 4.804; center loss 0.491 vs 0.182. adapter warmup=2，epoch1–2 correction 精确为 0。,零初始化没有失败；35% 跳帧历史已先改变整个 B0 点云/框序列的训练分布。,verified
+2,跳帧输入对 B0 主干不可辨识,trajectory_training_irregular_probability=0.35; main_time_source=order，等间隔 token 不编码真实 frame gap。,相同时间 token 对应不同物理间隔，主干被要求拟合互相冲突的运动尺度。,verified-code
+3,trajectory target 含输入不可识别的 anchor error,encoder 只看以 candidate anchor 归一化的相对历史；trajectory label 却包含 current GT − candidate anchor。,对所有历史与 anchor 加共同平移，encoder 输入不变而 target 改变；motion head 无法从自身输入恢复该误差。,verified-code
+4,adapter 开启后不是受限的小残差,"epoch3 correction L2=1.859; epoch60=2.072; raw norm² penalty=19.017, effective penalty≈0.0019.",normal_scale=0.1 只是输出乘数，不是范数上限；L2 权重过小，无法维持 B0 特征邻域。,verified
+5,pre-crop 第二分支实际覆盖过低,训练 trajectory_search_valid mean=3.93%; 配置 irregular probability=35%.,大多数跳帧样本没有足够 extension points，search 分支不足以学习或证明 irregular robustness。,verified
+6,invalid history 的 gap-ratio 诊断/输入未屏蔽,epoch60 mean gap ratio=119.8; transition_count=0 时 nominal_gap 被 clamp 到 0.001。,最终 correction 会被 valid=0 清零，因此不是主崩溃来源；但它污染诊断并留下不必要的数值风险。,verified-secondary

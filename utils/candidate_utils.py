@@ -79,6 +79,31 @@ def anchor_relative_trajectory_targets(
     return trajectory_displacement, velocity
 
 
+def physical_motion_targets(
+        current_box, latest_history_box, anchor_box, current_delta_t,
+        degrees=False, eps=1e-3):
+    """Return candidate-translation-independent physical xy motion.
+
+    ``anchor_box`` defines only the coordinate axes.  The displacement origin
+    remains the latest ground-truth history box, so candidate translation error
+    cannot leak into a target that is predicted from relative history alone.
+    This keeps the trajectory prior responsible for physical motion while the
+    observation branch remains responsible for correcting the online anchor.
+    """
+    current_delta_t = max(float(current_delta_t), float(eps))
+    world_displacement = (
+        np.asarray(current_box.center, dtype=np.float64)
+        - np.asarray(latest_history_box.center, dtype=np.float64)
+    )
+    local_displacement = (
+        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T
+        @ world_displacement
+    )
+    displacement_xy = local_displacement[:2].astype(np.float32)
+    velocity_xy = (displacement_xy / current_delta_t).astype(np.float32)
+    return displacement_xy, velocity_xy
+
+
 def yaw_rotation_matrix(angle, degrees=False):
     angle_rad = np.deg2rad(angle) if degrees else float(angle)
     cosine = np.cos(angle_rad)

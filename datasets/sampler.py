@@ -7,7 +7,10 @@ from easydict import EasyDict
 from nuscenes.utils import geometry_utils
 
 import datasets.points_utils as points_utils
-from utils.ct_history import build_irregular_history_offsets
+from utils.ct_history import (
+    build_alternating_aux_history_offsets,
+    build_irregular_history_offsets,
+)
 
 from datasets.misc_utils import get_history_frame_ids_and_masks, \
     create_history_frame_dict, \
@@ -32,6 +35,7 @@ from utils.candidate_utils import (
     canonical_dynamics_targets,
     equivalent_local_offsets,
     normalize_candidate_trajectory_mode,
+    physical_motion_targets,
     shared_se2_world_translation,
     validate_shared_se2_transform,
 )
@@ -354,6 +358,23 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         ordered_motion_anchor,
         degrees=config.degrees,
     )
+    use_motion_v3 = bool(getattr(config, 'use_b1motion_v3', False))
+    motion_main_ref_boxs = None
+    if use_motion_v3:
+        # Match recursive inference: the newest trajectory box is the actual
+        # crop anchor (therefore exactly zero in local coordinates), while
+        # older estimated-box errors evolve smoothly.  Using the clean newest
+        # GT box here would expose candidate anchor error that is unavailable
+        # online and recreate the v2 identifiability bug.
+        motion_main_ref_boxs = boxes_to_anchor_parameters(
+            ct_search_history_boxs,
+            ref_boxs[0],
+            degrees=config.degrees,
+        )
+        if not np.allclose(
+                motion_main_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
+            raise ValueError(
+                "B1motion-v3 newest main history must equal the crop anchor")
 
     real_time_fields = build_time_fields(
         prev_timestamps, current_timestamp,
@@ -384,6 +405,125 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     (effective_relative_timestamps, effective_delta_t_list,
      effective_local_timestamps, effective_current_timestamp) = (
         effective_time_fields)
+    motion_aux_contract = None
+    if use_motion_v3:
+        motion_aux_prev_frames = data.get('motion_aux_prev_frames')
+        if motion_aux_prev_frames is None:
+            raise KeyError(
+                "B1motion-v3 training requires motion_aux_prev_frames")
+        motion_aux_keys = sorted(
+            motion_aux_prev_frames, key=lambda key: abs(int(key)))
+        motion_aux_canonical_boxs = [
+            motion_aux_prev_frames[key]['3d_bbox']
+            for key in motion_aux_keys
+        ]
+        motion_aux_valid_mask = list(data['motion_aux_valid_mask'])
+        motion_aux_frame_ids = list(data['motion_aux_frame_ids'])
+        if candidate_trajectory_mode == 'shared_se2':
+            motion_aux_candidate_boxs = apply_shared_se2_to_boxes(
+                motion_aux_canonical_boxs,
+                candidate_shared_transform,
+                degrees=config.degrees,
+            )
+            motion_aux_offsets = equivalent_local_offsets(
+                motion_aux_canonical_boxs,
+                motion_aux_candidate_boxs,
+                degrees=config.degrees,
+            )
+        else:
+            motion_aux_offsets = candidate_offsets.copy()
+            motion_aux_candidate_boxs = [
+                points_utils.getOffsetBB(
+                    box,
+                    motion_aux_offsets[index],
+                    limit_box=config.data_limit_box,
+                    degrees=config.degrees,
+                )
+                for index, box in enumerate(motion_aux_canonical_boxs)
+            ]
+        _, motion_aux_history_boxs = build_ct_training_histories(
+            motion_aux_canonical_boxs,
+            motion_aux_candidate_boxs,
+            motion_aux_offsets,
+            candidate_id,
+            candidate_trajectory_mode,
+            training_mode=getattr(
+                config,
+                'motion_v3_history_training_mode',
+                'correlated_candidate',
+            ),
+            correlation=float(getattr(
+                config, 'motion_v3_history_correlation', 0.75)),
+            recursive_error_scale=1.0,
+            degrees=config.degrees,
+        )
+        motion_aux_anchor = motion_aux_candidate_boxs[0]
+        motion_aux_ref_boxs = boxes_to_anchor_parameters(
+            motion_aux_history_boxs,
+            motion_aux_anchor,
+            degrees=config.degrees,
+        )
+        if not np.allclose(
+                motion_aux_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
+            raise ValueError(
+                "B1motion-v3 newest auxiliary history must equal its anchor")
+        motion_aux_prev_timestamps = [
+            motion_aux_prev_frames[key].get('timestamp')
+            for key in motion_aux_keys
+        ]
+        motion_aux_real_time_fields = build_time_fields(
+            motion_aux_prev_timestamps,
+            current_timestamp,
+            frame_ids=motion_aux_frame_ids,
+            current_frame_id=this_frame_id,
+            use_real_time=use_real_time,
+            default_step=default_time_step,
+            pseudo_step=pseudo_time_step,
+        )
+        motion_aux_effective_time_fields = build_effective_time_fields(
+            dynamics_time_mode,
+            motion_aux_real_time_fields,
+            effective_frame_timestamps=[
+                motion_aux_prev_frames[key].get('_ct_effective_timestamp')
+                for key in motion_aux_keys
+            ],
+            effective_current_timestamp=this_frame.get(
+                '_ct_effective_timestamp'),
+            frame_ids=motion_aux_frame_ids,
+            current_frame_id=this_frame_id,
+            default_step=float(getattr(
+                config, 'dynamics_fixed_delta_t', default_time_step)),
+            pseudo_step=pseudo_time_step,
+        )
+        motion_aux_delta_t_real = motion_aux_real_time_fields[1]
+        motion_aux_delta_t_effective = motion_aux_effective_time_fields[1]
+        motion_aux_current_delta_t_real = (
+            motion_aux_delta_t_real[0]
+            if motion_aux_delta_t_real else default_time_step)
+        motion_aux_current_delta_t_effective = (
+            motion_aux_delta_t_effective[0]
+            if motion_aux_delta_t_effective else float(getattr(
+                config, 'dynamics_fixed_delta_t', default_time_step)))
+        motion_aux_target_xy, _ = physical_motion_targets(
+            canonical_this_box,
+            motion_aux_canonical_boxs[0],
+            motion_aux_anchor,
+            motion_aux_current_delta_t_real,
+            degrees=config.degrees,
+            eps=1e-3,
+        )
+        motion_aux_contract = {
+            'motion_aux_ref_boxs': motion_aux_ref_boxs.astype('float32'),
+            'motion_aux_delta_t': np.asarray(
+                motion_aux_delta_t_effective, dtype=np.float32),
+            'motion_aux_current_delta_t': np.float32(
+                motion_aux_current_delta_t_effective),
+            'motion_aux_valid_mask': np.asarray(
+                motion_aux_valid_mask, dtype=np.int64),
+            'motion_aux_target_xy': motion_aux_target_xy.astype('float32'),
+            'motion_aux_query_gap_frames': np.int64(
+                data['motion_aux_offsets'][0]),
+        }
     main_current_value = float(getattr(config, 'main_time_current', 0.0))
     point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
         valid_mask,
@@ -697,6 +837,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             degrees=config.degrees,
             eps=1e-3,
         ))
+    motion_main_target_xy = None
+    if use_motion_v3:
+        motion_main_target_xy, _ = physical_motion_targets(
+            canonical_this_box,
+            canonical_prev_boxs[0],
+            coordinate_anchor_box,
+            current_delta_t_real,
+            degrees=config.degrees,
+            eps=1e-3,
+        )
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -769,6 +919,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'trajectory_search_sigma_perpendicular': np.float32(
                 ct_search_diagnostics.get('sigma_perpendicular', 0.0)),
         })
+    if use_motion_v3:
+        data_dict.update({
+            'motion_main_ref_boxs': motion_main_ref_boxs.astype('float32'),
+            'motion_main_delta_t': np.asarray(
+                effective_delta_t_list, dtype=np.float32),
+            'motion_main_current_delta_t': np.float32(
+                current_delta_t_effective),
+            'motion_main_valid_mask': np.asarray(valid_mask, dtype=np.int64),
+            'motion_main_target_xy': motion_main_target_xy.astype('float32'),
+        })
+        data_dict.update(motion_aux_contract)
     if prev_frame_ids is not None:
         data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
     if this_frame_id is not None:
@@ -925,6 +1086,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.config, 'use_m3_path_distillation', False))
         self.use_paired_history = bool(
             self.use_twc or self.use_m3_path_distillation)
+        self.use_b1motion_v3 = bool(getattr(
+            self.config, 'use_b1motion_v3', False))
         self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
             getattr(self.config, 'candidate_trajectory_mode', 'independent'))
         self.trajectory_training_irregular_probability = float(getattr(
@@ -949,6 +1112,29 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 and not self.trajectory_training_query_gaps):
             raise ValueError(
                 "irregular trajectory training requires query gap choices")
+        self.motion_v3_aux_query_gaps = [
+            int(value) for value in getattr(
+                self.config, 'motion_v3_aux_query_gaps', [2, 4])
+        ]
+        self.motion_v3_aux_transition_gaps = [
+            int(value) for value in getattr(
+                self.config, 'motion_v3_aux_transition_gaps', [1, 2])
+        ]
+        if self.use_b1motion_v3:
+            if self.use_paired_history:
+                raise ValueError(
+                    "B1motion-v3 box-only auxiliary training is incompatible "
+                    "with paired point-cloud views")
+            if self.trajectory_training_irregular_probability != 0.0:
+                raise ValueError(
+                    "B1motion-v3 keeps the main view continuous; set legacy "
+                    "trajectory_training_irregular_probability to zero")
+            if (not self.motion_v3_aux_query_gaps
+                    or any(value <= 0 for value in
+                           self.motion_v3_aux_query_gaps)
+                    or any(value <= 0 for value in
+                           self.motion_v3_aux_transition_gaps)):
+                raise ValueError("B1motion-v3 auxiliary gaps must be positive")
         self.paired_candidate_zero_only = bool(getattr(
             self.config,
             'm3_candidate_zero_only'
@@ -1010,10 +1196,19 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         return build_irregular_history_offsets(
             self.dataset.hist_num, query_gap, transition_gaps)
 
+    def _motion_v3_aux_offsets(self, sample_index):
+        return build_alternating_aux_history_offsets(
+            self.dataset.hist_num,
+            sample_index,
+            query_gaps=self.motion_v3_aux_query_gaps,
+            transition_gaps=self.motion_v3_aux_transition_gaps,
+        )
+
     def _build_view(self, tracklet_id, this_frame_id, first_frame, this_frame,
                     candidate_id, offsets, candidate_offset_map=None,
                     point_sampling_seed_map=None, current_sampling_seed=None,
-                    candidate_shared_transform=None):
+                    candidate_shared_transform=None,
+                    motion_aux_offsets=None):
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
@@ -1028,6 +1223,22 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             "this_frame_id": this_frame_id,
             "history_offsets": offsets,
         }
+        if motion_aux_offsets is not None:
+            motion_aux_frame_ids, motion_aux_valid_mask = (
+                get_history_frame_ids_and_masks(
+                    this_frame_id,
+                    self.dataset.hist_num,
+                    offsets=motion_aux_offsets,
+                ))
+            motion_aux_frames = self.dataset.get_frames(
+                tracklet_id, frame_ids=motion_aux_frame_ids)
+            data.update({
+                "motion_aux_prev_frames": create_history_frame_dict(
+                    motion_aux_frames),
+                "motion_aux_valid_mask": motion_aux_valid_mask,
+                "motion_aux_frame_ids": motion_aux_frame_ids,
+                "motion_aux_offsets": motion_aux_offsets,
+            })
         if candidate_offset_map is not None:
             data["candidate_offsets"] = candidate_offsets_for_frame_ids(
                 prev_frame_ids, candidate_offset_map)
@@ -1088,9 +1299,16 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                           candidate_shared_transform=candidate_shared_transform)
                 return {"view_a": view_a, "view_b": view_b}
 
-            offsets = self._sample_history_offsets()
+            if self.use_b1motion_v3:
+                offsets = list(range(1, self.dataset.hist_num + 1))
+                motion_aux_offsets = self._motion_v3_aux_offsets(
+                    index)
+            else:
+                offsets = self._sample_history_offsets()
+                motion_aux_offsets = None
             return self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                    candidate_id, offsets)
+                                    candidate_id, offsets,
+                                    motion_aux_offsets=motion_aux_offsets)
         except AssertionError:
             # return 1
             return self[torch.randint(0, len(self), size=(1,)).item()]

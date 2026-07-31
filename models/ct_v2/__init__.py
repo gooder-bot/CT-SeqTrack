@@ -1,8 +1,12 @@
 """Focused building blocks for the paper-facing CT-SeqTrack v2 path."""
 
-from models.ct_v2.fusion import ProposalFusionGate
+from models.ct_v2.fusion import (
+    ProposalFusionGate,
+    ReliabilityGatedProposalFusion,
+)
 from models.ct_v2.motion import (
     ContinuousTimeMotionEncoder,
+    OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
@@ -21,10 +25,12 @@ from utils.ct_search import (
 
 __all__ = [
     "ContinuousTimeMotionEncoder",
+    "OrderedPhysicalMotionEncoder",
     "OrderedTrajectoryEncoder",
     "TrajectoryPointEncoder",
     "ZeroInitTrajectoryAdapter",
     "ProposalFusionGate",
+    "ReliabilityGatedProposalFusion",
     "PointFeatureTemporalConsistencyLoss",
     "canonicalize_points",
     "chronological_frame_indices",

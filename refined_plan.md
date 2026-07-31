@@ -1,6 +1,6 @@
 # CT-SeqTrack v2 论文计划
 
-更新时间：2026-07-30
+更新时间：2026-08-01
 
 > 2026-07-28 决策：standard 的 `delta_t` CV 只有 4.59%，真实时间的代码
 > 代价低、因果证据代价高；Random-20% 只保留为 synthetic
@@ -9,11 +9,13 @@
 > 模块契合审计和执行分叉见
 > [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
-> 2026-07-30 实证更新：首个 Δt-PFTC seed42 artifact 仅运行到约
-> epoch23.05，并发现 canonical yaw 符号错误、feature std 强收缩和约 10.2×
-> 训练开销。当前状态为 `NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`，
-> 不续训旧 checkpoint。完整诊断见
-> [Δt-PFTC seed42 部分运行诊断](compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md)。
+> 2026-08-01 实证更新：首个 Δt-PFTC seed42 artifact 已完整跑满 60 epoch，
+> final `51.189/60.886`、late-3 `51.398/60.618`，相对 B0 分别下降
+> `2.171/3.496` 与 `1.507/2.487`。同时 canonical yaw 符号错误、feature std
+> 只剩 epoch1 的 16.4%，训练开销为 8.24×。当前状态为
+> `NO-GO_CURRENT_B4_IMPLEMENTATION / PFTC_IDEA_NOT_YET_FAIRLY_TESTED`。
+> 完整诊断见
+> [Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
 
 > 2026-07-30 motion 更新：alpha0/0.25 两组 scratch 60 epoch 已完成。
 > alpha0.25 相对 alpha0 final 下降 `17.468/20.322`，较小全局修正仍失败；
@@ -81,15 +83,16 @@ search 训练树。Motion 同样只保留 alpha0/0.25 checkpoint 的无训练 on
         ↓
 projector + variance floor，增加 B0 feature-std/gradient 对照
         ↓
-把单卡开销从 10.2× 压到 ≤2× B0
+把单卡开销从 8.24× 压到 ≤2× B0
         ↓
 B0 / PFTC-U / Δt-PFTC 各 5 epoch 机制 gate
         ↓ 全部通过
 重新预检 λ，并从 scratch 跑 60-epoch 三臂
 ```
 
-旧 Δt-PFTC epoch19 checkpoint 不续训。当前 epoch20 的 `49.056/63.870`
-既不是 final，也来自错误 canonical geometry，不能参与论文主表。
+旧 Δt-PFTC 已完整跑完但正式 No-Go。epoch60 的 `51.189/60.886` 来自错误
+canonical geometry，且 final/late-3 都低于 B0，只能作为失败诊断，不能参与
+论文正向主表。
 
 ## 晋级规则
 

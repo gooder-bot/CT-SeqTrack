@@ -1,0 +1,5 @@
+run_id,arm,status,final_success,final_precision,delta_success_vs_b0,delta_precision_vs_b0,best_success,best_success_epoch,best_precision,best_precision_epoch,late3_success,late3_precision
+B0,B0 baseline (historical),COMPLETE,53.359955,64.381836,0.0,0.0,54.134571,50,64.381836,60,52.904814,63.104301
+A0,Legacy motion α=0,COMPLETE,47.049236,49.183811,-6.310719,-15.198025,49.876366,35,58.691467,35,46.828232,49.668858
+A025,Legacy motion α=0.25,COMPLETE,29.580963,28.862146,-23.778992,-35.51969,35.027355,20,41.130196,10,29.471555,28.848651
+B1V2,B1motion-v2 ordered + pre-crop,COMPLETE,20.618162,19.830418,-32.741793,-44.551418,30.195845,5,34.990154,5,21.77717,21.195114

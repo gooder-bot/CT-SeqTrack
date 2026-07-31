@@ -16,13 +16,20 @@ SeqTrack3D
 下降 `17.468/20.322`，因此问题不只是旧 `alpha=0.75` 太大，当前固定全局
 proposal innovation 正式 No-Go。
 
-同日对第四模块 Δt-PFTC 的首个 seed42 artifact 复核又发现：目录虽标记
-`60ep`，实际只运行到约 epoch23.05；同时 canonical yaw 逆变换符号与项目
-坐标约定相反，前景 feature std 到 epoch20 只剩 epoch1 的 22.2%，单卡训练
-开销约为 B0 的 10.2 倍。当前 PFTC 结论是
-`NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`：不续训旧 checkpoint，
-先修正几何、防坍缩目标与性能，再做 5-epoch kill-test。Random-20% 继续只
-作为最终鲁棒性补充，不参与选模。
+同日完成的有序/pre-crop B1motion-v2 也未修复 normal：epoch60 仅
+`20.618 Success / 19.830 Precision`，相对 B0 下降 `32.742/44.551`；
+最佳 epoch5 也只有 `30.196/34.990`。完整训练诊断表明，35% mixed-cadence
+在 adapter 仍为零时就先破坏了 gap-blind B0 主路径，epoch3 后无范数硬上限
+的 feature residual 又放大退化；pre-crop extension 实际只在 3.93% 训练样本
+有效。当前 B1motion-v2 原样配置同样 No-Go。
+
+2026-08-01 拉回的完整日志确认第四模块 Δt-PFTC 已跑满 60 epoch。它的 final
+为 `51.189/60.886`，相对 B0 下降 `2.171/3.496`；late-3 也下降
+`1.507/2.487`，因此当前 B4 明确没有涨点。canonical yaw 逆变换符号仍与项目
+坐标约定相反，前景 feature std 到 epoch60 只剩 epoch1 的 16.4%，训练开销为
+B0 的 8.24 倍。当前结论更新为
+`NO-GO_CURRENT_B4_IMPLEMENTATION / PFTC_IDEA_NOT_YET_FAIRLY_TESTED`：停止原样
+扩展，先修正几何、防坍缩目标与性能，再做 5-epoch 三臂机制测试。
 
 ## 已完成首筛的 v2 候选
 
@@ -40,7 +47,7 @@ TWC、旧 Observability Gate、M3 EMA teacher、M4 Kalman/filter 等路线保留
 [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
 第四模块的完整数据、实现错误、坍缩诊断和恢复路径见
-[Δt-PFTC seed42 部分运行诊断](compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md)。
+[Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
 
 Motion alpha 的完整性、曲线、机制诊断和后续 2×2 见
 [Motion fixed-alpha 复核](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)；
@@ -49,6 +56,24 @@ Motion alpha 的完整性、曲线、机制诊断和后续 2×2 见
 对 B1motion 的逐层代码链路、训练/推理闭环、时序表达能力、历史 M2 归因和
 SeqTrack3D/M²-Track/STTracker/HVTrack/TrajTrack 对照，见
 [B1motion 深度审计](compare_results/reports/b1_motion_module_deep_audit_20260730.html)。
+有序/pre-crop 修正版的完整 60-epoch 曲线、训练损失、代码合同漏洞与下一步
+factorial kill-test 见
+[B1motion-v2 seed42 结果](compare_results/reports/b1motion_v2_seed42_20260730.md)。
+
+## B1motion-v2 完成结果（2026-07-30）
+
+| 组别 | final Success | final Precision | best Success | best Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline | **53.360** | **64.382** | **54.135** | **64.382** |
+| legacy motion α=0 | 47.049 | 49.184 | 49.876 | 58.691 |
+| legacy motion α=0.25 | 29.581 | 28.862 | 35.027 | 41.130 |
+| B1motion-v2 ordered/pre-crop | 20.618 | 19.830 | 30.196 | 34.990 |
+
+本轮 B1motion-v2 训练完整，不是坏 checkpoint。当前没有该 checkpoint 的
+random20/gap1124 输出，因此不能声称 irregular 涨点；normal 大幅失败也已
+阻止晋级。下一步先重训 current-code B0，再做
+`irregular_probability 0/0.35 × adapter off/on` 的 10–15 epoch 归因实验，
+不再直接跑另一个 60 epoch。
 
 ## Motion fixed-alpha 复核（2026-07-30）
 
@@ -70,21 +95,22 @@ training loss 更低，说明主要矛盾是 teacher-forced 训练与 recursive 
 无效。下一步不再长训更小 alpha；先用两个已有 checkpoint 做推理 alpha
 开/关 2×2，并导出逐 endpoint observation/dynamics proposal 归因。
 
-## 第四模块当前状态（2026-07-30）
+## 第四模块最终状态（2026-08-01）
 
 | 项目 | 结果 | 判断 |
 |---|---:|---|
-| 训练进度 | 29,092 / 75,720 step（约 23.05 epoch） | 非完整 60 epoch |
-| epoch20 | 49.056 Success / 63.870 Precision | 不能代替 final |
-| vs B0 epoch60 | -4.304 / -0.512 | 尚未涨点 |
-| 前景 feature std | 0.0947 → 0.0210 | 强坍缩警报 |
-| weighted/raw loss 差异中位数 | 0.074% | 没有真实时间增量证据 |
-| 单卡 step time | 3.689 s vs B0 0.362 s | 约慢 10.2 倍 |
+| 训练完整性 | 75,720 step / 12 验证点 / epoch60 checkpoint | 完整 |
+| epoch60 final | 51.189 Success / 60.886 Precision | 比 B0 低 2.171 / 3.496 |
+| late-3 | 51.398 / 60.618 | 比 B0 低 1.507 / 2.487 |
+| 前景 feature std | 0.0947 → 0.0156 | 只剩 16.4%，强坍缩警报 |
+| weighted/raw loss 差异中位数 | -0.252% | 没有真实时间增量证据 |
+| 单卡 step time | 2.983 s vs B0 0.362 s | 约慢 8.24 倍 |
 
-当前旧公式不再训练。下一步依次是：拉回服务器终止日志；把 canonicalization
-改为项目一致的 `R(-yaw)` 并修正单测；加入 projector/variance floor 等明确的
-防坍缩机制；把 step time 压到 B0 的 2 倍以内；最后才重新运行同代码
-B0/PFTC-U/Δt-PFTC 的短机制筛选和 60-epoch 正式三臂消融。
+当前旧公式正式 No-Go，不再补 PFTC-U、seed43/44 或强协议。下一步依次是：把
+canonicalization 改为项目一致的 `R(-yaw)` 并修正交叉单测；加入
+projector/normalized loss/variance floor 等明确防坍缩机制；把 step time 压到
+B0 的 2 倍以内；最后才重新运行同代码 B0/PFTC-U-v2/Δt-PFTC-v2 的 5-epoch
+机制筛选。只有机制门槛全部通过，才重新预检 λ 和考虑 60-epoch 正式三臂。
 
 ## 当前实验结论（2026-07-27）
 

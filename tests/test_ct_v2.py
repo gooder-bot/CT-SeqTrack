@@ -9,15 +9,23 @@ from models.ct_v2.contracts import (
     build_search_usable_mask,
     resolve_observation_delta_t,
 )
-from models.ct_v2.fusion import ProposalFusionGate
+from models.ct_v2.fusion import (
+    ProposalFusionGate,
+    ReliabilityGatedProposalFusion,
+)
 from models.ct_v2.motion import (
     ContinuousTimeMotionEncoder,
+    OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     ZeroInitTrajectoryAdapter,
 )
 from models.dynamics import apply_proposal_innovation
-from utils.candidate_utils import anchor_relative_trajectory_targets
+from utils.candidate_utils import (
+    anchor_relative_trajectory_targets,
+    physical_motion_targets,
+)
 from utils.ct_history import (
+    build_alternating_aux_history_offsets,
     build_irregular_history_offsets,
     build_ct_history_offsets,
     correlate_candidate_offsets,
@@ -79,6 +87,35 @@ class TrajectoryTargetContractTest(unittest.TestCase):
 
         np.testing.assert_allclose(
             displacement, [0.7, 0.2, 0.0, 0.0], atol=1e-6)
+
+
+class PhysicalMotionTargetContractTest(unittest.TestCase):
+    def test_candidate_translation_does_not_enter_physical_target(self):
+        latest = OrientedDummyBox([1.0, 1.0, 0.0], 0.0)
+        current = OrientedDummyBox([2.0, 3.0, 0.0], 0.0)
+        anchor_a = OrientedDummyBox([0.0, 0.0, 0.0], 0.0)
+        anchor_b = OrientedDummyBox([25.0, -40.0, 0.0], 0.0)
+
+        displacement_a, velocity_a = physical_motion_targets(
+            current, latest, anchor_a, current_delta_t=2.0)
+        displacement_b, velocity_b = physical_motion_targets(
+            current, latest, anchor_b, current_delta_t=2.0)
+
+        np.testing.assert_array_equal(displacement_a, displacement_b)
+        np.testing.assert_array_equal(velocity_a, velocity_b)
+        np.testing.assert_allclose(displacement_a, [1.0, 2.0], atol=1e-6)
+        np.testing.assert_allclose(velocity_a, [0.5, 1.0], atol=1e-6)
+
+    def test_anchor_yaw_only_rotates_the_common_coordinate_axes(self):
+        latest = OrientedDummyBox([1.0, 1.0, 0.0], 0.0)
+        current = OrientedDummyBox([2.0, 3.0, 0.0], 0.0)
+        rotated_anchor = OrientedDummyBox(
+            [100.0, -100.0, 0.0], np.pi / 2.0)
+
+        displacement, _ = physical_motion_targets(
+            current, latest, rotated_anchor, current_delta_t=1.0)
+
+        np.testing.assert_allclose(displacement, [2.0, -1.0], atol=1e-6)
 
 
 class SearchExpansionTest(unittest.TestCase):
@@ -393,6 +430,201 @@ class OrderedTrajectoryMotionTest(unittest.TestCase):
         ))
 
 
+class OrderedPhysicalMotionTest(unittest.TestCase):
+    @staticmethod
+    def _constant_velocity_history():
+        return torch.tensor([[[
+            2.0, 0.0, 0.0, 0.0
+        ], [
+            1.0, 0.0, 0.0, 0.0
+        ], [
+            0.0, 0.0, 0.0, 0.0
+        ]]])
+
+    def test_measured_time_controls_velocity_and_query_integration(self):
+        encoder = OrderedPhysicalMotionEncoder(hidden_dim=16, step_dim=8)
+        boxes = self._constant_velocity_history()
+        valid = torch.ones(1, 3)
+
+        short = encoder(
+            boxes,
+            torch.tensor([[0.5, 1.0, 1.0]]),
+            valid,
+            current_delta_t=torch.tensor([0.5]),
+        )
+        long_query = encoder(
+            boxes,
+            torch.tensor([[2.0, 1.0, 1.0]]),
+            valid,
+            current_delta_t=torch.tensor([2.0]),
+        )
+        faster_history = encoder(
+            boxes,
+            torch.tensor([[0.5, 0.5, 0.5]]),
+            valid,
+            current_delta_t=torch.tensor([0.5]),
+        )
+
+        torch.testing.assert_close(short["velocity_xy"], torch.tensor([[1.0, 0.0]]))
+        torch.testing.assert_close(short["prior_xy"], torch.tensor([[0.5, 0.0]]))
+        torch.testing.assert_close(long_query["prior_xy"], torch.tensor([[2.0, 0.0]]))
+        torch.testing.assert_close(
+            faster_history["velocity_xy"], torch.tensor([[2.0, 0.0]]))
+        torch.testing.assert_close(
+            faster_history["prior_xy"], torch.tensor([[1.0, 0.0]]))
+
+    def test_chronological_order_is_visible_to_the_gru(self):
+        torch.manual_seed(19)
+        encoder = OrderedPhysicalMotionEncoder(hidden_dim=16, step_dim=8)
+        accelerating = torch.tensor([[[
+            4.0, 0.0, 0.0, 0.0
+        ], [
+            1.0, 0.0, 0.0, 0.0
+        ], [
+            0.0, 0.0, 0.0, 0.0
+        ]]])
+        decelerating = torch.tensor([[[
+            4.0, 0.0, 0.0, 0.0
+        ], [
+            3.0, 0.0, 0.0, 0.0
+        ], [
+            0.0, 0.0, 0.0, 0.0
+        ]]])
+        delta_t = torch.ones(1, 3)
+        valid = torch.ones(1, 3)
+
+        result_a = encoder(accelerating, delta_t, valid, torch.ones(1))
+        result_b = encoder(decelerating, delta_t, valid, torch.ones(1))
+
+        self.assertFalse(torch.equal(result_a["feature"], result_b["feature"]))
+        self.assertFalse(torch.equal(result_a["prior_xy"], result_b["prior_xy"]))
+
+    def test_invalid_or_nonfinite_history_has_no_prior(self):
+        encoder = OrderedPhysicalMotionEncoder(hidden_dim=16, step_dim=8)
+        boxes = self._constant_velocity_history().repeat(2, 1, 1)
+        boxes[1, 1, 0] = float("nan")
+        valid = torch.tensor([[1.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        result = encoder(
+            boxes,
+            torch.full((2, 3), 0.5),
+            valid,
+            current_delta_t=torch.tensor([0.5, 0.5]),
+        )
+
+        torch.testing.assert_close(result["valid"], torch.zeros(2))
+        torch.testing.assert_close(result["prior_xy"], torch.zeros(2, 2))
+
+    def test_invalid_old_padding_is_a_true_gru_noop(self):
+        torch.manual_seed(23)
+        encoder = OrderedPhysicalMotionEncoder(hidden_dim=16, step_dim=8)
+        full = self._constant_velocity_history()
+        padded = encoder(
+            full,
+            torch.tensor([[0.5, 1.0, 99.0]]),
+            torch.tensor([[1.0, 1.0, 0.0]]),
+            current_delta_t=torch.tensor([0.5]),
+        )
+        unpadded = encoder(
+            full[:, :2],
+            torch.tensor([[0.5, 1.0]]),
+            torch.ones(1, 2),
+            current_delta_t=torch.tensor([0.5]),
+        )
+
+        torch.testing.assert_close(padded["feature"], unpadded["feature"])
+        torch.testing.assert_close(padded["prior_xy"], unpadded["prior_xy"])
+
+
+class ReliableMotionFusionTest(unittest.TestCase):
+    @staticmethod
+    def _fusion():
+        return ReliabilityGatedProposalFusion(
+            observation_dim=8,
+            motion_dim=6,
+            observation_stats_dim=5,
+            hidden_dim=10,
+            context_dim=4,
+            max_alpha=0.5,
+            init_probability=0.01,
+            radius_base=0.25,
+            radius_per_second=0.5,
+            radius_max=1.25,
+            time_scale=0.5,
+        )
+
+    @staticmethod
+    def _inputs():
+        return {
+            "observation_box": torch.tensor([[1.0, 2.0, 3.0, 0.4]]),
+            "observation_feature": torch.zeros(1, 8),
+            "observation_stats": torch.zeros(1, 5),
+            "motion_feature": torch.zeros(1, 6),
+            "prior_xy": torch.tensor([[10.0, 2.0]]),
+            "prior_velocity_xy": torch.tensor([[2.0, 0.0]]),
+            "prior_valid": torch.ones(1),
+            "gap_ratio": torch.ones(1),
+            "history_valid_ratio": torch.ones(1),
+            "current_delta_t": torch.tensor([0.5]),
+        }
+
+    def test_warmup_invalid_and_nonfinite_inputs_are_exact_identity(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        observation = inputs["observation_box"]
+
+        warmup, _ = fusion(**inputs, enabled_scale=0.0)
+        self.assertTrue(torch.equal(warmup, observation))
+
+        invalid_inputs = dict(inputs)
+        invalid_inputs["prior_valid"] = torch.zeros(1)
+        invalid, _ = fusion(**invalid_inputs, enabled_scale=1.0)
+        self.assertTrue(torch.equal(invalid, observation))
+
+        nonfinite_inputs = dict(inputs)
+        nonfinite_inputs["prior_xy"] = torch.tensor([[float("nan"), 2.0]])
+        nonfinite, _ = fusion(**nonfinite_inputs, enabled_scale=1.0)
+        self.assertTrue(torch.equal(nonfinite, observation))
+
+    def test_xy_is_bounded_and_z_yaw_are_never_changed(self):
+        fusion = self._fusion()
+        with torch.no_grad():
+            fusion.gate[-1].bias.fill_(20.0)
+        inputs = self._inputs()
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+
+        torch.testing.assert_close(
+            final[:, 2:], inputs["observation_box"][:, 2:])
+        correction_norm = torch.linalg.norm(
+            final[:, :2] - inputs["observation_box"][:, :2], dim=1)
+        radius = torch.tensor([0.5])
+        self.assertTrue(torch.all(correction_norm <= 0.5 * radius + 1e-6))
+        torch.testing.assert_close(diagnostics["motion_fusion_radius"], radius)
+
+    def test_fused_loss_updates_only_gate_parameters(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        inputs["observation_box"] = inputs["observation_box"].requires_grad_()
+        inputs["observation_feature"] = inputs[
+            "observation_feature"].requires_grad_()
+        inputs["motion_feature"] = inputs["motion_feature"].requires_grad_()
+        inputs["prior_xy"] = inputs["prior_xy"].requires_grad_()
+        inputs["prior_velocity_xy"] = inputs[
+            "prior_velocity_xy"].requires_grad_()
+
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+        loss = final[:, :2].sum() + diagnostics[
+            "motion_gate_probability"].sum()
+        loss.backward()
+
+        self.assertIsNone(inputs["observation_box"].grad)
+        self.assertIsNone(inputs["observation_feature"].grad)
+        self.assertIsNone(inputs["motion_feature"].grad)
+        self.assertIsNone(inputs["prior_xy"].grad)
+        self.assertIsNone(inputs["prior_velocity_xy"].grad)
+        self.assertTrue(any(
+            parameter.grad is not None for parameter in fusion.parameters()))
+
+
 class ContinuousTimeContractTest(unittest.TestCase):
     @staticmethod
     def _stats_input(effective=True):
@@ -527,8 +759,46 @@ class CorrelatedHistoryTest(unittest.TestCase):
             for newer, older in zip(offsets[:-1], offsets[1:])
         ))
 
+    def test_v3_auxiliary_cadence_alternates_without_consuming_rng(self):
+        torch.manual_seed(1234)
+        torch_state = torch.get_rng_state().clone()
+        numpy_state = np.random.get_state()
+
+        even = build_alternating_aux_history_offsets(3, 0)
+        odd = build_alternating_aux_history_offsets(3, 1)
+
+        self.assertEqual(even, [2, 3, 5])
+        self.assertEqual(odd, [4, 5, 7])
+        self.assertTrue(torch.equal(torch.get_rng_state(), torch_state))
+        numpy_state_after = np.random.get_state()
+        self.assertEqual(numpy_state[0], numpy_state_after[0])
+        np.testing.assert_array_equal(numpy_state[1], numpy_state_after[1])
+        self.assertEqual(numpy_state[2:], numpy_state_after[2:])
+
 
 class ConfigCompositionTest(unittest.TestCase):
+    def test_motion_v3_isolated_reliable_post_transformer_config(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/02_ct_motion_v3.yaml")
+        self.assertTrue(config["use_b1motion_v3"])
+        for key in (
+                "use_ct_v2",
+                "use_dynamics_encoder",
+                "use_ordered_trajectory_encoder",
+                "use_trajectory_adapter",
+                "use_trajectory_search",
+                "use_time_guided_search",
+                "use_point_feature_tc"):
+            self.assertFalse(config[key], key)
+        self.assertEqual(config["trajectory_training_irregular_probability"], 0.0)
+        self.assertEqual(config["ct_history_training_mode"], "correlated_candidate")
+        self.assertEqual(config["ct_history_recursive_error_scale"], 1.0)
+        self.assertEqual(config["motion_v3_aux_query_gaps"], [2, 4])
+        self.assertEqual(config["motion_v3_aux_transition_gaps"], [1, 2])
+        self.assertEqual(config["motion_v3_warmup_epoch"], 10)
+        self.assertEqual(config["motion_v3_fusion_scale"], 1.0)
+        self.assertEqual(config["motion_v3_alpha_max"], 0.5)
+
     def test_new_b1_is_ordered_precrop_without_fixed_innovation(self):
         config = load_yaml_config(
             ROOT / "cfgs/ct_v2/02_ct_motion.yaml")

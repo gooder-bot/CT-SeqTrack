@@ -130,3 +130,15 @@ def build_irregular_history_offsets(
             (index - 1) % len(transition_gaps)]
         offsets.append(offsets[-1] + increment)
     return offsets
+
+
+def build_alternating_aux_history_offsets(
+        hist_num, sample_index, query_gaps=(2, 4),
+        transition_gaps=(1, 2)):
+    """Select a deterministic box-only cadence without consuming any RNG."""
+    query_gaps = [int(value) for value in query_gaps]
+    if not query_gaps or any(value <= 0 for value in query_gaps):
+        raise ValueError("auxiliary query gaps must be positive")
+    gap = query_gaps[int(sample_index) % len(query_gaps)]
+    return build_irregular_history_offsets(
+        hist_num, gap, transition_gaps)

@@ -30,9 +30,11 @@ from models.path_distillation import (
 )
 from models.ct_v2 import (
     ContinuousTimeMotionEncoder,
+    OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     PointFeatureTemporalConsistencyLoss,
     ProposalFusionGate,
+    ReliabilityGatedProposalFusion,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
 )
@@ -58,6 +60,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
         self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
+        self.use_b1motion_v3 = bool(getattr(
+            config, 'use_b1motion_v3', False))
         self.use_ordered_trajectory_encoder = bool(getattr(
             config, 'use_ordered_trajectory_encoder', False))
         self.use_trajectory_search = bool(getattr(
@@ -226,6 +230,31 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise ValueError(
                     "CT-SeqTrack v2 keeps legacy modules disabled: "
                     + ", ".join(enabled))
+        if self.use_b1motion_v3:
+            incompatible_v3 = {
+                'use_ct_v2': self.use_ct_v2,
+                'use_dynamics_encoder': self.use_dynamics_encoder,
+                'use_ordered_trajectory_encoder':
+                    self.use_ordered_trajectory_encoder,
+                'use_trajectory_adapter': self.use_trajectory_adapter,
+                'use_trajectory_search': self.use_trajectory_search,
+                'use_time_guided_search': self.use_time_guided_search,
+                'use_observability_gate': self.use_observability_gate,
+                'use_physical_time_adapter': self.use_physical_time_adapter,
+                'use_twc': bool(getattr(config, 'use_twc', False)),
+                'use_m3_path_distillation': self.use_m3_path_distillation,
+                'use_point_feature_tc': self.use_point_feature_tc,
+                'use_m4_state_filter': bool(getattr(
+                    config, 'use_m4_state_filter', False)),
+                'use_m4_trajectory_tube': bool(getattr(
+                    config, 'use_m4_trajectory_tube', False)),
+            }
+            enabled = [
+                name for name, value in incompatible_v3.items() if value]
+            if enabled:
+                raise ValueError(
+                    "B1motion-v3 is an isolated post-Transformer plugin; "
+                    "disable incompatible modules: " + ", ".join(enabled))
         # Time-guided search changes only the data-side crop and fixed token
         # allocation.  It is intentionally allowed without the CT-v2 motion
         # encoder so a baseline + search-only arm keeps exactly the baseline
@@ -268,6 +297,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         ))
         self.dynamics_innovation_disable_on_empty_search = bool(getattr(
             config, 'dynamics_innovation_disable_on_empty_search', False))
+        self.motion_v3_warmup_epoch = int(getattr(
+            config, 'motion_v3_warmup_epoch', 10))
+        self.motion_v3_fusion_scale = float(getattr(
+            config, 'motion_v3_fusion_scale', 1.0))
+        self.motion_v3_prior_weight = float(getattr(
+            config, 'motion_v3_prior_weight', 0.1))
+        self.motion_v3_aux_prior_weight = float(getattr(
+            config, 'motion_v3_aux_prior_weight', 0.1))
+        self.motion_v3_fused_weight = float(getattr(
+            config, 'motion_v3_fused_weight', 1.0))
+        self.motion_v3_gate_weight = float(getattr(
+            config, 'motion_v3_gate_weight', 0.1))
+        self.motion_v3_help_margin = float(getattr(
+            config, 'motion_v3_help_margin', 0.05))
+        self.motion_v3_aux_query_gaps = tuple(int(value) for value in getattr(
+            config, 'motion_v3_aux_query_gaps', (2, 4)))
         if self.dynamics_residual_scale < 0:
             raise ValueError("dynamics_residual_scale must be non-negative.")
         if self.dynamics_max_residual_norm <= 0:
@@ -290,6 +335,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError("dynamics_innovation_radius_per_second must be non-negative.")
         if self.dynamics_innovation_radius_max <= 0:
             raise ValueError("dynamics_innovation_radius_max must be positive.")
+        if self.motion_v3_warmup_epoch < 0:
+            raise ValueError("motion_v3_warmup_epoch must be non-negative")
+        if not 0.0 <= self.motion_v3_fusion_scale <= 1.0:
+            raise ValueError("motion_v3_fusion_scale must be in [0, 1]")
+        if min(
+                self.motion_v3_prior_weight,
+                self.motion_v3_aux_prior_weight,
+                self.motion_v3_fused_weight,
+                self.motion_v3_gate_weight,
+                self.motion_v3_help_margin) < 0:
+            raise ValueError("B1motion-v3 loss settings must be non-negative")
+        if (not self.motion_v3_aux_query_gaps
+                or any(value <= 0 for value in
+                       self.motion_v3_aux_query_gaps)):
+            raise ValueError("B1motion-v3 auxiliary query gaps must be positive")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -437,6 +497,45 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     gap_trigger=float(getattr(
                         config, 'trajectory_adapter_gap_trigger', 1.5)),
                 )
+
+        if self.use_b1motion_v3:
+            # Keep v3 after every B0 module so enabling the plugin cannot
+            # consume RNG before any shared parameter is initialized.
+            self.physical_motion_encoder = OrderedPhysicalMotionEncoder(
+                hidden_dim=int(getattr(
+                    config, 'motion_v3_hidden_dim', 128)),
+                step_dim=int(getattr(
+                    config, 'motion_v3_step_dim', 64)),
+                eps=float(getattr(config, 'motion_v3_eps', 1e-3)),
+                time_scale=float(getattr(
+                    config, 'time_scale', default_time_scale)),
+                residual_velocity_scale=float(getattr(
+                    config, 'motion_v3_residual_velocity_scale', 4.0)),
+                initial_sigma=float(getattr(
+                    config, 'motion_v3_initial_sigma', 0.5)),
+            )
+            self.motion_v3_fusion = ReliabilityGatedProposalFusion(
+                observation_dim=256,
+                motion_dim=int(getattr(
+                    config, 'motion_v3_hidden_dim', 128)),
+                observation_stats_dim=5,
+                hidden_dim=int(getattr(
+                    config, 'motion_v3_gate_hidden_dim', 64)),
+                context_dim=int(getattr(
+                    config, 'motion_v3_gate_context_dim', 32)),
+                max_alpha=float(getattr(
+                    config, 'motion_v3_alpha_max', 0.5)),
+                init_probability=float(getattr(
+                    config, 'motion_v3_gate_init_probability', 0.01)),
+                radius_base=float(getattr(
+                    config, 'motion_v3_radius_base', 0.25)),
+                radius_per_second=float(getattr(
+                    config, 'motion_v3_radius_per_second', 0.5)),
+                radius_max=float(getattr(
+                    config, 'motion_v3_radius_max', 1.25)),
+                time_scale=float(getattr(
+                    config, 'time_scale', default_time_scale)),
+            )
 
         self.m3_teacher = None
         if self.use_m3_path_distillation:
@@ -999,10 +1098,99 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         updated_ref_boxs = delta_motion[:,:HL,:]
         updated_aux_box =  delta_motion[:,-1,:]
 
+        observation_aux_box = updated_aux_box
+        if self.use_b1motion_v3:
+            required_motion_keys = (
+                'motion_main_ref_boxs',
+                'motion_main_delta_t',
+                'motion_main_current_delta_t',
+                'motion_main_valid_mask',
+            )
+            missing = [
+                key for key in required_motion_keys if key not in input_dict]
+            if missing:
+                raise KeyError(
+                    "B1motion-v3 input is missing: " + ", ".join(missing))
+            main_motion = self.physical_motion_encoder(
+                input_dict['motion_main_ref_boxs'],
+                input_dict['motion_main_delta_t'],
+                input_dict['motion_main_valid_mask'],
+                input_dict['motion_main_current_delta_t'],
+            )
+            # Both training and recursive inference define the newest history
+            # box as the crop anchor.  Keep its (normally exact-zero) origin as
+            # a diagnostic, but never add a GT-derived anchor correction to
+            # the proposal: the prior is physical motion only.
+            motion_prior_origin_xy = input_dict[
+                'motion_main_ref_boxs'][:, 0, :2].to(
+                    device=main_motion['prior_xy'].device,
+                    dtype=main_motion['prior_xy'].dtype,
+                )
+            motion_prior_proposal_xy = main_motion['prior_xy']
+            output_dict.update({
+                'motion_prior_xy': main_motion['prior_xy'],
+                'motion_prior_origin_xy': motion_prior_origin_xy,
+                'motion_prior_proposal_xy': motion_prior_proposal_xy,
+                'motion_prior_velocity_xy': main_motion['velocity_xy'],
+                'motion_prior_kinematic_xy':
+                    main_motion['kinematic_prior_xy'],
+                'motion_prior_valid': main_motion['valid'],
+                'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],
+                'motion_prior_gap_ratio': main_motion['gap_ratio'],
+            })
+            history_valid_ratio = input_dict[
+                'motion_main_valid_mask'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype,
+                ).mean(dim=1)
+            trainer = getattr(self, '_trainer', None)
+            trainer_state = str(getattr(
+                getattr(trainer, 'state', None), 'fn', '')).lower()
+            in_fit_loop = self.training or 'fit' in trainer_state
+            fusion_scale = self.motion_v3_fusion_scale
+            if (in_fit_loop
+                    and int(getattr(self, 'current_epoch', 0))
+                    < self.motion_v3_warmup_epoch):
+                fusion_scale = 0.0
+            updated_aux_box, fusion_diagnostics = self.motion_v3_fusion(
+                observation_aux_box,
+                point_feature,
+                obs_stats,
+                main_motion['feature'],
+                motion_prior_proposal_xy,
+                main_motion['velocity_xy'],
+                main_motion['valid'],
+                main_motion['gap_ratio'],
+                history_valid_ratio,
+                input_dict['motion_main_current_delta_t'],
+                enabled_scale=fusion_scale,
+            )
+            output_dict.update(fusion_diagnostics)
+            if self.training and 'motion_aux_ref_boxs' in input_dict:
+                aux_motion = self.physical_motion_encoder(
+                    input_dict['motion_aux_ref_boxs'],
+                    input_dict['motion_aux_delta_t'],
+                    input_dict['motion_aux_valid_mask'],
+                    input_dict['motion_aux_current_delta_t'],
+                )
+                output_dict.update({
+                    'motion_aux_prior_xy': aux_motion['prior_xy'],
+                    'motion_aux_prior_velocity_xy':
+                        aux_motion['velocity_xy'],
+                    'motion_aux_prior_kinematic_xy':
+                        aux_motion['kinematic_prior_xy'],
+                    'motion_aux_prior_valid': aux_motion['valid'],
+                    'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
+                    'motion_aux_prior_log_sigma_xy':
+                        aux_motion['log_sigma_xy'],
+                })
+
         
         output_dict["estimation_boxes"] = aux_box
         output_dict.update({"seg_logits": seg_logits,
                             "motion_pred": motion_pred,
+                            'observation_aux_estimation_boxes':
+                                observation_aux_box,
                             'aux_estimation_boxes': updated_aux_box,
                             'ref_boxs': input_dict['ref_boxs'],
                             'valid_mask':input_dict["valid_mask"],
@@ -1374,7 +1562,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         loss_total = 0.0
         loss_dict = {}
-        aux_estimation_boxes = output['aux_estimation_boxes']  
+        final_estimation_boxes = output['aux_estimation_boxes']
+        aux_estimation_boxes = output.get(
+            'observation_aux_estimation_boxes', final_estimation_boxes)
         motion_pred = output['motion_pred']  
         seg_logits = output['seg_logits'] 
         updated_ref_boxs = output['updated_ref_boxs']
@@ -1537,6 +1727,220 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "loss_trajectory_adapter_norm":
                     loss_trajectory_adapter_norm,
             })
+
+        if self.use_b1motion_v3:
+            def masked_mean(per_sample, valid):
+                valid = valid.to(
+                    device=per_sample.device,
+                    dtype=per_sample.dtype,
+                ).reshape(-1)
+                return (
+                    per_sample.reshape(-1) * valid
+                ).sum() / torch.clamp(valid.sum(), min=1.0)
+
+            main_target = data['motion_main_target_xy'].to(
+                device=output['motion_prior_xy'].device,
+                dtype=output['motion_prior_xy'].dtype,
+            )
+            main_prior_per_sample = F.smooth_l1_loss(
+                output['motion_prior_xy'],
+                main_target,
+                reduction='none',
+            ).mean(dim=1)
+            main_valid = output['motion_prior_valid']
+            loss_motion_v3_prior = masked_mean(
+                main_prior_per_sample, main_valid)
+            loss_total += (
+                self.motion_v3_prior_weight * loss_motion_v3_prior)
+
+            main_prior_error = torch.linalg.norm(
+                output['motion_prior_xy'].detach() - main_target,
+                dim=1,
+            )
+            main_kinematic_error = torch.linalg.norm(
+                output['motion_prior_kinematic_xy'].detach() - main_target,
+                dim=1,
+            )
+            loss_dict.update({
+                'loss_total': loss_total,
+                'loss_motion_v3_prior': loss_motion_v3_prior,
+                'motion_v3_prior_rmse': torch.sqrt(masked_mean(
+                    main_prior_error.pow(2), main_valid)),
+                'motion_v3_kinematic_rmse': torch.sqrt(masked_mean(
+                    main_kinematic_error.pow(2), main_valid)),
+                'motion_v3_prior_valid_rate': main_valid.float().mean(),
+                'motion_v3_history_valid_ratio': data[
+                    'motion_main_valid_mask'].float().mean(),
+            })
+
+            if 'candidate_id' in data:
+                candidate_id = data['candidate_id'].to(
+                    device=main_valid.device).reshape(-1)
+                candidate_masks = {
+                    'candidate0': candidate_id == 0,
+                    'candidate_nonzero': candidate_id != 0,
+                }
+                for bucket_name, bucket_mask in candidate_masks.items():
+                    bucket_valid = main_valid * bucket_mask.to(
+                        main_valid.dtype)
+                    loss_dict.update({
+                        f'motion_v3_prior_rmse_{bucket_name}': torch.sqrt(
+                            masked_mean(
+                                main_prior_error.pow(2), bucket_valid)),
+                        f'motion_v3_kinematic_rmse_{bucket_name}': torch.sqrt(
+                            masked_mean(
+                                main_kinematic_error.pow(2), bucket_valid)),
+                        f'motion_v3_count_{bucket_name}':
+                            bucket_valid.sum(),
+                    })
+
+            if ('motion_aux_prior_xy' in output
+                    and 'motion_aux_target_xy' in data):
+                aux_target = data['motion_aux_target_xy'].to(
+                    device=output['motion_aux_prior_xy'].device,
+                    dtype=output['motion_aux_prior_xy'].dtype,
+                )
+                aux_prior_per_sample = F.smooth_l1_loss(
+                    output['motion_aux_prior_xy'],
+                    aux_target,
+                    reduction='none',
+                ).mean(dim=1)
+                aux_valid = output['motion_aux_prior_valid']
+                loss_motion_v3_aux_prior = masked_mean(
+                    aux_prior_per_sample, aux_valid)
+                loss_total += (
+                    self.motion_v3_aux_prior_weight
+                    * loss_motion_v3_aux_prior)
+                aux_prior_error = torch.linalg.norm(
+                    output['motion_aux_prior_xy'].detach() - aux_target,
+                    dim=1,
+                )
+                aux_kinematic_error = torch.linalg.norm(
+                    output['motion_aux_prior_kinematic_xy'].detach()
+                    - aux_target,
+                    dim=1,
+                )
+                loss_dict.update({
+                    'loss_total': loss_total,
+                    'loss_motion_v3_aux_prior':
+                        loss_motion_v3_aux_prior,
+                    'motion_v3_aux_prior_rmse': torch.sqrt(masked_mean(
+                        aux_prior_error.pow(2), aux_valid)),
+                    'motion_v3_aux_kinematic_rmse': torch.sqrt(masked_mean(
+                        aux_kinematic_error.pow(2), aux_valid)),
+                    'motion_v3_aux_gap_ratio': masked_mean(
+                        output['motion_aux_prior_gap_ratio'], aux_valid),
+                    'motion_v3_aux_history_valid_ratio': data[
+                        'motion_aux_valid_mask'].float().mean(),
+                })
+                if 'motion_aux_query_gap_frames' in data:
+                    aux_query_gap = data[
+                        'motion_aux_query_gap_frames'].to(
+                            device=aux_valid.device).reshape(-1)
+                    for query_gap in self.motion_v3_aux_query_gaps:
+                        gap_valid = aux_valid * (
+                            aux_query_gap == query_gap).to(aux_valid.dtype)
+                        loss_dict.update({
+                            f'motion_v3_aux_prior_rmse_gap{query_gap}':
+                                torch.sqrt(masked_mean(
+                                    aux_prior_error.pow(2), gap_valid)),
+                            f'motion_v3_aux_kinematic_rmse_gap{query_gap}':
+                                torch.sqrt(masked_mean(
+                                    aux_kinematic_error.pow(2), gap_valid)),
+                            f'motion_v3_aux_count_gap{query_gap}':
+                                gap_valid.sum(),
+                        })
+
+            if int(getattr(
+                    self, 'current_epoch', 0)) >= self.motion_v3_warmup_epoch:
+                final_xy = final_estimation_boxes[:, :2]
+                target_xy = center_label[:, :2]
+                loss_motion_v3_fused = F.smooth_l1_loss(
+                    final_xy, target_xy)
+
+                observation_error = torch.linalg.norm(
+                    aux_estimation_boxes[:, :2].detach() - target_xy,
+                    dim=1,
+                )
+                prior_error = torch.linalg.norm(
+                    output['motion_prior_proposal_xy'].detach() - target_xy,
+                    dim=1,
+                )
+                helpful = (
+                    prior_error + self.motion_v3_help_margin
+                    < observation_error)
+                unhelpful = (
+                    observation_error + self.motion_v3_help_margin
+                    < prior_error)
+                decisive = (helpful | unhelpful) & (main_valid > 0)
+                helpful_target = helpful.to(final_xy.dtype)
+                gate_probability = output['motion_gate_probability']
+                gate_bce = F.binary_cross_entropy(
+                    gate_probability,
+                    helpful_target,
+                    reduction='none',
+                )
+                positive = decisive & helpful
+                negative = decisive & unhelpful
+                positive_count = positive.to(final_xy.dtype).sum()
+                negative_count = negative.to(final_xy.dtype).sum()
+                positive_loss = (
+                    gate_bce * positive.to(final_xy.dtype)
+                ).sum() / torch.clamp(positive_count, min=1.0)
+                negative_loss = (
+                    gate_bce * negative.to(final_xy.dtype)
+                ).sum() / torch.clamp(negative_count, min=1.0)
+                present_classes = (
+                    (positive_count > 0).to(final_xy.dtype)
+                    + (negative_count > 0).to(final_xy.dtype))
+                loss_motion_v3_gate = (
+                    positive_loss * (positive_count > 0).to(final_xy.dtype)
+                    + negative_loss * (negative_count > 0).to(final_xy.dtype)
+                ) / torch.clamp(present_classes, min=1.0)
+                loss_total += (
+                    self.motion_v3_fused_weight * loss_motion_v3_fused
+                    + self.motion_v3_gate_weight * loss_motion_v3_gate)
+
+                predicted_helpful = (
+                    gate_probability >= 0.5) & decisive
+                true_positive = (
+                    predicted_helpful & helpful).to(final_xy.dtype).sum()
+                predicted_positive = predicted_helpful.to(
+                    final_xy.dtype).sum()
+                decisive_count = decisive.to(final_xy.dtype).sum()
+                loss_dict.update({
+                    'loss_total': loss_total,
+                    'loss_motion_v3_fused': loss_motion_v3_fused,
+                    'loss_motion_v3_gate': loss_motion_v3_gate,
+                    'motion_v3_helpful_rate': (
+                        positive.to(final_xy.dtype).sum()
+                        / torch.clamp(decisive_count, min=1.0)),
+                    'motion_v3_gate_precision': (
+                        true_positive
+                        / torch.clamp(predicted_positive, min=1.0)),
+                    'motion_v3_gate_applied_rate': (
+                        (gate_probability >= 0.5) & decisive
+                    ).to(final_xy.dtype).sum() / torch.clamp(
+                        decisive_count, min=1.0),
+                    'motion_v3_gate_alpha_utilization': masked_mean(
+                        output['motion_gate_alpha'] / max(
+                            self.motion_v3_fusion.max_alpha, 1e-6),
+                        main_valid),
+                    'motion_v3_correction_norm': masked_mean(
+                        torch.linalg.norm(
+                            output['motion_correction_xy'], dim=1),
+                        main_valid),
+                    'motion_v3_clip_rate': masked_mean(
+                        output['motion_fusion_clip_rate'], main_valid),
+                    'motion_v3_observation_error': masked_mean(
+                        observation_error, main_valid),
+                    'motion_v3_prior_box_error': masked_mean(
+                        prior_error, main_valid),
+                    'motion_v3_final_error': masked_mean(
+                        torch.linalg.norm(
+                            final_xy.detach() - target_xy, dim=1),
+                        main_valid),
+                })
 
         if self.box_aware:
             prev_bc = torch.flatten(data['prev_bc'], start_dim=1, end_dim=2)

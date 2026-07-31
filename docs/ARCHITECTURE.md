@@ -129,10 +129,12 @@ B1–B3 显式选择 `correlated_candidate`。相关历史只改变输入数据�
 
 PFTC 通过后才重新评估 compact memory 和 MCC；二者不属于本轮实现。
 
-### 2026-07-30 Δt-PFTC 实现审计
+### 2026-08-01 Δt-PFTC 完整运行与实现审计
 
-首个 seed42 artifact 只到约 epoch23.05，不是完整 60 epoch。代码审计还发现
-当前 `canonicalize_points` 的 yaw 方向与项目已有几何约定不一致。对中心化后的
+首个 seed42 artifact 后续已经完整跑到 60 epoch：final 为
+`51.189/60.886`，相对 B0 下降 `2.171/3.496`；late-3 也下降
+`1.507/2.487`。因此当前 B4 没有涨点并停止晋级。代码审计同时确认
+`canonicalize_points` 的 yaw 方向与项目已有几何约定不一致。对中心化后的
 列向量，当前实现使用：
 
 ```text
@@ -151,12 +153,16 @@ y_local = -sin(yaw) * x + cos(yaw) * y
 因此当前 PFTC 运行只作为失败诊断，不能视为上述架构的有效实现。
 
 训练曲线同时表明 raw SmoothL1 正对应目标存在明显的特征尺度收缩：epoch1 到
-epoch20 的前景 feature std 从 `0.0947` 降至 `0.0210`，而匹配距离和对应数量
-基本不变。修订版必须加入明确防坍缩路径（train-only projector 加 variance
-floor；必要时加入 spatial negatives 或 stop-gradient teacher），并记录同定义
-B0 feature std 与两项 loss 的 gradient norm/cosine。当前逐样本/逐帧对循环还
-使训练慢约 10.2 倍，正式重跑前必须消除循环内 GPU `.item()` 同步并批量化或
-预计算 correspondence。
+epoch60 的前景 feature std 从 `0.0947` 降至 `0.0156`，只剩 16.4%；PFTC loss
+下降 99.21%，但匹配距离和对应数量基本不变。epoch60 supervised loss 还比 B0
+低 1.56%，说明问题不是训练不足，而是辅助目标把共享表示推向了更差的泛化解。
+
+修订版必须加入明确防坍缩路径（train-only projector、normalized matching 与
+variance floor；必要时加入 spatial negatives 或 stop-gradient teacher），并记录
+同定义 B0 feature std 与两项 loss 的 gradient norm/cosine。当前逐样本/逐帧对
+循环使训练平均慢 8.24 倍，正式重跑前必须消除循环内 GPU `.item()` 同步并
+批量化或预计算 correspondence。完整结论见
+`compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md`。
 
 ### 2026-07-30 Motion fixed-alpha 接入审计
 
@@ -224,15 +230,35 @@ endpoint diagnostics；结果出来前不训练 A2。B0–B3 复核见
 Search-only 复核见
 [`A1 报告`](../compare_results/reports/ct_search_only_seed42_20260727.md)。
 
-## 2026-07-30 B1motion-v2 修正
+## 2026-07-30 B1motion-v2 修正与完成结果
 
 旧固定-alpha B1 已冻结到 `02_ct_motion_legacy_fixed.yaml`。当前
 `02_ct_motion.yaml` 改为有序 GRU、crop 前第二搜索区域、独立扩区点编码和
 zero-init feature residual；它不再修改 observation proposal。B0 的 320 个
 共享 state tensors 已验证 step-0 exact match，新 adapter 初始 correction
-严格为零。2026-07-30 的二次复核进一步统一了训练坐标合同：ordered
-history、endpoint target 和 velocity target 均位于实际 candidate crop
-anchor 坐标，覆盖递归推理中最新预测框自身带误差的情形，避免把 GT-anchor
-motion feature 与 candidate-anchor observation feature 直接拼接。完整设计、
-外部代码审计、训练命令与晋级门槛见
-[`B1motion-v2 设计`](B1MOTION_V2_ORDERED_PRECROP_20260730.md)。
+严格为零。
+
+该版本的 seed42 60-epoch normal-mini 已完成，final 只有
+20.618 Success / 19.830 Precision，相对 B0 下降 32.742 / 44.551；最佳
+epoch5 也只有 30.196 / 34.990。运行有完整的 75,720 step、12 次验证和
+epoch60 last checkpoint，所以不是训练截断。
+
+完成后的代码/指标联合复核推翻了“统一到 candidate anchor 就完成训练合同”
+这一假设：
+
+1. 35% irregular sampler 替换整个 B0 历史，但主干仍使用 gap-blind
+   `main_time_source=order`；adapter 为零的 epoch1–2 主任务已经先分叉；
+2. relative history 对共同 anchor 平移不敏感，而 trajectory target 包含
+   `current GT − candidate anchor`，因此其中的 anchor-error 项对
+   trajectory-only encoder 不可识别；
+3. adapter 在 epoch3 启用后 feature correction L2 立即到 1.859，
+   epoch60 仍为 2.072；`normal_scale=0.1` 不是范数硬上限；
+4. pre-crop extension 的 training valid ratio 只有 3.93%，不足以补偿主干
+   分布变化或证明 irregular robustness。
+
+当前状态为 `NO_GO_CURRENT_B1MOTION_V2`，但不扩大为所有 motion prior
+无效。下一版必须保持连续 B0 主监督、把 irregular history 放入独立 paired
+辅助分支、分离 physical motion 与 anchor correction，并对 feature residual
+使用相对范数硬上限。完整结果、代码审计和 kill-test 顺序见
+[`B1motion-v2 结果`](../compare_results/reports/b1motion_v2_seed42_20260730.md)
+与 [`设计文档`](B1MOTION_V2_ORDERED_PRECROP_20260730.md)。

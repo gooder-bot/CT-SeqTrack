@@ -1,0 +1,8 @@
+order,step,implementation,gate
+1,Freeze current B4,"Do not run seed43/44 full nuScenes random20 gap1124 or the unchanged PFTC-U arm",Current implementation remains No-Go
+2,Repair canonical geometry,"Use project-consistent R(-yaw); add a cross-test against points_utils instead of a self-inverse-only synthetic test",All nonzero-yaw canonical recovery tests pass
+3,Remove the collapse solution,"Use a train-only projector with normalized correspondence loss plus an explicit variance floor; log B0 feature std and supervised/PFTC gradient norm and cosine",Feature std stays at least 50% of same-code B0 and no persistent destructive gradient conflict
+4,Reduce matching cost,"Precompute or batch correspondence indices; remove loop-local GPU item synchronization and repeated unique/cdist work",PFTC step time is at most 2x B0
+5,Run a 5-epoch three-arm mechanism kill test,"Same-code scratch B0 / corrected PFTC-U-v2 / corrected Delta-t-PFTC-v2 with identical shared initialization",Geometry collapse gradient and runtime gates all pass; validation is diagnostic only
+6,Repeat lambda preflight then formal ablation,"Only after the mechanism gate: rerun 200 fixed batches; then 60 epochs for the same three arms",PFTC-U must beat B0 on final and late-3 before testing physical-time attribution
+7,Test physical-time controls last,"Only if PFTC-U is positive: compare true/fixed/shuffled and then frozen normal/random20/gap1124 evaluation",Only consistent true over fixed/shuffled supports a physical-time claim

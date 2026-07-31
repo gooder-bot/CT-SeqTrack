@@ -1,34 +1,33 @@
 # CT-SeqTrack 下一步
 
-更新时间：2026-07-30
+更新时间：2026-08-01
 
 当前只维护一个最小决策链。第四模块的完整证据见
-[`Δt-PFTC seed42 部分运行诊断`](compare_results/reports/pftc_b4_seed42_partial_diagnosis_20260730.md)，
+[`Δt-PFTC seed42 60-epoch 最终诊断`](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)，
 整体时间路线见
 [`真实时间价值与模块路线审计`](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
 ## 0. 当前决定
 
 ```text
-NO-GO_CURRENT_IMPLEMENTATION
-INCONCLUSIVE_POINT_CONSISTENCY_IDEA
+NO-GO_CURRENT_B4_IMPLEMENTATION
+PFTC_IDEA_NOT_YET_FAIRLY_TESTED
 NO_EVIDENCE_FOR_PHYSICAL_TIME
 ```
 
-这次 `dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0` 不是完成的 B4：
+这次 `dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0` 已经完成：
 
-- 只记录 29,092 / 75,720 step，约 epoch23.05；
-- 只有 epoch5/10/15/20 四个验证点，`last.ckpt` 为 epoch19；
-- epoch20 为 49.056 Success / 63.870 Precision，相对 B0 epoch60 仍低
-  4.304 / 0.512；
+- 75,720 step、12 个验证点和 epoch60 `last.ckpt` 完整；
+- final 为 51.189 Success / 60.886 Precision，相对 B0 下降 2.171 / 3.496；
+- late-3 相对 B0 下降 1.507 / 2.487；
 - canonical yaw 的逆变换符号与项目约定相反；
-- feature std 从 epoch1 的 0.0947 降到 epoch20 的 0.0210；
-- weighted/raw PFTC loss 差异中位数只有 0.074%；
-- 单卡训练约慢于 B0 10.2 倍。
+- feature std 从 epoch1 的 0.0947 降到 epoch60 的 0.0156；
+- weighted/raw PFTC loss 差异中位数只有 -0.252%；
+- 单卡训练约慢于 B0 8.24 倍。
 
-因此不要续训 epoch19 checkpoint，也不要把当前结果登记为“PFTC 不涨点”或
-“PFTC 已涨点”。正确结论是当前实现无效，但修正后的 point consistency 思路
-允许一次受控 kill-test。
+因此当前 B4 必须登记为“不涨点 / 当前实现 No-Go”。但由于它训练的是错误
+canonical geometry，且 raw SmoothL1 出现明显表示收缩，不能把结论扩大为
+point consistency 思路本身无效；修正后的版本只允许一次受控 kill-test。
 
 ## 0A. Motion：只做无训练归因，不再扫全局 alpha
 
@@ -57,17 +56,7 @@ alpha0.25 相对同代码 alpha0 的 final 为 `−17.468/−20.322`，late-3 �
 本节不占用新训练 GPU，不阻塞下面的 PFTC 修复。禁止新增 alpha0.05/0.1 的
 60-epoch 训练、seed43/44、full nuScenes 或 motion+search。
 
-## 1. P0：拉回终止证据
-
-- [ ] 检查服务器是否仍有包含 `dt_pftc_true_5f260e7` 的进程。
-- [ ] 拉回该 job 的 stdout/nohup、scheduler stdout/stderr 和 exit code。
-- [ ] 检查服务器 event/checkpoint 是否比本地 step29,091 / epoch19 更新。
-- [ ] 若旧公式进程仍在运行，停止它；不再消耗 GPU 完成错误实现。
-
-当前只能确认 artifact 在第 24 个 epoch 内中断。运行约 29.81 小时，可能命中
-30 小时作业限制，但没有日志前不能把终止原因写死。
-
-## 2. P1：修正 canonical geometry
+## 1. P1：修正 canonical geometry
 
 - [ ] 将 `canonicalize_points` 从 `R(+yaw)` 改为项目一致的 `R(-yaw)`：
 
@@ -83,7 +72,7 @@ y_local = -sin(yaw) * x + cos(yaw) * y
 
 这一步完成前禁止任何新 PFTC 训练。
 
-## 3. P2：移除平凡表示收缩
+## 2. P2：移除平凡表示收缩
 
 不要只把 λ 从 1.0 改成 0.1。raw SmoothL1 只有正对应，所有 feature 收缩即可
 降低 loss；减小 λ 只会延缓，不会删除这个解。
@@ -97,9 +86,9 @@ y_local = -sin(yaw) * x + cos(yaw) * y
 - [ ] 前 200 batch 记录 PFTC 与 supervised 对 FeaturePointNet 前两层的 gradient
   norm ratio 和 cosine，识别目标冲突。
 
-## 4. P3：把训练开销降下来
+## 3. P3：把训练开销降下来
 
-当前 `3.689 s/step`，B0 为 `0.362 s/step`。正式重跑前的硬门槛是 PFTC 不超过
+完整运行平均 `2.983 s/step`，B0 为 `0.362 s/step`。正式重跑前的硬门槛是 PFTC 不超过
 B0 的 2 倍。
 
 - [ ] 消除 sample/frame/pair 循环中的 GPU `.item()` 同步。
@@ -108,7 +97,7 @@ B0 的 2 倍。
 - [ ] 若仍在线匹配，按 frame pair 批量化并使用 padding/mask。
 - [ ] 在 batch16、4×1024 上重新基准 step time 和峰值显存。
 
-## 5. P4：5-epoch 机制 kill-test
+## 4. P4：5-epoch 机制 kill-test
 
 新 clean commit、seed42、scratch、batch16、standard cadence，三臂各 5 epoch：
 
@@ -130,7 +119,7 @@ B0 的 2 倍。
 任一失败即停止 PFTC。全部通过后重新做 200-batch λ 预检；旧的 λ=1.0 不继承
 到改变目标函数后的版本。
 
-## 6. P5：正式三臂消融
+## 5. P5：正式三臂消融
 
 只有 P4 全通过，才从 scratch 运行同代码、同初始化的 60-epoch：
 
@@ -142,7 +131,7 @@ B0 的 2 倍。
 提高 Success/Precision，再回答 Δt 是否在 PFTC-U 上有额外收益。若 weighted 与
 unweighted 接近，只能保留 point consistency，不能声称 physical time。
 
-## 7. 继续暂停
+## 6. 继续暂停
 
 在 PFTC-v2 的 normal-mini 三臂完整晋级前，不运行：
 

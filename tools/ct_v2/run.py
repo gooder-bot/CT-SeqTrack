@@ -13,6 +13,7 @@ CONFIGS = {
     "search_only": ROOT / "cfgs/ct_v2/05_seqtrack3d_search_only.yaml",
     "baseline_full": ROOT / "cfgs/ct_v2/01_seqtrack3d_baseline_full.yaml",
     "motion": ROOT / "cfgs/ct_v2/02_ct_motion.yaml",
+    "motion_v3": ROOT / "cfgs/ct_v2/02_ct_motion_v3.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -28,6 +29,9 @@ def parse_args():
     parser.add_argument("--variant", choices=CONFIGS, default="full")
     parser.add_argument("--checkpoint")
     parser.add_argument("--init-checkpoint")
+    parser.add_argument(
+        "--resume-checkpoint",
+        help="training checkpoint that restores model, optimizer, and epoch state")
     parser.add_argument("--path", help="override the nuScenes dataset root")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tag", default="")
@@ -50,6 +54,9 @@ def parse_args():
         "--pftc-weight", type=float,
         help="override the frozen PFTC lambda")
     parser.add_argument(
+        "--fusion-off", action="store_true",
+        help="evaluate a motion_v3 checkpoint with exact observation-only output")
+    parser.add_argument(
         "--preflight", action="store_true",
         help="run 200 training batches with PFTC total weight forced to zero")
     parser.add_argument("--dry-run", action="store_true")
@@ -59,6 +66,12 @@ def parse_args():
 def build_command(args):
     if args.mode == "test" and not args.checkpoint:
         raise ValueError("--checkpoint is required in test mode")
+    if args.resume_checkpoint and args.mode != "train":
+        raise ValueError("--resume-checkpoint is training-only")
+    if args.resume_checkpoint and (
+            args.checkpoint or args.init_checkpoint):
+        raise ValueError(
+            "--resume-checkpoint cannot be combined with checkpoint initialization")
     if args.mode == "train" and args.protocol != "normal":
         raise ValueError("v2 training is fixed to the normal dataset protocol")
     if args.preflight and (
@@ -66,6 +79,10 @@ def build_command(args):
             or args.variant not in ("pftc_unweighted", "pftc")):
         raise ValueError(
             "--preflight requires train mode and a PFTC variant")
+    if args.fusion_off and (
+            args.mode != "test" or args.variant != "motion_v3"):
+        raise ValueError(
+            "--fusion-off requires test mode and --variant motion_v3")
     if (args.mode == "train"
             and args.variant in ("pftc_unweighted", "pftc")
             and not args.preflight
@@ -81,6 +98,8 @@ def build_command(args):
         raise ValueError("--time-manifest is required for shuffled time")
 
     default_tag = f"{args.variant}-{args.protocol}-{args.time_mode}"
+    if args.fusion_off:
+        default_tag += "-fusion-off"
     if args.preflight:
         default_tag += "-pftc-preflight-200"
     command = [
@@ -133,6 +152,8 @@ def build_command(args):
             "--limit_train_batches", str(args.limit_train_batches)))
     if args.pftc_weight is not None and not args.preflight:
         command.extend(("--pftc_weight", str(args.pftc_weight)))
+    if args.fusion_off:
+        command.extend(("--motion_v3_fusion_scale", "0.0"))
     if args.preflight:
         command.extend((
             "--pftc_weight", "0.0",
@@ -142,6 +163,8 @@ def build_command(args):
         ))
     if args.mode == "test":
         command.extend(("--test", "--checkpoint", args.checkpoint))
+    elif args.resume_checkpoint:
+        command.extend(("--checkpoint", args.resume_checkpoint))
     elif args.init_checkpoint:
         command.extend(("--init_checkpoint", args.init_checkpoint))
     if args.time_manifest:

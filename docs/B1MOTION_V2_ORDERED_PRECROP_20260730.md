@@ -2,6 +2,32 @@
 
 日期：2026-07-30
 
+## 60-epoch 实验结论（已完成）
+
+**当前 B1motion-v2 不涨点，判定为
+`NO_GO_CURRENT_B1MOTION_V2 / INCONCLUSIVE_MOTION_DIRECTION`。**
+
+seed42、nuScenes-mini Car、scratch 60 epoch 的 normal validation：
+
+| arm | final Success | final Precision | best Success/Precision | late-3 Success/Precision |
+|---|---:|---:|---:|---:|
+| B0 baseline（历史） | 53.360 | 64.382 | 54.135 / 64.382 | 52.905 / 63.104 |
+| legacy motion α=0 | 47.049 | 49.184 | 49.876 / 58.691 | 46.828 / 49.669 |
+| legacy motion α=0.25 | 29.581 | 28.862 | 35.027 / 41.130 | 29.472 / 28.849 |
+| **B1motion-v2** | **20.618** | **19.830** | **30.196 / 34.990（epoch5）** | **21.777 / 21.195** |
+
+B1motion-v2 相对 B0 final 下降 **32.742 Success / 44.551
+Precision**；最佳 checkpoint 也未通过 normal 守门线。训练有
+75,720/75,720 个 scalar step、12/12 个验证点，`last.ckpt` 为 epoch60 /
+global step75,720，因此不是运行截断或坏 final checkpoint。
+
+本轮目录中没有 B1motion-v2 的 random20/gap1124 输出，不能声称 irregular
+协议涨点。即使后续诊断发现某个 irregular subgroup 有收益，当前 normal
+退化幅度也不允许模型晋级。
+
+完整曲线、训练诊断、代码合同和后续 kill-test 见
+[`B1motion-v2 seed42 分析`](../compare_results/reports/b1motion_v2_seed42_20260730.md)。
+
 ## 决策
 
 `cfgs/ct_v2/02_ct_motion.yaml` 已从被否决的固定
@@ -17,9 +43,81 @@
 8. ordered history、endpoint/velocity target 与主干点云统一表达在实际
    candidate crop anchor 中，而不是不可用的最新 GT anchor 中。
 
+上述工程目标均已接入并通过初始化/梯度 smoke test，但 60-epoch 结果证明：
+**局部合同正确不等于整个训练合同正确。** 当前实现不应原样复跑。
+
 旧 B1 的可复现实验配置冻结为
 `cfgs/ct_v2/02_ct_motion_legacy_fixed.yaml`，历史 alpha0/0.25 和
 B2/B3 配置继续继承 legacy 文件。
+
+## 失败原因复核
+
+### 1. mixed cadence 先破坏了 B0 主路径
+
+`trajectory_adapter_warmup_epoch=2`，epoch1–2 adapter correction 精确为
+0；但 epoch1 total loss 已是 7.721，B0 为 4.804，center loss 为
+0.491 vs 0.182。zero-init 确实生效，退化却在 adapter 打开前出现。
+
+原因是 `trajectory_training_irregular_probability=0.35` 改变的不只是
+trajectory branch，而是整个主干的历史点云、历史框、motion label 和
+Transformer 序列。主干仍使用 `main_time_source=order`，不会看到真实
+frame gap；相同 order token 因而对应不同物理运动尺度。这违反了“保留 B0
+identity path”的训练分布前提。
+
+### 2. candidate-anchor target 对 trajectory-only encoder 不可识别
+
+ordered encoder 只接收以最新 candidate anchor 归一化的相对历史框，而
+`anchor_relative_trajectory_targets()` 把 `current GT − candidate anchor`
+作为 displacement/velocity target，包含最新 anchor 的绝对平移误差。
+
+对全部历史框与 anchor 加相同平移时，相对历史输入保持不变，target 却改变。
+因此这个 correction 项不可能由 trajectory-only head 唯一恢复。它把应由
+当前点云 observation/refinement 处理的定位误差混入“物理速度”，使
+velocity/displacement 辅助监督长期平台化，并把有噪表示送入 adapter。
+
+### 3. zero-init 只保护 step-0，normal scale 不是范数上限
+
+adapter 从 epoch3 启用后 correction L2 立即达到 1.859，epoch5 为 2.619，
+epoch60 仍为 2.072。`trajectory_adapter_normal_scale=0.1` 只是 MLP 输出
+的乘数，不限制最终 correction norm。epoch60 raw norm² penalty 为 19.017，
+乘 `trajectory_adapter_l2_weight=1e-4` 后只贡献约 0.0019，无法把模型约束
+在 B0 feature 邻域。
+
+### 4. pre-crop search 实际有效率过低
+
+训练期 `trajectory_search_valid` 均值仅 3.93%，远低于 35% irregular
+sampling。多数样本未获得至少 16 个 extension points，第二 crop 很少提供
+额外观测，既不能补偿主干分布破坏，也不足以证明 random/gap 鲁棒性。
+
+### 5. 次要数值卫生问题
+
+无有效 transition 的样本会把 `nominal_gap` clamp 到 0.001，使 epoch60
+记录的 `trajectory_gap_ratio` 均值达到 119.8。最终 correction 会由
+`trajectory_valid=0` 清零，所以它不是主崩溃来源；但应将 invalid ratio
+置 1、对 valid ratio 设置上限，并分别记录 trigger/available/applied。
+
+`trajectory_nll` 为负数本身不是 bug，Gaussian NLL 的 `log_sigma` 项允许
+负值；真正应检查的是 endpoint RMSE、velocity error 与 uncertainty
+calibration。
+
+## 修正后的下一步
+
+不再直接启动另一个 60-epoch B1。先做：
+
+1. 当前最终代码上的 same-code B0 seed42 scratch；
+2. `irregular_probability=0/0.35 × adapter off/on` 的 10–15 epoch
+   factorial kill-test，search 先关闭；
+3. 连续 B0 view 保持主监督，irregular history 改成 paired auxiliary view，
+   不再替换主路径；
+4. trajectory head 只预测 canonical physical motion，candidate-anchor
+   correction 交给读取当前点云证据的 refinement/correction head；
+5. normal adapter 永久 exact identity；irregular residual 使用相对 feature
+   norm 硬上限和 GT-free evidence gate；
+6. search 日志拆分为 geometric trigger、extension availability、foreground
+   evidence 和 applied，并先做离线 target-recall 审计。
+
+只有 normal 相对 same-code B0 达到 Success ≥ −0.3、Precision ≥ −0.5，
+且 core loss 不再从早期分叉，才允许继续 60 epoch、random20 和 gap1124。
 
 ## 为什么不是直接复刻外部代码
 

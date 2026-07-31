@@ -1,5 +1,10 @@
 # CT-SeqTrack 第四模块（Δt-PFTC）seed42 部分运行诊断
 
+> **历史状态说明（2026-08-01）**：该服务器任务后来完成了 60 epoch；本文件只
+> 保留 2026-07-30 当时同步到本地的部分日志与首次实现审计。最终指标、结论和
+> 下一步以
+> [60-epoch 最终诊断](pftc_b4_seed42_final_diagnosis_20260801.md)为准。
+
 日期：2026-07-30  
 决策：`NO-GO_CURRENT_IMPLEMENTATION / INCONCLUSIVE_IDEA`
 
