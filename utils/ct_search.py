@@ -307,6 +307,92 @@ def build_ordered_trajectory_search_box(
     return tube, estimate
 
 
+def _signed_box_yaw(box):
+    """Return a nuScenes-compatible box yaw in radians."""
+    return float(box.orientation.radians * box.orientation.axis[-1])
+
+
+def _wrap_radians(angle):
+    return float((float(angle) + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def build_trajectory_endpoint_search_box(
+        history_boxes,
+        delta_t,
+        valid_mask=None,
+        max_speed=20.0,
+        max_acceleration=8.0,
+        max_displacement=12.0,
+        acceleration_weight=0.5,
+        max_yaw_rate=math.pi / 2.0,
+        min_displacement=0.2):
+    """Build the compact B2-v2 crop at the predicted trajectory endpoint.
+
+    The latest historical box is copied without changing its dimensions.  Its
+    center and yaw are extrapolated causally from historical boxes only, so the
+    same function can be used by training and recursive inference without
+    access to the current-frame ground truth.
+    """
+    estimate = estimate_ordered_trajectory(
+        history_boxes,
+        delta_t,
+        valid_mask=valid_mask,
+        max_speed=max_speed,
+        max_acceleration=max_acceleration,
+        max_displacement=max_displacement,
+        acceleration_weight=acceleration_weight,
+    )
+    if not estimate.get("valid", False):
+        return None, estimate
+    if estimate["displacement"] < float(min_displacement):
+        estimate.update({"valid": False, "reason": "stationary"})
+        return None, estimate
+
+    pair_count = min(len(history_boxes) - 1, len(delta_t) - 1)
+    yaw_rate = 0.0
+    yaw_rate_valid = False
+    for index in range(max(pair_count, 0)):
+        if valid_mask is not None and not (
+                bool(valid_mask[index]) and bool(valid_mask[index + 1])):
+            continue
+        transition_gap = _finite_positive(
+            delta_t[index + 1], fallback=0.0)
+        if transition_gap <= 0:
+            continue
+        newer_yaw = _signed_box_yaw(history_boxes[index])
+        older_yaw = _signed_box_yaw(history_boxes[index + 1])
+        yaw_rate = _wrap_radians(newer_yaw - older_yaw) / transition_gap
+        yaw_rate = float(np.clip(
+            yaw_rate, -float(max_yaw_rate), float(max_yaw_rate)))
+        yaw_rate_valid = True
+        break
+
+    latest = history_boxes[0]
+    endpoint = copy.deepcopy(latest)
+    endpoint_center = (
+        np.asarray(latest.center, dtype=np.float64)
+        + estimate["displacement_vector"]
+    )
+    endpoint.center = endpoint_center
+    endpoint_yaw = _signed_box_yaw(latest)
+    if yaw_rate_valid:
+        endpoint_yaw += yaw_rate * estimate["query_delta_t"]
+    orientation_type = latest.orientation.__class__
+    endpoint.orientation = orientation_type(
+        axis=[0, 0, 1], radians=_wrap_radians(endpoint_yaw))
+    # Explicitly preserve the latest box support.  In particular, uncertainty
+    # and background point count never enlarge the crop geometry.
+    endpoint.wlh = np.asarray(latest.wlh, dtype=np.float64).copy()
+    estimate.update({
+        "valid": True,
+        "reason": "ok",
+        "yaw_rate": yaw_rate,
+        "endpoint_center": endpoint_center.copy(),
+        "endpoint_yaw": _wrap_radians(endpoint_yaw),
+    })
+    return endpoint, estimate
+
+
 def _sample_rows(points, sample_size, rng):
     points = np.asarray(points)
     if sample_size <= 0:
@@ -417,4 +503,73 @@ def sample_search_extension(
         "active": True,
         "sample_count": sample_size,
         "available_count": int(len(extension)),
+    }
+
+
+def sample_padded_search_extension(
+        baseline_points,
+        expanded_points,
+        sample_size=128,
+        min_expansion_points=3,
+        seed=None,
+        tolerance=1e-6):
+    """Return unique extension points with padding and an explicit mask.
+
+    Unlike the legacy sampler, sparse evidence is never amplified by sampling
+    with replacement.  A local Generator keeps this branch independent from
+    the baseline B0 sampling RNG.
+    """
+    baseline_points = np.asarray(baseline_points)
+    expanded_points = np.asarray(expanded_points)
+    sample_size = int(sample_size)
+    min_expansion_points = int(min_expansion_points)
+    if sample_size <= 0:
+        raise ValueError("search_v2_point_count must be positive")
+    if min_expansion_points < 3:
+        raise ValueError("search_v2_min_points must be at least 3")
+    if baseline_points.ndim != 2 or expanded_points.ndim != 2:
+        raise ValueError("search point arrays must have shape [N, C]")
+    if baseline_points.shape[1] != expanded_points.shape[1]:
+        raise ValueError("baseline and expanded points must share channels")
+
+    extension = _extension_only(
+        baseline_points, expanded_points, tolerance=tolerance)
+    # Remove duplicate extension coordinates while retaining deterministic
+    # first-occurrence order.  Intensity/auxiliary channels do not define a
+    # distinct LiDAR return for this purpose.
+    if len(extension):
+        coordinate_dims = min(extension.shape[1], 3)
+        quantized = np.rint(
+            extension[:, :coordinate_dims]
+            / _finite_positive(tolerance, fallback=1e-6)
+        ).astype(np.int64)
+        _, unique_indices = np.unique(
+            quantized, axis=0, return_index=True)
+        extension = extension[np.sort(unique_indices)]
+
+    available_count = int(len(extension))
+    output = np.zeros(
+        (sample_size, baseline_points.shape[1]), dtype=np.float32)
+    valid_mask = np.zeros((sample_size,), dtype=np.float32)
+    if available_count < min_expansion_points:
+        return output, valid_mask, {
+            "active": False,
+            "sample_count": 0,
+            "available_count": available_count,
+        }
+
+    if available_count > sample_size:
+        rng = np.random.default_rng(seed)
+        indices = rng.choice(
+            available_count, size=sample_size, replace=False)
+        selected = extension[indices]
+    else:
+        selected = extension
+    sample_count = int(len(selected))
+    output[:sample_count] = selected.astype(np.float32, copy=False)
+    valid_mask[:sample_count] = 1.0
+    return output, valid_mask, {
+        "active": True,
+        "sample_count": sample_count,
+        "available_count": available_count,
     }

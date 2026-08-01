@@ -10,6 +10,7 @@ These files are the complete active experiment surface:
 | `02_ct_motion_legacy_fixed.yaml` | Frozen rejected fixed-alpha B1 for reproduction |
 | `02_ct_motion_alpha000.yaml` | Reproduced fixed-motion fallback control, alpha=0 |
 | `02_ct_motion_alpha025.yaml` | Reproduced fixed-motion rerun, alpha=0.25 |
+| `02_ct_motion_v3.yaml` | Physical xy prior + bounded reliability-gated post-Transformer fusion |
 | `03_ct_motion_search.yaml` | Add time-guided search expansion |
 | `04_ct_seqtrack_v2.yaml` | Add adaptive proposal fusion; completed seed42 screen, rejected |
 | `04_ct_seqtrack_v2_full.yaml` | Reserved full-nuScenes config; blocked by the mini result |
@@ -51,6 +52,24 @@ same-code alpha-0 fallback. Do not launch another 60-epoch global-alpha sweep.
 First run a same-checkpoint alpha on/off 2x2 and export endpoint-level
 observation/dynamics proposal attribution. See
 `compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md`.
+
+`02_ct_motion_v3.yaml` has also completed its seed42 scratch 60-epoch screen.
+It finishes at 52.655 / 61.835 with late-3 52.050 / 61.206, below the
+historical B0 by 0.705 / 2.547 final and 0.855 / 1.898 late-3. It therefore
+does not pass the standard-cadence promotion gate. Unlike v2, the physical
+prior itself learns beyond constant velocity at epoch60 (main/gap2/gap4 RMSE
+improvement 7.6%/10.9%/16.0%); the remaining failure is concentrated in gate
+calibration and recursive transfer. Do not start another 60-epoch v3 sweep.
+First evaluate the epoch30 and epoch60 checkpoints with fusion on/off using
+`tools/ct_v2/run.py test --variant motion_v3 [--fusion-off]`, then export
+endpoint-level attribution. See
+`compare_results/reports/b1motion_v3_seed42_20260801.html`.
+
+For historical paper-table context, the separate original SeqTrack3D run
+finishes at 50.986 / 59.962, so v3 is numerically +1.670 / +1.873. This is not
+a motion ablation: the current B0 itself is +2.374 / +4.420 over that old run
+and remains stronger than v3. Use current B0 or same-checkpoint fusion-off for
+module attribution.
 
 PFTC is the independent fourth-module candidate; it is not B3 plus another
 module.  It is training-only and adds no inference work.

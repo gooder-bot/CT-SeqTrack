@@ -1,0 +1,11 @@
+﻿item,seqtrack,b0,comparison,interpretation
+Epoch60 final,50.986 S / 59.962 P,53.360 S / 64.382 P,+2.374 S / +4.420 P,B0 is higher at the preregistered final checkpoint.
+Late-3 mean,50.108 S / 58.863 P,52.905 S / 63.104 P,+2.797 S / +4.241 P,The positive gap is a late-training stability gap.
+Best checkpoint by metric,52.283 best S / 65.214 best P,54.135 best S / 64.382 best P,B0 best S is higher; SeqTrack best P is higher,B0 is not uniformly superior over the whole trajectory.
+All 12 validation points,Reference trajectory,wins 7/12 S and 9/12 P,mean -0.573 S / -1.136 P,Early B0 regressions precede the late reversal.
+Epoch56-60 mean training loss,0.22286,0.22086,-0.00200,Optimization is nearly identical; no large objective change.
+Checkpoint model topology,"320 tensors / 3,718,065 elements","320 tensors / 3,718,065 elements",identical keys and shapes,The gain is not caused by a larger CT model.
+Training budget/framework,"seed42, bs16, 75720 steps, PL 2.0.2","seed42, bs16, 75720 steps, PL 2.0.2",matched,Budget and top-level trainer version do not explain the gap.
+DataLoader workers,12,4,12 -> 4,NumPy candidate/point-sampling streams change with worker assignment; seed42 is therefore not the same training sample stream.
+Original-run provenance,no run_provenance.json / exact commit unknown,clean d86990ce with dataset selection hashes,not attribution-safe,Exact code and data identity cannot be proven retrospectively.
+Same-labelled SeqTrack epoch60 spread,50.986/59.962; 50.132/56.480; 51.049/60.175,single run 53.360/64.382,SeqTrack range 50.132-51.049 S / 56.480-60.175 P,"These folders lack exact source provenance, so they diagnose repeatability risk rather than estimate clean seed variance."

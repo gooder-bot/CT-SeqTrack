@@ -8,6 +8,31 @@
 
 ---
 
+## 2026-08-01：B1motion-v3 seed42 60-epoch 复核完成
+
+- [x] v3 完成 75,720 training steps、12 次 normal validation 和 epoch60
+  checkpoint；`last.ckpt` 与 epoch59 checkpoint SHA256 exact match。
+- [x] final 为 `52.655/61.835`，相对 B0 为 `−0.705/−2.547`；late-3
+  为 `52.050/61.206`，相对 B0 为 `−0.855/−1.898`。
+- [x] 相对原始 SeqTrack3D plain 的 `50.986/59.962`，v3 final 数值为
+  `+1.670/+1.873`；但 current B0 对原始 SeqTrack 为 `+2.374/+4.420`，
+  因此不能将这部分历史正差归因给 motion。
+- [x] v3 相对 B1motion-v2 final 恢复 `+32.037/+42.004`，确认旧 v2 的
+  catastrophic collapse 已被结构性修复，但仍未获得稳定 B0 增益。
+- [x] epoch60 learned prior 相对 CV 的 main/gap2/gap4 RMSE 分别改善
+  `7.6%/10.9%/16.0%`；candidate0/nonzero 均为正，prior encoder 不是当前
+  首要瓶颈。
+- [x] 晚期 helpful prevalence 为 `42.6%`，gate applied rate 为 `49.5%`、
+  precision 为 `52.7%`、实际平均 alpha 为 `0.255`；确认 observation 变强后
+  gate 没有相应关闭。
+- [x] 新增 `tools/analyze_b1motion_v3.py`，导出 validation、training、summary、
+  checkpoint、integrity、drivers、next-experiments 七份 CSV 和自包含技术报告。
+
+当前判定为 `NO_GO_B1MOTION_V3_STANDARD_GAIN`。连续时间因果 claim 尚未测试；
+下一步只做 epoch30/epoch60 same-checkpoint fusion on/off 与 endpoint attribution，
+不直接开启新的 motion 长训。报告见
+`compare_results/reports/b1motion_v3_seed42_20260801.html`。
+
 ## 2026-08-01：B4 Δt-PFTC seed42 60-epoch 复核完成
 
 - [x] B4 完成 75,720 training steps、12 次验证和 epoch60 checkpoint；

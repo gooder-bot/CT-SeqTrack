@@ -2,6 +2,56 @@
 
 日期：2026-07-31
 
+## 2026-08-01：60-epoch 实验结论
+
+```text
+NO_GO_B1MOTION_V3_STANDARD_GAIN
+V2_CATASTROPHIC_FAILURE_REPAIRED
+PHYSICAL_PRIOR_LEARNS_BEYOND_CV
+GATE_CALIBRATION_AND_RECURSIVE_TRANSFER_FAIL
+CONTINUOUS_TIME_CAUSAL_CLAIM_NOT_TESTED
+```
+
+seed42、scratch、nuScenes-mini Car 的 60-epoch 运行已完整结束：75,720 个
+training step、12 个 normal validation 点和 epoch60 checkpoint 齐全，
+`last.ckpt` 与 `epoch=59-step=75720.ckpt` 的 SHA256 完全相同。
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| SeqTrack3D plain（原始独立运行） | 50.986 | 59.962 | 50.108 | 58.863 |
+| B0 baseline（历史对照） | **53.360** | **64.382** | **52.905** | **63.104** |
+| B1motion-v2 | 20.618 | 19.830 | 21.777 | 21.195 |
+| B1motion-v3 | 52.655 | 61.835 | 52.050 | 61.206 |
+| Δ v3−B0 | **−0.705** | **−2.547** | **−0.855** | **−1.898** |
+
+因此 v3 修复了 v2 的灾难性塌陷，final 相对 v2 恢复
+`+32.037/+42.004`，但没有达到预注册的 `+0.5/+1.0` final 门槛，late-3
+也同时为负，当前不能登记为涨点模块。epoch30 虽达到
+`52.198/65.556`，但只表现为 Precision 短暂上升，Success 仍低于 B0，且
+epoch35 后回落；best checkpoint 不能替代 final/late-3 主结论。
+
+若只与原始独立运行的 SeqTrack3D plain 比，v3 final 为
+`+1.670/+1.873`，late-3 为 `+1.942/+2.344`，数值上确实更高。但 current
+B0 相对同一原始 SeqTrack 已经达到 `+2.374/+4.420`，且 v3 又低于 B0；因此
+这部分正差更可能来自当前训练/数据/代码栈，不能归因给 motion。模块净贡献仍应
+使用 current B0 或同 checkpoint fusion-off 判断。
+
+失败点已从 prior 学习转移到 fusion：epoch60 learned prior 相对 constant
+velocity 的训练 RMSE 在 main/gap2/gap4 分别改善 `7.6%/10.9%/16.0%`，
+candidate0/nonzero 也都改善。另一方面，observation error 从 gate 首轮 active
+时的 `0.358 m` 降到 `0.232 m`，prior box error 仍约 `0.271 m`，helpful
+prevalence 从约 `70.0%` 降到 `42.6%`；gate 却仍对约 `49.5%` 的 decisive
+样本应用修正，precision 只有 `52.7%`，实际平均 alpha 约 `0.255`。当前
+class-balanced BCE 没有随 observation 变强而收紧部署频率，一步训练误差的
+小幅改善没有转成 recursive tracking 增益。
+
+下一步不直接启动新 60-epoch 训练。先对 epoch30 和 epoch60 checkpoint 各做
+一次 standard fusion on/off，共四次推理，并导出 observation/prior/final/GT、
+gate、history error 和 tracklet id。若 fusion-off 恢复 B0，只重构 gate；若
+fusion-off 也低，必须先补 same-code B0 并排查主视图/RNG/代码版本。完整的
+结构化数据和技术报告见
+[`B1motion-v3 seed42 技术复核`](../compare_results/reports/b1motion_v3_seed42_20260801.html)。
+
 ## 决策
 
 当前 `cfgs/ct_v2/02_ct_motion.yaml` 应冻结为失败复现配置，不再通过调小
@@ -555,4 +605,3 @@ random offsets 难以模拟测试和历史框累计误差。这与当前 B1 的 
 2. 开启该 prior 后，normal B0 路径仍是结构性的 exact identity。
 
 只要这两个合同没有同时成立，就不应再启动新的 60-epoch B1。
-

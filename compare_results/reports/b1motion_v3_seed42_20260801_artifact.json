@@ -1,0 +1,1760 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "B1motion-v3 seed42 60-epoch 技术复核",
+    "description": "Normal-cadence outcome, physical-prior learning, gate calibration, limitations, and the next attribution experiment.",
+    "generatedAt": "2026-08-01T10:20:02.403144+00:00",
+    "sources": [
+      {
+        "id": "validation_source",
+        "label": "Reviewed TensorBoard normal-validation metrics",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_validation.csv",
+        "query": {
+          "language": "python",
+          "engine": "DuckDB",
+          "sql": "SELECT run_id, arm, epoch, step, success, precision FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_validation.csv', header=true) ORDER BY run_id, epoch",
+          "description": "tools/analyze_b1motion_v3.py extracts all twelve unsmoothed five-epoch validation points from the original SeqTrack run, current B0, B1motion-v2, and v3.",
+          "executed_at": "2026-08-01",
+          "filters": [
+            "nuScenes v1.0-mini Car mini_val",
+            "normal cadence",
+            "seed=42",
+            "scratch 60 epochs"
+          ],
+          "metric_definitions": [
+            "Final is epoch60 and is the primary result.",
+            "Late-3 is the arithmetic mean at epochs 50, 55, and 60.",
+            "Best is diagnostic only and never replaces final."
+          ]
+        }
+      },
+      {
+        "id": "training_source",
+        "label": "Reviewed B1motion-v3 training diagnostics",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_training_epochs.csv",
+        "query": {
+          "language": "python",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_training_epochs.csv', header=true) ORDER BY epoch",
+          "description": "Epoch diagnostics are regenerated from 75,720 TensorBoard training steps. RMSE values are pooled using logged valid sample counts; gate rates are unsmoothed batch means.",
+          "executed_at": "2026-08-01",
+          "filters": [
+            "B1motion-v3 seed42 scratch",
+            "1,262 full-size batches per epoch",
+            "gate active from zero-based epoch10"
+          ],
+          "metric_definitions": [
+            "Prior improvement is (CV RMSE - learned RMSE) / CV RMSE.",
+            "Gate precision is helpful among probability>=0.5 decisive samples.",
+            "Applied rate uses decisive samples as denominator.",
+            "Actual alpha mean is alpha utilization times alpha_max=0.5."
+          ]
+        }
+      },
+      {
+        "id": "seqtrack_b0_source",
+        "label": "SeqTrack-to-B0 attribution audit",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_seqtrack_b0_diagnostics.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "sql": "SELECT item, seqtrack, b0, comparison, interpretation FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_seqtrack_b0_diagnostics.csv', header=true)",
+          "description": "Recomputes validation-trajectory comparisons, late training loss, checkpoint topology/config metadata, worker counts, and available same-labelled SeqTrack epoch60 endpoints.",
+          "executed_at": "2026-08-01",
+          "metric_definitions": [
+            "Numerical gaps are descriptive and not method attribution.",
+            "The original SeqTrack run has no captured commit or dataset hashes."
+          ]
+        }
+      },
+      {
+        "id": "integrity_source",
+        "label": "Run provenance and checkpoint integrity",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_integrity.csv",
+        "query": {
+          "language": "python",
+          "description": "Checks run_provenance.json, training/validation counts, dataset selection hashes, checkpoint steps, and SHA256 identity.",
+          "executed_at": "2026-08-01"
+        }
+      },
+      {
+        "id": "checkpoint_source",
+        "label": "B1motion-v3 checkpoint parameter diagnostics",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_checkpoints.csv",
+        "query": {
+          "language": "python",
+          "description": "Reads checkpoint metadata and selected physical-prior/gate parameter norms without modifying checkpoints.",
+          "executed_at": "2026-08-01"
+        }
+      },
+      {
+        "id": "code_source",
+        "label": "B1motion-v3 implementation audit",
+        "path": "models/seqtrack3d.py",
+        "query": {
+          "language": "python",
+          "description": "Code review covers models/seqtrack3d.py, models/ct_v2/fusion.py, models/ct_v2/motion.py, datasets/sampler.py, and the v3 config.",
+          "executed_at": "2026-08-01",
+          "filters": [
+            "physical xy target",
+            "detached observation/prior fusion",
+            "class-balanced helpful BCE",
+            "bounded correction"
+          ]
+        }
+      },
+      {
+        "id": "driver_source",
+        "label": "B1motion-v3 diagnostic evidence register",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_drivers.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "sql": "SELECT priority, finding, evidence, interpretation, confidence FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_drivers.csv', header=true) ORDER BY priority",
+          "description": "Evidence register derived from reviewed validation, training, checkpoint, and implementation sources.",
+          "executed_at": "2026-08-01"
+        }
+      },
+      {
+        "id": "next_source",
+        "label": "Controlled B1motion follow-up register",
+        "path": "compare_results/data/b1motion_v3_seed42_20260801_next_experiments.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "sql": "SELECT \"order\", experiment, change, decision, gpu_cost FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_next_experiments.csv', header=true) ORDER BY \"order\"",
+          "description": "Ordered decision tree that requires inference-only attribution before another training run.",
+          "executed_at": "2026-08-01"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "success_curve",
+        "title": "Normal validation Success by epoch",
+        "subtitle": "Twelve unsmoothed checkpoints; epoch60 is primary and best is diagnostic only.",
+        "type": "line",
+        "dataset": "validation_metrics",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "arm",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "success",
+              "type": "quantitative",
+              "label": "Success"
+            }
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Success"
+      },
+      {
+        "id": "precision_curve",
+        "title": "Normal validation Precision by epoch",
+        "subtitle": "v3 peaks at epoch30, then loses the transient precision advantage during late training.",
+        "type": "line",
+        "dataset": "validation_metrics",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "precision",
+            "type": "quantitative",
+            "label": "Precision"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "arm",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            }
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Precision"
+      },
+      {
+        "id": "prior_improvement",
+        "title": "Epoch-60 prior RMSE improvement over constant velocity",
+        "subtitle": "Positive means lower learned-prior RMSE; these are training-distribution diagnostics, not recursive validation gains.",
+        "type": "bar",
+        "dataset": "prior_e60",
+        "sourceId": "training_source",
+        "encodings": {
+          "x": {
+            "field": "branch",
+            "type": "nominal",
+            "label": "Branch"
+          },
+          "y": {
+            "field": "rmse_improvement_pct",
+            "type": "quantitative",
+            "label": "RMSE improvement (%)"
+          },
+          "tooltip": [
+            {
+              "field": "branch",
+              "type": "nominal",
+              "label": "Branch"
+            },
+            {
+              "field": "learned_rmse_m",
+              "type": "quantitative",
+              "label": "Learned RMSE (m)"
+            },
+            {
+              "field": "constant_velocity_rmse_m",
+              "type": "quantitative",
+              "label": "CV RMSE (m)"
+            },
+            {
+              "field": "rmse_improvement_pct",
+              "type": "quantitative",
+              "label": "Improvement (%)"
+            }
+          ]
+        },
+        "xAxisTitle": "Motion branch",
+        "yAxisTitle": "RMSE improvement (%)"
+      }
+    ],
+    "tables": [
+      {
+        "id": "run_summary",
+        "title": "Normal-validation result summary",
+        "subtitle": "Historical B0 and v2 context; final/late-3 are decision metrics.",
+        "dataset": "run_summary",
+        "sourceId": "validation_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "final_success",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "final_success",
+            "label": "Final S",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "final_precision",
+            "label": "Final P",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "delta_final_success_vs_b0",
+            "label": "ΔS vs B0",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "delta_final_precision_vs_b0",
+            "label": "ΔP vs B0",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "late3_success",
+            "label": "Late-3 S",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "late3_precision",
+            "label": "Late-3 P",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "seqtrack_b0_table",
+        "title": "Why the historical B0 endpoint is above SeqTrack",
+        "subtitle": "Verified matches, active stochastic differences, and provenance limits.",
+        "dataset": "seqtrack_b0_diagnostics",
+        "sourceId": "seqtrack_b0_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "item",
+            "label": "Audit item",
+            "type": "text"
+          },
+          {
+            "field": "seqtrack",
+            "label": "SeqTrack",
+            "type": "text"
+          },
+          {
+            "field": "b0",
+            "label": "B0",
+            "type": "text"
+          },
+          {
+            "field": "comparison",
+            "label": "Comparison",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "prior_table",
+        "title": "Epoch-60 learned prior versus constant velocity",
+        "subtitle": "RMSE in metres, pooled by logged valid sample counts.",
+        "dataset": "prior_e60",
+        "sourceId": "training_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "rmse_improvement_pct",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "branch",
+            "label": "Branch",
+            "type": "text"
+          },
+          {
+            "field": "learned_rmse_m",
+            "label": "Learned RMSE",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "constant_velocity_rmse_m",
+            "label": "CV RMSE",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "rmse_improvement_pct",
+            "label": "Improvement %",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          }
+        ]
+      },
+      {
+        "id": "gate_table",
+        "title": "Gate calibration during active training",
+        "subtitle": "Rates are unsmoothed batch means; alpha is the actual applied mean.",
+        "dataset": "gate_epochs",
+        "sourceId": "training_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "epoch",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "epoch",
+            "label": "Epoch",
+            "type": "number"
+          },
+          {
+            "field": "observation_error_m",
+            "label": "Obs err (m)",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "prior_box_error_m",
+            "label": "Prior err (m)",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "helpful_rate",
+            "label": "Helpful rate",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "gate_applied_rate",
+            "label": "Applied rate",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "gate_precision",
+            "label": "Gate precision",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "actual_alpha_mean",
+            "label": "Mean α",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "correction_norm_m",
+            "label": "Correction (m)",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "driver_table",
+        "title": "Failure-mechanism evidence register",
+        "subtitle": "Observed evidence is separated from interpretation and confidence.",
+        "dataset": "drivers",
+        "sourceId": "driver_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "priority",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "priority",
+            "label": "#",
+            "type": "number"
+          },
+          {
+            "field": "finding",
+            "label": "Finding",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Evidence",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          },
+          {
+            "field": "confidence",
+            "label": "Confidence",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "next_table",
+        "title": "Ordered next experiments",
+        "subtitle": "Inference-only attribution comes before another training run.",
+        "dataset": "next_experiments",
+        "sourceId": "next_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "order",
+            "label": "#",
+            "type": "number"
+          },
+          {
+            "field": "experiment",
+            "label": "Experiment",
+            "type": "text"
+          },
+          {
+            "field": "change",
+            "label": "Change",
+            "type": "text"
+          },
+          {
+            "field": "decision",
+            "label": "Decision use",
+            "type": "text"
+          },
+          {
+            "field": "gpu_cost",
+            "label": "Cost",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# B1motion-v3 seed42 60-epoch 技术复核"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "validation_source",
+        "body": "## 技术结论：修复了 v2，但没有超过 B0\n\nB1motion-v3 epoch60 为 **52.655 Success / 61.835 Precision**，相对历史 B0 为 **-0.705 / -2.547**；late-3 为 **-0.855 / -1.898**。因此它未通过 final 的 +0.5/+1.0 门槛，也未通过 late-3 非负门槛。相对 v2 则恢复 **+32.037 / +42.004**：v3 是成功的安全性重构，但当前不是相对 current B0 的涨点模块。若只和原始 SeqTrack3D plain 的 **50.986/59.962** 比，v3 为 **+1.670/+1.873**；但 current B0 相对原始 SeqTrack 已有 **+2.374/+4.420**，所以这部分正差不能归因给 motion。"
+      },
+      {
+        "id": "summary_table_block",
+        "type": "table",
+        "tableId": "run_summary"
+      },
+      {
+        "id": "seqtrack_b0_attribution",
+        "type": "markdown",
+        "sourceId": "seqtrack_b0_source",
+        "body": "## B0 为什么在 epoch60 高于原始 SeqTrack\n\n这不是 CT 模块或更大网络带来的提升：两个 last checkpoint 都是 **320 个同名同 shape tensors、3,718,065 个参数元素**，训练预算、损失权重、优化器、学习率计划、PL 2.0.2 和验证主路径均对齐。B0 只是在 final/late training 更高；原始 SeqTrack 的历史最好 Precision 为 **65.214**，反而高于 B0 的 **64.382**，且 B0 前20轮多次明显落后。两者 epoch56–60 mean total loss 也仅为 **0.22286 vs 0.22086**。\n\n当前最可能的直接驱动是随机训练流不同：原 run 使用 **12 workers**，B0 使用 **4 workers**；候选框扰动和点采样依赖 worker 内 NumPy 随机流，所以同为 seed42 并不代表看到了同一批随机候选与点子集。这些小差异会通过递归 tracker history 被放大为数分的 endpoint 差异。B0 sampler 还把 candidate offset 显式转为 float32，并计算额外但关闭的 CT 诊断字段，说明它与旧代码也不是 bitwise 同一路径。\n\n归因上仍有硬限制：原始 SeqTrack 输出没有 run_provenance.json，无法证明训练时的 exact commit、dirty state 和 dataset selection hash。因此正确表述是：**B0 的这次 scratch run 获得了更好的后期随机训练轨迹和稳定 endpoint；尚无证据表明 B0 方法本身优于 SeqTrack。**"
+      },
+      {
+        "id": "seqtrack_b0_table_block",
+        "type": "table",
+        "tableId": "seqtrack_b0_table"
+      },
+      {
+        "id": "curve_finding",
+        "type": "markdown",
+        "sourceId": "validation_source",
+        "body": "## 中期正信号没有保持到 late training\n\nv3 在 epoch20–30 出现明显的 Precision 正信号，epoch30 达到 **65.556 Precision / 52.198 Success**；但这不是联合涨点，且 epoch35 后回落。下面两条曲线应按同一规则阅读：epoch60 与 late-3 决定晋级，best 只用于定位不稳定时点。"
+      },
+      {
+        "id": "success_chart_block",
+        "type": "chart",
+        "chartId": "success_curve"
+      },
+      {
+        "id": "precision_chart_block",
+        "type": "chart",
+        "chartId": "precision_curve"
+      },
+      {
+        "id": "prior_finding",
+        "type": "markdown",
+        "sourceId": "training_source",
+        "body": "## Prior 已经学到东西，主要问题转向融合\n\nepoch60 的 learned prior 相对 constant velocity 在主分支降低 RMSE **7.6%**，gap2 降低 **10.9%**，gap4 降低 **16.0%**。candidate0 与 nonzero 也分别改善 **6.5% / 8.0%**。这不证明递归验证有效，但足以排除“GRU 容量不足或 prior 完全没学会”作为当前首要解释。"
+      },
+      {
+        "id": "prior_chart_block",
+        "type": "chart",
+        "chartId": "prior_improvement"
+      },
+      {
+        "id": "prior_table_block",
+        "type": "table",
+        "tableId": "prior_table"
+      },
+      {
+        "id": "gate_finding",
+        "type": "markdown",
+        "sourceId": "training_source",
+        "body": "## Gate 没有随 observation 变强而关闭\n\n第一轮 active gate 时 prior box error 低于 observation，helpful 样本约占 70%；到 epoch60，observation error 已降至 **0.232 m**，优于 prior 的 **0.271 m**，helpful prevalence 只剩 **42.6%**。但 gate 仍对约 **49.5%** 的 decisive 样本应用修正，precision 只有 **52.7%**，实际平均 α 约 **0.255**。balanced BCE 将分类边界和部署频率混在一起，无法提供 conservative calibration。"
+      },
+      {
+        "id": "gate_table_block",
+        "type": "table",
+        "tableId": "gate_table"
+      },
+      {
+        "id": "mechanism_finding",
+        "type": "markdown",
+        "sourceId": "driver_source",
+        "body": "## 一步训练收益没有转成递归 tracking 收益\n\nepoch60 训练 batch 上 final error 为 **0.226 m**，比 observation 的 **0.232 m** 略低；然而 recursive mini_val 低于 B0。最符合现有证据的解释是：gate 在 candidate-perturbed、单步监督上优化，而部署在 predicted-history 闭环；小而频繁的错误修正会沿 tracklet 累积。该判断仍需同 checkpoint fusion-off endpoint 结果确认。"
+      },
+      {
+        "id": "driver_table_block",
+        "type": "table",
+        "tableId": "driver_table"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "sourceId": "integrity_source",
+        "body": "## 数据范围与指标口径\n\n实验为 nuScenes v1.0-mini Car、mini_train 274 tracklets/5,051 frames、mini_val 106 tracklets/2,285 frames、seed42、batch16、60 epoch、每 5 epoch 验证一次。Success/Precision 是递归 tracking 聚合指标；final=epoch60，late-3=epoch50/55/60 均值。训练 RMSE 使用 logged valid count 聚合；gate rate 是未平滑 batch mean。"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "sourceId": "code_source",
+        "body": "## 复核方法\n\n分析脚本从三组 TensorBoard event 读取全部验证点，从 v3 的 75,720 training scalars 重算每轮 prior/CV 与 gate 指标，并检查 provenance、dataset selection hash、checkpoint global step 和 SHA256。物理 prior 与 observation 在融合损失中 detach，xy correction 受 α 和半径限制；因此本文将 prior 学习质量与 gate 闭环效果分开判断。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 证据边界与稳健性\n\n当前只有 seed42、normal mini_val 聚合值；没有 per-tracklet bootstrap，不能把 -0.705/-2.547 解释为已量化的统计显著退化，但它明确不是预设意义上的涨点。历史 B0 来自不同 commit，v3 运行时 tracked source 为 dirty；虽然 dataset selection 完全匹配且运行完整，仍缺少同代码 B0 或同 checkpoint fusion-off 对照。尚未运行 gap1124、random20、true/fixed/shuffled，因此不能声称连续时间带来因果收益。原始 SeqTrack run 的 checkpoint 可确认协议字段与训练步，但没有当时的 run_provenance.json，属于跨代码版本历史对照。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "sourceId": "next_source",
+        "body": "## 下一步：先做四次推理归因，不再直接开 60 轮\n\n立即评测 epoch30 与 epoch60 的 fusion on/off 四格，并在相同 endpoint 导出 observation/prior/final/gate/GT。若 fusion-off 恢复 B0，只重做 gate：在 frozen recursive mini_train rollout 上学习 bounded correction 的实际收益，取消 class-balanced 部署偏置，把 helpful probability 与 step size 分开，并使用渐进 ramp。若 fusion-off 也低，则先补 same-code B0，检查 main-view/RNG/代码版本，禁止用新 gate 掩盖基线问题。"
+      },
+      {
+        "id": "next_table_block",
+        "type": "table",
+        "tableId": "next_table"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 仍需回答的问题\n\n1. v3 的 observation-only 是否与同代码 B0 一致？\n\n2. gate 的错误主要集中在哪些 tracklet、速度、history error 和 prior/observation disagreement 桶？\n\n3. e30 的 precision 峰值来自 observation、prior 还是 gate，是否能在 fusion-off 配对结果中复现？\n\n4. 只有 standard 同 checkpoint 同时提高两项后，true-time 才值得进入 gap1124 的固定/打乱时间因果控制。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-01T10:20:02.403144+00:00",
+    "datasets": {
+      "validation_metrics": [
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 5,
+          "step": 6310,
+          "success": 40.696938,
+          "precision": 41.869808
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 10,
+          "step": 12620,
+          "success": 46.090813,
+          "precision": 65.214447
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 15,
+          "step": 18930,
+          "success": 45.729759,
+          "precision": 50.54158
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 20,
+          "step": 25240,
+          "success": 42.88512,
+          "precision": 49.230854
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 25,
+          "step": 31550,
+          "success": 51.736324,
+          "precision": 60.632397
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 30,
+          "step": 37860,
+          "success": 48.928883,
+          "precision": 53.909187
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 35,
+          "step": 44170,
+          "success": 52.283371,
+          "precision": 62.339169
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 40,
+          "step": 50480,
+          "success": 46.478115,
+          "precision": 51.173962
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 45,
+          "step": 56790,
+          "success": 50.462799,
+          "precision": 59.610504
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 50,
+          "step": 63100,
+          "success": 50.202404,
+          "precision": 57.308537
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 55,
+          "step": 69410,
+          "success": 49.134575,
+          "precision": 59.318382
+        },
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "epoch": 60,
+          "step": 75720,
+          "success": 50.985779,
+          "precision": 59.961712
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 5,
+          "step": 6310,
+          "success": 32.39278,
+          "precision": 45.434353
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 10,
+          "step": 12620,
+          "success": 36.230854,
+          "precision": 34.963898
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 15,
+          "step": 18930,
+          "success": 49.738514,
+          "precision": 60.415756
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 20,
+          "step": 25240,
+          "success": 37.217724,
+          "precision": 34.479214
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 25,
+          "step": 31550,
+          "success": 47.206787,
+          "precision": 49.196941
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 30,
+          "step": 37860,
+          "success": 49.832607,
+          "precision": 55.159737
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 35,
+          "step": 44170,
+          "success": 51.539391,
+          "precision": 63.762581
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 40,
+          "step": 50480,
+          "success": 52.799786,
+          "precision": 63.130199
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 45,
+          "step": 56790,
+          "success": 53.066742,
+          "precision": 61.625828
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 50,
+          "step": 63100,
+          "success": 54.134571,
+          "precision": 64.343536
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 55,
+          "step": 69410,
+          "success": 51.219917,
+          "precision": 60.587532
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "epoch": 60,
+          "step": 75720,
+          "success": 53.359955,
+          "precision": 64.381836
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 5,
+          "step": 6310,
+          "success": 30.195845,
+          "precision": 34.990154
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 10,
+          "step": 12620,
+          "success": 25.416847,
+          "precision": 23.167397
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 15,
+          "step": 18930,
+          "success": 23.447483,
+          "precision": 24.157551
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 20,
+          "step": 25240,
+          "success": 20.44092,
+          "precision": 19.355581
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 25,
+          "step": 31550,
+          "success": 24.243982,
+          "precision": 22.960611
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 30,
+          "step": 37860,
+          "success": 22.913567,
+          "precision": 21.986872
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 35,
+          "step": 44170,
+          "success": 21.235231,
+          "precision": 20.429979
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 40,
+          "step": 50480,
+          "success": 24.541578,
+          "precision": 24.125824
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 45,
+          "step": 56790,
+          "success": 20.80197,
+          "precision": 19.926697
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 50,
+          "step": 63100,
+          "success": 22.782274,
+          "precision": 22.323851
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 55,
+          "step": 69410,
+          "success": 21.931074,
+          "precision": 21.431074
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "epoch": 60,
+          "step": 75720,
+          "success": 20.618162,
+          "precision": 19.830418
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 5,
+          "step": 6310,
+          "success": 34.436546,
+          "precision": 37.678337
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 10,
+          "step": 12620,
+          "success": 31.47155,
+          "precision": 33.375271
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 15,
+          "step": 18930,
+          "success": 49.436546,
+          "precision": 63.068928
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 20,
+          "step": 25240,
+          "success": 42.37965,
+          "precision": 58.52298
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 25,
+          "step": 31550,
+          "success": 51.02079,
+          "precision": 61.596287
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 30,
+          "step": 37860,
+          "success": 52.198036,
+          "precision": 65.555801
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 35,
+          "step": 44170,
+          "success": 49.63348,
+          "precision": 58.86433
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 40,
+          "step": 50480,
+          "success": 49.933262,
+          "precision": 57.2976
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 45,
+          "step": 56790,
+          "success": 52.591908,
+          "precision": 61.163021
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 50,
+          "step": 63100,
+          "success": 52.095188,
+          "precision": 61.064552
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 55,
+          "step": 69410,
+          "success": 51.399345,
+          "precision": 60.719913
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "epoch": 60,
+          "step": 75720,
+          "success": 52.655365,
+          "precision": 61.834793
+        }
+      ],
+      "run_summary": [
+        {
+          "run_id": "SEQTRACK",
+          "arm": "SeqTrack3D plain (original run)",
+          "final_success": 50.985779,
+          "final_precision": 59.961712,
+          "delta_final_success_vs_b0": -2.374176,
+          "delta_final_precision_vs_b0": -4.420124,
+          "late3_success": 50.107586,
+          "late3_precision": 58.862877,
+          "delta_late3_success_vs_b0": -2.797228,
+          "delta_late3_precision_vs_b0": -4.241425,
+          "best_success": 52.283371,
+          "best_success_epoch": 35,
+          "best_precision": 65.214447,
+          "best_precision_epoch": 10,
+          "paired_success_at_best_precision": 46.090813
+        },
+        {
+          "run_id": "B0",
+          "arm": "B0 baseline (historical)",
+          "final_success": 53.359955,
+          "final_precision": 64.381836,
+          "delta_final_success_vs_b0": 0.0,
+          "delta_final_precision_vs_b0": 0.0,
+          "late3_success": 52.904814,
+          "late3_precision": 63.104301,
+          "delta_late3_success_vs_b0": 0.0,
+          "delta_late3_precision_vs_b0": 0.0,
+          "best_success": 54.134571,
+          "best_success_epoch": 50,
+          "best_precision": 64.381836,
+          "best_precision_epoch": 60,
+          "paired_success_at_best_precision": 53.359955
+        },
+        {
+          "run_id": "B1V2",
+          "arm": "B1motion-v2",
+          "final_success": 20.618162,
+          "final_precision": 19.830418,
+          "delta_final_success_vs_b0": -32.741793,
+          "delta_final_precision_vs_b0": -44.551418,
+          "late3_success": 21.77717,
+          "late3_precision": 21.195114,
+          "delta_late3_success_vs_b0": -31.127644,
+          "delta_late3_precision_vs_b0": -41.909187,
+          "best_success": 30.195845,
+          "best_success_epoch": 5,
+          "best_precision": 34.990154,
+          "best_precision_epoch": 5,
+          "paired_success_at_best_precision": 30.195845
+        },
+        {
+          "run_id": "B1V3",
+          "arm": "B1motion-v3",
+          "final_success": 52.655365,
+          "final_precision": 61.834793,
+          "delta_final_success_vs_b0": -0.70459,
+          "delta_final_precision_vs_b0": -2.547043,
+          "late3_success": 52.049966,
+          "late3_precision": 61.20642,
+          "delta_late3_success_vs_b0": -0.854848,
+          "delta_late3_precision_vs_b0": -1.897882,
+          "best_success": 52.655365,
+          "best_success_epoch": 60,
+          "best_precision": 65.555801,
+          "best_precision_epoch": 30,
+          "paired_success_at_best_precision": 52.198036
+        }
+      ],
+      "prior_e60": [
+        {
+          "branch": "Main cadence",
+          "learned_rmse_m": 0.380351,
+          "constant_velocity_rmse_m": 0.411827,
+          "rmse_improvement_pct": 7.643072
+        },
+        {
+          "branch": "Aux gap2",
+          "learned_rmse_m": 0.711562,
+          "constant_velocity_rmse_m": 0.798376,
+          "rmse_improvement_pct": 10.873827
+        },
+        {
+          "branch": "Aux gap4",
+          "learned_rmse_m": 1.53683,
+          "constant_velocity_rmse_m": 1.830503,
+          "rmse_improvement_pct": 16.04331
+        }
+      ],
+      "gate_epochs": [
+        {
+          "epoch": 11,
+          "main_prior_rmse_m": 0.37549,
+          "main_cv_rmse_m": 0.397478,
+          "main_improvement_pct": 5.531728,
+          "candidate0_prior_rmse_m": 0.363265,
+          "candidate0_cv_rmse_m": 0.380229,
+          "candidate0_improvement_pct": 4.461698,
+          "candidate_nonzero_prior_rmse_m": 0.379438,
+          "candidate_nonzero_cv_rmse_m": 0.403007,
+          "candidate_nonzero_improvement_pct": 5.848322,
+          "aux_prior_rmse_m": 1.219752,
+          "aux_cv_rmse_m": 1.369369,
+          "aux_improvement_pct": 10.925976,
+          "gap2_prior_rmse_m": 0.69468,
+          "gap2_cv_rmse_m": 0.762497,
+          "gap2_improvement_pct": 8.894039,
+          "gap4_prior_rmse_m": 1.623017,
+          "gap4_cv_rmse_m": 1.830475,
+          "gap4_improvement_pct": 11.333593,
+          "alpha_utilization": 0.44862,
+          "gate_applied_rate": 0.434057,
+          "gate_precision": 0.628502,
+          "helpful_rate": 0.699828,
+          "correction_norm_m": 0.045843,
+          "clip_rate": 0.132226,
+          "observation_error_m": 0.357585,
+          "prior_box_error_m": 0.271611,
+          "final_error_m": 0.332223,
+          "prior_valid_rate": 0.904665,
+          "history_valid_ratio": 0.903708,
+          "aux_history_valid_ratio": 0.786252,
+          "prior_loss": 0.022518,
+          "aux_prior_loss": 0.168263,
+          "fused_loss": 0.068403,
+          "gate_loss": 0.906151,
+          "actual_alpha_mean": 0.22431
+        },
+        {
+          "epoch": 15,
+          "main_prior_rmse_m": 0.381333,
+          "main_cv_rmse_m": 0.405386,
+          "main_improvement_pct": 5.933382,
+          "candidate0_prior_rmse_m": 0.38236,
+          "candidate0_cv_rmse_m": 0.403391,
+          "candidate0_improvement_pct": 5.213573,
+          "candidate_nonzero_prior_rmse_m": 0.380992,
+          "candidate_nonzero_cv_rmse_m": 0.406044,
+          "candidate_nonzero_improvement_pct": 6.169801,
+          "aux_prior_rmse_m": 1.244905,
+          "aux_cv_rmse_m": 1.412127,
+          "aux_improvement_pct": 11.841892,
+          "gap2_prior_rmse_m": 0.698302,
+          "gap2_cv_rmse_m": 0.773315,
+          "gap2_improvement_pct": 9.700298,
+          "gap4_prior_rmse_m": 1.661541,
+          "gap4_cv_rmse_m": 1.893602,
+          "gap4_improvement_pct": 12.254999,
+          "alpha_utilization": 0.536493,
+          "gate_applied_rate": 0.679731,
+          "gate_precision": 0.699038,
+          "helpful_rate": 0.670527,
+          "correction_norm_m": 0.051256,
+          "clip_rate": 0.122415,
+          "observation_error_m": 0.332108,
+          "prior_box_error_m": 0.273271,
+          "final_error_m": 0.306051,
+          "prior_valid_rate": 0.904319,
+          "history_valid_ratio": 0.902915,
+          "aux_history_valid_ratio": 0.785063,
+          "prior_loss": 0.02305,
+          "aux_prior_loss": 0.166871,
+          "fused_loss": 0.058706,
+          "gate_loss": 0.690846,
+          "actual_alpha_mean": 0.268246
+        },
+        {
+          "epoch": 30,
+          "main_prior_rmse_m": 0.387383,
+          "main_cv_rmse_m": 0.419216,
+          "main_improvement_pct": 7.593526,
+          "candidate0_prior_rmse_m": 0.361976,
+          "candidate0_cv_rmse_m": 0.395082,
+          "candidate0_improvement_pct": 8.379467,
+          "candidate_nonzero_prior_rmse_m": 0.395577,
+          "candidate_nonzero_cv_rmse_m": 0.427042,
+          "candidate_nonzero_improvement_pct": 7.368066,
+          "aux_prior_rmse_m": 1.200531,
+          "aux_cv_rmse_m": 1.391993,
+          "aux_improvement_pct": 13.754504,
+          "gap2_prior_rmse_m": 0.705513,
+          "gap2_cv_rmse_m": 0.794262,
+          "gap2_improvement_pct": 11.173767,
+          "gap4_prior_rmse_m": 1.589674,
+          "gap4_cv_rmse_m": 1.85512,
+          "gap4_improvement_pct": 14.308831,
+          "alpha_utilization": 0.525918,
+          "gate_applied_rate": 0.556859,
+          "gate_precision": 0.591673,
+          "helpful_rate": 0.492033,
+          "correction_norm_m": 0.033996,
+          "clip_rate": 0.069362,
+          "observation_error_m": 0.245104,
+          "prior_box_error_m": 0.268181,
+          "final_error_m": 0.235929,
+          "prior_valid_rate": 0.903823,
+          "history_valid_ratio": 0.902437,
+          "aux_history_valid_ratio": 0.784205,
+          "prior_loss": 0.022573,
+          "aux_prior_loss": 0.156388,
+          "fused_loss": 0.032533,
+          "gate_loss": 0.656322,
+          "actual_alpha_mean": 0.262959
+        },
+        {
+          "epoch": 45,
+          "main_prior_rmse_m": 0.371987,
+          "main_cv_rmse_m": 0.404063,
+          "main_improvement_pct": 7.938303,
+          "candidate0_prior_rmse_m": 0.391309,
+          "candidate0_cv_rmse_m": 0.41611,
+          "candidate0_improvement_pct": 5.960229,
+          "candidate_nonzero_prior_rmse_m": 0.36539,
+          "candidate_nonzero_cv_rmse_m": 0.40001,
+          "candidate_nonzero_improvement_pct": 8.654738,
+          "aux_prior_rmse_m": 1.177884,
+          "aux_cv_rmse_m": 1.381624,
+          "aux_improvement_pct": 14.746414,
+          "gap2_prior_rmse_m": 0.709713,
+          "gap2_cv_rmse_m": 0.804587,
+          "gap2_improvement_pct": 11.79163,
+          "gap4_prior_rmse_m": 1.54681,
+          "gap4_cv_rmse_m": 1.828618,
+          "gap4_improvement_pct": 15.410962,
+          "alpha_utilization": 0.517906,
+          "gate_applied_rate": 0.505767,
+          "gate_precision": 0.531444,
+          "helpful_rate": 0.43301,
+          "correction_norm_m": 0.031427,
+          "clip_rate": 0.067359,
+          "observation_error_m": 0.234474,
+          "prior_box_error_m": 0.268918,
+          "final_error_m": 0.228075,
+          "prior_valid_rate": 0.902882,
+          "history_valid_ratio": 0.90176,
+          "aux_history_valid_ratio": 0.782224,
+          "prior_loss": 0.02191,
+          "aux_prior_loss": 0.154345,
+          "fused_loss": 0.030162,
+          "gate_loss": 0.655913,
+          "actual_alpha_mean": 0.258953
+        },
+        {
+          "epoch": 60,
+          "main_prior_rmse_m": 0.380351,
+          "main_cv_rmse_m": 0.411827,
+          "main_improvement_pct": 7.643072,
+          "candidate0_prior_rmse_m": 0.383386,
+          "candidate0_cv_rmse_m": 0.410073,
+          "candidate0_improvement_pct": 6.507777,
+          "candidate_nonzero_prior_rmse_m": 0.379331,
+          "candidate_nonzero_cv_rmse_m": 0.412412,
+          "candidate_nonzero_improvement_pct": 8.021508,
+          "aux_prior_rmse_m": 1.173074,
+          "aux_cv_rmse_m": 1.381769,
+          "aux_improvement_pct": 15.103514,
+          "gap2_prior_rmse_m": 0.711562,
+          "gap2_cv_rmse_m": 0.798376,
+          "gap2_improvement_pct": 10.873827,
+          "gap4_prior_rmse_m": 1.53683,
+          "gap4_cv_rmse_m": 1.830503,
+          "gap4_improvement_pct": 16.04331,
+          "alpha_utilization": 0.510578,
+          "gate_applied_rate": 0.495328,
+          "gate_precision": 0.526551,
+          "helpful_rate": 0.425689,
+          "correction_norm_m": 0.031373,
+          "clip_rate": 0.067078,
+          "observation_error_m": 0.231605,
+          "prior_box_error_m": 0.271143,
+          "final_error_m": 0.225816,
+          "prior_valid_rate": 0.904517,
+          "history_valid_ratio": 0.903427,
+          "aux_history_valid_ratio": 0.786302,
+          "prior_loss": 0.022497,
+          "aux_prior_loss": 0.154308,
+          "fused_loss": 0.028562,
+          "gate_loss": 0.65536,
+          "actual_alpha_mean": 0.255289
+        }
+      ],
+      "drivers": [
+        {
+          "priority": 1,
+          "finding": "No stable standard-cadence gain",
+          "evidence": "Final v3-B0 is -0.705/-2.547; late-3 is -0.855/-1.898.",
+          "interpretation": "Fails the preregistered +0.5/+1.0 final gate and the non-negative late-3 guardrail.",
+          "confidence": "High for No-Go; one seed cannot quantify variance"
+        },
+        {
+          "priority": 2,
+          "finding": "v3 is numerically above the original SeqTrack run",
+          "evidence": "Final v3-SeqTrack is +1.670/+1.873; current B0-SeqTrack is +2.374/+4.420.",
+          "interpretation": "The paper-table comparison is positive, but the stronger current B0 shows that the gain cannot be attributed to motion.",
+          "confidence": "Medium; original run has no captured provenance"
+        },
+        {
+          "priority": 3,
+          "finding": "v3 repairs the catastrophic v2 architecture",
+          "evidence": "Final v3-v2 is +32.037/+42.004.",
+          "interpretation": "Protected B0 view, physical targets, and bounded post-transformer fusion removed v2's collapse, but safety repair is not a B0 gain.",
+          "confidence": "High"
+        },
+        {
+          "priority": 4,
+          "finding": "The physical prior learns beyond constant velocity",
+          "evidence": "At epoch60 learned RMSE is lower by 7.6% on main cadence, 10.9% on gap2, and 16.0% on gap4.",
+          "interpretation": "GRU capacity and physical target identifiability are no longer the leading failure mode on the training distribution.",
+          "confidence": "High descriptively; training-only evidence"
+        },
+        {
+          "priority": 5,
+          "finding": "Observation improves while the prior plateaus",
+          "evidence": "Observation/prior box error moves from 0.358/0.272 m at first active epoch to 0.232/0.271 m; helpful prevalence falls from 70.0% to 42.6%.",
+          "interpretation": "The gate must become more conservative late in training, but the current objective does not enforce that calibration.",
+          "confidence": "High on one-step training batches"
+        },
+        {
+          "priority": 6,
+          "finding": "The late gate remains half open and weakly selective",
+          "evidence": "Epoch60 mean alpha is 0.255; application is 49.5% of decisive samples with 52.7% precision; mean correction is 0.031 m.",
+          "interpretation": "Class-balanced BCE calibrates class separation, not deployment prevalence or recursive cost. Nearly half of applied decisive corrections are not labeled helpful.",
+          "confidence": "Medium-high; decisive-count weighting is unavailable"
+        },
+        {
+          "priority": 7,
+          "finding": "One-step training improvement does not transfer",
+          "evidence": "Epoch60 one-step final error is 0.226 m versus observation 0.232 m, yet normal recursive validation is below B0.",
+          "interpretation": "Candidate-perturbed teacher-forced gate training is mismatched to recursive predicted-history deployment and tracklet metrics.",
+          "confidence": "Medium; fusion-off endpoint export is still missing"
+        }
+      ],
+      "next_experiments": [
+        {
+          "order": 1,
+          "experiment": "Same-checkpoint standard on/off attribution",
+          "change": "Evaluate epoch30 and epoch60 v3 checkpoints with fusion on and motion_v3_fusion_scale=0 on identical mini_val endpoints.",
+          "decision": "Separates protected observation quality from gate-induced closed-loop damage without retraining.",
+          "gpu_cost": "4 test passes; no training"
+        },
+        {
+          "order": 2,
+          "experiment": "Endpoint/tracklet motion attribution export",
+          "change": "Export observation, prior, final, GT, gate probability, correction, validity, candidate/history error, speed, and delta_t.",
+          "decision": "Measures recursive helpful precision, cumulative drift, subgroup stability, and paired bootstrap uncertainty.",
+          "gpu_cost": "Reuse the 4 test passes"
+        },
+        {
+          "order": 3,
+          "experiment": "Branch on fusion-off result",
+          "change": "If off restores B0, freeze observation/prior and redesign only the gate. If off is also low, run one same-code scratch B0 before any motion change.",
+          "decision": "Prevents a new gate design from masking a baseline/RNG/code-version regression.",
+          "gpu_cost": "No training unless off also fails"
+        },
+        {
+          "order": 4,
+          "experiment": "B1motion-v3.1 gate kill-test",
+          "change": "Train gate on frozen recursive mini_train rollouts; predict bounded correction benefit, remove class-balanced deployment bias, separate help probability from step size, and ramp fusion gradually.",
+          "decision": "Continue past epoch15 only if observation identity holds, applied rate is conservative, helpful precision is high, and fused improves both standard metrics over fusion-off.",
+          "gpu_cost": "One short seed42 run after attribution"
+        },
+        {
+          "order": 5,
+          "experiment": "Strong cadence and causal-time controls",
+          "change": "Only after standard passes, evaluate gap1124/random20 and frozen true/fixed/shuffled time with per-tracklet bootstrap.",
+          "decision": "Determines whether the paper may claim continuous-time benefit or only reliable trajectory fusion.",
+          "gpu_cost": "Blocked until standard pass"
+        }
+      ],
+      "seqtrack_b0_diagnostics": [
+        {
+          "item": "Epoch60 final",
+          "seqtrack": "50.986 S / 59.962 P",
+          "b0": "53.360 S / 64.382 P",
+          "comparison": "+2.374 S / +4.420 P",
+          "interpretation": "B0 is higher at the preregistered final checkpoint."
+        },
+        {
+          "item": "Late-3 mean",
+          "seqtrack": "50.108 S / 58.863 P",
+          "b0": "52.905 S / 63.104 P",
+          "comparison": "+2.797 S / +4.241 P",
+          "interpretation": "The positive gap is a late-training stability gap."
+        },
+        {
+          "item": "Best checkpoint by metric",
+          "seqtrack": "52.283 best S / 65.214 best P",
+          "b0": "54.135 best S / 64.382 best P",
+          "comparison": "B0 best S is higher; SeqTrack best P is higher",
+          "interpretation": "B0 is not uniformly superior over the whole trajectory."
+        },
+        {
+          "item": "All 12 validation points",
+          "seqtrack": "Reference trajectory",
+          "b0": "wins 7/12 S and 9/12 P",
+          "comparison": "mean -0.573 S / -1.136 P",
+          "interpretation": "Early B0 regressions precede the late reversal."
+        },
+        {
+          "item": "Epoch56-60 mean training loss",
+          "seqtrack": "0.22286",
+          "b0": "0.22086",
+          "comparison": "-0.00200",
+          "interpretation": "Optimization is nearly identical; no large objective change."
+        },
+        {
+          "item": "Checkpoint model topology",
+          "seqtrack": "320 tensors / 3,718,065 elements",
+          "b0": "320 tensors / 3,718,065 elements",
+          "comparison": "identical keys and shapes",
+          "interpretation": "The gain is not caused by a larger CT model."
+        },
+        {
+          "item": "Training budget/framework",
+          "seqtrack": "seed42, bs16, 75720 steps, PL 2.0.2",
+          "b0": "seed42, bs16, 75720 steps, PL 2.0.2",
+          "comparison": "matched",
+          "interpretation": "Budget and top-level trainer version do not explain the gap."
+        },
+        {
+          "item": "DataLoader workers",
+          "seqtrack": "12",
+          "b0": "4",
+          "comparison": "12 -> 4",
+          "interpretation": "NumPy candidate/point-sampling streams change with worker assignment; seed42 is therefore not the same training sample stream."
+        },
+        {
+          "item": "Original-run provenance",
+          "seqtrack": "no run_provenance.json / exact commit unknown",
+          "b0": "clean d86990ce with dataset selection hashes",
+          "comparison": "not attribution-safe",
+          "interpretation": "Exact code and data identity cannot be proven retrospectively."
+        },
+        {
+          "item": "Same-labelled SeqTrack epoch60 spread",
+          "seqtrack": "50.986/59.962; 50.132/56.480; 51.049/60.175",
+          "b0": "single run 53.360/64.382",
+          "comparison": "SeqTrack range 50.132-51.049 S / 56.480-60.175 P",
+          "interpretation": "These folders lack exact source provenance, so they diagnose repeatability risk rather than estimate clean seed variance."
+        }
+      ],
+      "integrity": [
+        {
+          "check": "training_steps",
+          "observed": 75720,
+          "expected": 75720,
+          "passed": true
+        },
+        {
+          "check": "validation_points",
+          "observed": 12,
+          "expected": 12,
+          "passed": true
+        },
+        {
+          "check": "training_epoch_rows",
+          "observed": 60,
+          "expected": 60,
+          "passed": true
+        },
+        {
+          "check": "epoch60_checkpoint",
+          "observed": 75720,
+          "expected": 75720,
+          "passed": true
+        },
+        {
+          "check": "last_matches_epoch59_sha256",
+          "observed": "8590c37c20fb73466f1cbc4011aababcdae45ff4d05eeb5e4afa0a00421e6b75",
+          "expected": "8590c37c20fb73466f1cbc4011aababcdae45ff4d05eeb5e4afa0a00421e6b75",
+          "passed": true
+        },
+        {
+          "check": "train_selection_matches_b0",
+          "observed": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+          "expected": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+          "passed": true
+        },
+        {
+          "check": "val_selection_matches_b0",
+          "observed": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+          "expected": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+          "passed": true
+        },
+        {
+          "check": "scratch_training",
+          "observed": null,
+          "expected": null,
+          "passed": true
+        },
+        {
+          "check": "v3_git_commit",
+          "observed": "5f260e74b7fb5799720b8a172b916159b5bf6cf4",
+          "expected": "recorded",
+          "passed": true
+        },
+        {
+          "check": "v3_tracked_source_clean",
+          "observed": false,
+          "expected": true,
+          "passed": false
+        },
+        {
+          "check": "same_commit_as_historical_b0",
+          "observed": "5f260e74b7fb5799720b8a172b916159b5bf6cf4",
+          "expected": "d86990ce5304258822c1748d17f997f6ec003e9c",
+          "passed": false
+        }
+      ],
+      "checkpoints": [
+        {
+          "checkpoint": "epoch=14-step=18930.ckpt",
+          "epoch_zero_based": 14,
+          "global_step": 18930,
+          "size_bytes": 46179970,
+          "sha256": "5cefa37c8c9a00b97742624afb01272db4cb6cc3e9ca8943a4628d3ade0b593b",
+          "residual_head_weight_l2": 0.588717,
+          "gate_last_weight_l2": 0.275466,
+          "gate_last_bias": -4.54248,
+          "best_precision_score": 63.068928,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=14-step=18930.ckpt"
+        },
+        {
+          "checkpoint": "epoch=24-step=31550.ckpt",
+          "epoch_zero_based": 24,
+          "global_step": 31550,
+          "size_bytes": 46180545,
+          "sha256": "4d2a44a484229c3bc5327bfb7cc9dfbe8e6c8746a94bb86d79c991197369aec4",
+          "residual_head_weight_l2": 0.722574,
+          "gate_last_weight_l2": 0.317822,
+          "gate_last_bias": -4.532876,
+          "best_precision_score": 63.068928,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=14-step=18930.ckpt"
+        },
+        {
+          "checkpoint": "epoch=29-step=37860.ckpt",
+          "epoch_zero_based": 29,
+          "global_step": 37860,
+          "size_bytes": 46180545,
+          "sha256": "ca1258828379122bec1345661cf25d38cdc8e7890820a9694781c7571c22d292",
+          "residual_head_weight_l2": 0.739095,
+          "gate_last_weight_l2": 0.319318,
+          "gate_last_bias": -4.533268,
+          "best_precision_score": 65.555801,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=29-step=37860.ckpt"
+        },
+        {
+          "checkpoint": "epoch=44-step=56790.ckpt",
+          "epoch_zero_based": 44,
+          "global_step": 56790,
+          "size_bytes": 46180545,
+          "sha256": "7b15ee02cbbefbfbce3af55a06c4f1c88900c57e1c5c6bca17e9a69d069a9dbe",
+          "residual_head_weight_l2": 0.773088,
+          "gate_last_weight_l2": 0.327099,
+          "gate_last_bias": -4.53311,
+          "best_precision_score": 65.555801,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=29-step=37860.ckpt"
+        },
+        {
+          "checkpoint": "epoch=59-step=75720.ckpt",
+          "epoch_zero_based": 59,
+          "global_step": 75720,
+          "size_bytes": 46180545,
+          "sha256": "8590c37c20fb73466f1cbc4011aababcdae45ff4d05eeb5e4afa0a00421e6b75",
+          "residual_head_weight_l2": 0.777744,
+          "gate_last_weight_l2": 0.32815,
+          "gate_last_bias": -4.533184,
+          "best_precision_score": 65.555801,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=29-step=37860.ckpt"
+        },
+        {
+          "checkpoint": "last.ckpt",
+          "epoch_zero_based": 59,
+          "global_step": 75720,
+          "size_bytes": 46180545,
+          "sha256": "8590c37c20fb73466f1cbc4011aababcdae45ff4d05eeb5e4afa0a00421e6b75",
+          "residual_head_weight_l2": 0.777744,
+          "gate_last_weight_l2": 0.32815,
+          "gate_last_bias": -4.533184,
+          "best_precision_score": 65.555801,
+          "best_checkpoint_path": "output/20260801-0117-02_ct_motion_v3-b1motion_v3_mini_car_60ep_bs16_seed42/lightning_logs/version_0/checkpoints/epoch=29-step=37860.ckpt"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "validation_source",
+      "label": "Reviewed TensorBoard normal-validation metrics",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_validation.csv",
+      "query": {
+        "language": "python",
+        "engine": "DuckDB",
+        "sql": "SELECT run_id, arm, epoch, step, success, precision FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_validation.csv', header=true) ORDER BY run_id, epoch",
+        "description": "tools/analyze_b1motion_v3.py extracts all twelve unsmoothed five-epoch validation points from the original SeqTrack run, current B0, B1motion-v2, and v3.",
+        "executed_at": "2026-08-01",
+        "filters": [
+          "nuScenes v1.0-mini Car mini_val",
+          "normal cadence",
+          "seed=42",
+          "scratch 60 epochs"
+        ],
+        "metric_definitions": [
+          "Final is epoch60 and is the primary result.",
+          "Late-3 is the arithmetic mean at epochs 50, 55, and 60.",
+          "Best is diagnostic only and never replaces final."
+        ]
+      }
+    },
+    {
+      "id": "training_source",
+      "label": "Reviewed B1motion-v3 training diagnostics",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_training_epochs.csv",
+      "query": {
+        "language": "python",
+        "engine": "DuckDB",
+        "sql": "SELECT * FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_training_epochs.csv', header=true) ORDER BY epoch",
+        "description": "Epoch diagnostics are regenerated from 75,720 TensorBoard training steps. RMSE values are pooled using logged valid sample counts; gate rates are unsmoothed batch means.",
+        "executed_at": "2026-08-01",
+        "filters": [
+          "B1motion-v3 seed42 scratch",
+          "1,262 full-size batches per epoch",
+          "gate active from zero-based epoch10"
+        ],
+        "metric_definitions": [
+          "Prior improvement is (CV RMSE - learned RMSE) / CV RMSE.",
+          "Gate precision is helpful among probability>=0.5 decisive samples.",
+          "Applied rate uses decisive samples as denominator.",
+          "Actual alpha mean is alpha utilization times alpha_max=0.5."
+        ]
+      }
+    },
+    {
+      "id": "seqtrack_b0_source",
+      "label": "SeqTrack-to-B0 attribution audit",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_seqtrack_b0_diagnostics.csv",
+      "query": {
+        "language": "sql",
+        "engine": "DuckDB",
+        "sql": "SELECT item, seqtrack, b0, comparison, interpretation FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_seqtrack_b0_diagnostics.csv', header=true)",
+        "description": "Recomputes validation-trajectory comparisons, late training loss, checkpoint topology/config metadata, worker counts, and available same-labelled SeqTrack epoch60 endpoints.",
+        "executed_at": "2026-08-01",
+        "metric_definitions": [
+          "Numerical gaps are descriptive and not method attribution.",
+          "The original SeqTrack run has no captured commit or dataset hashes."
+        ]
+      }
+    },
+    {
+      "id": "integrity_source",
+      "label": "Run provenance and checkpoint integrity",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_integrity.csv",
+      "query": {
+        "language": "python",
+        "description": "Checks run_provenance.json, training/validation counts, dataset selection hashes, checkpoint steps, and SHA256 identity.",
+        "executed_at": "2026-08-01"
+      }
+    },
+    {
+      "id": "checkpoint_source",
+      "label": "B1motion-v3 checkpoint parameter diagnostics",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_checkpoints.csv",
+      "query": {
+        "language": "python",
+        "description": "Reads checkpoint metadata and selected physical-prior/gate parameter norms without modifying checkpoints.",
+        "executed_at": "2026-08-01"
+      }
+    },
+    {
+      "id": "code_source",
+      "label": "B1motion-v3 implementation audit",
+      "path": "models/seqtrack3d.py",
+      "query": {
+        "language": "python",
+        "description": "Code review covers models/seqtrack3d.py, models/ct_v2/fusion.py, models/ct_v2/motion.py, datasets/sampler.py, and the v3 config.",
+        "executed_at": "2026-08-01",
+        "filters": [
+          "physical xy target",
+          "detached observation/prior fusion",
+          "class-balanced helpful BCE",
+          "bounded correction"
+        ]
+      }
+    },
+    {
+      "id": "driver_source",
+      "label": "B1motion-v3 diagnostic evidence register",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_drivers.csv",
+      "query": {
+        "language": "sql",
+        "engine": "DuckDB",
+        "sql": "SELECT priority, finding, evidence, interpretation, confidence FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_drivers.csv', header=true) ORDER BY priority",
+        "description": "Evidence register derived from reviewed validation, training, checkpoint, and implementation sources.",
+        "executed_at": "2026-08-01"
+      }
+    },
+    {
+      "id": "next_source",
+      "label": "Controlled B1motion follow-up register",
+      "path": "compare_results/data/b1motion_v3_seed42_20260801_next_experiments.csv",
+      "query": {
+        "language": "sql",
+        "engine": "DuckDB",
+        "sql": "SELECT \"order\", experiment, change, decision, gpu_cost FROM read_csv_auto('compare_results/data/b1motion_v3_seed42_20260801_next_experiments.csv', header=true) ORDER BY \"order\"",
+        "description": "Ordered decision tree that requires inference-only attribution before another training run.",
+        "executed_at": "2026-08-01"
+      }
+    }
+  ],
+  "package_info": {
+    "generator": "tools/analyze_b1motion_v3.py",
+    "generatedAt": "2026-08-01T10:20:02.403144+00:00"
+  }
+}

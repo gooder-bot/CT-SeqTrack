@@ -4,6 +4,8 @@
 
 当前只维护一个最小决策链。第四模块的完整证据见
 [`Δt-PFTC seed42 60-epoch 最终诊断`](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)，
+最新 motion 证据见
+[`B1motion-v3 seed42 60-epoch 技术复核`](compare_results/reports/b1motion_v3_seed42_20260801.html)，
 整体时间路线见
 [`真实时间价值与模块路线审计`](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 
@@ -12,6 +14,8 @@
 ```text
 NO-GO_CURRENT_B4_IMPLEMENTATION
 PFTC_IDEA_NOT_YET_FAIRLY_TESTED
+NO_GO_B1MOTION_V3_STANDARD_GAIN
+V3_PHYSICAL_PRIOR_LEARNS_BUT_GATE_TRANSFER_FAILS
 NO_EVIDENCE_FOR_PHYSICAL_TIME
 ```
 
@@ -29,7 +33,43 @@ NO_EVIDENCE_FOR_PHYSICAL_TIME
 canonical geometry，且 raw SmoothL1 出现明显表示收缩，不能把结论扩大为
 point consistency 思路本身无效；修正后的版本只允许一次受控 kill-test。
 
-## 0A. Motion：只做无训练归因，不再扫全局 alpha
+## 0A. B1motion-v3：先做同 checkpoint 归因
+
+v3 的 60-epoch final 为 `52.655/61.835`，相对 current B0 为
+`−0.705/−2.547`；late-3 为 `−0.855/−1.898`，当前不涨点。但 v3 相对
+v2 恢复 `+32.037/+42.004`，而 learned prior 在 main/gap2/gap4 相对 CV
+分别改善 `7.6%/10.9%/16.0%`。因此不重写 prior encoder，先定位 fusion：
+
+补充口径：v3 相对原始 SeqTrack3D plain final 是 `+1.670/+1.873`，但 current
+B0 相对原始 SeqTrack 是 `+2.374/+4.420`；论文模块归因不能使用前一组跨代码
+版本差值，仍以 current B0 和 same-checkpoint fusion-off 为准。
+
+- [ ] 用 epoch30 checkpoint 跑 standard fusion-on。
+- [ ] 用同一 epoch30 checkpoint 加 `--fusion-off` 跑 observation-only。
+- [ ] 用 epoch60 `last.ckpt` 跑 standard fusion-on。
+- [ ] 用同一 epoch60 `last.ckpt` 加 `--fusion-off` 跑 observation-only。
+- [ ] 四次评测固定同一 mini_val selection、seed、endpoint 顺序和时间模式。
+- [ ] 导出逐 endpoint 的 observation/prior/final/GT、gate probability/alpha、
+  correction、history-valid、previous prediction error、speed、delta_t 和
+  tracklet id。
+- [ ] 对 on−off 做逐 tracklet bootstrap，并报告 helpful precision、applied
+  rate、首次失控帧、连续漂移长度和 disagreement/history-error 分桶。
+
+决策分叉：
+
+- fusion-off 恢复 B0、fusion-on 退化：冻结 observation/prior，只重构 gate；
+- fusion-off 也低于 B0：先跑 same-code scratch B0，并审计主视图、RNG 与代码
+  版本，禁止用新 gate 掩盖 baseline 回归；
+- 只有同 checkpoint fusion-on 在 standard 的 Success/Precision 均超过 off，
+  才允许一个 epoch15 的 v3.1 gate kill-test；
+- v3.1 应使用 frozen recursive mini_train rollout 学习 bounded correction 的
+  实际收益，取消 class-balanced 部署偏置，分开 helpful probability 与 step
+  size，并使用渐进 fusion ramp；不再复用当前约 50% 的应用率。
+
+gap1124/random20 与 true/fixed/shuffled 保持锁定，直到 standard on/off 同时为正。
+本节只需推理，不阻塞下方 PFTC 修复。
+
+## 0B. Motion legacy：只做无训练归因，不再扫全局 alpha
 
 完整数据见
 [`Motion fixed-alpha 复核`](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)。

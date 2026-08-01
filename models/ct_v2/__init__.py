@@ -6,8 +6,10 @@ from models.ct_v2.fusion import (
 )
 from models.ct_v2.motion import (
     ContinuousTimeMotionEncoder,
+    JointProposalFusion,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
+    TrajectorySearchEvidence,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
 )
@@ -18,15 +20,19 @@ from models.ct_v2.point_feature_consistency import (
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
+    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    sample_padded_search_extension,
     sample_search_extension,
     stratified_search_sample,
 )
 
 __all__ = [
     "ContinuousTimeMotionEncoder",
+    "JointProposalFusion",
     "OrderedPhysicalMotionEncoder",
     "OrderedTrajectoryEncoder",
+    "TrajectorySearchEvidence",
     "TrajectoryPointEncoder",
     "ZeroInitTrajectoryAdapter",
     "ProposalFusionGate",
@@ -35,7 +41,9 @@ __all__ = [
     "canonicalize_points",
     "chronological_frame_indices",
     "build_ordered_trajectory_search_box",
+    "build_trajectory_endpoint_search_box",
     "build_time_guided_search_box",
+    "sample_padded_search_extension",
     "sample_search_extension",
     "stratified_search_sample",
 ]

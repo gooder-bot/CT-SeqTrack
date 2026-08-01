@@ -15,8 +15,10 @@ from models.ct_v2.fusion import (
 )
 from models.ct_v2.motion import (
     ContinuousTimeMotionEncoder,
+    JointProposalFusion,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
+    TrajectorySearchEvidence,
     ZeroInitTrajectoryAdapter,
 )
 from models.dynamics import apply_proposal_innovation
@@ -33,7 +35,9 @@ from utils.ct_history import (
 from utils.config import load_yaml_config
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
+    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    sample_padded_search_extension,
     sample_search_extension,
     stratified_search_sample,
 )
@@ -51,7 +55,7 @@ class DummyBox:
 
 class DummyOrientation:
     def __init__(self, axis=None, radians=0.0):
-        self.axis = axis
+        self.axis = [0, 0, 1] if axis is None else axis
         self.radians = radians
 
 
@@ -199,6 +203,194 @@ class SearchExpansionTest(unittest.TestCase):
         np.testing.assert_array_equal(baseline, baseline_copy)
         self.assertEqual(sampled.shape, (8, 3))
         self.assertTrue(diagnostics["active"])
+
+
+class EndpointSearchV2Test(unittest.TestCase):
+    def test_endpoint_crop_is_compact_and_available_at_normal_cadence(self):
+        boxes = [
+            DummyBox([2.0, 0.0, 0.0]),
+            DummyBox([1.0, 0.0, 0.0]),
+            DummyBox([0.0, 0.0, 0.0]),
+        ]
+        endpoint, diagnostics = build_trajectory_endpoint_search_box(
+            boxes,
+            delta_t=[0.5, 0.5, 0.5],
+            valid_mask=[1, 1, 1],
+        )
+        self.assertIsNotNone(endpoint)
+        self.assertTrue(diagnostics["valid"])
+        np.testing.assert_allclose(endpoint.center, [3.0, 0.0, 0.0])
+        np.testing.assert_array_equal(endpoint.wlh, boxes[0].wlh)
+
+    def test_endpoint_yaw_rate_is_bounded(self):
+        boxes = [
+            DummyBox([2.0, 0.0, 0.0]),
+            DummyBox([1.0, 0.0, 0.0]),
+        ]
+        boxes[0].orientation = DummyOrientation(radians=np.pi)
+        boxes[1].orientation = DummyOrientation(radians=0.0)
+        _, diagnostics = build_trajectory_endpoint_search_box(
+            boxes, delta_t=[1.0, 0.1], valid_mask=[1, 1])
+        self.assertLessEqual(
+            abs(diagnostics["yaw_rate"]), np.pi / 2.0 + 1e-9)
+
+    def test_sparse_extension_is_padded_without_repetition(self):
+        baseline = np.zeros((1, 3), dtype=np.float32)
+        for count in (3, 127, 128, 140):
+            expanded = np.stack((
+                np.arange(1, count + 1),
+                np.ones(count),
+                np.zeros(count)), axis=1).astype(np.float32)
+            points, mask, diagnostics = sample_padded_search_extension(
+                baseline, expanded, sample_size=128, seed=17)
+            expected = min(count, 128)
+            self.assertTrue(diagnostics["active"])
+            self.assertEqual(int(mask.sum()), expected)
+            self.assertEqual(
+                len(np.unique(points[mask > 0, :3], axis=0)), expected)
+            np.testing.assert_array_equal(points[mask == 0], 0.0)
+
+    def test_empty_and_subthreshold_extension_are_finite_inactive(self):
+        baseline = np.zeros((1, 3), dtype=np.float32)
+        for expanded in (
+                np.empty((0, 3), dtype=np.float32),
+                np.asarray([[1, 0, 0], [2, 0, 0]], dtype=np.float32)):
+            points, mask, diagnostics = sample_padded_search_extension(
+                baseline, expanded, sample_size=128, seed=5)
+            self.assertFalse(diagnostics["active"])
+            self.assertEqual(mask.sum(), 0)
+            self.assertTrue(np.isfinite(points).all())
+
+    def test_extension_rng_does_not_touch_numpy_global_state(self):
+        baseline = np.zeros((1, 3), dtype=np.float32)
+        expanded = np.stack((
+            np.arange(200), np.ones(200), np.zeros(200)), axis=1)
+        state = np.random.get_state()
+        sample_padded_search_extension(
+            baseline, expanded, sample_size=128, seed=13)
+        after = np.random.get_state()
+        self.assertEqual(state[0], after[0])
+        np.testing.assert_array_equal(state[1], after[1])
+        self.assertEqual(state[2:], after[2:])
+
+
+class SearchEvidenceEncoderTest(unittest.TestCase):
+    @staticmethod
+    def _inputs():
+        torch.manual_seed(11)
+        return {
+            "point_inputs": torch.randn(2, 8, 9),
+            "point_xy": torch.randn(2, 8, 2),
+            "point_valid_mask": torch.tensor([
+                [1, 1, 1, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0]], dtype=torch.float32),
+            "geometry_valid": torch.tensor([1.0, 0.0]),
+            "observation_feature": torch.randn(2, 256),
+            "motion_feature": torch.randn(2, 128),
+            "observation_stats": torch.randn(2, 5),
+            "query_delta_t": torch.tensor([0.5, 0.5]),
+            "gap_ratio": torch.ones(2),
+            "sigma_parallel": torch.ones(2),
+            "sigma_perpendicular": torch.ones(2),
+            "available_count": torch.tensor([3.0, 0.0]),
+        }
+
+    def test_padding_is_ignored_and_empty_rows_have_no_nan(self):
+        encoder = TrajectorySearchEvidence()
+        inputs = self._inputs()
+        output = encoder(**inputs)
+        changed = dict(inputs)
+        changed["point_inputs"] = inputs["point_inputs"].clone()
+        changed["point_xy"] = inputs["point_xy"].clone()
+        changed["point_inputs"][0, 3:] = 1e6
+        changed["point_xy"][0, 3:] = -1e6
+        changed_output = encoder(**changed)
+        for key in (
+                "search_evidence_token", "search_proposal_xy",
+                "search_confidence", "search_targetness_mass"):
+            torch.testing.assert_close(output[key][0], changed_output[key][0])
+        self.assertTrue(all(
+            torch.isfinite(value).all()
+            for value in output.values() if torch.is_tensor(value)))
+        torch.testing.assert_close(
+            output["search_proposal_xy"][1], torch.zeros(2))
+        self.assertEqual(output["search_confidence"][1].item(), 0.0)
+
+
+class JointProposalFusionTest(unittest.TestCase):
+    @staticmethod
+    def _fusion():
+        return JointProposalFusion(
+            observation_dim=8, motion_dim=6, search_dim=7,
+            observation_stats_dim=5, context_dim=4, hidden_dim=12)
+
+    @staticmethod
+    def _inputs():
+        return {
+            "observation_box": torch.tensor([[1.0, 2.0, 3.0, 0.4]]),
+            "observation_feature": torch.zeros(1, 8),
+            "observation_stats": torch.zeros(1, 5),
+            "motion_feature": torch.zeros(1, 6),
+            "motion_proposal_xy": torch.tensor([[20.0, 2.0]]),
+            "motion_log_sigma_xy": torch.zeros(1, 2),
+            "motion_valid": torch.ones(1),
+            "history_valid_ratio": torch.ones(1),
+            "search_evidence_token": torch.zeros(1, 7),
+            "search_proposal_xy": torch.tensor([[1.0, 30.0]]),
+            "search_confidence": torch.ones(1),
+            "search_targetness_mass": torch.ones(1),
+            "search_entropy": torch.zeros(1),
+            "search_valid": torch.ones(1),
+            "query_delta_t": torch.tensor([1.0]),
+            "gap_ratio": torch.ones(1),
+        }
+
+    def test_initial_gate_is_observation_biased(self):
+        _, diagnostics = self._fusion()(**self._inputs())
+        self.assertGreater(
+            diagnostics["joint_gate_probability"][0, 0].item(), 0.97)
+
+    def test_warmup_and_invalid_candidates_are_bitwise_observation(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        warmup, _ = fusion(**inputs, enabled_scale=0.0)
+        self.assertTrue(torch.equal(warmup, inputs["observation_box"]))
+        inputs["motion_valid"] = torch.zeros(1)
+        inputs["search_valid"] = torch.zeros(1)
+        invalid, _ = fusion(**inputs, enabled_scale=1.0)
+        self.assertTrue(torch.equal(invalid, inputs["observation_box"]))
+
+    def test_correction_is_radius_bounded_and_keeps_z_yaw(self):
+        fusion = self._fusion()
+        with torch.no_grad():
+            fusion.gate[-1].bias.copy_(torch.tensor([0.0, 20.0, 20.0]))
+        inputs = self._inputs()
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+        correction = torch.linalg.norm(
+            final[:, :2] - inputs["observation_box"][:, :2], dim=1)
+        self.assertTrue(torch.all(
+            correction <= diagnostics["joint_fusion_radius"] + 1e-6))
+        torch.testing.assert_close(
+            final[:, 2:], inputs["observation_box"][:, 2:])
+
+    def test_fused_loss_cannot_update_candidate_sources(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        for key in (
+                "observation_box", "observation_feature", "motion_feature",
+                "motion_proposal_xy", "search_evidence_token",
+                "search_proposal_xy"):
+            inputs[key] = inputs[key].requires_grad_()
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+        (final[:, :2].sum()
+         + diagnostics["joint_gate_probability"].sum()).backward()
+        for key in (
+                "observation_box", "observation_feature", "motion_feature",
+                "motion_proposal_xy", "search_evidence_token",
+                "search_proposal_xy"):
+            self.assertIsNone(inputs[key].grad, key)
+        self.assertTrue(any(
+            parameter.grad is not None for parameter in fusion.parameters()))
 
 
 class ProposalFusionTest(unittest.TestCase):
@@ -777,6 +969,25 @@ class CorrelatedHistoryTest(unittest.TestCase):
 
 
 class ConfigCompositionTest(unittest.TestCase):
+    def test_b2_v2_resolves_scratch_three_candidate_contract(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/03_ct_motion_search_v2.yaml")
+        self.assertTrue(config["use_b1motion_v3"])
+        self.assertFalse(config["use_motion_v3_legacy_fusion"])
+        self.assertTrue(config["use_search_evidence_v2"])
+        self.assertTrue(config["use_joint_proposal_fusion"])
+        self.assertFalse(config["use_time_guided_search"])
+        self.assertFalse(config["use_trajectory_search"])
+        self.assertEqual(config["point_sample_size"], 1024)
+        self.assertEqual(config["search_v2_point_count"], 128)
+        self.assertEqual(config["search_v2_min_points"], 3)
+        self.assertEqual(config["batch_size"], 16)
+        self.assertEqual(config["epoch"], 60)
+        self.assertEqual(config["check_val_every_n_epoch"], 5)
+        self.assertEqual(config["seed"], 42)
+        self.assertEqual(config["joint_fusion_warmup_epochs"], 10)
+        self.assertEqual(config["joint_fusion_ramp_epochs"], 10)
+
     def test_motion_v3_isolated_reliable_post_transformer_config(self):
         config = load_yaml_config(
             ROOT / "cfgs/ct_v2/02_ct_motion_v3.yaml")

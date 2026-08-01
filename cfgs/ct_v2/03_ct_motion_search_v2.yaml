@@ -1,0 +1,68 @@
+_base_: 02_ct_motion_v3.yaml
+
+experiment_name: ct_trajectory_conditioned_search_evidence_v2
+
+# Formal normal-mini scratch contract.
+seed: 42
+batch_size: 16
+workers: 12
+epoch: 60
+from_epoch: 0
+check_val_every_n_epoch: 5
+
+# B0 observation + B1-v3 physical proposal + B2-v2 search proposal.
+use_b1motion_v3: true
+use_motion_v3_legacy_fusion: false
+use_search_evidence_v2: true
+use_joint_proposal_fusion: true
+
+# Legacy B2 crops remain available through 03_ct_motion_search.yaml only.
+use_time_guided_search: false
+use_trajectory_search: false
+use_ordered_trajectory_encoder: false
+use_trajectory_adapter: false
+
+# Compact endpoint support. The data code reuses the baseline bb_scale=1.25
+# and bb_offset=2.0 and never changes the baseline 1024-point sample.
+search_v2_point_count: 128
+search_v2_min_points: 3
+search_v2_max_speed: 20.0
+search_v2_max_acceleration: 8.0
+search_v2_max_displacement: 12.0
+search_v2_acceleration_weight: 0.5
+search_v2_max_yaw_rate: 1.5707963267948966
+search_v2_min_displacement: 0.2
+search_v2_history_correlation: 0.75
+
+# Motion-conditioned foreground evidence.
+search_v2_feature_dim: 128
+search_v2_max_vote_offset: 4.0
+
+# Observation-default three-candidate gate.
+joint_gate_context_dim: 32
+joint_gate_hidden_dim: 96
+joint_gate_observation_bias: 4.6
+joint_radius_base: 0.5
+joint_radius_per_second: 0.5
+joint_radius_max: 2.0
+joint_normal_aux_mass: 0.5
+joint_gap_aux_mass: 0.8
+joint_help_margin: 0.05
+
+# Epochs 0-9: no fusion; 10-19: linear ramp; 20-59: full fusion.
+joint_fusion_warmup_epochs: 10
+joint_fusion_ramp_epochs: 10
+
+# L = L_B0 + .1 L_motion_main + .1 L_motion_aux
+#   + .2 L_targetness + L_vote + L_search_proposal + .1 L_confidence
+#   + ramp * (L_fused + .1 L_joint_gate)
+motion_v3_prior_weight: 0.1
+motion_v3_aux_prior_weight: 0.1
+search_v2_targetness_weight: 0.2
+search_v2_vote_weight: 1.0
+search_v2_proposal_weight: 1.0
+search_v2_confidence_weight: 0.1
+search_v2_focal_alpha: 0.75
+search_v2_focal_gamma: 2.0
+joint_fused_weight: 1.0
+joint_gate_weight: 0.1

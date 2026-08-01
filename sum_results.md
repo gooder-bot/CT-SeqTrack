@@ -13,6 +13,68 @@ Search-only A1 为准。
 
 ## 0. 当前总判断
 
+### 2026-08-01 B1motion-v3 seed42 60-epoch
+
+B1motion-v3 已完成 75,720 step、12 个 normal validation 点和 epoch60
+checkpoint；`last.ckpt` 与 epoch59 checkpoint hash 完全一致。
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| SeqTrack3D plain（原始独立运行） | 50.986 | 59.962 | 50.108 | 58.863 |
+| B0 baseline（历史对照） | **53.360** | **64.382** | **52.905** | **63.104** |
+| B1motion-v2 | 20.618 | 19.830 | 21.777 | 21.195 |
+| B1motion-v3 | 52.655 | 61.835 | 52.050 | 61.206 |
+| Δ v3−B0 | **−0.705** | **−2.547** | **−0.855** | **−1.898** |
+
+当前结论是 `NO_GO_B1MOTION_V3_STANDARD_GAIN`：v3 相对 v2 final 恢复
+`+32.037/+42.004`，证明保护 B0 主视图、物理 target 与有界 proposal
+fusion 修复了旧架构崩溃；但 final 未达到 `+0.5/+1.0`，late-3 两项也为负，
+所以它不是可用于论文主表的涨点模块。epoch30 的 `52.198/65.556` 只是
+Precision 短暂正信号，不能用 best checkpoint 替代 final 结论。
+
+相对原始 SeqTrack3D plain，v3 final 数值为 `+1.670/+1.873`，late-3 为
+`+1.942/+2.344`。但 current B0 相对原始 SeqTrack 的 final 提升更大，达到
+`+2.374/+4.420`；v3 在 current B0 上反而为负。因此“超过原始 SeqTrack”可作为
+历史数值对照，不能写成 motion 的净增益或独立消融结论。
+
+#### 为什么 B0 的末轮比原始 SeqTrack 高
+
+审计结果不支持把这组差值解释成新结构收益。两个 `last.ckpt` 都包含 320 个
+同名同 shape tensors、共 3,718,065 个参数元素；训练步数均为 75,720，且
+batch size、seed、PyTorch Lightning 2.0.2、损失权重、Adam/StepLR 和验证主路径
+对齐。B0 中 CT/dynamics/search/TWC/M3/M4 开关全部关闭，order-time point/corner
+token 也与原 SeqTrack 的 `[-0.1,-0.2,-0.3,+0.1]` 语义等价。因此 B0 不是靠更大
+模型或隐藏开启 CT 模块得到 `+2.374/+4.420`。
+
+曲线显示它主要是一次后期更稳定的 scratch run，而非全程占优：B0 在 12 个验证
+时点中 Success 只赢 7 次，12 点平均差反而是 `−0.573/−1.136`；前 20 epoch 多次
+明显落后，约 epoch40 后才持续反超。原 SeqTrack 的 best Precision 为 `65.214`，
+高于 B0 的 `64.382`。两者 epoch56–60 mean training loss 仅为
+`0.22286/0.22086`，说明目标函数和收敛程度几乎相同，小的训练轨迹差异被递归
+tracking history 放大成了末轮分差。
+
+当前最可能的直接来源是随机训练流不一致：原 SeqTrack 使用 12 workers，B0 使用
+4 workers；候选框扰动和点采样依赖各 worker 的 NumPy RNG，所以两个 seed42 并非
+同一 candidate/point 子序列。B0 sampler 还把 candidate offset 显式转成 float32，
+与旧实现的 float64 draw 也不是 bitwise 相同。更重要的是，原 run 没有
+`run_provenance.json`，无法恢复其 exact commit、dirty state 和数据选择 hash。
+因此当前只能说“B0 这次 run 的 late endpoint 更好”，不能说“B0 方法优于
+SeqTrack”，更不能把这部分算作 motion 的论文增益。最小验证是固定同一代码、
+workers、数据 hash 和 deterministic 设置重跑 3 seeds，并把两个 checkpoint 在
+同一 evaluator 下交叉评测。
+
+prior 本身并未失败：epoch60 learned prior 相对 constant velocity 的训练
+RMSE 在 main/gap2/gap4 分别改善 `7.6%/10.9%/16.0%`。问题集中在 gate：
+晚期 observation error 已为 `0.232 m`，优于 prior 的 `0.271 m`，helpful
+prevalence 下降到 `42.6%`，gate 仍在约 `49.5%` decisive 样本上应用修正，
+precision 只有 `52.7%`、实际平均 alpha 为 `0.255`。一步训练 final error
+虽略低于 observation，recursive validation 却低于 B0，支持 gate calibration
+与训练/递归历史分布错位。
+
+立即只做 epoch30/epoch60 的 same-checkpoint fusion on/off 四次推理和
+endpoint/tracklet attribution，不再直接启动 motion 60-epoch sweep。完整报告见
+[`B1motion-v3 seed42 60-epoch 技术复核`](compare_results/reports/b1motion_v3_seed42_20260801.html)。
+
 ### 2026-08-01 B4 Δt-PFTC seed42 60-epoch
 
 B4 已完成 75,720 step、12 个验证点和 epoch60 `last.ckpt`；`last.ckpt` 与

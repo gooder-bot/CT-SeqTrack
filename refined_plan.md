@@ -17,6 +17,19 @@
 > 完整诊断见
 > [Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
 
+> 2026-08-01 B1motion-v3 实证更新：seed42 scratch 60 epoch final 为
+> `52.655/61.835`、late-3 为 `52.050/61.206`，相对历史 B0 分别下降
+> `0.705/2.547` 与 `0.855/1.898`，当前为
+> `NO_GO_B1MOTION_V3_STANDARD_GAIN`。但 v3 相对 v2 final 恢复
+> `+32.037/+42.004`，且 learned prior 在 main/gap2/gap4 相对 CV 的训练
+> RMSE 改善 `7.6%/10.9%/16.0%`；当前瓶颈收窄为 gate calibration 与
+> recursive-history transfer。下一步只做 epoch30/epoch60 same-checkpoint
+> fusion on/off 和 endpoint attribution，不直接新开 motion 长训。完整报告见
+> [B1motion-v3 seed42 技术复核](compare_results/reports/b1motion_v3_seed42_20260801.html)。
+> 相对原始 SeqTrack3D plain 的 `50.986/59.962`，v3 数值为
+> `+1.670/+1.873`；但 current B0 对原始 SeqTrack 为 `+2.374/+4.420`，
+> 因此前者不能作为 motion 模块净贡献。
+
 > 2026-07-30 motion 更新：alpha0/0.25 两组 scratch 60 epoch 已完成。
 > alpha0.25 相对 alpha0 final 下降 `17.468/20.322`，较小全局修正仍失败；
 > fixed global proposal innovation 正式 No-Go。motion 后续只做已有

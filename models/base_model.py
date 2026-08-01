@@ -33,7 +33,9 @@ from models.state_filter import (
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
+    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    sample_padded_search_extension,
     sample_search_extension,
     stratified_search_sample,
 )
@@ -607,6 +609,54 @@ class MotionBaseModelMF(BaseModelMF):
                     offset=0.0,
                 )
                 expanded_search_points = ct_search_pc.points.T
+
+        use_search_evidence_v2 = bool(getattr(
+            self.config, "use_search_evidence_v2", False))
+        search_v2_box = None
+        search_v2_diagnostics = {
+            "valid": False,
+            "query_delta_t": float(effective_delta_t_list[0]),
+            "gap_ratio": 1.0,
+            "sigma_parallel": 0.0,
+            "sigma_perpendicular": 0.0,
+        }
+        search_v2_expanded_points = np.empty(
+            (0, baseline_search_points.shape[1]),
+            dtype=baseline_search_points.dtype,
+        )
+        search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
+        if use_search_evidence_v2:
+            search_v2_box, search_v2_diagnostics = (
+                build_trajectory_endpoint_search_box(
+                    ref_boxs,
+                    effective_delta_t_list,
+                    valid_mask=valid_mask,
+                    max_speed=float(getattr(
+                        self.config, "search_v2_max_speed", 20.0)),
+                    max_acceleration=float(getattr(
+                        self.config, "search_v2_max_acceleration", 8.0)),
+                    max_displacement=float(getattr(
+                        self.config, "search_v2_max_displacement", 12.0)),
+                    acceleration_weight=float(getattr(
+                        self.config, "search_v2_acceleration_weight", 0.5)),
+                    max_yaw_rate=float(getattr(
+                        self.config, "search_v2_max_yaw_rate", np.pi / 2.0)),
+                    min_displacement=float(getattr(
+                        self.config, "search_v2_min_displacement", 0.2)),
+                ))
+            if search_v2_box is not None:
+                search_v2_pc = points_utils.generate_subwindow_with_aroundboxs(
+                    this_pc,
+                    search_v2_box,
+                    ref_boxs[0],
+                    scale=self.config.bb_scale,
+                    offset=self.config.bb_offset,
+                )
+                search_v2_expanded_points = search_v2_pc.points.T
+                search_v2_local_box = points_utils.transform_box(
+                    search_v2_box, ref_boxs[0])
+                search_v2_endpoint_xy = np.asarray(
+                    search_v2_local_box.center[:2], dtype=np.float32)
         num_points_in_search_baseline = this_frame_pc.nbr_points()
         num_points_in_search_tube = 0
         tube_box = None
@@ -734,6 +784,33 @@ class MotionBaseModelMF(BaseModelMF):
                 "expansion_available_count": 0,
             }
             ct_search_active = False
+        search_v2_point_count = int(getattr(
+            self.config, "search_v2_point_count", 128))
+        search_v2_points = np.zeros(
+            (search_v2_point_count, baseline_search_points.shape[1]),
+            dtype=np.float32,
+        )
+        search_v2_point_valid_mask = np.zeros(
+            (search_v2_point_count,), dtype=np.float32)
+        search_v2_sampling = {
+            "active": False,
+            "sample_count": 0,
+            "available_count": 0,
+        }
+        if use_search_evidence_v2 and search_v2_box is not None:
+            search_v2_seed = (
+                int(frame_id) * 1664525 + 1013904223
+            ) & 0xFFFFFFFF
+            (search_v2_points,
+             search_v2_point_valid_mask,
+             search_v2_sampling) = sample_padded_search_extension(
+                baseline_search_points,
+                search_v2_expanded_points,
+                sample_size=search_v2_point_count,
+                min_expansion_points=int(getattr(
+                    self.config, "search_v2_min_points", 3)),
+                seed=search_v2_seed,
+            )
         search_has_usable_points = num_points_in_search > 2
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
@@ -773,6 +850,20 @@ class MotionBaseModelMF(BaseModelMF):
         )
         trajectory_search_points = np.concatenate(
             (trajectory_search_points, trajectory_timestamp, trajectory_prior),
+            axis=-1,
+        )
+        search_v2_timestamp = np.full(
+            (search_v2_points.shape[0], 1),
+            fill_value=main_current_value,
+            dtype=np.float32,
+        )
+        search_v2_prior = np.full(
+            (search_v2_points.shape[0], 1),
+            fill_value=0.5,
+            dtype=np.float32,
+        )
+        search_v2_points = np.concatenate(
+            (search_v2_points, search_v2_timestamp, search_v2_prior),
             axis=-1,
         )
 
@@ -870,6 +961,38 @@ class MotionBaseModelMF(BaseModelMF):
                     device=self.device, dtype=torch.float32),
                 "trajectory_search_sigma_perpendicular": torch.tensor(
                     [ct_search_diagnostics.get("sigma_perpendicular", 0.0)],
+                    device=self.device, dtype=torch.float32),
+            })
+        if use_search_evidence_v2:
+            data_dict.update({
+                "search_v2_points": torch.tensor(
+                    search_v2_points[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_point_valid_mask": torch.tensor(
+                    search_v2_point_valid_mask[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_geometry_valid": torch.tensor(
+                    [search_v2_sampling["active"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_endpoint_xy": torch.tensor(
+                    search_v2_endpoint_xy[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_query_delta_t": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "query_delta_t", effective_delta_t_list[0])],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_gap_ratio": torch.tensor(
+                    [search_v2_diagnostics.get("gap_ratio", 1.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_sigma_parallel": torch.tensor(
+                    [search_v2_diagnostics.get("sigma_parallel", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_sigma_perpendicular": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "sigma_perpendicular", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v2_available_count": torch.tensor(
+                    [search_v2_sampling["available_count"]],
                     device=self.device, dtype=torch.float32),
             })
         if m4_diagnostics_enabled:

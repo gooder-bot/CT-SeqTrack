@@ -41,7 +41,9 @@ from utils.candidate_utils import (
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
+    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    sample_padded_search_extension,
     sample_search_extension,
     stratified_search_sample,
 )
@@ -300,6 +302,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     current_sampling_seed = data.get('current_sampling_seed')
     if current_sampling_seed is not None:
         current_sampling_seed = int(current_sampling_seed)
+    sample_index = int(data.get(
+        'sample_index', this_frame_id if this_frame_id is not None else 0))
 
     # Check the number of empty boxes
     for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
@@ -645,6 +649,77 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             )
             expanded_search_points = expanded_search_pc.points.T
 
+    # B2-v2 is deliberately independent of the legacy long-tube paths above.
+    # Candidate zero receives clean history.  Other candidates alternate
+    # deterministically between correlated and recursive histories, matching
+    # the recursive online error contract without consuming point-sampling RNG.
+    use_search_evidence_v2 = bool(getattr(
+        config, 'use_search_evidence_v2', False))
+    search_v2_box = None
+    search_v2_diagnostics = {
+        'valid': False,
+        'query_delta_t': float(effective_delta_t_list[0]),
+        'gap_ratio': 1.0,
+        'sigma_parallel': 0.0,
+        'sigma_perpendicular': 0.0,
+    }
+    search_v2_expanded_points = np.empty(
+        (0, baseline_search_points.shape[1]),
+        dtype=baseline_search_points.dtype,
+    )
+    search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
+    if use_search_evidence_v2:
+        if int(candidate_id) == 0:
+            search_v2_history_mode = 'canonical'
+        elif sample_index % 2 == 0:
+            search_v2_history_mode = 'correlated_candidate'
+        else:
+            search_v2_history_mode = 'recursive_candidate'
+        _, search_v2_history_boxes = build_ct_training_histories(
+            canonical_prev_boxs,
+            ref_boxs,
+            candidate_offsets,
+            candidate_id,
+            candidate_trajectory_mode,
+            training_mode=search_v2_history_mode,
+            correlation=float(getattr(
+                config, 'search_v2_history_correlation', 0.75)),
+            recursive_error_scale=1.0,
+            degrees=config.degrees,
+        )
+        search_v2_box, search_v2_diagnostics = (
+            build_trajectory_endpoint_search_box(
+                search_v2_history_boxes,
+                effective_delta_t_list,
+                valid_mask=valid_mask,
+                max_speed=float(getattr(
+                    config, 'search_v2_max_speed', 20.0)),
+                max_acceleration=float(getattr(
+                    config, 'search_v2_max_acceleration', 8.0)),
+                max_displacement=float(getattr(
+                    config, 'search_v2_max_displacement', 12.0)),
+                acceleration_weight=float(getattr(
+                    config, 'search_v2_acceleration_weight', 0.5)),
+                max_yaw_rate=float(getattr(
+                    config, 'search_v2_max_yaw_rate', np.pi / 2.0)),
+                min_displacement=float(getattr(
+                    config, 'search_v2_min_displacement', 0.2)),
+            ))
+        if search_v2_box is not None:
+            search_v2_expanded_pc = (
+                points_utils.generate_subwindow_with_aroundboxs(
+                    this_pc,
+                    search_v2_box,
+                    ref_boxs[0],
+                    scale=config.bb_scale,
+                    offset=config.bb_offset,
+                ))
+            search_v2_expanded_points = search_v2_expanded_pc.points.T
+            search_v2_local_box = points_utils.transform_box(
+                search_v2_box, ref_boxs[0])
+            search_v2_endpoint_xy = np.asarray(
+                search_v2_local_box.center[:2], dtype=np.float32)
+
     # Preserve the pre-normalization anchor: ref_boxs[0] becomes approximately
     # zero after transform_box(), so the normalized tensor cannot prove that
     # paired views shared the same crop and local coordinate system.
@@ -724,6 +799,37 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'expansion_sample_count': 0,
             'expansion_available_count': 0,
         }
+
+    search_v2_point_count = int(getattr(
+        config, 'search_v2_point_count', 128))
+    search_v2_points = np.zeros(
+        (search_v2_point_count, baseline_search_points.shape[1]),
+        dtype=np.float32,
+    )
+    search_v2_point_valid_mask = np.zeros(
+        (search_v2_point_count,), dtype=np.float32)
+    search_v2_sampling = {
+        'active': False,
+        'sample_count': 0,
+        'available_count': 0,
+    }
+    if use_search_evidence_v2 and search_v2_box is not None:
+        independent_seed_base = (
+            current_sampling_seed
+            if current_sampling_seed is not None else sample_index)
+        search_v2_seed = (
+            int(independent_seed_base) * 1664525 + 1013904223
+        ) & 0xFFFFFFFF
+        (search_v2_points,
+         search_v2_point_valid_mask,
+         search_v2_sampling) = sample_padded_search_extension(
+            baseline_search_points,
+            search_v2_expanded_points,
+            sample_size=search_v2_point_count,
+            min_expansion_points=int(getattr(
+                config, 'search_v2_min_points', 3)),
+            seed=search_v2_seed,
+        )
     ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
     num_points_in_search = int(len(baseline_search_points))
     if ct_search_active:
@@ -732,6 +838,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     search_has_usable_points = num_points_in_search > 2
 
     seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
+    search_v2_point_labels = geometry_utils.points_in_box(
+        this_box,
+        search_v2_points.T[:3, :],
+        config.bb_scale,
+    ).astype(np.float32)
+    search_v2_point_labels *= search_v2_point_valid_mask
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
     if candidate_id != 0:
@@ -769,6 +881,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     )
     trajectory_search_points = np.concatenate(
         (trajectory_search_points, trajectory_timestamp, trajectory_prior),
+        axis=-1,
+    )
+    search_v2_timestamp = np.full(
+        (search_v2_points.shape[0], 1),
+        fill_value=main_current_value,
+        dtype=np.float32,
+    )
+    search_v2_prior = np.full(
+        (search_v2_points.shape[0], 1),
+        fill_value=0.5,
+        dtype=np.float32,
+    )
+    search_v2_points = np.concatenate(
+        (search_v2_points, search_v2_timestamp, search_v2_prior),
         axis=-1,
     )
 
@@ -918,6 +1044,29 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 ct_search_diagnostics.get('sigma_parallel', 0.0)),
             'trajectory_search_sigma_perpendicular': np.float32(
                 ct_search_diagnostics.get('sigma_perpendicular', 0.0)),
+        })
+    if use_search_evidence_v2:
+        data_dict.update({
+            'search_v2_points': search_v2_points.astype('float32'),
+            'search_v2_point_valid_mask':
+                search_v2_point_valid_mask.astype('float32'),
+            'search_v2_point_labels':
+                search_v2_point_labels.astype('float32'),
+            'search_v2_geometry_valid': np.float32(
+                search_v2_sampling['active']),
+            'search_v2_endpoint_xy':
+                search_v2_endpoint_xy.astype('float32'),
+            'search_v2_query_delta_t': np.float32(
+                search_v2_diagnostics.get(
+                    'query_delta_t', effective_delta_t_list[0])),
+            'search_v2_gap_ratio': np.float32(
+                search_v2_diagnostics.get('gap_ratio', 1.0)),
+            'search_v2_sigma_parallel': np.float32(
+                search_v2_diagnostics.get('sigma_parallel', 0.0)),
+            'search_v2_sigma_perpendicular': np.float32(
+                search_v2_diagnostics.get('sigma_perpendicular', 0.0)),
+            'search_v2_available_count': np.float32(
+                search_v2_sampling['available_count']),
         })
     if use_motion_v3:
         data_dict.update({
@@ -1208,7 +1357,7 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     candidate_id, offsets, candidate_offset_map=None,
                     point_sampling_seed_map=None, current_sampling_seed=None,
                     candidate_shared_transform=None,
-                    motion_aux_offsets=None):
+                    motion_aux_offsets=None, sample_index=0):
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
@@ -1222,6 +1371,7 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             "prev_frame_ids": prev_frame_ids,
             "this_frame_id": this_frame_id,
             "history_offsets": offsets,
+            "sample_index": int(sample_index),
         }
         if motion_aux_offsets is not None:
             motion_aux_frame_ids, motion_aux_valid_mask = (
@@ -1290,13 +1440,15 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
                                           current_sampling_seed=current_sampling_seed,
-                                          candidate_shared_transform=candidate_shared_transform)
+                                          candidate_shared_transform=candidate_shared_transform,
+                                          sample_index=anno_id)
                 view_b = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
                                           paired_candidate_id, self.twc_view_b_offsets,
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
                                           current_sampling_seed=current_sampling_seed,
-                                          candidate_shared_transform=candidate_shared_transform)
+                                          candidate_shared_transform=candidate_shared_transform,
+                                          sample_index=anno_id)
                 return {"view_a": view_a, "view_b": view_b}
 
             if self.use_b1motion_v3:
@@ -1308,7 +1460,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 motion_aux_offsets = None
             return self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
                                     candidate_id, offsets,
-                                    motion_aux_offsets=motion_aux_offsets)
+                                    motion_aux_offsets=motion_aux_offsets,
+                                    sample_index=anno_id)
         except AssertionError:
             # return 1
             return self[torch.randint(0, len(self), size=(1,)).item()]

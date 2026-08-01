@@ -30,11 +30,13 @@ from models.path_distillation import (
 )
 from models.ct_v2 import (
     ContinuousTimeMotionEncoder,
+    JointProposalFusion,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     PointFeatureTemporalConsistencyLoss,
     ProposalFusionGate,
     ReliabilityGatedProposalFusion,
+    TrajectorySearchEvidence,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
 )
@@ -62,6 +64,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
         self.use_b1motion_v3 = bool(getattr(
             config, 'use_b1motion_v3', False))
+        self.use_motion_v3_legacy_fusion = bool(getattr(
+            config, 'use_motion_v3_legacy_fusion', True))
+        self.use_search_evidence_v2 = bool(getattr(
+            config, 'use_search_evidence_v2', False))
+        self.use_joint_proposal_fusion = bool(getattr(
+            config, 'use_joint_proposal_fusion', False))
         self.use_ordered_trajectory_encoder = bool(getattr(
             config, 'use_ordered_trajectory_encoder', False))
         self.use_trajectory_search = bool(getattr(
@@ -255,6 +263,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise ValueError(
                     "B1motion-v3 is an isolated post-Transformer plugin; "
                     "disable incompatible modules: " + ", ".join(enabled))
+        if self.use_search_evidence_v2 and not self.use_b1motion_v3:
+            raise ValueError(
+                "Search Evidence v2 requires the B1motion-v3 physical prior")
+        if self.use_joint_proposal_fusion and not self.use_search_evidence_v2:
+            raise ValueError(
+                "joint proposal fusion requires Search Evidence v2")
+        if (self.use_search_evidence_v2
+                and self.use_motion_v3_legacy_fusion):
+            raise ValueError(
+                "B2-v2 disables the legacy two-candidate motion fusion")
         # Time-guided search changes only the data-side crop and fixed token
         # allocation.  It is intentionally allowed without the CT-v2 motion
         # encoder so a baseline + search-only arm keeps exactly the baseline
@@ -313,6 +331,28 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'motion_v3_help_margin', 0.05))
         self.motion_v3_aux_query_gaps = tuple(int(value) for value in getattr(
             config, 'motion_v3_aux_query_gaps', (2, 4)))
+        self.search_v2_targetness_weight = float(getattr(
+            config, 'search_v2_targetness_weight', 0.2))
+        self.search_v2_vote_weight = float(getattr(
+            config, 'search_v2_vote_weight', 1.0))
+        self.search_v2_proposal_weight = float(getattr(
+            config, 'search_v2_proposal_weight', 1.0))
+        self.search_v2_confidence_weight = float(getattr(
+            config, 'search_v2_confidence_weight', 0.1))
+        self.search_v2_focal_alpha = float(getattr(
+            config, 'search_v2_focal_alpha', 0.75))
+        self.search_v2_focal_gamma = float(getattr(
+            config, 'search_v2_focal_gamma', 2.0))
+        self.joint_fused_weight = float(getattr(
+            config, 'joint_fused_weight', 1.0))
+        self.joint_gate_weight = float(getattr(
+            config, 'joint_gate_weight', 0.1))
+        self.joint_help_margin = float(getattr(
+            config, 'joint_help_margin', 0.05))
+        self.joint_fusion_warmup_epochs = int(getattr(
+            config, 'joint_fusion_warmup_epochs', 10))
+        self.joint_fusion_ramp_epochs = int(getattr(
+            config, 'joint_fusion_ramp_epochs', 10))
         if self.dynamics_residual_scale < 0:
             raise ValueError("dynamics_residual_scale must be non-negative.")
         if self.dynamics_max_residual_norm <= 0:
@@ -350,6 +390,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 or any(value <= 0 for value in
                        self.motion_v3_aux_query_gaps)):
             raise ValueError("B1motion-v3 auxiliary query gaps must be positive")
+        if min(
+                self.search_v2_targetness_weight,
+                self.search_v2_vote_weight,
+                self.search_v2_proposal_weight,
+                self.search_v2_confidence_weight,
+                self.search_v2_focal_gamma,
+                self.joint_fused_weight,
+                self.joint_gate_weight,
+                self.joint_help_margin) < 0:
+            raise ValueError("B2-v2 loss settings must be non-negative")
+        if not 0.0 <= self.search_v2_focal_alpha <= 1.0:
+            raise ValueError("search_v2_focal_alpha must be in [0,1]")
+        if (self.joint_fusion_warmup_epochs < 0
+                or self.joint_fusion_ramp_epochs < 0):
+            raise ValueError("joint fusion schedule must be non-negative")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -514,28 +569,69 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 initial_sigma=float(getattr(
                     config, 'motion_v3_initial_sigma', 0.5)),
             )
-            self.motion_v3_fusion = ReliabilityGatedProposalFusion(
+            if self.use_motion_v3_legacy_fusion:
+                self.motion_v3_fusion = ReliabilityGatedProposalFusion(
+                    observation_dim=256,
+                    motion_dim=int(getattr(
+                        config, 'motion_v3_hidden_dim', 128)),
+                    observation_stats_dim=5,
+                    hidden_dim=int(getattr(
+                        config, 'motion_v3_gate_hidden_dim', 64)),
+                    context_dim=int(getattr(
+                        config, 'motion_v3_gate_context_dim', 32)),
+                    max_alpha=float(getattr(
+                        config, 'motion_v3_alpha_max', 0.5)),
+                    init_probability=float(getattr(
+                        config, 'motion_v3_gate_init_probability', 0.01)),
+                    radius_base=float(getattr(
+                        config, 'motion_v3_radius_base', 0.25)),
+                    radius_per_second=float(getattr(
+                        config, 'motion_v3_radius_per_second', 0.5)),
+                    radius_max=float(getattr(
+                        config, 'motion_v3_radius_max', 1.25)),
+                    time_scale=float(getattr(
+                        config, 'time_scale', default_time_scale)),
+                )
+
+        if self.use_search_evidence_v2:
+            # These modules are created only after all shared B0 parameters,
+            # preserving tensor-identical B0 initialization under a fixed seed.
+            self.search_evidence_v2 = TrajectorySearchEvidence(
+                point_dim=9,
+                feature_dim=int(getattr(
+                    config, 'search_v2_feature_dim', 128)),
                 observation_dim=256,
                 motion_dim=int(getattr(
                     config, 'motion_v3_hidden_dim', 128)),
                 observation_stats_dim=5,
-                hidden_dim=int(getattr(
-                    config, 'motion_v3_gate_hidden_dim', 64)),
-                context_dim=int(getattr(
-                    config, 'motion_v3_gate_context_dim', 32)),
-                max_alpha=float(getattr(
-                    config, 'motion_v3_alpha_max', 0.5)),
-                init_probability=float(getattr(
-                    config, 'motion_v3_gate_init_probability', 0.01)),
-                radius_base=float(getattr(
-                    config, 'motion_v3_radius_base', 0.25)),
-                radius_per_second=float(getattr(
-                    config, 'motion_v3_radius_per_second', 0.5)),
-                radius_max=float(getattr(
-                    config, 'motion_v3_radius_max', 1.25)),
-                time_scale=float(getattr(
-                    config, 'time_scale', default_time_scale)),
+                max_vote_offset=float(getattr(
+                    config, 'search_v2_max_vote_offset', 4.0)),
             )
+            if self.use_joint_proposal_fusion:
+                self.joint_proposal_fusion = JointProposalFusion(
+                    observation_dim=256,
+                    motion_dim=int(getattr(
+                        config, 'motion_v3_hidden_dim', 128)),
+                    search_dim=int(getattr(
+                        config, 'search_v2_feature_dim', 128)),
+                    observation_stats_dim=5,
+                    context_dim=int(getattr(
+                        config, 'joint_gate_context_dim', 32)),
+                    hidden_dim=int(getattr(
+                        config, 'joint_gate_hidden_dim', 96)),
+                    observation_bias=float(getattr(
+                        config, 'joint_gate_observation_bias', 4.6)),
+                    radius_base=float(getattr(
+                        config, 'joint_radius_base', 0.5)),
+                    radius_per_second=float(getattr(
+                        config, 'joint_radius_per_second', 0.5)),
+                    radius_max=float(getattr(
+                        config, 'joint_radius_max', 2.0)),
+                    normal_aux_mass=float(getattr(
+                        config, 'joint_normal_aux_mass', 0.5)),
+                    gap_aux_mass=float(getattr(
+                        config, 'joint_gap_aux_mass', 0.8)),
+                )
 
         self.m3_teacher = None
         if self.use_m3_path_distillation:
@@ -1143,29 +1239,150 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     device=point_feature.device,
                     dtype=point_feature.dtype,
                 ).mean(dim=1)
-            trainer = getattr(self, '_trainer', None)
-            trainer_state = str(getattr(
-                getattr(trainer, 'state', None), 'fn', '')).lower()
-            in_fit_loop = self.training or 'fit' in trainer_state
-            fusion_scale = self.motion_v3_fusion_scale
-            if (in_fit_loop
-                    and int(getattr(self, 'current_epoch', 0))
-                    < self.motion_v3_warmup_epoch):
-                fusion_scale = 0.0
-            updated_aux_box, fusion_diagnostics = self.motion_v3_fusion(
-                observation_aux_box,
-                point_feature,
-                obs_stats,
-                main_motion['feature'],
-                motion_prior_proposal_xy,
-                main_motion['velocity_xy'],
-                main_motion['valid'],
-                main_motion['gap_ratio'],
-                history_valid_ratio,
-                input_dict['motion_main_current_delta_t'],
-                enabled_scale=fusion_scale,
-            )
-            output_dict.update(fusion_diagnostics)
+            if self.use_motion_v3_legacy_fusion:
+                trainer = getattr(self, '_trainer', None)
+                trainer_state = str(getattr(
+                    getattr(trainer, 'state', None), 'fn', '')).lower()
+                in_fit_loop = self.training or 'fit' in trainer_state
+                fusion_scale = self.motion_v3_fusion_scale
+                if (in_fit_loop
+                        and int(getattr(self, 'current_epoch', 0))
+                        < self.motion_v3_warmup_epoch):
+                    fusion_scale = 0.0
+                updated_aux_box, fusion_diagnostics = self.motion_v3_fusion(
+                    observation_aux_box,
+                    point_feature,
+                    obs_stats,
+                    main_motion['feature'],
+                    motion_prior_proposal_xy,
+                    main_motion['velocity_xy'],
+                    main_motion['valid'],
+                    main_motion['gap_ratio'],
+                    history_valid_ratio,
+                    input_dict['motion_main_current_delta_t'],
+                    enabled_scale=fusion_scale,
+                )
+                output_dict.update(fusion_diagnostics)
+            else:
+                updated_aux_box = observation_aux_box
+
+            if self.use_search_evidence_v2:
+                required_search_keys = (
+                    'search_v2_points',
+                    'search_v2_point_valid_mask',
+                    'search_v2_geometry_valid',
+                    'search_v2_endpoint_xy',
+                    'search_v2_query_delta_t',
+                    'search_v2_gap_ratio',
+                    'search_v2_sigma_parallel',
+                    'search_v2_sigma_perpendicular',
+                    'search_v2_available_count',
+                )
+                missing_search = [
+                    key for key in required_search_keys
+                    if key not in input_dict]
+                if missing_search:
+                    raise KeyError(
+                        "B2-v2 input is missing: "
+                        + ", ".join(missing_search))
+                raw_search_points = input_dict['search_v2_points'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype)
+                encoded_search_points = self.encode_point_time(
+                    raw_search_points)
+                if encoded_search_points.shape[-1] != 5:
+                    raise ValueError(
+                        "B2-v2 requires a scalar point-time encoding")
+                endpoint_xy = input_dict['search_v2_endpoint_xy'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype)
+                point_xy = raw_search_points[..., :2]
+                delta_to_endpoint = endpoint_xy.unsqueeze(1) - point_xy
+                direction_norm = torch.linalg.norm(
+                    endpoint_xy, dim=1, keepdim=True)
+                default_direction = torch.zeros_like(endpoint_xy)
+                default_direction[:, 0] = 1.0
+                direction = torch.where(
+                    (direction_norm > 1e-6).expand_as(endpoint_xy),
+                    endpoint_xy / torch.clamp(direction_norm, min=1e-6),
+                    default_direction)
+                perpendicular = torch.stack((
+                    -direction[:, 1], direction[:, 0]), dim=1)
+                sigma_parallel = input_dict[
+                    'search_v2_sigma_parallel'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype).reshape(B, 1)
+                sigma_perpendicular = input_dict[
+                    'search_v2_sigma_perpendicular'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype).reshape(B, 1)
+                longitudinal = (
+                    delta_to_endpoint
+                    * direction.unsqueeze(1)).sum(dim=2) / torch.clamp(
+                        sigma_parallel, min=0.25)
+                lateral = (
+                    delta_to_endpoint
+                    * perpendicular.unsqueeze(1)).sum(dim=2) / torch.clamp(
+                        sigma_perpendicular, min=0.20)
+                search_point_inputs = torch.cat((
+                    encoded_search_points,
+                    delta_to_endpoint,
+                    longitudinal.unsqueeze(2),
+                    lateral.unsqueeze(2),
+                ), dim=2)
+                search_output = self.search_evidence_v2(
+                    search_point_inputs,
+                    point_xy,
+                    input_dict['search_v2_point_valid_mask'],
+                    input_dict['search_v2_geometry_valid'],
+                    point_feature.detach(),
+                    main_motion['feature'].detach(),
+                    obs_stats.detach(),
+                    input_dict['search_v2_query_delta_t'],
+                    input_dict['search_v2_gap_ratio'],
+                    sigma_parallel,
+                    sigma_perpendicular,
+                    input_dict['search_v2_available_count'],
+                )
+                output_dict.update(search_output)
+
+                if self.use_joint_proposal_fusion:
+                    trainer = getattr(self, '_trainer', None)
+                    trainer_state = str(getattr(
+                        getattr(trainer, 'state', None), 'fn', '')).lower()
+                    in_fit_loop = self.training or 'fit' in trainer_state
+                    joint_scale = 1.0
+                    if in_fit_loop:
+                        epoch = int(getattr(self, 'current_epoch', 0))
+                        if epoch < self.joint_fusion_warmup_epochs:
+                            joint_scale = 0.0
+                        elif self.joint_fusion_ramp_epochs > 0:
+                            joint_scale = min(
+                                1.0,
+                                (epoch - self.joint_fusion_warmup_epochs + 1)
+                                / float(self.joint_fusion_ramp_epochs),
+                            )
+                    updated_aux_box, joint_diagnostics = (
+                        self.joint_proposal_fusion(
+                            observation_aux_box,
+                            point_feature,
+                            obs_stats,
+                            main_motion['feature'],
+                            motion_prior_proposal_xy,
+                            main_motion['log_sigma_xy'],
+                            main_motion['valid'],
+                            history_valid_ratio,
+                            search_output['search_evidence_token'],
+                            search_output['search_proposal_xy'],
+                            search_output['search_confidence'],
+                            search_output['search_targetness_mass'],
+                            search_output['search_targetness_entropy'],
+                            search_output['search_candidate_valid'],
+                            input_dict['search_v2_query_delta_t'],
+                            input_dict['search_v2_gap_ratio'],
+                            enabled_scale=joint_scale,
+                        ))
+                    output_dict.update(joint_diagnostics)
             if self.training and 'motion_aux_ref_boxs' in input_dict:
                 aux_motion = self.physical_motion_encoder(
                     input_dict['motion_aux_ref_boxs'],
@@ -1851,8 +2068,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                 gap_valid.sum(),
                         })
 
-            if int(getattr(
-                    self, 'current_epoch', 0)) >= self.motion_v3_warmup_epoch:
+            if (self.use_motion_v3_legacy_fusion
+                    and int(getattr(
+                        self, 'current_epoch', 0))
+                    >= self.motion_v3_warmup_epoch):
                 final_xy = final_estimation_boxes[:, :2]
                 target_xy = center_label[:, :2]
                 loss_motion_v3_fused = F.smooth_l1_loss(
@@ -1941,6 +2160,154 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             final_xy.detach() - target_xy, dim=1),
                         main_valid),
                 })
+
+        if self.use_search_evidence_v2:
+            target_xy = center_label[:, :2].to(
+                device=output['search_proposal_xy'].device,
+                dtype=output['search_proposal_xy'].dtype)
+            point_labels = data['search_v2_point_labels'].to(
+                device=output['search_targetness_logits'].device,
+                dtype=output['search_targetness_logits'].dtype)
+            point_valid = data['search_v2_point_valid_mask'].to(
+                device=point_labels.device, dtype=point_labels.dtype)
+            targetness_logits = output['search_targetness_logits']
+            bce = F.binary_cross_entropy_with_logits(
+                targetness_logits, point_labels, reduction='none')
+            probability = torch.sigmoid(targetness_logits)
+            p_t = (
+                point_labels * probability
+                + (1.0 - point_labels) * (1.0 - probability))
+            alpha_t = (
+                point_labels * self.search_v2_focal_alpha
+                + (1.0 - point_labels)
+                * (1.0 - self.search_v2_focal_alpha))
+            focal = alpha_t * (1.0 - p_t).pow(
+                self.search_v2_focal_gamma) * bce
+            loss_search_targetness = (
+                focal * point_valid).sum() / torch.clamp(
+                    point_valid.sum(), min=1.0)
+
+            foreground = point_labels * point_valid
+            foreground_count = foreground.sum(dim=1)
+            vote_error = F.smooth_l1_loss(
+                output['search_point_center_votes'],
+                target_xy.unsqueeze(1).expand_as(
+                    output['search_point_center_votes']),
+                reduction='none').mean(dim=2)
+            loss_search_vote = (
+                vote_error * foreground).sum() / torch.clamp(
+                    foreground.sum(), min=1.0)
+
+            proposal_valid = (foreground_count >= 1).to(point_labels.dtype)
+            proposal_per_sample = F.smooth_l1_loss(
+                output['search_proposal_xy'], target_xy,
+                reduction='none').mean(dim=1)
+            loss_search_proposal = (
+                proposal_per_sample * proposal_valid).sum() / torch.clamp(
+                    proposal_valid.sum(), min=1.0)
+
+            confidence_target = (
+                foreground_count >= 3).to(point_labels.dtype)
+            loss_search_confidence = F.binary_cross_entropy_with_logits(
+                output['search_confidence_logit'], confidence_target)
+            loss_total += (
+                self.search_v2_targetness_weight
+                * loss_search_targetness
+                + self.search_v2_vote_weight * loss_search_vote
+                + self.search_v2_proposal_weight * loss_search_proposal
+                + self.search_v2_confidence_weight
+                * loss_search_confidence)
+            loss_dict.update({
+                'loss_total': loss_total,
+                'loss_search_v2_targetness': loss_search_targetness,
+                'loss_search_v2_vote': loss_search_vote,
+                'loss_search_v2_proposal': loss_search_proposal,
+                'loss_search_v2_confidence': loss_search_confidence,
+                'search_v2_foreground_points': foreground_count.mean(),
+                'search_v2_geometry_valid_rate': data[
+                    'search_v2_geometry_valid'].float().mean(),
+                'search_v2_candidate_valid_rate': output[
+                    'search_candidate_valid'].float().mean(),
+                'search_v2_confidence_mean': output[
+                    'search_confidence'].mean(),
+                'search_v2_targetness_mass': output[
+                    'search_targetness_mass'].mean(),
+                'search_v2_targetness_entropy': output[
+                    'search_targetness_entropy'].mean(),
+            })
+
+            if self.use_joint_proposal_fusion:
+                epoch = int(getattr(self, 'current_epoch', 0))
+                if epoch < self.joint_fusion_warmup_epochs:
+                    joint_ramp = 0.0
+                elif self.joint_fusion_ramp_epochs <= 0:
+                    joint_ramp = 1.0
+                else:
+                    joint_ramp = min(
+                        1.0,
+                        (epoch - self.joint_fusion_warmup_epochs + 1)
+                        / float(self.joint_fusion_ramp_epochs))
+                if joint_ramp > 0.0:
+                    loss_joint_fused = F.smooth_l1_loss(
+                        final_estimation_boxes[:, :2], target_xy)
+                    observation_error = torch.linalg.norm(
+                        aux_estimation_boxes[:, :2].detach() - target_xy,
+                        dim=1)
+                    motion_error = torch.linalg.norm(
+                        output['motion_prior_proposal_xy'].detach()
+                        - target_xy, dim=1)
+                    search_error = torch.linalg.norm(
+                        output['search_proposal_xy'].detach()
+                        - target_xy, dim=1)
+                    motion_valid = output['motion_prior_valid'] > 0
+                    search_valid = output['search_candidate_valid'] > 0
+                    motion_helpful = (
+                        motion_valid
+                        & (motion_error + self.joint_help_margin
+                           < observation_error))
+                    search_helpful = (
+                        search_valid
+                        & (search_error + self.joint_help_margin
+                           < observation_error))
+                    oracle = torch.zeros_like(
+                        observation_error, dtype=torch.long)
+                    oracle = torch.where(
+                        motion_helpful, torch.ones_like(oracle), oracle)
+                    choose_search = search_helpful & (
+                        (~motion_helpful) | (search_error < motion_error))
+                    oracle = torch.where(
+                        choose_search,
+                        torch.full_like(oracle, 2),
+                        oracle)
+                    loss_joint_gate = F.cross_entropy(
+                        output['joint_gate_logits'], oracle)
+                    loss_total += joint_ramp * (
+                        self.joint_fused_weight * loss_joint_fused
+                        + self.joint_gate_weight * loss_joint_gate)
+
+                    selected = torch.argmax(
+                        output['joint_gate_applied_probability'], dim=1)
+                    selected_search = selected == 2
+                    helpful_selected_search = (
+                        selected_search & search_helpful)
+                    loss_dict.update({
+                        'loss_total': loss_total,
+                        'loss_joint_fused': loss_joint_fused,
+                        'loss_joint_gate': loss_joint_gate,
+                        'joint_fusion_ramp': target_xy.new_tensor(joint_ramp),
+                        'joint_observation_error': observation_error.mean(),
+                        'joint_motion_error': motion_error.mean(),
+                        'joint_search_error': search_error.mean(),
+                        'joint_final_error': torch.linalg.norm(
+                            final_estimation_boxes[:, :2].detach()
+                            - target_xy, dim=1).mean(),
+                        'joint_search_selected_rate':
+                            selected_search.float().mean(),
+                        'joint_search_helpful_precision':
+                            helpful_selected_search.float().sum()
+                            / torch.clamp(
+                                selected_search.float().sum(), min=1.0),
+                    })
 
         if self.box_aware:
             prev_bc = torch.flatten(data['prev_bc'], start_dim=1, end_dim=2)

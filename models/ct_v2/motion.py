@@ -297,7 +297,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         query_gap, query_finite = self._format_query_gap(
             current_delta_t, batch_size, ref_boxs)
 
-        finite_row = torch.isfinite(ref_boxs).all(dim=(1, 2))
+        # PyTorch 2.0's Tensor.all accepts one dimension at a time; flattening
+        # preserves the per-sample finite check and remains compatible with
+        # newer releases.
+        finite_row = torch.isfinite(ref_boxs).flatten(1).all(dim=1)
         finite_row = finite_row & torch.isfinite(delta_t).all(dim=1)
         finite_row = finite_row & query_finite
         safe_boxs = torch.nan_to_num(
@@ -435,6 +438,434 @@ class TrajectoryPointEncoder(nn.Module):
 
     def forward(self, points):
         return self.net(points)
+
+
+class TrajectorySearchEvidence(nn.Module):
+    """Encode masked endpoint-crop points into soft foreground evidence."""
+
+    def __init__(
+            self,
+            point_dim=9,
+            feature_dim=128,
+            observation_dim=256,
+            motion_dim=128,
+            observation_stats_dim=5,
+            max_vote_offset=4.0,
+            eps=1e-6):
+        super().__init__()
+        self.feature_dim = int(feature_dim)
+        self.max_vote_offset = float(max_vote_offset)
+        self.eps = float(eps)
+        if self.feature_dim <= 0 or self.max_vote_offset <= 0:
+            raise ValueError("search evidence dimensions/scales must be positive")
+
+        self.point_mlp = nn.Sequential(
+            nn.Linear(int(point_dim), 64),
+            nn.LayerNorm(64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, self.feature_dim),
+            nn.LayerNorm(self.feature_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.feature_dim, self.feature_dim),
+            nn.LayerNorm(self.feature_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.extension_source_embedding = nn.Parameter(
+            torch.zeros(self.feature_dim))
+        # query dt, gap ratio, sigma parallel/perpendicular, available count
+        context_input_dim = (
+            int(observation_dim) + int(motion_dim)
+            + int(observation_stats_dim) + 5)
+        self.context_projection = nn.Sequential(
+            nn.Linear(context_input_dim, self.feature_dim),
+            nn.LayerNorm(self.feature_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.film_scale = nn.Linear(self.feature_dim, self.feature_dim)
+        self.film_shift = nn.Linear(self.feature_dim, self.feature_dim)
+        self.targetness_head = nn.Sequential(
+            nn.Linear(self.feature_dim, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 1),
+        )
+        self.vote_head = nn.Sequential(
+            nn.Linear(self.feature_dim, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 2),
+        )
+        self.confidence_head = nn.Linear(self.feature_dim + 2, 1)
+
+    @staticmethod
+    def _batch_scalar(value, reference, default=0.0):
+        batch_size = reference.shape[0]
+        if value is None:
+            return reference.new_full((batch_size, 1), float(default))
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(
+                value, device=reference.device, dtype=reference.dtype)
+        value = value.to(
+            device=reference.device, dtype=reference.dtype).reshape(-1)
+        if value.numel() == 1:
+            value = value.repeat(batch_size)
+        elif value.numel() != batch_size:
+            raise ValueError("search scalar must contain one value per sample")
+        return value.reshape(batch_size, 1)
+
+    def forward(
+            self,
+            point_inputs,
+            point_xy,
+            point_valid_mask,
+            geometry_valid,
+            observation_feature,
+            motion_feature,
+            observation_stats,
+            query_delta_t,
+            gap_ratio,
+            sigma_parallel,
+            sigma_perpendicular,
+            available_count=None):
+        if point_inputs.dim() != 3 or point_inputs.shape[-1] != 9:
+            raise ValueError("search point_inputs must have shape [B,N,9]")
+        if point_xy.shape != point_inputs.shape[:2] + (2,):
+            raise ValueError("search point_xy must have shape [B,N,2]")
+        batch_size, point_count, _ = point_inputs.shape
+        valid = point_valid_mask.to(
+            device=point_inputs.device, dtype=point_inputs.dtype)
+        if valid.shape != (batch_size, point_count):
+            raise ValueError("search point mask must have shape [B,N]")
+        geometry_valid = self._batch_scalar(
+            geometry_valid, point_inputs, default=0.0)
+        geometry_valid = (geometry_valid > 0).to(point_inputs.dtype)
+        valid = (valid > 0).to(point_inputs.dtype)
+        valid = valid * geometry_valid
+
+        scalar_context = torch.cat((
+            self._batch_scalar(query_delta_t, point_inputs, default=0.1),
+            self._batch_scalar(gap_ratio, point_inputs, default=1.0),
+            self._batch_scalar(sigma_parallel, point_inputs, default=0.0),
+            self._batch_scalar(
+                sigma_perpendicular, point_inputs, default=0.0),
+            torch.log1p(torch.clamp(self._batch_scalar(
+                available_count, point_inputs, default=0.0), min=0.0)) / 8.0,
+        ), dim=1)
+        context_input = torch.cat((
+            observation_feature.detach(),
+            motion_feature.detach(),
+            observation_stats.detach(),
+            scalar_context,
+        ), dim=1)
+        context = self.context_projection(torch.nan_to_num(
+            context_input, nan=0.0, posinf=0.0, neginf=0.0))
+
+        point_feature = self.point_mlp(torch.nan_to_num(
+            point_inputs, nan=0.0, posinf=0.0, neginf=0.0))
+        point_feature = point_feature + self.extension_source_embedding.view(
+            1, 1, -1)
+        film_scale = torch.sigmoid(self.film_scale(context)).unsqueeze(1)
+        film_shift = self.film_shift(context).unsqueeze(1)
+        point_feature = point_feature * (1.0 + film_scale) + film_shift
+
+        targetness_logits = self.targetness_head(
+            point_feature).squeeze(-1)
+        targetness = torch.sigmoid(targetness_logits)
+        weights = targetness * valid
+        targetness_mass = weights.sum(dim=1)
+        denominator = torch.clamp(
+            targetness_mass.unsqueeze(1), min=self.eps)
+        search_evidence_token = (
+            point_feature * weights.unsqueeze(-1)
+        ).sum(dim=1) / denominator
+
+        vote_offsets = self.max_vote_offset * torch.tanh(
+            self.vote_head(point_feature))
+        point_center_votes = point_xy + vote_offsets
+        search_proposal_xy = (
+            point_center_votes * weights.unsqueeze(-1)
+        ).sum(dim=1) / denominator
+
+        valid_count = valid.sum(dim=1)
+        mean_targetness = targetness_mass / torch.clamp(
+            valid_count, min=1.0)
+        probability = torch.clamp(
+            targetness, min=self.eps, max=1.0 - self.eps)
+        point_entropy = -(
+            probability * torch.log(probability)
+            + (1.0 - probability) * torch.log(1.0 - probability))
+        entropy = (point_entropy * valid).sum(dim=1) / torch.clamp(
+            valid_count, min=1.0)
+        confidence_logit = self.confidence_head(torch.cat((
+            search_evidence_token,
+            mean_targetness.unsqueeze(1),
+            entropy.unsqueeze(1),
+        ), dim=1)).squeeze(1)
+        search_confidence = torch.sigmoid(confidence_logit)
+        row_valid = (valid_count >= 3).to(point_inputs.dtype)
+        search_confidence = search_confidence * row_valid
+        search_evidence_token = search_evidence_token * row_valid.unsqueeze(1)
+        search_proposal_xy = search_proposal_xy * row_valid.unsqueeze(1)
+        return {
+            "search_evidence_token": search_evidence_token,
+            "search_proposal_xy": search_proposal_xy,
+            "search_confidence": search_confidence,
+            "search_confidence_logit": confidence_logit,
+            "search_targetness_logits": targetness_logits,
+            "search_targetness": targetness,
+            "search_targetness_mass": targetness_mass,
+            "search_targetness_mean": mean_targetness,
+            "search_targetness_entropy": entropy,
+            "search_vote_offsets": vote_offsets,
+            "search_point_center_votes": point_center_votes,
+            "search_candidate_valid": row_valid,
+        }
+
+
+class JointProposalFusion(nn.Module):
+    """Observation-default bounded fusion of observation/motion/search xy."""
+
+    def __init__(
+            self,
+            observation_dim=256,
+            motion_dim=128,
+            search_dim=128,
+            observation_stats_dim=5,
+            context_dim=32,
+            hidden_dim=96,
+            observation_bias=4.6,
+            radius_base=0.5,
+            radius_per_second=0.5,
+            radius_max=2.0,
+            normal_aux_mass=0.5,
+            gap_aux_mass=0.8,
+            eps=1e-6):
+        super().__init__()
+        self.radius_base = float(radius_base)
+        self.radius_per_second = float(radius_per_second)
+        self.radius_max = float(radius_max)
+        self.normal_aux_mass = float(normal_aux_mass)
+        self.gap_aux_mass = float(gap_aux_mass)
+        self.eps = float(eps)
+        if not 0.0 <= self.normal_aux_mass <= self.gap_aux_mass <= 1.0:
+            raise ValueError("joint fusion auxiliary mass bounds are invalid")
+        if self.radius_base < 0 or self.radius_max <= 0:
+            raise ValueError("joint fusion radii must be positive")
+        self.observation_projection = nn.Sequential(
+            nn.Linear(int(observation_dim), int(context_dim)), nn.ReLU())
+        self.motion_projection = nn.Sequential(
+            nn.Linear(int(motion_dim), int(context_dim)), nn.ReLU())
+        self.search_projection = nn.Sequential(
+            nn.Linear(int(search_dim), int(context_dim)), nn.ReLU())
+        # observation stats; motion sigma xy/history validity; search
+        # confidence/mass/entropy; three pair distances; query dt/gap ratio.
+        scalar_dim = int(observation_stats_dim) + 2 + 1 + 3 + 3 + 2
+        self.gate = nn.Sequential(
+            nn.Linear(3 * int(context_dim) + scalar_dim, int(hidden_dim)),
+            nn.LayerNorm(int(hidden_dim)),
+            nn.ReLU(inplace=True),
+            nn.Linear(int(hidden_dim), 3),
+        )
+        nn.init.zeros_(self.gate[-1].weight)
+        with torch.no_grad():
+            self.gate[-1].bias.copy_(torch.tensor(
+                [float(observation_bias), 0.0, 0.0]))
+
+    @staticmethod
+    def _batch_scalar(value, reference, default=0.0):
+        batch_size = reference.shape[0]
+        if value is None:
+            return reference.new_full((batch_size, 1), float(default))
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(
+                value, device=reference.device, dtype=reference.dtype)
+        value = value.to(
+            device=reference.device, dtype=reference.dtype).reshape(-1)
+        if value.numel() == 1:
+            value = value.repeat(batch_size)
+        elif value.numel() != batch_size:
+            raise ValueError("joint fusion scalar must contain one per sample")
+        return value.reshape(batch_size, 1)
+
+    @staticmethod
+    def _clip_norm(vector, radius, eps=1e-6):
+        norm = torch.linalg.norm(vector, dim=1, keepdim=True)
+        scale = torch.minimum(
+            torch.ones_like(norm), radius / torch.clamp(norm, min=eps))
+        return vector * scale
+
+    def forward(
+            self,
+            observation_box,
+            observation_feature,
+            observation_stats,
+            motion_feature,
+            motion_proposal_xy,
+            motion_log_sigma_xy,
+            motion_valid,
+            history_valid_ratio,
+            search_evidence_token,
+            search_proposal_xy,
+            search_confidence,
+            search_targetness_mass,
+            search_entropy,
+            search_valid,
+            query_delta_t,
+            gap_ratio,
+            enabled_scale=1.0):
+        if observation_box.dim() != 2 or observation_box.shape[1] != 4:
+            raise ValueError("observation_box must have shape [B,4]")
+        enabled_scale = float(enabled_scale)
+        if not 0.0 <= enabled_scale <= 1.0:
+            raise ValueError("joint fusion scale must be in [0,1]")
+        if enabled_scale == 0.0:
+            batch_size = observation_box.shape[0]
+            diagnostics = {
+                "joint_gate_logits": observation_box.new_zeros(
+                    (batch_size, 3)),
+                "joint_gate_probability": torch.cat((
+                    observation_box.new_ones((batch_size, 1)),
+                    observation_box.new_zeros((batch_size, 2))), dim=1),
+                "joint_gate_applied_probability": torch.cat((
+                    observation_box.new_ones((batch_size, 1)),
+                    observation_box.new_zeros((batch_size, 2))), dim=1),
+                "joint_correction_xy": observation_box.new_zeros(
+                    (batch_size, 2)),
+                "joint_fusion_radius": observation_box.new_zeros(
+                    (batch_size,)),
+                "joint_motion_valid": observation_box.new_zeros(
+                    (batch_size,)),
+                "joint_search_valid": observation_box.new_zeros(
+                    (batch_size,)),
+                "joint_fusion_enabled_scale": observation_box.new_tensor(0.0),
+            }
+            return observation_box, diagnostics
+
+        observation = observation_box.detach()
+        observation_xy = observation[:, :2]
+        motion_xy = motion_proposal_xy.detach()
+        search_xy = search_proposal_xy.detach()
+        observation_feature = observation_feature.detach()
+        observation_stats = observation_stats.detach()
+        motion_feature = motion_feature.detach()
+        motion_log_sigma_xy = motion_log_sigma_xy.detach()
+        search_evidence_token = search_evidence_token.detach()
+        search_confidence = search_confidence.detach()
+        search_targetness_mass = search_targetness_mass.detach()
+        search_entropy = search_entropy.detach()
+
+        motion_valid = (self._batch_scalar(
+            motion_valid, observation_xy) > 0)
+        search_valid = (self._batch_scalar(
+            search_valid, observation_xy) > 0)
+        motion_finite = (
+            torch.isfinite(motion_xy).all(dim=1, keepdim=True)
+            & torch.isfinite(motion_feature).all(dim=1, keepdim=True)
+            & torch.isfinite(motion_log_sigma_xy).all(dim=1, keepdim=True))
+        search_finite = (
+            torch.isfinite(search_xy).all(dim=1, keepdim=True)
+            & torch.isfinite(search_evidence_token).all(dim=1, keepdim=True)
+            & torch.isfinite(search_confidence).reshape(-1, 1))
+        motion_valid = motion_valid & motion_finite
+        search_valid = search_valid & search_finite
+        motion_xy = torch.where(
+            torch.isfinite(motion_xy), motion_xy, observation_xy)
+        search_xy = torch.where(
+            torch.isfinite(search_xy), search_xy, observation_xy)
+
+        query_dt = torch.clamp(torch.nan_to_num(self._batch_scalar(
+            query_delta_t, observation_xy, default=0.1), nan=0.1), min=0.0)
+        gap_ratio = torch.nan_to_num(self._batch_scalar(
+            gap_ratio, observation_xy, default=1.0), nan=1.0)
+        history_valid_ratio = torch.nan_to_num(self._batch_scalar(
+            history_valid_ratio, observation_xy), nan=0.0)
+        search_confidence_column = torch.clamp(
+            torch.nan_to_num(search_confidence.reshape(-1, 1), nan=0.0),
+            min=0.0, max=1.0)
+        search_mass_column = torch.log1p(torch.clamp(
+            torch.nan_to_num(search_targetness_mass.reshape(-1, 1)), min=0.0))
+        search_entropy_column = torch.nan_to_num(
+            search_entropy.reshape(-1, 1), nan=0.0)
+
+        obs_motion = torch.linalg.norm(
+            motion_xy - observation_xy, dim=1, keepdim=True)
+        obs_search = torch.linalg.norm(
+            search_xy - observation_xy, dim=1, keepdim=True)
+        motion_search = torch.linalg.norm(
+            motion_xy - search_xy, dim=1, keepdim=True)
+        gate_input = torch.cat((
+            self.observation_projection(torch.nan_to_num(
+                observation_feature, nan=0.0, posinf=0.0, neginf=0.0)),
+            self.motion_projection(torch.nan_to_num(
+                motion_feature, nan=0.0, posinf=0.0, neginf=0.0)),
+            self.search_projection(torch.nan_to_num(
+                search_evidence_token, nan=0.0, posinf=0.0, neginf=0.0)),
+            torch.nan_to_num(
+                observation_stats, nan=0.0, posinf=0.0, neginf=0.0),
+            torch.nan_to_num(
+                motion_log_sigma_xy, nan=0.0, posinf=0.0, neginf=0.0),
+            history_valid_ratio,
+            search_confidence_column,
+            search_mass_column,
+            search_entropy_column,
+            obs_motion,
+            obs_search,
+            motion_search,
+            query_dt,
+            gap_ratio,
+        ), dim=1)
+        logits = self.gate(gate_input)
+        logits = logits.clone()
+        logits[:, 1] = torch.where(
+            motion_valid.squeeze(1), logits[:, 1],
+            logits.new_full((), float("-inf")))
+        logits[:, 2] = torch.where(
+            search_valid.squeeze(1),
+            logits[:, 2] + torch.log(
+                search_confidence_column.squeeze(1) + self.eps),
+            logits.new_full((), float("-inf")))
+        probability = torch.softmax(logits, dim=1)
+
+        max_aux_mass = self.normal_aux_mass + (
+            self.gap_aux_mass - self.normal_aux_mass
+        ) * torch.clamp(gap_ratio - 1.0, min=0.0, max=1.0)
+        aux_probability = probability[:, 1:]
+        aux_mass = aux_probability.sum(dim=1, keepdim=True)
+        aux_scale = torch.minimum(
+            torch.ones_like(aux_mass),
+            max_aux_mass / torch.clamp(aux_mass, min=self.eps))
+        applied_aux = aux_probability * aux_scale
+        applied_probability = torch.cat((
+            1.0 - applied_aux.sum(dim=1, keepdim=True), applied_aux), dim=1)
+
+        radius = torch.clamp(
+            self.radius_base + self.radius_per_second * query_dt,
+            max=self.radius_max)
+        motion_residual = self._clip_norm(
+            motion_xy - observation_xy, radius, eps=self.eps)
+        search_residual = self._clip_norm(
+            search_xy - observation_xy, radius, eps=self.eps)
+        correction = (
+            applied_aux[:, 0:1] * motion_residual
+            + applied_aux[:, 1:2] * search_residual)
+        correction = self._clip_norm(correction, radius, eps=self.eps)
+        correction = correction * enabled_scale
+        candidate_xy = observation_xy + correction
+        any_valid = (motion_valid | search_valid).expand_as(candidate_xy)
+        final_xy = torch.where(any_valid, candidate_xy, observation_xy)
+        final_box = torch.cat((final_xy, observation[:, 2:]), dim=1)
+        return final_box, {
+            "joint_gate_logits": logits,
+            "joint_gate_probability": probability,
+            "joint_gate_applied_probability": applied_probability,
+            "joint_correction_xy": torch.where(
+                any_valid, correction, torch.zeros_like(correction)),
+            "joint_fusion_radius": radius.squeeze(1),
+            "joint_motion_valid": motion_valid.to(
+                observation_xy.dtype).squeeze(1),
+            "joint_search_valid": search_valid.to(
+                observation_xy.dtype).squeeze(1),
+            "joint_fusion_enabled_scale": observation_xy.new_tensor(
+                enabled_scale),
+        }
 
 
 class ZeroInitTrajectoryAdapter(nn.Module):
