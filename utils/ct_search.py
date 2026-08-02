@@ -573,3 +573,134 @@ def sample_padded_search_extension(
         "sample_count": sample_count,
         "available_count": available_count,
     }
+
+
+def sample_source_aware_endpoint_points(
+        baseline_points,
+        endpoint_points,
+        sample_size=128,
+        extension_quota=64,
+        min_points=3,
+        seed=None,
+        tolerance=1e-6):
+    """Sample a compact endpoint crop without starving overlap evidence.
+
+    Endpoint returns are deduplicated by XYZ and labelled according to whether
+    the identical return also belongs to the baseline crop.  Extension-only
+    points receive a reserved quota, while stable overlap points may fill the
+    rest of the independent branch.  Sampling is local, without replacement,
+    and therefore cannot consume or perturb the B0 sampling RNG.
+
+    Returns:
+        points: ``[sample_size, C]`` float32 array with zero padding.
+        valid_mask: ``[sample_size]`` float32 mask.
+        source: ``[sample_size]`` int64 array (0=overlap, 1=extension).
+        diagnostics: availability and selected-source counts.
+    """
+    baseline_points = np.asarray(baseline_points)
+    endpoint_points = np.asarray(endpoint_points)
+    sample_size = int(sample_size)
+    extension_quota = int(extension_quota)
+    min_points = int(min_points)
+    if sample_size <= 0:
+        raise ValueError("search_v21_point_count must be positive")
+    if not 0 <= extension_quota <= sample_size:
+        raise ValueError(
+            "search_v21_extension_quota must be in [0, point_count]")
+    if min_points < 3:
+        raise ValueError("search_v21_min_points must be at least 3")
+    if baseline_points.ndim != 2 or endpoint_points.ndim != 2:
+        raise ValueError("search point arrays must have shape [N, C]")
+    if baseline_points.shape[1] != endpoint_points.shape[1]:
+        raise ValueError("baseline and endpoint points must share channels")
+
+    tolerance = _finite_positive(tolerance, fallback=1e-6)
+    coordinate_dims = min(
+        baseline_points.shape[1], endpoint_points.shape[1], 3)
+    baseline_keys = {
+        tuple(row) for row in np.rint(
+            baseline_points[:, :coordinate_dims] / tolerance
+        ).astype(np.int64)
+    }
+
+    if len(endpoint_points):
+        endpoint_keys = np.rint(
+            endpoint_points[:, :coordinate_dims] / tolerance
+        ).astype(np.int64)
+        _, unique_indices = np.unique(
+            endpoint_keys, axis=0, return_index=True)
+        unique_indices = np.sort(unique_indices)
+        unique_points = endpoint_points[unique_indices]
+        unique_keys = endpoint_keys[unique_indices]
+        is_extension = np.fromiter(
+            (tuple(row) not in baseline_keys for row in unique_keys),
+            dtype=bool,
+            count=len(unique_keys),
+        )
+    else:
+        unique_points = endpoint_points
+        is_extension = np.zeros((0,), dtype=bool)
+
+    extension_indices = np.flatnonzero(is_extension)
+    overlap_indices = np.flatnonzero(~is_extension)
+    available_count = int(len(unique_points))
+    extension_count = int(len(extension_indices))
+    overlap_count = int(len(overlap_indices))
+
+    output = np.zeros(
+        (sample_size, baseline_points.shape[1]), dtype=np.float32)
+    valid_mask = np.zeros((sample_size,), dtype=np.float32)
+    source = np.zeros((sample_size,), dtype=np.int64)
+    inactive = {
+        "active": False,
+        "sample_count": 0,
+        "available_count": available_count,
+        "extension_count": extension_count,
+        "overlap_count": overlap_count,
+        "selected_extension_count": 0,
+        "selected_overlap_count": 0,
+    }
+    if available_count < min_points:
+        return output, valid_mask, source, inactive
+
+    rng = np.random.default_rng(seed)
+    extension_order = rng.permutation(extension_indices)
+    overlap_order = rng.permutation(overlap_indices)
+    initial_extension = min(
+        extension_quota, len(extension_order), sample_size)
+    selected_parts = [extension_order[:initial_extension]]
+    selected_sources = [np.ones((initial_extension,), dtype=np.int64)]
+
+    remaining = sample_size - initial_extension
+    selected_overlap = min(remaining, len(overlap_order))
+    if selected_overlap:
+        selected_parts.append(overlap_order[:selected_overlap])
+        selected_sources.append(np.zeros(
+            (selected_overlap,), dtype=np.int64))
+    remaining -= selected_overlap
+
+    extra_extension = min(
+        remaining, len(extension_order) - initial_extension)
+    if extra_extension:
+        selected_parts.append(extension_order[
+            initial_extension:initial_extension + extra_extension])
+        selected_sources.append(np.ones(
+            (extra_extension,), dtype=np.int64))
+
+    selected_indices = np.concatenate(selected_parts)
+    selected_source = np.concatenate(selected_sources)
+    sample_count = int(len(selected_indices))
+    output[:sample_count] = unique_points[selected_indices].astype(
+        np.float32, copy=False)
+    valid_mask[:sample_count] = 1.0
+    source[:sample_count] = selected_source
+    selected_extension_count = int(selected_source.sum())
+    return output, valid_mask, source, {
+        "active": True,
+        "sample_count": sample_count,
+        "available_count": available_count,
+        "extension_count": extension_count,
+        "overlap_count": overlap_count,
+        "selected_extension_count": selected_extension_count,
+        "selected_overlap_count": sample_count - selected_extension_count,
+    }

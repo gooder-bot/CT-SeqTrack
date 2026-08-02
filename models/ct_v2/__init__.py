@@ -5,11 +5,13 @@ from models.ct_v2.fusion import (
     ReliabilityGatedProposalFusion,
 )
 from models.ct_v2.motion import (
+    AdvantageGatedProposalFusion,
     ContinuousTimeMotionEncoder,
     JointProposalFusion,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     TrajectorySearchEvidence,
+    TrajectorySearchEvidenceV21,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
 )
@@ -23,16 +25,19 @@ from utils.ct_search import (
     build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
     sample_padded_search_extension,
+    sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
 )
 
 __all__ = [
+    "AdvantageGatedProposalFusion",
     "ContinuousTimeMotionEncoder",
     "JointProposalFusion",
     "OrderedPhysicalMotionEncoder",
     "OrderedTrajectoryEncoder",
     "TrajectorySearchEvidence",
+    "TrajectorySearchEvidenceV21",
     "TrajectoryPointEncoder",
     "ZeroInitTrajectoryAdapter",
     "ProposalFusionGate",
@@ -44,6 +49,7 @@ __all__ = [
     "build_trajectory_endpoint_search_box",
     "build_time_guided_search_box",
     "sample_padded_search_extension",
+    "sample_source_aware_endpoint_points",
     "sample_search_extension",
     "stratified_search_sample",
 ]

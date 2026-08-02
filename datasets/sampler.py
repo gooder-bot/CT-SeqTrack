@@ -44,6 +44,7 @@ from utils.ct_search import (
     build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
     sample_padded_search_extension,
+    sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
 )
@@ -655,6 +656,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     # the recursive online error contract without consuming point-sampling RNG.
     use_search_evidence_v2 = bool(getattr(
         config, 'use_search_evidence_v2', False))
+    use_search_evidence_v21 = bool(getattr(
+        config, 'use_search_evidence_v21', False))
+    if use_search_evidence_v2 and use_search_evidence_v21:
+        raise ValueError("Search Evidence v2 and v2.1 are mutually exclusive")
+    use_endpoint_search_evidence = (
+        use_search_evidence_v2 or use_search_evidence_v21)
+    search_config_prefix = (
+        'search_v21' if use_search_evidence_v21 else 'search_v2')
+
+    def search_config_value(name, default):
+        return getattr(config, f'{search_config_prefix}_{name}', default)
+
     search_v2_box = None
     search_v2_diagnostics = {
         'valid': False,
@@ -668,7 +681,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         dtype=baseline_search_points.dtype,
     )
     search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
-    if use_search_evidence_v2:
+    if use_endpoint_search_evidence:
         if int(candidate_id) == 0:
             search_v2_history_mode = 'canonical'
         elif sample_index % 2 == 0:
@@ -682,8 +695,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             candidate_id,
             candidate_trajectory_mode,
             training_mode=search_v2_history_mode,
-            correlation=float(getattr(
-                config, 'search_v2_history_correlation', 0.75)),
+            correlation=float(search_config_value(
+                'history_correlation', 0.75)),
             recursive_error_scale=1.0,
             degrees=config.degrees,
         )
@@ -692,18 +705,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 search_v2_history_boxes,
                 effective_delta_t_list,
                 valid_mask=valid_mask,
-                max_speed=float(getattr(
-                    config, 'search_v2_max_speed', 20.0)),
-                max_acceleration=float(getattr(
-                    config, 'search_v2_max_acceleration', 8.0)),
-                max_displacement=float(getattr(
-                    config, 'search_v2_max_displacement', 12.0)),
-                acceleration_weight=float(getattr(
-                    config, 'search_v2_acceleration_weight', 0.5)),
-                max_yaw_rate=float(getattr(
-                    config, 'search_v2_max_yaw_rate', np.pi / 2.0)),
-                min_displacement=float(getattr(
-                    config, 'search_v2_min_displacement', 0.2)),
+                max_speed=float(search_config_value('max_speed', 20.0)),
+                max_acceleration=float(search_config_value(
+                    'max_acceleration', 8.0)),
+                max_displacement=float(search_config_value(
+                    'max_displacement', 12.0)),
+                acceleration_weight=float(search_config_value(
+                    'acceleration_weight', 0.5)),
+                max_yaw_rate=float(search_config_value(
+                    'max_yaw_rate', np.pi / 2.0)),
+                min_displacement=float(search_config_value(
+                    'min_displacement', 0.2)),
             ))
         if search_v2_box is not None:
             search_v2_expanded_pc = (
@@ -800,36 +812,53 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'expansion_available_count': 0,
         }
 
-    search_v2_point_count = int(getattr(
-        config, 'search_v2_point_count', 128))
+    search_v2_point_count = int(search_config_value('point_count', 128))
     search_v2_points = np.zeros(
         (search_v2_point_count, baseline_search_points.shape[1]),
         dtype=np.float32,
     )
     search_v2_point_valid_mask = np.zeros(
         (search_v2_point_count,), dtype=np.float32)
+    search_v2_point_source = np.zeros(
+        (search_v2_point_count,), dtype=np.int64)
     search_v2_sampling = {
         'active': False,
         'sample_count': 0,
         'available_count': 0,
+        'extension_count': 0,
+        'overlap_count': 0,
     }
-    if use_search_evidence_v2 and search_v2_box is not None:
+    if use_endpoint_search_evidence and search_v2_box is not None:
         independent_seed_base = (
             current_sampling_seed
             if current_sampling_seed is not None else sample_index)
         search_v2_seed = (
             int(independent_seed_base) * 1664525 + 1013904223
         ) & 0xFFFFFFFF
-        (search_v2_points,
-         search_v2_point_valid_mask,
-         search_v2_sampling) = sample_padded_search_extension(
-            baseline_search_points,
-            search_v2_expanded_points,
-            sample_size=search_v2_point_count,
-            min_expansion_points=int(getattr(
-                config, 'search_v2_min_points', 3)),
-            seed=search_v2_seed,
-        )
+        if use_search_evidence_v21:
+            (search_v2_points,
+             search_v2_point_valid_mask,
+             search_v2_point_source,
+             search_v2_sampling) = sample_source_aware_endpoint_points(
+                baseline_search_points,
+                search_v2_expanded_points,
+                sample_size=search_v2_point_count,
+                extension_quota=int(search_config_value(
+                    'extension_quota', 64)),
+                min_points=int(search_config_value('min_points', 3)),
+                seed=search_v2_seed,
+            )
+        else:
+            (search_v2_points,
+             search_v2_point_valid_mask,
+             search_v2_sampling) = sample_padded_search_extension(
+                baseline_search_points,
+                search_v2_expanded_points,
+                sample_size=search_v2_point_count,
+                min_expansion_points=int(search_config_value(
+                    'min_points', 3)),
+                seed=search_v2_seed,
+            )
     ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
     num_points_in_search = int(len(baseline_search_points))
     if ct_search_active:
@@ -1067,6 +1096,35 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 search_v2_diagnostics.get('sigma_perpendicular', 0.0)),
             'search_v2_available_count': np.float32(
                 search_v2_sampling['available_count']),
+        })
+    if use_search_evidence_v21:
+        data_dict.update({
+            'search_v21_points': search_v2_points.astype('float32'),
+            'search_v21_point_valid_mask':
+                search_v2_point_valid_mask.astype('float32'),
+            'search_v21_point_source':
+                search_v2_point_source.astype('int64'),
+            'search_v21_point_labels':
+                search_v2_point_labels.astype('float32'),
+            'search_v21_geometry_valid': np.float32(
+                search_v2_sampling['active']),
+            'search_v21_endpoint_xy':
+                search_v2_endpoint_xy.astype('float32'),
+            'search_v21_query_delta_t': np.float32(
+                search_v2_diagnostics.get(
+                    'query_delta_t', effective_delta_t_list[0])),
+            'search_v21_gap_ratio': np.float32(
+                search_v2_diagnostics.get('gap_ratio', 1.0)),
+            'search_v21_sigma_parallel': np.float32(
+                search_v2_diagnostics.get('sigma_parallel', 0.0)),
+            'search_v21_sigma_perpendicular': np.float32(
+                search_v2_diagnostics.get('sigma_perpendicular', 0.0)),
+            'search_v21_available_count': np.float32(
+                search_v2_sampling['available_count']),
+            'search_v21_extension_count': np.float32(
+                search_v2_sampling['extension_count']),
+            'search_v21_overlap_count': np.float32(
+                search_v2_sampling['overlap_count']),
         })
     if use_motion_v3:
         data_dict.update({

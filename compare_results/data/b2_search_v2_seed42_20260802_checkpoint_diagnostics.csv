@@ -1,0 +1,2 @@
+﻿checkpoint,epoch,global_step,gate_bias_observation,gate_bias_motion,gate_bias_search,gate_weight_norm_observation,gate_weight_norm_motion,gate_weight_norm_search,search_confidence_head_bias
+last.ckpt,60,75720,4.547919750213623,0.020853541791439056,0.09725986421108246,0.6233704090118408,0.5496268272399902,0.9071670770645142,-2.5933399200439453

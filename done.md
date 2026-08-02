@@ -1,12 +1,42 @@
 # CT-SeqTrack 已完成记录
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
 这份文件统一记录已经完成的工程验收、历史实验和可供回查的关键输出。当前和未来任务只维护在 `need_to_do.md`；研究定位和论文边界见 `refined_plan.md`；简洁实验结论见 `sum_results.md`。
 
 注意：本文件是历史归档。下方旧日志里的“下一步”“待后续确认”只代表当时上下文，不代表当前任务；当前任务一律以 `need_to_do.md` 为准。
 
 ---
+
+## 2026-08-02：B2-v2 search / motion+search seed42 复核完成
+
+- [x] 新 SeqTrack control、legacy search-only 和 B2-v2 full 均完成 scratch
+  60 epoch 与 12 次 normal validation；B2 两组来自同一 clean commit
+  `a486a36`，seed42、batch16、workers4 和数据合同一致。
+- [x] 新 SeqTrack control final 为 `31.684/31.337`，远低于历史
+  `50.986/59.962`；该 run 缺少 provenance 且来自独立 dirty repo，不能作为
+  唯一 matched baseline，也不能用 `full−control` 声称 B2 大幅涨点。
+- [x] legacy search-only final/late-3 为 `49.655/56.392`、
+  `49.431/55.593`，相对历史 B0 final 下降 `3.705/7.990`；旧 long-tube +
+  75/25 token 搜索继续判定 No-Go。
+- [x] B2-v2 full final 为 `54.132/64.755`，相对历史 B0 为
+  `+0.772/+0.373`；late-3 为 `54.462/66.013`，相对 B0 为
+  `+1.557/+2.909`。Success 门槛通过、Precision 门槛失败，正式状态为
+  `HOLD_B2V2_PROMOTION`。
+- [x] physical prior 相对 CV 的 candidate0/nonzero/gap2/gap4 RMSE 改善
+  `6.6%/12.8%/16.8%/21.6%`，不是主要失败点。
+- [x] Search Evidence geometry/candidate 有效率仅 `23.29%`，epoch60 gate
+  选择 search 的比例仅 `0.104%`；gate bias 基本保持 observation 初始偏置，
+  当前 search 贡献尚未建立。
+- [x] 确认本轮 search-only 是 legacy 配置，不是新版 Search Evidence-only
+  消融；禁止用 full 与它的差值做 motion/search 因果拆分。
+- [x] 新增 `tools/analyze_b2_search_v2.py`，导出 validation、summary、
+  comparisons、full/legacy training、integrity、control stability、checkpoint、
+  drivers、next-experiments 与 decision 十一份可复现 CSV，并完成技术报告。
+
+完整结论见
+`compare_results/reports/b2_search_v2_seed42_20260802.html`。当前只允许同
+checkpoint 四模式归因和 same-commit matched B0；seed43/44 与强协议暂不启动。
 
 ## 2026-08-01：B1motion-v3 seed42 60-epoch 复核完成
 

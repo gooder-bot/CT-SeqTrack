@@ -1,6 +1,18 @@
 # CT-SeqTrack v2 论文计划
 
-更新时间：2026-08-01
+更新时间：2026-08-02
+
+> 2026-08-02 B2-v2 实证更新：motion + Search Evidence + joint fusion 的
+> seed42 scratch 60-epoch final 为 `54.132/64.755`、late-3 为
+> `54.462/66.013`。相对最强历史 B0，final 为 `+0.772/+0.373`，仅
+> Success 通过预注册门槛；late-3 为 `+1.557/+2.909`。同时，新 SeqTrack
+> control 异常低至 `31.684/31.337` 且缺少 provenance，不能作为唯一 baseline。
+> full 中 Search Evidence candidate 有效率只有 `23.29%`，epoch60 gate
+> argmax 选择率只有 `0.104%`，因此当前状态为
+> `B2V2_NORMAL_SIGNAL_POSITIVE / B2V2_SEARCH_CONTRIBUTION_NOT_ESTABLISHED /
+> HOLD_B2V2_PROMOTION`。论文不能声称 search 已带来增益；先做同 checkpoint
+> 四模式归因与 commit-`a486a36` matched B0。完整复核见
+> [B2-v2 seed42 技术报告](compare_results/reports/b2_search_v2_seed42_20260802.html)。
 
 > 2026-07-28 决策：standard 的 `delta_t` CV 只有 4.59%，真实时间的代码
 > 代价低、因果证据代价高；Random-20% 只保留为 synthetic

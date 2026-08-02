@@ -1,8 +1,10 @@
 # CT-SeqTrack 下一步
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
-当前只维护一个最小决策链。第四模块的完整证据见
+当前只维护最小决策链。最新 B2 证据见
+[`B2-v2 seed42 技术复核`](compare_results/reports/b2_search_v2_seed42_20260802.html)，
+第四模块的完整证据见
 [`Δt-PFTC seed42 60-epoch 最终诊断`](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)，
 最新 motion 证据见
 [`B1motion-v3 seed42 60-epoch 技术复核`](compare_results/reports/b1motion_v3_seed42_20260801.html)，
@@ -14,10 +16,52 @@
 ```text
 NO-GO_CURRENT_B4_IMPLEMENTATION
 PFTC_IDEA_NOT_YET_FAIRLY_TESTED
-NO_GO_B1MOTION_V3_STANDARD_GAIN
 V3_PHYSICAL_PRIOR_LEARNS_BUT_GATE_TRANSFER_FAILS
+B2V2_NORMAL_SIGNAL_POSITIVE
+B2V2_SEARCH_CONTRIBUTION_NOT_ESTABLISHED
+HOLD_B2V2_PROMOTION
 NO_EVIDENCE_FOR_PHYSICAL_TIME
 ```
+
+## 0A. B2-v2：先完成归因与 matched B0
+
+B2-v2 full final 为 `54.132/64.755`，相对历史 B0 为
+`+0.772/+0.373`；late-3 为 `+1.557/+2.909`。epoch60 Success 通过
+`+0.5`，Precision 未达到 `+1.0`，且新 SeqTrack control 异常低至
+`31.684/31.337`，不能作为唯一 baseline。当前状态是“正信号但不晋级”。
+
+旧 search-only 是 long-tube + 75/25 token legacy 路径，final 比历史 B0
+低 `3.705/7.990`，不是新版 Search Evidence-only 消融。full 内部 search
+candidate 有效率只有 `23.29%`，epoch60 argmax 选择率只有 `0.104%`；因此
+当前正信号不能归因给 search。
+
+- [ ] 给 `tools/ct_v2/run.py test` 增加/核验四个同 checkpoint 模式：full、
+  observation-only、motion-only、search-only；不得改变候选值与点采样。
+- [ ] 用 B2-v2 epoch60 `last.ckpt` 在完全相同 mini_val endpoint 上跑四模式。
+- [ ] 导出 obs/motion/search/final/GT、candidate validity、confidence、targetness
+  mass/entropy、三类 gate probability、oracle 类、previous prediction error 和
+  tracklet id。
+- [ ] 修正训练/验证诊断：`joint_search_error` 只在 valid search 行聚合，并记录
+  oracle search prevalence、valid-search helpful rate、selected-search helpful
+  precision 和 correction norm。
+- [ ] 对四模式做 tracklet-level paired bootstrap；best checkpoint 只诊断，主判定
+  仍使用 epoch60。
+- [ ] 在 commit `a486a36`、seed42、batch16、workers4、scratch 60 epoch、相同
+  数据 hash 下补 `01_seqtrack3d_baseline.yaml` matched B0。
+- [ ] 仅当 full 相对 matched B0 的 epoch60 同时达到 `+0.5 Success / +1.0
+  Precision` 且 late-3 不退化，才运行 seed43/44。
+
+若同 checkpoint 证明 search 无净贡献，B2-v2.1 只允许以下定向修改：保留紧凑
+endpoint crop 与独立 128 点；允许 endpoint crop 全部点进入 source-aware encoder
+并增加 baseline-overlap flag，解决 extension-only 的 77% invalid；将 availability
+与 utility 分开监督，让 reliability 拟合 search 相对 observation 的 advantage，
+移除未校准的 `log(confidence)` 二次惩罚。禁止退回 long tube、压缩 B0 1024 点或
+用固定平均融合。
+
+完成 attribution 和 matched B0 前，暂停 seed43/44、gap1124、random20、
+burst-drop、true/fixed/shuffled 与论文 search 消融长训。
+
+## 0B. PFTC：先修正当前实现
 
 这次 `dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0` 已经完成：
 
@@ -33,7 +77,7 @@ NO_EVIDENCE_FOR_PHYSICAL_TIME
 canonical geometry，且 raw SmoothL1 出现明显表示收缩，不能把结论扩大为
 point consistency 思路本身无效；修正后的版本只允许一次受控 kill-test。
 
-## 0A. B1motion-v3：先做同 checkpoint 归因
+## 0C. B1motion-v3：先做同 checkpoint 归因
 
 v3 的 60-epoch final 为 `52.655/61.835`，相对 current B0 为
 `−0.705/−2.547`；late-3 为 `−0.855/−1.898`，当前不涨点。但 v3 相对
@@ -69,7 +113,7 @@ B0 相对原始 SeqTrack 是 `+2.374/+4.420`；论文模块归因不能使用前
 gap1124/random20 与 true/fixed/shuffled 保持锁定，直到 standard on/off 同时为正。
 本节只需推理，不阻塞下方 PFTC 修复。
 
-## 0B. Motion legacy：只做无训练归因，不再扫全局 alpha
+## 0D. Motion legacy：只做无训练归因，不再扫全局 alpha
 
 完整数据见
 [`Motion fixed-alpha 复核`](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)。

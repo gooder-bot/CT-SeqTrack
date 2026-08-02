@@ -1,6 +1,6 @@
 # CT-SeqTrack 实验结果简要总结
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。
 
@@ -8,10 +8,48 @@
 
 CT-SeqTrack 已完成 baseline、CT Motion、CT Motion + Search、完整
 Adaptive Fusion 四组正常数据消融。下方 2026-07-24 及更早的 M2/M3/M4
-数值只保留为历史证据；当前决策以新的 B0–B3 normal-mini 首筛和后续
-Search-only A1 为准。
+数值只保留为历史证据；旧链结论以 B0–B3 normal-mini 与 Search-only A1
+为准，当前 B2 决策以 2026-08-02 的 B2-v2 full 复核为准。
 
 ## 0. 当前总判断
+
+### 2026-08-02 B2-v2 search-only / motion+search seed42 复核
+
+本轮三个新 run 均完成 60 epoch 和 12 个 normal validation 点，但存在一个必须
+先处理的对照异常：新 SeqTrack control final 只有 `31.684/31.337`，远低于
+历史原始 SeqTrack 的 `50.986/59.962`。它没有 `run_provenance.json`，来自独立
+dirty repo；虽然前 3 个 batch loss 与历史 run 逐 float 相等，但之后训练轨迹
+迅速分叉。因此 `full−新 control=+22.449/+33.418` 不能作为 B2 净增益。
+
+| arm | final Success | final Precision | late-3 Success | late-3 Precision |
+|---|---:|---:|---:|---:|
+| 新 SeqTrack control（异常低） | 31.684 | 31.337 | 31.138 | 30.640 |
+| 旧 search-only | 49.655 | 56.392 | 49.431 | 55.593 |
+| **B2-v2 full** | **54.132** | **64.755** | **54.462** | **66.013** |
+| 历史原始 SeqTrack | 50.986 | 59.962 | 50.108 | 58.863 |
+| 历史 CT-v2 B0 | 53.360 | 64.382 | 52.905 | 63.104 |
+
+旧 search-only 使用的是 legacy long-tube 和 75/25 token 分配，并非新版 Search
+Evidence 单独消融。它相对历史 B0 final 下降 `3.705/7.990`，结论仍是
+`LEGACY_SEARCH_ONLY_NO_GO`，也不能用它与 full 的差值拆解 motion/search。
+
+B2-v2 full 相对历史 B0 的 epoch60 为 `+0.772/+0.373`：Success 通过预注册
+`+0.5` 门槛，Precision 未达到 `+1.0`；late-3 为 `+1.557/+2.909`，两项均
+稳定为正。当前正式登记为 `B2V2_NORMAL_SIGNAL_POSITIVE / HOLD_B2V2_PROMOTION`，
+不能宣布完整晋级，也不应直接废弃。
+
+内部诊断显示 physical prior 在 candidate0/nonzero/gap2/gap4 相对 CV 的 RMSE
+改善 `6.6%/12.8%/16.8%/21.6%`；但 Search Evidence 的 geometry/candidate
+有效率只有 `23.29%`，epoch60 被 gate 选为 argmax 的比例仅 `0.104%`。最终
+gate bias `[4.548,0.021,0.097]` 基本保留 observation 初始偏置，且 search
+logit 还叠加 `log(confidence)`；当前正信号更可能来自 physical prior 与新
+observation-default joint fusion，而不是已被证明的 search 贡献。
+
+下一步先用 full epoch60 同 checkpoint 做 full / observation-only /
+motion-only / search-only 四模式推理，补 valid-search 条件误差、oracle prevalence、
+helpful precision 和 tracklet bootstrap；同时补同 commit `a486a36` 的 matched
+B0。完成这两项前不运行 seed43/44 或强协议。完整报告见
+[`B2-v2 seed42 技术复核`](compare_results/reports/b2_search_v2_seed42_20260802.html)。
 
 ### 2026-08-01 B1motion-v3 seed42 60-epoch
 

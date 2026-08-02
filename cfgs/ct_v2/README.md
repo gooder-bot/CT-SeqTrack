@@ -12,6 +12,7 @@ These files are the complete active experiment surface:
 | `02_ct_motion_alpha025.yaml` | Reproduced fixed-motion rerun, alpha=0.25 |
 | `02_ct_motion_v3.yaml` | Physical xy prior + bounded reliability-gated post-Transformer fusion |
 | `03_ct_motion_search.yaml` | Add time-guided search expansion |
+| `03_ct_motion_search_v2.yaml` | B1-v3 physical prior + endpoint Search Evidence + observation-default three-candidate fusion |
 | `04_ct_seqtrack_v2.yaml` | Add adaptive proposal fusion; completed seed42 screen, rejected |
 | `04_ct_seqtrack_v2_full.yaml` | Reserved full-nuScenes config; blocked by the mini result |
 | `05_seqtrack3d_search_only.yaml` | Same B0 network plus data-side time-guided search; completed seed42 screen, rejected |
@@ -70,6 +71,22 @@ finishes at 50.986 / 59.962, so v3 is numerically +1.670 / +1.873. This is not
 a motion ablation: the current B0 itself is +2.374 / +4.420 over that old run
 and remains stronger than v3. Use current B0 or same-checkpoint fusion-off for
 module attribution.
+
+`03_ct_motion_search_v2.yaml` has completed its first seed42 scratch 60-epoch
+normal-mini screen. It finishes at 54.132 / 64.755 with late-3
+54.462 / 66.013. Against the strongest available historical B0 this is
+`+0.772 / +0.373` final and `+1.557 / +2.909` late-3: Success passes the
+preregistered final threshold, Precision does not, and a same-commit matched B0
+is still missing. Status is `HOLD_B2V2_PROMOTION`, not a full pass.
+
+The contemporaneous `05_seqtrack3d_search_only.yaml` run is a legacy long-tube
+and 75/25-token experiment, not a Search Evidence-only ablation. It finishes at
+49.655 / 56.392 and remains rejected. In the full v2 run, endpoint search is
+valid for only 23.29% of training samples and is the gate argmax only 0.104% at
+epoch60, so the positive full score cannot yet be attributed to search. First
+run same-checkpoint full/observation-only/motion-only/search-only inference and
+train a commit-`a486a36` matched B0. See
+`compare_results/reports/b2_search_v2_seed42_20260802.html`.
 
 PFTC is the independent fourth-module candidate; it is not B3 plus another
 module.  It is training-only and adds no inference work.

@@ -14,11 +14,13 @@ from models.ct_v2.fusion import (
     ReliabilityGatedProposalFusion,
 )
 from models.ct_v2.motion import (
+    AdvantageGatedProposalFusion,
     ContinuousTimeMotionEncoder,
     JointProposalFusion,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     TrajectorySearchEvidence,
+    TrajectorySearchEvidenceV21,
     ZeroInitTrajectoryAdapter,
 )
 from models.dynamics import apply_proposal_innovation
@@ -38,6 +40,7 @@ from utils.ct_search import (
     build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
     sample_padded_search_extension,
+    sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
 )
@@ -315,6 +318,293 @@ class SearchEvidenceEncoderTest(unittest.TestCase):
         torch.testing.assert_close(
             output["search_proposal_xy"][1], torch.zeros(2))
         self.assertEqual(output["search_confidence"][1].item(), 0.0)
+
+
+class EndpointSearchV21Test(unittest.TestCase):
+    @staticmethod
+    def _points(start, count):
+        value = np.arange(start, start + count, dtype=np.float32)
+        return np.stack((
+            value, np.zeros(count), np.ones(count),
+            np.full(count, 0.5), np.zeros(count)), axis=1)
+
+    def test_extension_quota_and_overlap_fill_are_exact(self):
+        baseline = self._points(0, 100)
+        endpoint = np.concatenate((
+            baseline, self._points(1000, 100)), axis=0)
+        points, mask, source, diagnostics = (
+            sample_source_aware_endpoint_points(
+                baseline, endpoint, sample_size=128,
+                extension_quota=64, seed=21))
+
+        self.assertEqual(points.shape, (128, 5))
+        self.assertEqual(int(mask.sum()), 128)
+        self.assertEqual(int(source[mask > 0].sum()), 64)
+        self.assertEqual(diagnostics["selected_extension_count"], 64)
+        self.assertEqual(diagnostics["selected_overlap_count"], 64)
+        self.assertEqual(
+            len(np.unique(points[mask > 0, :3], axis=0)), 128)
+
+    def test_overlap_shortage_is_filled_from_remaining_extension(self):
+        baseline = self._points(0, 8)
+        endpoint = np.concatenate((
+            baseline, self._points(1000, 160)), axis=0)
+        _, mask, source, diagnostics = sample_source_aware_endpoint_points(
+            baseline, endpoint, sample_size=128,
+            extension_quota=64, seed=4)
+
+        self.assertEqual(int(mask.sum()), 128)
+        self.assertEqual(diagnostics["selected_overlap_count"], 8)
+        self.assertEqual(diagnostics["selected_extension_count"], 120)
+        self.assertEqual(int(source[mask > 0].sum()), 120)
+
+    def test_sparse_and_empty_endpoint_are_padded_without_nan(self):
+        baseline = self._points(0, 4)
+        for count, expected_active in ((0, False), (2, False), (3, True)):
+            endpoint = self._points(0, count)
+            points, mask, source, diagnostics = (
+                sample_source_aware_endpoint_points(
+                    baseline, endpoint, sample_size=128, seed=8))
+            self.assertEqual(diagnostics["active"], expected_active)
+            self.assertEqual(int(mask.sum()), count if expected_active else 0)
+            self.assertTrue(np.isfinite(points).all())
+            np.testing.assert_array_equal(points[mask == 0], 0.0)
+            np.testing.assert_array_equal(source[mask == 0], 0)
+
+    def test_source_count_boundaries_have_no_replacement(self):
+        cases = (
+            (0, 0), (0, 3), (0, 63), (0, 64),
+            (63, 64), (64, 64), (80, 160),
+        )
+        for overlap_count, extension_count in cases:
+            baseline = self._points(0, max(overlap_count, 1))
+            overlap = self._points(0, overlap_count)
+            extension = self._points(1000, extension_count)
+            endpoint = np.concatenate((overlap, extension), axis=0)
+            points, mask, source, diagnostics = (
+                sample_source_aware_endpoint_points(
+                    baseline, endpoint, sample_size=128,
+                    extension_quota=64, seed=12))
+            available = overlap_count + extension_count
+            expected = min(available, 128) if available >= 3 else 0
+            self.assertEqual(int(mask.sum()), expected)
+            self.assertEqual(diagnostics["active"], available >= 3)
+            self.assertEqual(
+                len(np.unique(points[mask > 0, :3], axis=0)), expected)
+            self.assertEqual(
+                int(source[mask > 0].sum()),
+                diagnostics["selected_extension_count"])
+
+    def test_branch_sampling_preserves_baseline_and_global_rng(self):
+        baseline = self._points(0, 100)
+        endpoint = np.concatenate((
+            baseline, self._points(1000, 100)), axis=0)
+        baseline_copy = baseline.copy()
+        state = np.random.get_state()
+        first = sample_source_aware_endpoint_points(
+            baseline, endpoint, sample_size=128, seed=31)
+        second = sample_source_aware_endpoint_points(
+            baseline, endpoint, sample_size=128, seed=31)
+        after = np.random.get_state()
+
+        np.testing.assert_array_equal(baseline, baseline_copy)
+        np.testing.assert_array_equal(first[0], second[0])
+        np.testing.assert_array_equal(first[1], second[1])
+        np.testing.assert_array_equal(first[2], second[2])
+        self.assertEqual(state[0], after[0])
+        np.testing.assert_array_equal(state[1], after[1])
+        self.assertEqual(state[2:], after[2:])
+
+
+class SearchEvidenceV21Test(unittest.TestCase):
+    @staticmethod
+    def _inputs():
+        torch.manual_seed(23)
+        return {
+            "point_inputs": torch.randn(2, 8, 9),
+            "point_xy": torch.randn(2, 8, 2),
+            "point_valid_mask": torch.tensor([
+                [1, 1, 1, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0]], dtype=torch.float32),
+            "point_source": torch.tensor([
+                [1, 0, 1, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0]], dtype=torch.long),
+            "geometry_valid": torch.tensor([1.0, 0.0]),
+            "observation_feature": torch.randn(2, 16),
+            "motion_feature": torch.randn(2, 12),
+            "motion_context_valid": torch.tensor([1.0, 0.0]),
+            "observation_stats": torch.randn(2, 5),
+            "query_delta_t": torch.tensor([0.5, 0.5]),
+            "gap_ratio": torch.ones(2),
+            "sigma_parallel": torch.ones(2),
+            "sigma_perpendicular": torch.ones(2),
+            "available_count": torch.tensor([3.0, 0.0]),
+            "extension_count": torch.tensor([2.0, 0.0]),
+            "overlap_count": torch.tensor([1.0, 0.0]),
+        }
+
+    @staticmethod
+    def _encoder():
+        return TrajectorySearchEvidenceV21(
+            observation_dim=16, motion_dim=12, feature_dim=20,
+            query_dim=8)
+
+    def test_padding_is_ignored_and_empty_rows_are_finite(self):
+        encoder = self._encoder()
+        inputs = self._inputs()
+        output = encoder(**inputs)
+        changed = dict(inputs)
+        changed["point_inputs"] = inputs["point_inputs"].clone()
+        changed["point_xy"] = inputs["point_xy"].clone()
+        changed["point_source"] = inputs["point_source"].clone()
+        changed["point_inputs"][0, 3:] = 1e6
+        changed["point_xy"][0, 3:] = -1e6
+        changed["point_source"][0, 3:] = 1
+        changed_output = encoder(**changed)
+
+        for key in (
+                "search_v21_evidence_token", "search_v21_proposal_xy",
+                "search_v21_targetness_mass",
+                "search_v21_targetness_mean",
+                "search_v21_targetness_max",
+                "search_v21_targetness_entropy",
+                "search_v21_effective_sample_size",
+                "search_v21_extension_weight_ratio"):
+            torch.testing.assert_close(output[key][0], changed_output[key][0])
+        self.assertTrue(all(
+            torch.isfinite(value).all()
+            for value in output.values() if torch.is_tensor(value)))
+        torch.testing.assert_close(
+            output["search_v21_proposal_xy"][1], torch.zeros(2))
+        self.assertEqual(
+            output["search_v21_candidate_valid"][1].item(), 0.0)
+
+    def test_observation_query_changes_explicit_match_logits(self):
+        encoder = self._encoder()
+        inputs = self._inputs()
+        output = encoder(**inputs)
+        changed = dict(inputs)
+        changed["observation_feature"] = (
+            inputs["observation_feature"] + 2.0)
+        changed_output = encoder(**changed)
+        self.assertFalse(torch.equal(
+            output["search_v21_match_logits"][0, :3],
+            changed_output["search_v21_match_logits"][0, :3]))
+
+    def test_all_negative_targetness_still_pools_without_nan(self):
+        encoder = self._encoder()
+        with torch.no_grad():
+            encoder.key_projection.weight.zero_()
+            encoder.key_projection.bias.zero_()
+            encoder.local_targetness_head[-1].weight.zero_()
+            encoder.local_targetness_head[-1].bias.fill_(-100.0)
+        output = encoder(**self._inputs())
+        self.assertTrue(all(
+            torch.isfinite(value).all()
+            for value in output.values() if torch.is_tensor(value)))
+        torch.testing.assert_close(
+            output["search_v21_pool_weights"][0].sum(),
+            torch.tensor(1.0), atol=1e-6, rtol=0.0)
+        torch.testing.assert_close(
+            output["search_v21_pool_weights"][1].sum(),
+            torch.tensor(0.0), atol=0.0, rtol=0.0)
+
+    def test_context_features_are_gradient_isolated(self):
+        encoder = self._encoder()
+        inputs = self._inputs()
+        inputs["observation_feature"] = (
+            inputs["observation_feature"].requires_grad_())
+        inputs["motion_feature"] = inputs["motion_feature"].requires_grad_()
+        output = encoder(**inputs)
+        (output["search_v21_evidence_token"].sum()
+         + output["search_v21_proposal_xy"].sum()).backward()
+        self.assertIsNone(inputs["observation_feature"].grad)
+        self.assertIsNone(inputs["motion_feature"].grad)
+        self.assertTrue(any(
+            parameter.grad is not None for parameter in encoder.parameters()))
+
+
+class AdvantageProposalFusionTest(unittest.TestCase):
+    @staticmethod
+    def _fusion():
+        return AdvantageGatedProposalFusion(
+            observation_dim=8, motion_dim=6, search_dim=7,
+            observation_stats_dim=5, context_dim=4, hidden_dim=12)
+
+    @staticmethod
+    def _inputs():
+        return {
+            "observation_box": torch.tensor([[1.0, 2.0, 3.0, 0.4]]),
+            "observation_feature": torch.zeros(1, 8),
+            "observation_stats": torch.zeros(1, 5),
+            "motion_feature": torch.zeros(1, 6),
+            "motion_proposal_xy": torch.tensor([[20.0, 2.0]]),
+            "motion_log_sigma_xy": torch.zeros(1, 2),
+            "motion_valid": torch.ones(1),
+            "history_valid_ratio": torch.ones(1),
+            "search_evidence_token": torch.zeros(1, 7),
+            "search_proposal_xy": torch.tensor([[1.0, 30.0]]),
+            "search_valid": torch.ones(1),
+            "search_targetness_mean": torch.ones(1),
+            "search_targetness_max": torch.ones(1),
+            "search_entropy": torch.zeros(1),
+            "search_effective_sample_size": torch.ones(1),
+            "search_extension_weight_ratio": torch.full((1,), 0.5),
+            "search_available_count": torch.full((1,), 128.0),
+            "search_extension_count": torch.full((1,), 64.0),
+            "search_overlap_count": torch.full((1,), 64.0),
+            "query_delta_t": torch.tensor([1.0]),
+            "gap_ratio": torch.ones(1),
+        }
+
+    def test_initial_independent_weights_are_one_percent(self):
+        _, diagnostics = self._fusion()(**self._inputs())
+        torch.testing.assert_close(
+            diagnostics["advantage_applied_weight"],
+            torch.full((1, 2), 0.01), atol=1e-6, rtol=0.0)
+
+    def test_warmup_and_double_invalid_are_bitwise_observation(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        warmup, _ = fusion(**inputs, enabled_scale=0.0)
+        self.assertTrue(torch.equal(warmup, inputs["observation_box"]))
+        inputs["motion_valid"] = torch.zeros(1)
+        inputs["search_valid"] = torch.zeros(1)
+        invalid, _ = fusion(**inputs, enabled_scale=1.0)
+        self.assertTrue(torch.equal(invalid, inputs["observation_box"]))
+
+    def test_correction_is_bounded_and_z_yaw_are_observation(self):
+        fusion = self._fusion()
+        with torch.no_grad():
+            fusion.help_head.bias.fill_(20.0)
+            fusion.step_head.bias.fill_(20.0)
+        inputs = self._inputs()
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+        correction = torch.linalg.norm(
+            final[:, :2] - inputs["observation_box"][:, :2], dim=1)
+        self.assertTrue(torch.all(
+            correction <= diagnostics["advantage_fusion_radius"] + 1e-6))
+        torch.testing.assert_close(final[:, 2:], inputs["observation_box"][:, 2:])
+        self.assertLessEqual(
+            diagnostics["advantage_applied_weight"].sum().item(), 0.5 + 1e-6)
+
+    def test_joint_losses_cannot_update_candidate_sources(self):
+        fusion = self._fusion()
+        inputs = self._inputs()
+        isolated = (
+            "observation_box", "observation_feature", "motion_feature",
+            "motion_proposal_xy", "search_evidence_token",
+            "search_proposal_xy")
+        for key in isolated:
+            inputs[key] = inputs[key].requires_grad_()
+        final, diagnostics = fusion(**inputs, enabled_scale=1.0)
+        (final[:, :2].sum()
+         + diagnostics["advantage_help_logits"].sum()
+         + diagnostics["advantage_step_logits"].sum()).backward()
+        for key in isolated:
+            self.assertIsNone(inputs[key].grad, key)
+        self.assertTrue(any(
+            parameter.grad is not None for parameter in fusion.parameters()))
 
 
 class JointProposalFusionTest(unittest.TestCase):
@@ -969,6 +1259,40 @@ class CorrelatedHistoryTest(unittest.TestCase):
 
 
 class ConfigCompositionTest(unittest.TestCase):
+    def test_search_v21_config_is_search_only_scratch_contract(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/08_seqtrack3d_search_v21.yaml")
+        self.assertFalse(config["use_b1motion_v3"])
+        self.assertTrue(config["use_search_evidence_v21"])
+        self.assertTrue(config["use_advantage_proposal_fusion"])
+        self.assertTrue(config["export_proposal_diagnostics"])
+        self.assertFalse(config["use_search_evidence_v2"])
+        self.assertFalse(config["use_joint_proposal_fusion"])
+        self.assertEqual(config["proposal_inference_mode"], "full")
+        self.assertEqual(config["point_sample_size"], 1024)
+        self.assertEqual(config["search_v21_point_count"], 128)
+        self.assertEqual(config["search_v21_extension_quota"], 64)
+        self.assertEqual(config["search_v21_query_dim"], 32)
+        self.assertEqual(config["search_v21_pool_temperature"], 0.5)
+        self.assertEqual(config["batch_size"], 16)
+        self.assertEqual(config["workers"], 4)
+        self.assertEqual(config["epoch"], 60)
+        self.assertEqual(config["seed"], 42)
+
+    def test_motion_search_v21_config_disables_legacy_fusion(self):
+        config = load_yaml_config(
+            ROOT / "cfgs/ct_v2/09_ct_motion_search_v21.yaml")
+        self.assertTrue(config["use_b1motion_v3"])
+        self.assertFalse(config["use_motion_v3_legacy_fusion"])
+        self.assertTrue(config["use_search_evidence_v21"])
+        self.assertTrue(config["use_advantage_proposal_fusion"])
+        self.assertTrue(config["export_proposal_diagnostics"])
+        self.assertFalse(config["use_search_evidence_v2"])
+        self.assertFalse(config["use_joint_proposal_fusion"])
+        self.assertEqual(config["proposal_inference_mode"], "full")
+        self.assertEqual(config["advantage_fusion_warmup_epochs"], 10)
+        self.assertEqual(config["advantage_fusion_ramp_epochs"], 10)
+
     def test_b2_v2_resolves_scratch_three_candidate_contract(self):
         config = load_yaml_config(
             ROOT / "cfgs/ct_v2/03_ct_motion_search_v2.yaml")

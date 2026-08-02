@@ -226,8 +226,16 @@ def parse_config():
     parser.add_argument(
         '--motion_v3_fusion_scale', type=float, default=argparse.SUPPRESS,
         help='B1motion-v3 runtime fusion scale; use zero for observation-only evaluation.')
+    parser.add_argument(
+        '--proposal-mode', '--proposal_mode',
+        dest='proposal_inference_mode',
+        choices=('obs', 'obs_motion', 'obs_search', 'full'),
+        default=argparse.SUPPRESS,
+        help='Evaluation-only B2-v2.1 proposal attribution mode.')
 
     args = parser.parse_args()
+    if (hasattr(args, 'proposal_inference_mode') and not args.test):
+        raise ValueError("--proposal_mode is evaluation-only")
     config = load_yaml(args.cfg)
     config.update(vars(args))  # override the configuration using the value in args
     defaults = {

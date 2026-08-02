@@ -1,0 +1,57 @@
+{
+  "audience": "technical",
+  "delivery_mode": "html",
+  "required_structure_mapping": {
+    "technical_summary": "technical_summary",
+    "key_findings_with_visual_evidence": [
+      "decision_finding",
+      "curve_finding",
+      "search_finding",
+      "motion_finding"
+    ],
+    "scope_data_metric_definitions": "scope",
+    "methodology": "methodology",
+    "limitations_uncertainty_robustness": "limitations",
+    "recommended_next_steps": "next_finding",
+    "further_questions": "questions"
+  },
+  "chart_map": [
+    {
+      "section": "late-stage validation",
+      "question": "Does full retain its advantage through epoch60?",
+      "family": "trend",
+      "type": "line",
+      "fields": [
+        "epoch",
+        "success",
+        "series"
+      ],
+      "takeaway": "full remains above historical B0 at epochs 50/55/60",
+      "palette": "relaxed multi-category native report palette; legend plus line geometry prevents color-only interpretation",
+      "delivery": "compare_results/reports/b2_search_v2_seed42_20260802.html"
+    },
+    {
+      "section": "late-stage validation",
+      "question": "Does full pass the final Precision gate and stay stable?",
+      "family": "trend",
+      "type": "line",
+      "fields": [
+        "epoch",
+        "precision",
+        "series"
+      ],
+      "takeaway": "late-3 is positive but final improvement misses +1.0",
+      "palette": "same series mapping as Success for cross-chart consistency",
+      "delivery": "compare_results/reports/b2_search_v2_seed42_20260802.html"
+    }
+  ],
+  "visual_omissions": [
+    "Search gate diagnostics use a table because only five selected epoch anchors are needed for exact low-rate lookup.",
+    "Motion prior diagnostics use a table because exact four-branch RMSE comparisons are the audit target."
+  ],
+  "source_notes": [
+    "New SeqTrack control lacks run_provenance.json and comes from a separate dirty working tree.",
+    "Legacy search-only is not a new Search Evidence-only ablation.",
+    "Runtime is omitted because both B2 runs contended on physical GPU2."
+  ]
+}

@@ -14,6 +14,9 @@ CONFIGS = {
     "baseline_full": ROOT / "cfgs/ct_v2/01_seqtrack3d_baseline_full.yaml",
     "motion": ROOT / "cfgs/ct_v2/02_ct_motion.yaml",
     "motion_v3": ROOT / "cfgs/ct_v2/02_ct_motion_v3.yaml",
+    "search_v21": ROOT / "cfgs/ct_v2/08_seqtrack3d_search_v21.yaml",
+    "motion_search_v21": (
+        ROOT / "cfgs/ct_v2/09_ct_motion_search_v21.yaml"),
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -57,6 +60,10 @@ def parse_args():
         "--fusion-off", action="store_true",
         help="evaluate a motion_v3 checkpoint with exact observation-only output")
     parser.add_argument(
+        "--proposal-mode",
+        choices=("obs", "obs_motion", "obs_search", "full"),
+        help="evaluate a B2-v2.1 checkpoint under a same-weight proposal mode")
+    parser.add_argument(
         "--preflight", action="store_true",
         help="run 200 training batches with PFTC total weight forced to zero")
     parser.add_argument("--dry-run", action="store_true")
@@ -83,6 +90,11 @@ def build_command(args):
             args.mode != "test" or args.variant != "motion_v3"):
         raise ValueError(
             "--fusion-off requires test mode and --variant motion_v3")
+    if args.proposal_mode and (
+            args.mode != "test"
+            or args.variant not in ("search_v21", "motion_search_v21")):
+        raise ValueError(
+            "--proposal-mode requires test mode and a B2-v2.1 variant")
     if (args.mode == "train"
             and args.variant in ("pftc_unweighted", "pftc")
             and not args.preflight
@@ -100,6 +112,8 @@ def build_command(args):
     default_tag = f"{args.variant}-{args.protocol}-{args.time_mode}"
     if args.fusion_off:
         default_tag += "-fusion-off"
+    if args.proposal_mode:
+        default_tag += f"-{args.proposal_mode}"
     if args.preflight:
         default_tag += "-pftc-preflight-200"
     command = [
@@ -154,6 +168,8 @@ def build_command(args):
         command.extend(("--pftc_weight", str(args.pftc_weight)))
     if args.fusion_off:
         command.extend(("--motion_v3_fusion_scale", "0.0"))
+    if args.proposal_mode:
+        command.extend(("--proposal-mode", args.proposal_mode))
     if args.preflight:
         command.extend((
             "--pftc_weight", "0.0",

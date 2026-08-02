@@ -1,0 +1,73 @@
+﻿run_id,arm,role,epoch,step,success,precision
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,5,6310,32.30306625366211,32.13566970825195
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,10,12620,26.760393142700195,33.793216705322266
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,15,18930,31.950769424438477,32.92341613769531
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,20,25240,28.970462799072266,27.862146377563477
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,25,31550,29.826038360595703,28.701311111450195
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,30,37860,29.71881866455078,29.289934158325195
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,35,44170,30.602848052978516,30.4135684967041
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,40,50480,28.03173065185547,27.272430419921875
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,45,56790,30.526262283325195,30.080965042114258
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,50,63100,31.878555297851562,31.498905181884766
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,55,69410,29.8523006439209,29.08534049987793
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",requested_control,60,75720,31.683805465698242,31.33698081970215
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,5,6310,31.176149368286133,29.447481155395508
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,10,12620,39.388404846191406,39.440921783447266
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,15,18930,41.425601959228516,48.955142974853516
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,20,25240,30.609411239624023,26.32822608947754
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,25,31550,46.195838928222656,46.67943572998047
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,30,37860,45.01203536987305,44.7089729309082
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,35,44170,49.948577880859375,58.92888259887695
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,40,50480,49.799781799316406,55.94420623779297
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,45,56790,47.2089729309082,54.5908088684082
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,50,63100,49.5,54.589717864990234
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,55,69410,49.13676071166992,55.7975959777832
+SEARCH_LEGACY,"Legacy search-only (tube, 75/25 tokens)",requested_search_only,60,75720,49.655364990234375,56.391685485839844
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,5,6310,30.99452781677246,26.828229904174805
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,10,12620,30.920133590698242,27.24398422241211
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,15,18930,46.13019561767578,56.07111358642578
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,20,25240,41.03391647338867,39.27133560180664
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,25,31550,51.39277648925781,64.02188873291016
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,30,37860,50.7669563293457,59.37527847290039
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,35,44170,52.491249084472656,63.381839752197266
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,40,50480,54.079872131347656,65.95295715332031
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,45,56790,51.9157600402832,61.22648239135742
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,50,63100,54.33588790893555,66.5842514038086
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,55,69410,54.91794204711914,66.7002182006836
+B2V2_FULL,B2-v2 motion + Search Evidence + joint fusion,requested_full,60,75720,54.13238525390625,64.75492095947266
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,5,6310,40.696937561035156,41.869808197021484
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,10,12620,46.09081268310547,65.21444702148438
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,15,18930,45.729759216308594,50.54158020019531
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,20,25240,42.8851203918457,49.23085403442383
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,25,31550,51.736324310302734,60.63239669799805
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,30,37860,48.92888259887695,53.90918731689453
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,35,44170,52.28337097167969,62.339168548583984
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,40,50480,46.47811508178711,51.1739616394043
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,45,56790,50.462799072265625,59.610504150390625
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,50,63100,50.2024040222168,57.308536529541016
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,55,69410,49.13457489013672,59.318382263183594
+SEQTRACK_HIST,SeqTrack historical reference (2026-05-28),historical_reference,60,75720,50.98577880859375,59.96171188354492
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,5,6310,32.39278030395508,45.43435287475586
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,10,12620,36.23085403442383,34.963897705078125
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,15,18930,49.7385139465332,60.41575622558594
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,20,25240,37.21772384643555,34.47921371459961
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,25,31550,47.206787109375,49.19694137573242
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,30,37860,49.83260726928711,55.15973663330078
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,35,44170,51.539390563964844,63.76258087158203
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,40,50480,52.79978561401367,63.13019943237305
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,45,56790,53.066741943359375,61.62582778930664
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,50,63100,54.13457107543945,64.34353637695312
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,55,69410,51.21991729736328,60.58753204345703
+B0_HIST,CT-v2 B0 historical guardrail (2026-07-25),historical_guardrail,60,75720,53.359954833984375,64.3818359375
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,5,6310,34.436546325683594,37.67833709716797
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,10,12620,31.47154998779297,33.37527084350586
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,15,18930,49.436546325683594,63.06892776489258
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,20,25240,42.3796501159668,58.522979736328125
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,25,31550,51.020790100097656,61.59628677368164
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,30,37860,52.198036193847656,65.55580139160156
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,35,44170,49.633480072021484,58.86433029174805
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,40,50480,49.93326187133789,57.29759979248047
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,45,56790,52.5919075012207,61.163021087646484
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,50,63100,52.09518814086914,61.064552307128906
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,55,69410,51.39934539794922,60.719913482666016
+B1V3,B1motion-v3 standalone (2026-08-01),attribution_reference,60,75720,52.655364990234375,61.83479309082031

@@ -1,0 +1,73 @@
+_base_: nuscenes_mini_base.yaml
+
+experiment_name: ct_observation_queried_search_v21
+
+seed: 42
+batch_size: 16
+workers: 4
+epoch: 60
+from_epoch: 0
+check_val_every_n_epoch: 5
+
+# B0 + deterministic trajectory endpoint + observation-queried evidence.
+use_b1motion_v3: false
+use_motion_v3_legacy_fusion: false
+use_search_evidence_v2: false
+use_joint_proposal_fusion: false
+use_search_evidence_v21: true
+use_advantage_proposal_fusion: true
+proposal_inference_mode: full
+export_proposal_diagnostics: true
+
+use_ct_v2: false
+use_dynamics_encoder: false
+use_ordered_trajectory_encoder: false
+use_trajectory_adapter: false
+use_trajectory_search: false
+use_time_guided_search: false
+use_physical_time_adapter: false
+use_observability_gate: false
+use_twc: false
+use_m3_path_distillation: false
+use_point_feature_tc: false
+
+search_v21_point_count: 128
+search_v21_extension_quota: 64
+search_v21_min_points: 3
+search_v21_max_speed: 20.0
+search_v21_max_acceleration: 8.0
+search_v21_max_displacement: 12.0
+search_v21_acceleration_weight: 0.5
+search_v21_max_yaw_rate: 1.5707963267948966
+search_v21_min_displacement: 0.2
+search_v21_history_correlation: 0.75
+
+search_v21_feature_dim: 128
+search_v21_query_dim: 32
+search_v21_pool_temperature: 0.5
+search_v21_max_vote_offset: 4.0
+
+advantage_gate_context_dim: 32
+advantage_gate_hidden_dim: 96
+advantage_init_help_probability: 0.02
+advantage_radius_base: 0.5
+advantage_radius_per_second: 0.5
+advantage_radius_max: 2.0
+advantage_normal_aux_mass: 0.5
+advantage_gap_aux_mass: 0.8
+advantage_help_margin: 0.05
+advantage_fusion_warmup_epochs: 10
+advantage_fusion_ramp_epochs: 10
+
+search_v21_match_weight: 0.1
+search_v21_targetness_weight: 0.2
+search_v21_vote_weight: 1.0
+search_v21_proposal_weight: 1.0
+search_v21_focal_alpha: 0.75
+search_v21_focal_gamma: 2.0
+advantage_fused_weight: 1.0
+advantage_help_weight: 0.2
+advantage_step_weight: 0.1
+advantage_help_alpha_motion: 0.5
+advantage_help_alpha_search: 0.75
+advantage_help_gamma: 2.0

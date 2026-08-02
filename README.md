@@ -45,6 +45,8 @@ TWC、旧 Observability Gate、M3 EMA teacher、M4 Kalman/filter 等路线保留
 [refined_plan.md](refined_plan.md)。关于真实时间的投入产出、Random-20%
 现实性、ChronoTrack/近期工作借鉴顺序和现有模块审计，见
 [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
+服务器上的 KITTI、nuScenes-mini 和 nuScenes Python 包路径及其正确用法见
+[服务器路径说明](docs/SERVER_PATHS.md)。
 
 第四模块的完整数据、实现错误、坍缩诊断和恢复路径见
 [Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
