@@ -1,0 +1,7 @@
+﻿question,criterion,observed,decision
+Did Search-v2.1 improve over legacy search-only?,epoch60 and late-3 both improve,final +3.088 S / +6.654 P; late-3 +2.381 / +6.174,PASS: the Search redesign is materially better than the legacy path
+Did Search-v2.1 beat SeqTrack?,+0.5 Success and +1.0 Precision at epoch60; late-3 non-negative,"versus historical SeqTrack final +1.757/+3.084, late-3 +1.705/+2.904","NUMERICAL PASS versus historical SeqTrack, but not a formal matched-B0 promotion"
+Did Search-v2.1 beat the strongest available B0 guardrail?,+0.5 Success and +1.0 Precision at epoch60; late-3 non-negative,final -0.617/-1.336; late-3 -1.093/-1.337,FAIL against historical B0; same-commit matched B0 is still missing
+Did full B2-v2.1 improve over B2-v2?,epoch60 and late-3 should improve or at least remain stable,final -28.284/-39.578; late-3 -28.669/-40.648,CATASTROPHIC FAIL: do not promote or run more seeds
+Did full B2-v2.1 at least beat the anomalous new control?,both epoch60 metrics should be non-negative,final -5.836/-6.160,FAIL even against the weak requested control
+Is Search gate selection reliable enough?,applied weight >=0.1 helpful precision >=70%,Search-only helpful precision 55.8%; prevalence 54.7%,FAIL: selection adds only a small lift over natural prevalence

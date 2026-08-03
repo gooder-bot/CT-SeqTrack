@@ -1,0 +1,7 @@
+﻿comparison,checkpoint_epoch,shared_tensor_count,exact_tensor_count,changed_tensor_count,new_only_key_count,historical_only_key_count,exact_initial_loss_step_prefix,new_workers,historical_workers,new_provenance_present,historical_provenance_present,interpretation,bn_rank,bn_tensor,bn_max_abs_difference
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,320,28,292,0,0,3,4,12,False,False,"Same key set and identical first loss steps, then a different stochastic training/BatchNorm path; exact code and data state remain unprovable.",,,
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,,,,,,,,,,,Largest BatchNorm running-stat divergence at epoch10.,1,feature_pointnet.seq_per_point2.0.1.running_var,15.04142951965332
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,,,,,,,,,,,Largest BatchNorm running-stat divergence at epoch10.,2,seg_pointnet.seq_per_point2.0.1.running_mean,10.535785675048828
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,,,,,,,,,,,Largest BatchNorm running-stat divergence at epoch10.,3,mini_pointnet.features.15.running_var,9.332590103149414
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,,,,,,,,,,,Largest BatchNorm running-stat divergence at epoch10.,4,feature_pointnet.seq_per_point2.0.1.running_mean,9.236358642578125
+SEQTRACK_NEW_vs_SEQTRACK_HIST,10,,,,,,,,,,,Largest BatchNorm running-stat divergence at epoch10.,5,mini_pointnet.features.15.running_mean,8.231504440307617

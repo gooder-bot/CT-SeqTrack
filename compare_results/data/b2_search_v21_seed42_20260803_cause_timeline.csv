@@ -1,0 +1,21 @@
+﻿run_id,arm,epoch,success,precision,advantage_fusion_ramp_expected,interpretation
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",5,32.30306625366211,32.13566970825195,0.0,fusion_off
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",10,26.760393142700195,33.793216705322266,0.0,fusion_off
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",15,31.950769424438477,32.92341613769531,0.0,fusion_off
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",20,28.970462799072266,27.862146377563477,0.0,fusion_off
+SEQTRACK_NEW,"SeqTrack control (2026-08-01, anomalous)",60,31.683805465698242,31.33698081970215,0.0,fusion_off
+SEQTRACK_HIST,SeqTrack historical seed42 reference,5,40.696937561035156,41.869808197021484,0.0,fusion_off
+SEQTRACK_HIST,SeqTrack historical seed42 reference,10,46.09081268310547,65.21444702148438,0.0,fusion_off
+SEQTRACK_HIST,SeqTrack historical seed42 reference,15,45.729759216308594,50.54158020019531,0.0,fusion_off
+SEQTRACK_HIST,SeqTrack historical seed42 reference,20,42.8851203918457,49.23085403442383,0.0,fusion_off
+SEQTRACK_HIST,SeqTrack historical seed42 reference,60,50.98577880859375,59.96171188354492,0.0,fusion_off
+V21_SEARCH,B2-v2.1 search-only,5,30.786651611328125,41.34245300292969,0.0,fusion_off
+V21_SEARCH,B2-v2.1 search-only,10,30.90262794494629,36.177242279052734,0.0,fusion_off
+V21_SEARCH,B2-v2.1 search-only,15,51.74070739746094,63.87199783325195,0.5,fusion_ramping
+V21_SEARCH,B2-v2.1 search-only,20,38.2330436706543,35.301971435546875,1.0,fusion_full
+V21_SEARCH,B2-v2.1 search-only,60,52.74288558959961,63.045955657958984,1.0,fusion_full
+V21_FULL,B2-v2.1 motion + search + advantage fusion,5,30.88730812072754,32.24726486206055,0.0,fusion_off
+V21_FULL,B2-v2.1 motion + search + advantage fusion,10,32.405906677246094,31.001094818115234,0.0,fusion_off
+V21_FULL,B2-v2.1 motion + search + advantage fusion,15,22.896060943603516,21.687089920043945,0.5,fusion_ramping
+V21_FULL,B2-v2.1 motion + search + advantage fusion,20,23.567834854125977,23.113786697387695,1.0,fusion_full
+V21_FULL,B2-v2.1 motion + search + advantage fusion,60,25.847923278808594,25.177244186401367,1.0,fusion_full

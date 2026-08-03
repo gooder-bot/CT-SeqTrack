@@ -100,6 +100,32 @@ paired-view 失败诊断，但它不是 explicit physical-time 方法。
 不能再把失败的 motion、search、gate 与新 memory 同时堆叠，依靠模块间抵消
 得到一个无法归因的分数。
 
+### 1.4 跨数据集共享模型是更可辨识的真实时间场景（待验证）
+
+当前 standard nuScenes 的 `delta_t` 变化很小，但这不意味着真实时间在所有
+设定中都缺乏价值。若**同一个模型**联合训练或直接迁移于不同帧率的数据集，
+order-only 的“一步运动”会具有不同的物理含义。例如 10 Hz 数据中的 `0.5 m`
+逐帧位移与 2 Hz 数据中的 `2.5 m` 逐帧位移都可能对应 `5 m/s`。显式时间可以
+通过 `v=delta_x/delta_t` 统一不同数据集的运动尺度，再通过
+`delta_x_query=v*delta_t_query` 适配目标时刻。因此跨 KITTI、nuScenes、Waymo
+或同一数据集的 stride-1/2/4 共享训练，比单一近恒定 cadence 更有机会辨识
+physical-time 的价值。数据集总帧数本身不构成该动机，关键是帧率和历史窗口覆盖
+的实际时间不同。
+
+这个场景仍有两条严格边界：
+
+1. 如果每个数据集分别训练独立模型，固定平均 `delta_t` 很容易被模型参数吸收，
+   因而不能据此期待显著收益；
+2. 如果一个数据集始终对应一个固定 `delta_t`，模型可能把时间当作 dataset ID，
+   而非学习物理状态传播。
+
+未来跨数据集实验应使用一个共享 checkpoint，并至少比较 order-only、全局固定
+时间、dataset-mean fixed、within-dataset shuffled 和 true time。每个数据集内部
+还应构造多 stride，并保留未见过的 cadence 作测试。`true` 只有在同数据集重采样
+和 held-out gap 上继续超过两个控制，才能支持跨帧率连续时间泛化；若只超过全局
+固定而不超过 dataset-mean fixed，则更可能只是数据集尺度校准。该实验属于当前
+normal-mini 模块归因完成后的扩展证据，不改变现有执行优先级。
+
 ## 2. “实现代价”和“论文代价”必须分开
 
 | 目标 | 工程代价 | 训练/评测代价 | 当前判断 |

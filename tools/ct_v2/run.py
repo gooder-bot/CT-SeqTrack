@@ -17,6 +17,9 @@ CONFIGS = {
     "search_v21": ROOT / "cfgs/ct_v2/08_seqtrack3d_search_v21.yaml",
     "motion_search_v21": (
         ROOT / "cfgs/ct_v2/09_ct_motion_search_v21.yaml"),
+    "b3_crpa_v1": ROOT / "cfgs/ct_v2/10_b3_crpa_v1.yaml",
+    "b2_v22_refiner": ROOT / "cfgs/ct_v2/11_b2_v22_refiner.yaml",
+    "b2_v22_selective": ROOT / "cfgs/ct_v2/12_b2_v22_selective.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -61,8 +64,10 @@ def parse_args():
         help="evaluate a motion_v3 checkpoint with exact observation-only output")
     parser.add_argument(
         "--proposal-mode",
-        choices=("obs", "obs_motion", "obs_search", "full"),
-        help="evaluate a B2-v2.1 checkpoint under a same-weight proposal mode")
+        choices=(
+            "obs", "obs_motion", "obs_search", "full",
+            "obs_motion_search", "full_selective"),
+        help="evaluate a B2 checkpoint under a same-weight proposal mode")
     parser.add_argument(
         "--preflight", action="store_true",
         help="run 200 training batches with PFTC total weight forced to zero")
@@ -79,6 +84,15 @@ def build_command(args):
             args.checkpoint or args.init_checkpoint):
         raise ValueError(
             "--resume-checkpoint cannot be combined with checkpoint initialization")
+    if (args.mode == "train" and args.variant == "b2_v22_refiner"
+            and not (args.init_checkpoint or args.resume_checkpoint)):
+        raise ValueError(
+            "B2-v2.2 refiner training requires the composed "
+            "--init-checkpoint (or an explicit --resume-checkpoint)")
+    if args.mode == "train" and args.variant == "b2_v22_selective":
+        raise ValueError(
+            "the signed router is trained offline; b2_v22_selective is "
+            "evaluation-only")
     if args.mode == "train" and args.protocol != "normal":
         raise ValueError("v2 training is fixed to the normal dataset protocol")
     if args.preflight and (
@@ -92,9 +106,14 @@ def build_command(args):
             "--fusion-off requires test mode and --variant motion_v3")
     if args.proposal_mode and (
             args.mode != "test"
-            or args.variant not in ("search_v21", "motion_search_v21")):
+            or args.variant not in (
+                "search_v21", "motion_search_v21", "b3_crpa_v1",
+                "b2_v22_refiner", "b2_v22_selective")):
         raise ValueError(
-            "--proposal-mode requires test mode and a B2-v2.1 variant")
+            "--proposal-mode requires test mode and a supported B2 variant")
+    if (args.proposal_mode == "obs_search"
+            and args.variant in ("b2_v22_refiner", "b2_v22_selective")):
+        raise ValueError("B2-v2.2 has no independent obs_search mode")
     if (args.mode == "train"
             and args.variant in ("pftc_unweighted", "pftc")
             and not args.preflight

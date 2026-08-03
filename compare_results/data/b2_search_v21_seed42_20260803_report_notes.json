@@ -1,0 +1,78 @@
+{
+  "audience": "technical",
+  "delivery_mode": "portable_html",
+  "required_structure_mapping": {
+    "technical_summary": "technical_summary",
+    "key_findings_with_visual_evidence": [
+      "comparison_finding",
+      "curve_finding",
+      "search_finding",
+      "gate_finding",
+      "root_finding",
+      "same_cause_finding",
+      "base_loss_finding",
+      "seqtrack_divergence_finding",
+      "decision_finding",
+      "retrain_finding"
+    ],
+    "scope_data_metric_definitions": "scope",
+    "methodology": "method",
+    "limitations_uncertainty_robustness": "limitations",
+    "recommended_next_steps": "next_finding",
+    "further_questions": "questions"
+  },
+  "chart_map": [
+    {
+      "section": "validation outcome",
+      "question": "How do Success trajectories compare through epoch60?",
+      "family": "trend",
+      "type": "line",
+      "fields": [
+        "epoch",
+        "success",
+        "series"
+      ],
+      "point_count": 60,
+      "takeaway": "Search-only repairs the legacy path; full collapses after fusion activation.",
+      "palette": "relaxed multi-category native report palette; legend and line geometry provide non-color distinction",
+      "delivery": "compare_results/reports/b2_search_v21_seed42_20260803.html"
+    },
+    {
+      "section": "validation outcome",
+      "question": "How do Precision trajectories compare through epoch60?",
+      "family": "trend",
+      "type": "line",
+      "fields": [
+        "epoch",
+        "precision",
+        "series"
+      ],
+      "point_count": 60,
+      "takeaway": "Full precision remains collapsed while Search-only stays near the historical B0.",
+      "palette": "same mapping as Success for cross-chart consistency",
+      "delivery": "compare_results/reports/b2_search_v21_seed42_20260803.html"
+    },
+    {
+      "section": "gate reliability",
+      "question": "Does applied Search selection enrich helpful candidates?",
+      "family": "comparison",
+      "type": "grouped bar",
+      "fields": [
+        "metric",
+        "rate",
+        "run"
+      ],
+      "category_count": 4,
+      "takeaway": "Material selection nearly equals availability and helpful precision barely exceeds prevalence.",
+      "palette": "hard two-root cap with direct metric axis and visible run legend",
+      "delivery": "compare_results/reports/b2_search_v21_seed42_20260803.html"
+    }
+  ],
+  "source_notes": [
+    "The new SeqTrack control lacks run_provenance.json and is anomalously low.",
+    "V2, historical B0, and V2.1 are clean but not same-commit runs.",
+    "Runtime is omitted from promotion because the V2.1 runs contended on physical GPU2.",
+    "No endpoint-level validation export exists, so AUPRC and paired bootstrap remain unavailable.",
+    "The two SeqTrack controls lack run provenance and differ in worker count, so the exact stochastic-divergence initiator is unresolved."
+  ]
+}

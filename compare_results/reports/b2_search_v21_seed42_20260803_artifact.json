@@ -1,0 +1,2780 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "B2-v2.1 seed42：Observation-Queried Search 与 Advantage Fusion 复核",
+    "description": "Normal-mini outcome, V2 and baseline comparisons, Search evidence quality, gate calibration, closed-loop failure drivers, and controlled next steps.",
+    "generatedAt": "2026-08-03T05:10:03.297956+00:00",
+    "sources": [
+      {
+        "id": "validation_source",
+        "label": "Reviewed normal-validation TensorBoard scalars",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_validation.csv",
+        "query": {
+          "language": "python",
+          "description": "tools/analyze_b2_search_v21.py extracts all twelve unsmoothed validation points from each run's raw TensorBoard event files.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_validation.csv', header=true)",
+          "metric_definitions": [
+            "Final is epoch60 and is the primary decision point.",
+            "Late-3 is the arithmetic mean of epochs 50, 55, and 60.",
+            "Best checkpoints are diagnostic only."
+          ]
+        }
+      },
+      {
+        "id": "summary_source",
+        "label": "Reviewed final, late-3, and best checkpoint summary",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_summary.csv",
+        "query": {
+          "language": "python",
+          "description": "Final, late-3, and best values are recomputed from all twelve paired validation points.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_summary.csv', header=true)"
+        }
+      },
+      {
+        "id": "comparison_source",
+        "label": "Reviewed comparison register",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_comparisons.csv",
+        "query": {
+          "language": "python",
+          "description": "Pairwise score differences preserve the comparator's provenance limitations and never substitute a best checkpoint for epoch60.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_comparisons.csv', header=true)"
+        }
+      },
+      {
+        "id": "training_source",
+        "label": "B2-v2.1 epoch-level training diagnostics",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_v21_training_epochs.csv",
+        "query": {
+          "language": "python",
+          "description": "Epoch means are regenerated from 75,720 TensorBoard training steps using 1,262 batches per epoch for both V2.1 runs.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_v21_training_epochs.csv', header=true)"
+        }
+      },
+      {
+        "id": "diagnostic_source",
+        "label": "Derived gate and evidence diagnostics",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_derived_diagnostics.csv",
+        "query": {
+          "language": "python",
+          "description": "Conditional rates and weights are recomputed from raw epoch60 means; the ESS valid-row estimate removes the mathematically verified 1e6 invalid-row sentinel.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_derived_diagnostics.csv', header=true)"
+        }
+      },
+      {
+        "id": "driver_source",
+        "label": "B2-v2.1 evidence and root-cause register",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_drivers.csv",
+        "query": {
+          "language": "python",
+          "description": "Findings distinguish directly verified evidence from closed-loop causal inference and unresolved attribution.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_drivers.csv', header=true)"
+        }
+      },
+      {
+        "id": "decision_source",
+        "label": "Frozen decision checks",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_decision.csv",
+        "query": {
+          "language": "python",
+          "description": "Applies the stated epoch60, late-3, and helpful-precision gates without best-checkpoint substitution.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_decision.csv', header=true)"
+        }
+      },
+      {
+        "id": "integrity_source",
+        "label": "Run integrity and comparability audit",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_integrity.csv",
+        "query": {
+          "language": "python",
+          "description": "Checks provenance, clean commit, config, seed, training length, validation coverage, and final checkpoint presence.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_integrity.csv', header=true)"
+        }
+      },
+      {
+        "id": "code_source",
+        "label": "B2-v2.1 implementation audit",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_code_audit.csv",
+        "query": {
+          "language": "python",
+          "description": "Code review covers the evidence encoder, advantage fusion, one-step loss, and source-aware sampler.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_code_audit.csv', header=true)"
+        }
+      },
+      {
+        "id": "next_source",
+        "label": "Controlled follow-up register",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_next_steps.csv",
+        "query": {
+          "language": "python",
+          "description": "Orders inference-only attribution and verified bug repair before any new full training.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_next_steps.csv', header=true)"
+        }
+      },
+      {
+        "id": "cause_source",
+        "label": "Regression timing and intervention audit",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_cause_timeline.csv",
+        "query": {
+          "language": "python",
+          "description": "Aligns both SeqTrack controls and both V2.1 runs at epochs 5, 10, 15, 20, and 60; the expected full-fusion ramp is recorded explicitly.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_cause_timeline.csv', header=true)"
+        }
+      },
+      {
+        "id": "base_loss_source",
+        "label": "Base supervised-loss comparison",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_base_loss_comparison.csv",
+        "query": {
+          "language": "python",
+          "description": "Recomputes epoch means for total, center, angle, segmentation, and box-cloud losses at seven fixed training anchors for four runs.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_base_loss_comparison.csv', header=true)"
+        }
+      },
+      {
+        "id": "seqtrack_audit_source",
+        "label": "SeqTrack checkpoint divergence audit",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_seqtrack_checkpoint_audit.csv",
+        "query": {
+          "language": "python",
+          "description": "Compares every state tensor in the two epoch10 SeqTrack checkpoints and records the largest BatchNorm running-stat differences and missing provenance.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_seqtrack_checkpoint_audit.csv', header=true)"
+        }
+      },
+      {
+        "id": "retrain_source",
+        "label": "Retraining decision register",
+        "path": "compare_results/data/b2_search_v21_seed42_20260803_retrain_decision.csv",
+        "query": {
+          "language": "python",
+          "description": "Separates unchanged retraining, inference-only attribution, and corrected-model retraining decisions with confidence labels.",
+          "executed_at": "2026-08-03",
+          "engine": "DuckDB",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_search_v21_seed42_20260803_retrain_decision.csv', header=true)"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "success_curve",
+        "title": "Normal validation Success by epoch",
+        "subtitle": "nuScenes-mini Car, seed42; 12 unsmoothed validation checkpoints; epoch60 is primary.",
+        "type": "line",
+        "dataset": "validation_chart",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "series",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "success",
+              "type": "quantitative",
+              "label": "Success"
+            }
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Success"
+      },
+      {
+        "id": "precision_curve",
+        "title": "Normal validation Precision by epoch",
+        "subtitle": "Motion+Search V2.1 collapses as the epoch10-19 fusion ramp activates.",
+        "type": "line",
+        "dataset": "validation_chart",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "precision",
+            "type": "quantitative",
+            "label": "Precision"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "series",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            }
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Precision"
+      },
+      {
+        "id": "gate_chart",
+        "title": "Epoch-60 Search availability and gate reliability",
+        "subtitle": "Rates are fractions of all rows except prevalence and precision, which condition on valid or selected Search rows.",
+        "type": "bar",
+        "dataset": "gate_rows",
+        "sourceId": "diagnostic_source",
+        "encodings": {
+          "x": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Metric"
+          },
+          "y": {
+            "field": "rate",
+            "type": "quantitative",
+            "label": "Rate"
+          },
+          "color": {
+            "field": "run",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "run",
+              "type": "nominal",
+              "label": "Run"
+            },
+            {
+              "field": "metric",
+              "type": "nominal",
+              "label": "Metric"
+            },
+            {
+              "field": "rate",
+              "type": "quantitative",
+              "label": "Rate"
+            }
+          ]
+        },
+        "xAxisTitle": "Metric",
+        "yAxisTitle": "Rate"
+      }
+    ],
+    "tables": [
+      {
+        "id": "summary_table",
+        "title": "Normal-validation result summary",
+        "subtitle": "Final and late-3 drive the decision; best is shown only for diagnosis.",
+        "dataset": "summary_visible",
+        "sourceId": "summary_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "final_success",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "final_success",
+            "label": "Final S",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "final_precision",
+            "label": "Final P",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "late3_success",
+            "label": "Late-3 S",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "late3_precision",
+            "label": "Late-3 P",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "best_success",
+            "label": "Best S",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "best_success_epoch",
+            "label": "Best-S epoch",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "comparison_table",
+        "title": "Key epoch-60 and late-3 deltas",
+        "subtitle": "Positive favors V2.1; comparison basis records non-matched controls.",
+        "dataset": "key_comparisons",
+        "sourceId": "comparison_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "treatment",
+            "label": "Treatment",
+            "type": "text"
+          },
+          {
+            "field": "baseline",
+            "label": "Comparator",
+            "type": "text"
+          },
+          {
+            "field": "delta_final_success",
+            "label": "Δ Final S",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "delta_final_precision",
+            "label": "Δ Final P",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "delta_late3_success",
+            "label": "Δ Late-3 S",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "delta_late3_precision",
+            "label": "Δ Late-3 P",
+            "type": "number",
+            "format": "number",
+            "semantic": "movement"
+          },
+          {
+            "field": "comparison_basis",
+            "label": "Basis",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "search_evidence_table",
+        "title": "Epoch-60 Search evidence quality",
+        "subtitle": "Training means; lower losses are better, valid rate uses all training rows.",
+        "dataset": "search_evidence_rows",
+        "sourceId": "training_source",
+        "density": "compact",
+        "defaultSort": {
+          "field": "valid_rate",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "run",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "valid_rate",
+            "label": "Valid rate",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "foreground_points",
+            "label": "FG points",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "targetness_loss",
+            "label": "Targetness loss",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "vote_loss",
+            "label": "Vote loss",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "proposal_loss",
+            "label": "Proposal loss",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "driver_table",
+        "title": "Root-cause evidence register",
+        "subtitle": "Confidence explicitly separates verified metrics, verified code behavior, and likely closed-loop causality.",
+        "dataset": "drivers",
+        "sourceId": "driver_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "priority",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "priority",
+            "label": "Priority",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "finding",
+            "label": "Finding",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Evidence",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          },
+          {
+            "field": "confidence",
+            "label": "Confidence",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "decision_table",
+        "title": "Decision checks",
+        "subtitle": "The anomalous new SeqTrack control is shown but cannot establish method attribution.",
+        "dataset": "decisions",
+        "sourceId": "decision_source",
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "question",
+            "label": "Question",
+            "type": "text"
+          },
+          {
+            "field": "criterion",
+            "label": "Criterion",
+            "type": "text"
+          },
+          {
+            "field": "observed",
+            "label": "Observed",
+            "type": "text"
+          },
+          {
+            "field": "decision",
+            "label": "Decision",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "integrity_table",
+        "title": "Run integrity and comparability",
+        "subtitle": "Both V2.1 runs are complete, clean, same-commit scratch runs; the new SeqTrack control lacks provenance.",
+        "dataset": "integrity_visible",
+        "sourceId": "integrity_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "run_id",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "provenance_present",
+            "label": "Provenance",
+            "type": "boolean"
+          },
+          {
+            "field": "git_commit",
+            "label": "Commit",
+            "type": "text"
+          },
+          {
+            "field": "git_dirty",
+            "label": "Dirty",
+            "type": "text"
+          },
+          {
+            "field": "seed",
+            "label": "Seed",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "workers",
+            "label": "Workers",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "validation_points",
+            "label": "Val points",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "last_checkpoint_present",
+            "label": "Last ckpt",
+            "type": "boolean"
+          }
+        ]
+      },
+      {
+        "id": "code_table",
+        "title": "Implementation audit",
+        "subtitle": "Direct code behavior relevant to the observed failure.",
+        "dataset": "code_audit",
+        "sourceId": "code_source",
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "file",
+            "label": "File",
+            "type": "text"
+          },
+          {
+            "field": "symbol",
+            "label": "Symbol",
+            "type": "text"
+          },
+          {
+            "field": "verified_behavior",
+            "label": "Verified behavior",
+            "type": "text"
+          },
+          {
+            "field": "risk",
+            "label": "Risk",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "next_table",
+        "title": "Controlled next steps",
+        "subtitle": "Inference attribution and the verified numerical bug come before another 60-epoch full run.",
+        "dataset": "next_steps",
+        "sourceId": "next_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "order",
+            "label": "Order",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "action",
+            "label": "Action",
+            "type": "text"
+          },
+          {
+            "field": "change",
+            "label": "Change",
+            "type": "text"
+          },
+          {
+            "field": "decision_unlocked",
+            "label": "Decision unlocked",
+            "type": "text"
+          },
+          {
+            "field": "gpu_cost",
+            "label": "GPU cost",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "cause_timeline_table",
+        "title": "两次退步的时序与 intervention 对齐",
+        "subtitle": "Epoch10/15/60；两组 V2.1 使用同一 ramp，但只有 Motion+Search 崩塌。",
+        "dataset": "cause_timeline_visible",
+        "sourceId": "cause_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "run_id",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "epoch",
+            "label": "Epoch",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "success",
+            "label": "Success",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "precision",
+            "label": "Precision",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "advantage_fusion_ramp_expected",
+            "label": "Fusion ramp",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "interpretation",
+            "label": "State",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "base_loss_table",
+        "title": "Epoch60 基础监督损失",
+        "subtitle": "V2.1 total 包含额外分支损失，因此判断 B0 时以 center/angle/seg/box-cloud 为主。",
+        "dataset": "base_loss_visible",
+        "sourceId": "base_loss_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "run_id",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "loss_total",
+            "label": "Total",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "loss_center",
+            "label": "Center",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "loss_angle",
+            "label": "Angle",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "loss_seg",
+            "label": "Seg",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "loss_bc",
+            "label": "Box-cloud",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "seqtrack_audit_table",
+        "title": "SeqTrack epoch10 checkpoint 分叉",
+        "subtitle": "同一 state key 集，但多数 tensor 已分叉；最大差异集中在 BatchNorm running stats。",
+        "dataset": "seqtrack_checkpoint_audit",
+        "sourceId": "seqtrack_audit_source",
+        "density": "compact",
+        "columns": [
+          {
+            "field": "shared_tensor_count",
+            "label": "Shared",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "exact_tensor_count",
+            "label": "Exact",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "changed_tensor_count",
+            "label": "Changed",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "bn_rank",
+            "label": "BN rank",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "bn_tensor",
+            "label": "BN tensor",
+            "type": "text"
+          },
+          {
+            "field": "bn_max_abs_difference",
+            "label": "Max |Δ|",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "retrain_table",
+        "title": "是否重训的分层决策",
+        "subtitle": "区分原样重训、归因测试和修复后重训。",
+        "dataset": "retrain_decision",
+        "sourceId": "retrain_source",
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "question",
+            "label": "Question",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Evidence",
+            "type": "text"
+          },
+          {
+            "field": "decision",
+            "label": "Decision",
+            "type": "text"
+          },
+          {
+            "field": "confidence",
+            "label": "Confidence",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# B2-v2.1 seed42：Observation-Queried Search 与 Advantage Fusion 复核"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "summary_source",
+        "body": "## 技术结论：两次退步共享递归放大器，但不是同一直接原因\n\n**Search-only** epoch60 为 **52.743 Success / 63.046 Precision**，比 legacy search-only 高 **3.088 / 6.654**。**Motion+Search full** 只有 **25.848 / 25.177**，并在 fusion ramp 开启时突降。异常 SeqTrack control 则从首次验证就低，且基础训练损失与历史 SeqTrack 几乎相同、缺少运行 provenance。结论是：两者都会被递归历史放大，但 V2.1 full 有明确的 fusion/Motion 结构触发；**不要原样重训 current full，先做四模式归因并修复 gate，修复后的 full 需要从零重训。**"
+      },
+      {
+        "id": "summary_block",
+        "type": "table",
+        "tableId": "summary_table"
+      },
+      {
+        "id": "comparison_finding",
+        "type": "markdown",
+        "sourceId": "comparison_source",
+        "body": "## Search-only 的正向结论取决于基线口径，full 在所有口径下失败\n\n本次新 SeqTrack control final 只有 **31.684/31.337**，且没有 `run_provenance.json`；Search-only 相对它的 +21.059/+31.709 是异常 control 放大的数值，不能写成论文收益。历史 SeqTrack 给出数值上涨，但更强的历史 B0 给出负值。full 即使对这个异常低 control 也仍是 **−5.836/−6.160**。"
+      },
+      {
+        "id": "comparison_block",
+        "type": "table",
+        "tableId": "comparison_table"
+      },
+      {
+        "id": "curve_finding",
+        "type": "markdown",
+        "sourceId": "validation_source",
+        "body": "## full 的崩塌与 fusion ramp 同步，不是 epoch60 偶然波动\n\nfull 在 fusion 关闭的 epoch10 尚为 **32.406/31.001**；ramp 进入中段的 epoch15 立即降到 **22.896/21.687**，之后一直维持约 25 分。Search-only 在相同 ramp 下 epoch15 已达到 **51.741/63.872**。时间对齐把故障范围缩小到 Motion 与 advantage fusion 的闭环交互。"
+      },
+      {
+        "id": "success_block",
+        "type": "chart",
+        "chartId": "success_curve"
+      },
+      {
+        "id": "precision_block",
+        "type": "chart",
+        "chartId": "precision_curve"
+      },
+      {
+        "id": "search_finding",
+        "type": "markdown",
+        "sourceId": "training_source",
+        "body": "## Observation-query 与 overlap 证据确实改善了 Search 分支\n\n相对 B2-v2，V2.1 full 的 epoch60 Search valid rate 从 **23.29%** 升到 **30.71%**，平均目标点从 **3.68** 增到 **7.51**，proposal loss 从 **0.01361** 降到 **0.01034**（约 **24.0%**）。这证明 Search encoder/crop 改造方向有效；最终没有涨过 B0，主要是候选覆盖与 gate 选择仍不合格。"
+      },
+      {
+        "id": "search_evidence_block",
+        "type": "table",
+        "tableId": "search_evidence_table"
+      },
+      {
+        "id": "gate_finding",
+        "type": "markdown",
+        "sourceId": "diagnostic_source",
+        "body": "## Advantage gate 实际退化为 availability gate\n\nSearch-only 在 epoch60 对约 **97.8%** 的 valid Search 行施加了至少 0.1 权重，valid 行条件平均权重约 **0.486**，几乎顶到 normal 0.5 上限。被选 Search 的 helpful precision 只有 **55.8%**，而自然 helpful prevalence 已有 **54.7%**，提升仅 **1.1 个百分点**，远低于预设 70%。full 中也选择了约 **97.1%** valid Search 行。"
+      },
+      {
+        "id": "gate_block",
+        "type": "chart",
+        "chartId": "gate_chart"
+      },
+      {
+        "id": "root_finding",
+        "type": "markdown",
+        "sourceId": "driver_source",
+        "body": "## full 崩塌由 Motion 过度使用和一个无效行数值缺陷共同驱动\n\nfull 的 Motion candidate 在 **90.4%** 样本有效，却只有 **16.9%** 比 observation 至少好 0.05 m；仍获得约 **0.272** 的 valid-row 条件权重。与此同时，Search 无效行的 pool weight 全零，`1 / clamp(sum(w²), 1e-6)` 会生成 **1e6** 的 effective sample size；该值未按 `search_valid` 屏蔽就进入共享 gate。epoch60 Search 无效率约 69.3%，所以这一异常特征可以在多数 Motion 决策中出现。代码缺陷与时序证据已验证；它在总崩塌中的独立因果份额仍需四模式推理确认。"
+      },
+      {
+        "id": "driver_block",
+        "type": "table",
+        "tableId": "driver_table"
+      },
+      {
+        "id": "same_cause_finding",
+        "type": "markdown",
+        "sourceId": "cause_source",
+        "body": "## 与异常 SeqTrack 不是同一直接原因\n\n异常 SeqTrack 在没有任何 fusion intervention 的情况下从 epoch5 起就只有 **32.303/32.136**，之后始终约 27–32 分；V2.1 full 在 ramp 关闭的 epoch10 为 **32.406/31.001**，到 ramp≈0.5 的 epoch15 才突降至 **22.896/21.687**，而 Search-only 同期升至 **51.741/63.872**。因此共同点是 recursive tracking 会放大小的模型差异；不同点是 V2.1 full 的直接触发被定位到 Motion/fusion 闭环，SeqTrack 的触发仍是缺 provenance 的训练流/代码数据状态不确定性。"
+      },
+      {
+        "id": "cause_timeline_block",
+        "type": "table",
+        "tableId": "cause_timeline_table"
+      },
+      {
+        "id": "base_loss_finding",
+        "type": "markdown",
+        "sourceId": "base_loss_source",
+        "body": "## 两次退步都不是普通的 supervised underfit\n\n新旧 SeqTrack epoch60 total loss 为 **0.22027 vs 0.21873**，center loss 为 **0.02147 vs 0.02105**，但验证相差 **19.302 Success / 28.625 Precision**。V2.1 Search-only/full 的 center loss为 **0.02220/0.02127**，full 反而略低；angle、seg、box-cloud 也同量级。这排除了‘再用同一配置多训一次就会自然修好’的主要依据，但 observation-only recursive 表现仍应由同 checkpoint 反事实确认。"
+      },
+      {
+        "id": "base_loss_block",
+        "type": "table",
+        "tableId": "base_loss_table"
+      },
+      {
+        "id": "seqtrack_divergence_finding",
+        "type": "markdown",
+        "sourceId": "seqtrack_audit_source",
+        "body": "## SeqTrack 更像随机训练流与 BatchNorm 路径分叉后被递归放大\n\n两次 SeqTrack 的前三个 total-loss step 完全一致，epoch10 checkpoint 的 **320** 个 state tensor key 也完全对应，但只有 **28** 个 tensor 逐值相等、**292** 个已经分叉，最大差异集中在 BatchNorm running mean/variance。新跑使用 workers4、历史跑使用 workers12，且两者都没有 `run_provenance.json`，所以可以确认 stochastic/BN path 已分叉，却不能把根因唯一归结为 workers 数、代码版本或数据缓存。"
+      },
+      {
+        "id": "seqtrack_audit_block",
+        "type": "table",
+        "tableId": "seqtrack_audit_table"
+      },
+      {
+        "id": "decision_finding",
+        "type": "markdown",
+        "sourceId": "decision_source",
+        "body": "## 决策：保留 Search-v2.1 思路，否决当前 full 与当前 gate\n\nSearch-v2.1 通过“优于 legacy Search”的修复目标，也通过“相对历史 SeqTrack 数值上涨”的弱口径；但未通过最强 B0 guardrail，更没有同 commit matched B0。full 同时失败于 V2 对比、SeqTrack 对比和闭环稳定性。"
+      },
+      {
+        "id": "decision_block",
+        "type": "table",
+        "tableId": "decision_table"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "sourceId": "integrity_source",
+        "body": "## 范围、运行合同与数据质量\n\n两组 V2.1 都是 commit `16c2b8b` 的 clean scratch run：nuScenes v1.0-mini Car、seed42、batch16、workers4、60 epoch、每 5 epoch 验证，共 12 个验证点和 epoch59/last checkpoint；训练/验证分别为 5051/2285 frames。V2 与历史 B0 来自其他 clean commit；新 SeqTrack control 完整但缺 provenance。因此结果足以否决 current full，尚不足以正式宣布 Search-only 相对 matched B0 涨点。"
+      },
+      {
+        "id": "integrity_block",
+        "type": "table",
+        "tableId": "integrity_table"
+      },
+      {
+        "id": "method",
+        "type": "markdown",
+        "sourceId": "code_source",
+        "body": "## 方法与实现核验\n\n分析从原始 TensorBoard event 重算 final、late-3、best 和 75,720-step epoch means，并读取两份 last checkpoint 的 gate 参数。实现审计确认：B0 1024 点未被 Search 分支改写；Search point/query/context 在新分支中学习；candidate 和 B0 context 在 joint loss 前 detach。full epoch60 的 B0 center loss与 Search-only 同量级，故当前证据不支持“B0 被辅助梯度改坏”。"
+      },
+      {
+        "id": "code_block",
+        "type": "table",
+        "tableId": "code_table"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 限制与未决归因\n\n本轮只有一个 seed，没有 commit-16c2b8b matched B0、四模式 inference、endpoint/tracklet 级导出、AUPRC 或 paired bootstrap。helpful precision 是训练 batch 比率的 epoch mean，不是 validation endpoint precision。两组 V2.1 还曾并行占用同一物理 GPU2，runtime 标量不能用于 15% runtime 晋级判断。这些限制不会改变 full 的失败结论，但会限制 Search-only 的论文归因。"
+      },
+      {
+        "id": "next_finding",
+        "type": "markdown",
+        "sourceId": "next_source",
+        "body": "## 下一步先归因和修 bug，不要直接再跑 60 epoch\n\n先用现有 checkpoint 跑 `obs / obs_motion / obs_search / full`；随后把 invalid Search 的 ESS/统计量置零并归一化，收紧 Motion 介入和 gate abstention，再补同 commit B0。只有 corrected full 的 Search helpful precision 达到 70%、epoch60 相对 matched B0 同时达到 +0.5/+1.0，才值得进入 seed43/44。"
+      },
+      {
+        "id": "next_block",
+        "type": "table",
+        "tableId": "next_table"
+      },
+      {
+        "id": "retrain_finding",
+        "type": "markdown",
+        "sourceId": "retrain_source",
+        "body": "## 重训结论分三层\n\n**current full 不要原样重训**：已存在 verified numerical defect 和不选择性的 gate，换 seed 只能把结构风险伪装成随机波动。**当前 Search-only 不必立即重训**：保留 checkpoint，先跑 `obs/obs_search`。**修复后的 full 必须从零重训**：gate 输入、abstention 与监督分布已经改变；正式 60 epoch 前先在 ramp 跨越点做短诊断，确认 epoch15 不再崩塌。"
+      },
+      {
+        "id": "retrain_block",
+        "type": "table",
+        "tableId": "retrain_table"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 仍需回答的问题\n\n- full checkpoint 的 `obs` 模式能否恢复到约 52–53 分，从而直接证明 B0 没坏？\n- `obs_motion` 是否独立复现 25 分崩塌，还是只有 Search-invalid ESS 与 Motion gate 交互才触发？\n- valid Search 的 validation AUPRC 是否明显高于 55% prevalence？\n- 修复 invalid ESS 并加入 abstention 后，Search-only 能否超过 commit-matched B0，而不是只超过 legacy Search？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-03T05:10:03.297956+00:00",
+    "datasets": {
+      "validation_chart": [
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 5,
+          "step": 6310,
+          "success": 40.696937561035156,
+          "precision": 41.869808197021484,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 10,
+          "step": 12620,
+          "success": 46.09081268310547,
+          "precision": 65.21444702148438,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 15,
+          "step": 18930,
+          "success": 45.729759216308594,
+          "precision": 50.54158020019531,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 20,
+          "step": 25240,
+          "success": 42.8851203918457,
+          "precision": 49.23085403442383,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 25,
+          "step": 31550,
+          "success": 51.736324310302734,
+          "precision": 60.63239669799805,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 30,
+          "step": 37860,
+          "success": 48.92888259887695,
+          "precision": 53.90918731689453,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 35,
+          "step": 44170,
+          "success": 52.28337097167969,
+          "precision": 62.339168548583984,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 40,
+          "step": 50480,
+          "success": 46.47811508178711,
+          "precision": 51.1739616394043,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 45,
+          "step": 56790,
+          "success": 50.462799072265625,
+          "precision": 59.610504150390625,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 50,
+          "step": 63100,
+          "success": 50.2024040222168,
+          "precision": 57.308536529541016,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 55,
+          "step": 69410,
+          "success": 49.13457489013672,
+          "precision": 59.318382263183594,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "epoch": 60,
+          "step": 75720,
+          "success": 50.98577880859375,
+          "precision": 59.96171188354492,
+          "series": "Historical SeqTrack"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 5,
+          "step": 6310,
+          "success": 32.39278030395508,
+          "precision": 45.43435287475586,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 10,
+          "step": 12620,
+          "success": 36.23085403442383,
+          "precision": 34.963897705078125,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 15,
+          "step": 18930,
+          "success": 49.7385139465332,
+          "precision": 60.41575622558594,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 20,
+          "step": 25240,
+          "success": 37.21772384643555,
+          "precision": 34.47921371459961,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 25,
+          "step": 31550,
+          "success": 47.206787109375,
+          "precision": 49.19694137573242,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 30,
+          "step": 37860,
+          "success": 49.83260726928711,
+          "precision": 55.15973663330078,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 35,
+          "step": 44170,
+          "success": 51.539390563964844,
+          "precision": 63.76258087158203,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 40,
+          "step": 50480,
+          "success": 52.79978561401367,
+          "precision": 63.13019943237305,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 45,
+          "step": 56790,
+          "success": 53.066741943359375,
+          "precision": 61.62582778930664,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 50,
+          "step": 63100,
+          "success": 54.13457107543945,
+          "precision": 64.34353637695312,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 55,
+          "step": 69410,
+          "success": 51.21991729736328,
+          "precision": 60.58753204345703,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "epoch": 60,
+          "step": 75720,
+          "success": 53.359954833984375,
+          "precision": 64.3818359375,
+          "series": "Historical B0"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 5,
+          "step": 6310,
+          "success": 30.99452781677246,
+          "precision": 26.828229904174805,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 10,
+          "step": 12620,
+          "success": 30.920133590698242,
+          "precision": 27.24398422241211,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 15,
+          "step": 18930,
+          "success": 46.13019561767578,
+          "precision": 56.07111358642578,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 20,
+          "step": 25240,
+          "success": 41.03391647338867,
+          "precision": 39.27133560180664,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 25,
+          "step": 31550,
+          "success": 51.39277648925781,
+          "precision": 64.02188873291016,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 30,
+          "step": 37860,
+          "success": 50.7669563293457,
+          "precision": 59.37527847290039,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 35,
+          "step": 44170,
+          "success": 52.491249084472656,
+          "precision": 63.381839752197266,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 40,
+          "step": 50480,
+          "success": 54.079872131347656,
+          "precision": 65.95295715332031,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 45,
+          "step": 56790,
+          "success": 51.9157600402832,
+          "precision": 61.22648239135742,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 50,
+          "step": 63100,
+          "success": 54.33588790893555,
+          "precision": 66.5842514038086,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 55,
+          "step": 69410,
+          "success": 54.91794204711914,
+          "precision": 66.7002182006836,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "epoch": 60,
+          "step": 75720,
+          "success": 54.13238525390625,
+          "precision": 64.75492095947266,
+          "series": "B2-v2 full"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 5,
+          "step": 6310,
+          "success": 30.786651611328125,
+          "precision": 41.34245300292969,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 10,
+          "step": 12620,
+          "success": 30.90262794494629,
+          "precision": 36.177242279052734,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 15,
+          "step": 18930,
+          "success": 51.74070739746094,
+          "precision": 63.87199783325195,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 20,
+          "step": 25240,
+          "success": 38.2330436706543,
+          "precision": 35.301971435546875,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 25,
+          "step": 31550,
+          "success": 45.13238525390625,
+          "precision": 46.36980438232422,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 30,
+          "step": 37860,
+          "success": 47.4715576171875,
+          "precision": 51.75492858886719,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 35,
+          "step": 44170,
+          "success": 48.68818664550781,
+          "precision": 57.500003814697266,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 40,
+          "step": 50480,
+          "success": 53.594093322753906,
+          "precision": 64.49343872070312,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 45,
+          "step": 56790,
+          "success": 51.103939056396484,
+          "precision": 58.35886001586914,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 50,
+          "step": 63100,
+          "success": 51.25492858886719,
+          "precision": 60.89387512207031,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 55,
+          "step": 69410,
+          "success": 51.43873596191406,
+          "precision": 61.36214828491211,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "epoch": 60,
+          "step": 75720,
+          "success": 52.74288558959961,
+          "precision": 63.045955657958984,
+          "series": "V2.1 Search-only"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 5,
+          "step": 6310,
+          "success": 30.88730812072754,
+          "precision": 32.24726486206055,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 10,
+          "step": 12620,
+          "success": 32.405906677246094,
+          "precision": 31.001094818115234,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 15,
+          "step": 18930,
+          "success": 22.896060943603516,
+          "precision": 21.687089920043945,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 20,
+          "step": 25240,
+          "success": 23.567834854125977,
+          "precision": 23.113786697387695,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 25,
+          "step": 31550,
+          "success": 23.1192569732666,
+          "precision": 22.669584274291992,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 30,
+          "step": 37860,
+          "success": 24.05579948425293,
+          "precision": 23.60284423828125,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 35,
+          "step": 44170,
+          "success": 25.44967269897461,
+          "precision": 25.1192569732666,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 40,
+          "step": 50480,
+          "success": 25.211158752441406,
+          "precision": 24.910282135009766,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 45,
+          "step": 56790,
+          "success": 26.307443618774414,
+          "precision": 25.745079040527344,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 50,
+          "step": 63100,
+          "success": 25.022977828979492,
+          "precision": 24.636760711669922,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 55,
+          "step": 69410,
+          "success": 26.50875473022461,
+          "precision": 26.282278060913086,
+          "series": "V2.1 full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "epoch": 60,
+          "step": 75720,
+          "success": 25.847923278808594,
+          "precision": 25.177244186401367,
+          "series": "V2.1 full"
+        }
+      ],
+      "summary_visible": [
+        {
+          "run_id": "SEQTRACK_NEW",
+          "arm": "SeqTrack control (2026-08-01, anomalous)",
+          "role": "requested_control",
+          "final_success": 31.683805465698242,
+          "final_precision": 31.33698081970215,
+          "late3_success": 31.138220469156902,
+          "late3_precision": 30.640408833821613,
+          "best_success": 32.30306625366211,
+          "best_success_epoch": 5,
+          "best_precision": 33.793216705322266,
+          "best_precision_epoch": 10
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "role": "historical_reference",
+          "final_success": 50.98577880859375,
+          "final_precision": 59.96171188354492,
+          "late3_success": 50.10758590698242,
+          "late3_precision": 58.862876892089844,
+          "best_success": 52.28337097167969,
+          "best_success_epoch": 35,
+          "best_precision": 65.21444702148438,
+          "best_precision_epoch": 10
+        },
+        {
+          "run_id": "B0_HIST",
+          "arm": "CT-v2 historical B0 guardrail",
+          "role": "historical_guardrail",
+          "final_success": 53.359954833984375,
+          "final_precision": 64.3818359375,
+          "late3_success": 52.90481440226237,
+          "late3_precision": 63.10430145263672,
+          "best_success": 54.13457107543945,
+          "best_success_epoch": 50,
+          "best_precision": 64.3818359375,
+          "best_precision_epoch": 60
+        },
+        {
+          "run_id": "LEGACY_SEARCH",
+          "arm": "Legacy tube search-only",
+          "role": "legacy_search_reference",
+          "final_success": 49.655364990234375,
+          "final_precision": 56.391685485839844,
+          "late3_success": 49.43070856730143,
+          "late3_precision": 55.59299977620443,
+          "best_success": 49.948577880859375,
+          "best_success_epoch": 35,
+          "best_precision": 58.92888259887695,
+          "best_precision_epoch": 35
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "arm": "B2-v2 motion + search + softmax fusion",
+          "role": "v2_full_reference",
+          "final_success": 54.13238525390625,
+          "final_precision": 64.75492095947266,
+          "late3_success": 54.46207173665365,
+          "late3_precision": 66.01313018798828,
+          "best_success": 54.91794204711914,
+          "best_success_epoch": 55,
+          "best_precision": 66.7002182006836,
+          "best_precision_epoch": 55
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "role": "requested_search_only",
+          "final_success": 52.74288558959961,
+          "final_precision": 63.045955657958984,
+          "late3_success": 51.81218338012695,
+          "late3_precision": 61.76732635498047,
+          "best_success": 53.594093322753906,
+          "best_success_epoch": 40,
+          "best_precision": 64.49343872070312,
+          "best_precision_epoch": 40
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "role": "requested_full",
+          "final_success": 25.847923278808594,
+          "final_precision": 25.177244186401367,
+          "late3_success": 25.7932186126709,
+          "late3_precision": 25.365427652994793,
+          "best_success": 32.405906677246094,
+          "best_success_epoch": 10,
+          "best_precision": 32.24726486206055,
+          "best_precision_epoch": 5
+        }
+      ],
+      "key_comparisons": [
+        {
+          "treatment": "V21_SEARCH",
+          "baseline": "LEGACY_SEARCH",
+          "comparison_basis": "search redesign versus legacy tube search-only",
+          "delta_final_success": 3.0875205993652344,
+          "delta_final_precision": 6.654270172119141,
+          "delta_late3_success": 2.381474812825523,
+          "delta_late3_precision": 6.174326578776039
+        },
+        {
+          "treatment": "V21_SEARCH",
+          "baseline": "SEQTRACK_HIST",
+          "comparison_basis": "historical original SeqTrack reference",
+          "delta_final_success": 1.7571067810058594,
+          "delta_final_precision": 3.0842437744140625,
+          "delta_late3_success": 1.7045974731445312,
+          "delta_late3_precision": 2.904449462890625
+        },
+        {
+          "treatment": "V21_SEARCH",
+          "baseline": "B0_HIST",
+          "comparison_basis": "strongest available B0 guardrail; not same commit",
+          "delta_final_success": -0.6170692443847656,
+          "delta_final_precision": -1.3358802795410156,
+          "delta_late3_success": -1.0926310221354143,
+          "delta_late3_precision": -1.33697509765625
+        },
+        {
+          "treatment": "V21_FULL",
+          "baseline": "B2V2_FULL",
+          "comparison_basis": "v2.1 full versus v2 full; different clean commits",
+          "delta_final_success": -28.284461975097656,
+          "delta_final_precision": -39.57767677307129,
+          "delta_late3_success": -28.66885312398275,
+          "delta_late3_precision": -40.647702534993485
+        },
+        {
+          "treatment": "V21_FULL",
+          "baseline": "SEQTRACK_NEW",
+          "comparison_basis": "requested control; numerically paired but anomalous",
+          "delta_final_success": -5.835882186889648,
+          "delta_final_precision": -6.159736633300781,
+          "delta_late3_success": -5.345001856486004,
+          "delta_late3_precision": -5.2749811808268205
+        }
+      ],
+      "gate_rows": [
+        {
+          "run": "Search-only",
+          "metric": "Search valid",
+          "rate": 0.3076465927099842,
+          "epoch": 60
+        },
+        {
+          "run": "Search-only",
+          "metric": "Applied weight ≥ 0.1",
+          "rate": 0.30101030110935023,
+          "epoch": 60
+        },
+        {
+          "run": "Search-only",
+          "metric": "Helpful prevalence",
+          "rate": 0.5471397882796789,
+          "epoch": 60
+        },
+        {
+          "run": "Search-only",
+          "metric": "Helpful precision",
+          "rate": 0.5579933715591623,
+          "epoch": 60
+        },
+        {
+          "run": "Motion + Search",
+          "metric": "Search valid",
+          "rate": 0.3070522979397781,
+          "epoch": 60
+        },
+        {
+          "run": "Motion + Search",
+          "metric": "Applied weight ≥ 0.1",
+          "rate": 0.2981378763866878,
+          "epoch": 60
+        },
+        {
+          "run": "Motion + Search",
+          "metric": "Helpful prevalence",
+          "rate": 0.5589400699772472,
+          "epoch": 60
+        },
+        {
+          "run": "Motion + Search",
+          "metric": "Helpful precision",
+          "rate": 0.575801518812138,
+          "epoch": 60
+        }
+      ],
+      "search_evidence_rows": [
+        {
+          "run": "B2-v2 full",
+          "valid_rate": 0.23291402535657688,
+          "foreground_points": 3.6786351030110933,
+          "targetness_loss": 0.008584446973235585,
+          "vote_loss": 0.016695290023104496,
+          "proposal_loss": 0.013611151967082118
+        },
+        {
+          "run": "V2.1 Search-only",
+          "valid_rate": 0.3076465927099842,
+          "foreground_points": 7.42625792393027,
+          "targetness_loss": 0.008459629721830435,
+          "vote_loss": 0.017020642011509043,
+          "proposal_loss": 0.01075235308836035
+        },
+        {
+          "run": "V2.1 full",
+          "valid_rate": 0.3070522979397781,
+          "foreground_points": 7.50891442155309,
+          "targetness_loss": 0.008167037784767992,
+          "vote_loss": 0.016066808182773475,
+          "proposal_loss": 0.010343964240389117
+        }
+      ],
+      "training_anchor_rows": [
+        {
+          "run_id": "V21_SEARCH",
+          "epoch": 10,
+          "loss_total": 0.6149131466653759,
+          "loss_center": 0.04944679651537795,
+          "loss_angle": 0.00042374733383657533,
+          "loss_seg": 0.08815622478487374,
+          "loss_bc": 0.13997769153273992,
+          "search_match_loss": 0.014558602760378205,
+          "search_targetness_loss": 0.015618801030738828,
+          "search_vote_loss": 0.038691159086848025,
+          "search_proposal_loss": 0.028893269495997968,
+          "search_geometry_valid_rate": 0.3088351822503962,
+          "search_candidate_valid_rate": 0.3088351822503962,
+          "search_foreground_points": 7.502674326465927,
+          "search_targetness_mean": 0.15212623084704915,
+          "search_targetness_max": 0.28350037184031757,
+          "search_targetness_entropy": 0.11425307888254263,
+          "search_effective_sample_size": 691167.6173979794,
+          "search_extension_weight_ratio": 0.10731056504507389,
+          "search_available_count": 94.58676703645008,
+          "search_extension_count": 36.745889461172744,
+          "search_overlap_count": 57.84087757527734,
+          "observation_error_m": null,
+          "motion_error_valid_m": null,
+          "search_error_valid_m": null,
+          "final_error_m": null,
+          "motion_helpful_rate": null,
+          "search_helpful_rate": null,
+          "motion_weight": null,
+          "search_weight": null,
+          "search_applied_rate": null,
+          "search_helpful_precision": null,
+          "fusion_ramp": null,
+          "motion_candidate_valid_rate": null,
+          "motion_prior_rmse": null,
+          "motion_constant_velocity_rmse": null
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "epoch": 15,
+          "loss_total": 0.5438393063595292,
+          "loss_center": 0.04168182042414077,
+          "loss_angle": 0.00037570807142606134,
+          "loss_seg": 0.07085620499734077,
+          "loss_bc": 0.11420008488200169,
+          "search_match_loss": 0.01170537678415809,
+          "search_targetness_loss": 0.011916909575440171,
+          "search_vote_loss": 0.03284445531347474,
+          "search_proposal_loss": 0.021233740172426702,
+          "search_geometry_valid_rate": 0.30863708399366085,
+          "search_candidate_valid_rate": 0.30863708399366085,
+          "search_foreground_points": 7.491927496038035,
+          "search_targetness_mean": 0.15031113294979023,
+          "search_targetness_max": 0.2852200275263417,
+          "search_targetness_entropy": 0.10790591714564245,
+          "search_effective_sample_size": 691365.5297147385,
+          "search_extension_weight_ratio": 0.1162205033720626,
+          "search_available_count": 94.90095087163233,
+          "search_extension_count": 36.28105190174326,
+          "search_overlap_count": 58.619898969889064,
+          "observation_error_m": 0.3654624030655235,
+          "motion_error_valid_m": 0,
+          "search_error_valid_m": 0.30905482337903084,
+          "final_error_m": 0.34637853036827976,
+          "motion_helpful_rate": 0,
+          "search_helpful_rate": 0.6524826666538008,
+          "motion_weight": 0,
+          "search_weight": 0.15310077738199862,
+          "search_applied_rate": 0.30863708399366085,
+          "search_helpful_precision": 0.6524826666538008,
+          "fusion_ramp": 0.5,
+          "motion_candidate_valid_rate": null,
+          "motion_prior_rmse": null,
+          "motion_constant_velocity_rmse": null
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "epoch": 20,
+          "loss_total": 0.4975451874869939,
+          "loss_center": 0.035967183518171804,
+          "loss_angle": 0.00032687507500841253,
+          "loss_seg": 0.06076809866781894,
+          "loss_bc": 0.09795320069449828,
+          "search_match_loss": 0.010625759814308588,
+          "search_targetness_loss": 0.010936413725271262,
+          "search_vote_loss": 0.028355295853445782,
+          "search_proposal_loss": 0.01937469506810885,
+          "search_geometry_valid_rate": 0.3064580031695721,
+          "search_candidate_valid_rate": 0.3064580031695721,
+          "search_foreground_points": 7.451515451664025,
+          "search_targetness_mean": 0.1474504550268044,
+          "search_targetness_max": 0.2848157982848195,
+          "search_targetness_entropy": 0.09989623270010821,
+          "search_effective_sample_size": 693544.5245146593,
+          "search_extension_weight_ratio": 0.1106829002649186,
+          "search_available_count": 96.91704635499208,
+          "search_extension_count": 36.84627575277337,
+          "search_overlap_count": 60.0707706022187,
+          "observation_error_m": 0.34151527160415557,
+          "motion_error_valid_m": 0,
+          "search_error_valid_m": 0.2968256307851446,
+          "final_error_m": 0.3095588220398513,
+          "motion_helpful_rate": 0,
+          "search_helpful_rate": 0.6428781028028147,
+          "motion_weight": 0,
+          "search_weight": 0.15051104247322078,
+          "search_applied_rate": 0.3051703645007924,
+          "search_helpful_precision": 0.6453996105872319,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": null,
+          "motion_prior_rmse": null,
+          "motion_constant_velocity_rmse": null
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "epoch": 40,
+          "loss_total": 0.3004492756906194,
+          "loss_center": 0.02220597333848925,
+          "loss_angle": 0.00024609325369279433,
+          "loss_seg": 0.04756269433200595,
+          "loss_bc": 0.06919775721388272,
+          "search_match_loss": 0.008273458589280169,
+          "search_targetness_loss": 0.008292027058775794,
+          "search_vote_loss": 0.01836831258497719,
+          "search_proposal_loss": 0.011444232863279594,
+          "search_geometry_valid_rate": 0.3064580031695721,
+          "search_candidate_valid_rate": 0.3064580031695721,
+          "search_foreground_points": 7.5367472266244055,
+          "search_targetness_mean": 0.14624868923755402,
+          "search_targetness_max": 0.28406107965886307,
+          "search_targetness_entropy": 0.09755986206094762,
+          "search_effective_sample_size": 693544.605512084,
+          "search_extension_weight_ratio": 0.11274022309623649,
+          "search_available_count": 95.62202852614897,
+          "search_extension_count": 38.22533676703645,
+          "search_overlap_count": 57.39669175911252,
+          "observation_error_m": 0.25388083054363825,
+          "motion_error_valid_m": 0,
+          "search_error_valid_m": 0.24023524143699138,
+          "final_error_m": 0.23486960195772433,
+          "motion_helpful_rate": 0,
+          "search_helpful_rate": 0.5624256554973296,
+          "motion_weight": 0,
+          "search_weight": 0.14933671252787256,
+          "search_applied_rate": 0.30046553090332806,
+          "search_helpful_precision": 0.5731034659309735,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": null,
+          "motion_prior_rmse": null,
+          "motion_constant_velocity_rmse": null
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "epoch": 60,
+          "loss_total": 0.2908941668099628,
+          "loss_center": 0.022196441163012254,
+          "loss_angle": 0.00024217615997595968,
+          "loss_seg": 0.046168072875323464,
+          "loss_bc": 0.06702145745331295,
+          "search_match_loss": 0.008388755199565015,
+          "search_targetness_loss": 0.008459629721830435,
+          "search_vote_loss": 0.017020642011509043,
+          "search_proposal_loss": 0.01075235308836035,
+          "search_geometry_valid_rate": 0.3076465927099842,
+          "search_candidate_valid_rate": 0.3076465927099842,
+          "search_foreground_points": 7.42625792393027,
+          "search_targetness_mean": 0.14570189650552776,
+          "search_targetness_max": 0.2842341529444545,
+          "search_targetness_entropy": 0.0976686637978499,
+          "search_effective_sample_size": 692356.0611628367,
+          "search_extension_weight_ratio": 0.1160816774411284,
+          "search_available_count": 95.83919374009508,
+          "search_extension_count": 37.63530110935024,
+          "search_overlap_count": 58.203892630744846,
+          "observation_error_m": 0.24803138631742844,
+          "motion_error_valid_m": 0,
+          "search_error_valid_m": 0.24478609241521584,
+          "final_error_m": 0.23062985485475718,
+          "motion_helpful_rate": 0,
+          "search_helpful_rate": 0.5471397882796789,
+          "motion_weight": 0,
+          "search_weight": 0.14943380330330597,
+          "search_applied_rate": 0.30101030110935023,
+          "search_helpful_precision": 0.5579933715591623,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": null,
+          "motion_prior_rmse": null,
+          "motion_constant_velocity_rmse": null
+        },
+        {
+          "run_id": "V21_FULL",
+          "epoch": 10,
+          "loss_total": 0.6429515752215204,
+          "loss_center": 0.050236398238310866,
+          "loss_angle": 0.0004691843367949211,
+          "loss_seg": 0.08606353552241569,
+          "loss_bc": 0.1390181602216466,
+          "search_match_loss": 0.0132714401295557,
+          "search_targetness_loss": 0.013989829617307251,
+          "search_vote_loss": 0.037520180166870205,
+          "search_proposal_loss": 0.027183923559857326,
+          "search_geometry_valid_rate": 0.3047741679873217,
+          "search_candidate_valid_rate": 0.3047741679873217,
+          "search_foreground_points": 7.454387876386688,
+          "search_targetness_mean": 0.1502757182181702,
+          "search_targetness_max": 0.2806004974585198,
+          "search_targetness_entropy": 0.11210370419411175,
+          "search_effective_sample_size": 695228.6686311411,
+          "search_extension_weight_ratio": 0.10434289207174494,
+          "search_available_count": 95.09003565768622,
+          "search_extension_count": 37.68754952456418,
+          "search_overlap_count": 57.402486133122025,
+          "observation_error_m": null,
+          "motion_error_valid_m": null,
+          "search_error_valid_m": null,
+          "final_error_m": null,
+          "motion_helpful_rate": null,
+          "search_helpful_rate": null,
+          "motion_weight": null,
+          "search_weight": null,
+          "search_applied_rate": null,
+          "search_helpful_precision": null,
+          "fusion_ramp": null,
+          "motion_candidate_valid_rate": 0.904467115689382,
+          "motion_prior_rmse": 0.2748896562820522,
+          "motion_constant_velocity_rmse": 0.30017992255474235
+        },
+        {
+          "run_id": "V21_FULL",
+          "epoch": 15,
+          "loss_total": 0.5503294712933232,
+          "loss_center": 0.04080488822546901,
+          "loss_angle": 0.0004020984507202725,
+          "loss_seg": 0.06619295043495917,
+          "loss_bc": 0.10903069466683075,
+          "search_match_loss": 0.011256126577141241,
+          "search_targetness_loss": 0.011631258179529909,
+          "search_vote_loss": 0.03140131741184328,
+          "search_proposal_loss": 0.021949926643400258,
+          "search_geometry_valid_rate": 0.3071513470681458,
+          "search_candidate_valid_rate": 0.3071513470681458,
+          "search_foreground_points": 7.501238114104596,
+          "search_targetness_mean": 0.1480452148627531,
+          "search_targetness_max": 0.28177608528046055,
+          "search_targetness_entropy": 0.10703472785058353,
+          "search_effective_sample_size": 692851.5924871236,
+          "search_extension_weight_ratio": 0.10786602486975971,
+          "search_available_count": 98.04209587955626,
+          "search_extension_count": 37.27624801901743,
+          "search_overlap_count": 60.76584786053883,
+          "observation_error_m": 0.36471065424276417,
+          "motion_error_valid_m": 0.2709178351420797,
+          "search_error_valid_m": 0.3086744661335191,
+          "final_error_m": 0.33628448111886267,
+          "motion_helpful_rate": 0.44972069476466925,
+          "search_helpful_rate": 0.648234016201481,
+          "motion_weight": 0.35600335446146514,
+          "search_weight": 0.08773527369523058,
+          "search_applied_rate": 0.3055170364500792,
+          "search_helpful_precision": 0.6513746594995402,
+          "fusion_ramp": 0.5,
+          "motion_candidate_valid_rate": 0.9063985736925515,
+          "motion_prior_rmse": 0.2700590269400985,
+          "motion_constant_velocity_rmse": 0.2977089322690163
+        },
+        {
+          "run_id": "V21_FULL",
+          "epoch": 20,
+          "loss_total": 0.5069502180946988,
+          "loss_center": 0.036176350138190004,
+          "loss_angle": 0.0003358363749694338,
+          "loss_seg": 0.058708541636929366,
+          "loss_bc": 0.09435169203074062,
+          "search_match_loss": 0.010862382251753438,
+          "search_targetness_loss": 0.010958998305441257,
+          "search_vote_loss": 0.02724077067320957,
+          "search_proposal_loss": 0.01840760544410465,
+          "search_geometry_valid_rate": 0.3070522979397781,
+          "search_candidate_valid_rate": 0.3070522979397781,
+          "search_foreground_points": 7.52699088748019,
+          "search_targetness_mean": 0.14864185957308923,
+          "search_targetness_max": 0.28433271320226783,
+          "search_targetness_entropy": 0.10237080410636501,
+          "search_effective_sample_size": 692950.3453595483,
+          "search_extension_weight_ratio": 0.11299411921415238,
+          "search_available_count": 97.82220681458003,
+          "search_extension_count": 38.577555467511885,
+          "search_overlap_count": 59.24465134706814,
+          "observation_error_m": 0.34082926986901396,
+          "motion_error_valid_m": 0.2708700725103237,
+          "search_error_valid_m": 0.2883725825080238,
+          "final_error_m": 0.29392917965510756,
+          "motion_helpful_rate": 0.41494446297407905,
+          "search_helpful_rate": 0.6348732747905039,
+          "motion_weight": 0.3487046612470917,
+          "search_weight": 0.0907021251574628,
+          "search_applied_rate": 0.299276941362916,
+          "search_helpful_precision": 0.6496292219841159,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": 0.9039223454833597,
+          "motion_prior_rmse": 0.2685107884429714,
+          "motion_constant_velocity_rmse": 0.29909647980235554
+        },
+        {
+          "run_id": "V21_FULL",
+          "epoch": 40,
+          "loss_total": 0.3161857019513609,
+          "loss_center": 0.021979631357213775,
+          "loss_angle": 0.00024417239178482015,
+          "loss_seg": 0.04635386465474514,
+          "loss_bc": 0.06786723153314386,
+          "search_match_loss": 0.008371617707038091,
+          "search_targetness_loss": 0.008340577534517194,
+          "search_vote_loss": 0.017205083366521177,
+          "search_proposal_loss": 0.011473416654169748,
+          "search_geometry_valid_rate": 0.3074980190174326,
+          "search_candidate_valid_rate": 0.3074980190174326,
+          "search_foreground_points": 7.455229793977813,
+          "search_targetness_mean": 0.14587465951790393,
+          "search_targetness_max": 0.28431210260271506,
+          "search_targetness_entropy": 0.09695063608221816,
+          "search_effective_sample_size": 692504.5757354398,
+          "search_extension_weight_ratio": 0.11749565025253558,
+          "search_available_count": 96.38668779714739,
+          "search_extension_count": 38.06304477020602,
+          "search_overlap_count": 58.32364302694136,
+          "observation_error_m": 0.2565812841175853,
+          "motion_error_valid_m": 0.2706068208745183,
+          "search_error_valid_m": 0.24068452528103737,
+          "final_error_m": 0.23610133995344823,
+          "motion_helpful_rate": 0.20847094372481628,
+          "search_helpful_rate": 0.5661185445550315,
+          "motion_weight": 0.26770709321587666,
+          "search_weight": 0.09927915578342802,
+          "search_applied_rate": 0.29863312202852615,
+          "search_helpful_precision": 0.5827015695972413,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": 0.905358557844691,
+          "motion_prior_rmse": 0.2676948984928441,
+          "motion_constant_velocity_rmse": 0.3001307679425848
+        },
+        {
+          "run_id": "V21_FULL",
+          "epoch": 60,
+          "loss_total": 0.2997107733802637,
+          "loss_center": 0.02127186483046757,
+          "loss_angle": 0.00022417388344626347,
+          "loss_seg": 0.04656317190041326,
+          "loss_bc": 0.06477389572905569,
+          "search_match_loss": 0.008253151427016126,
+          "search_targetness_loss": 0.008167037784767992,
+          "search_vote_loss": 0.016066808182773475,
+          "search_proposal_loss": 0.010343964240389117,
+          "search_geometry_valid_rate": 0.3070522979397781,
+          "search_candidate_valid_rate": 0.3070522979397781,
+          "search_foreground_points": 7.50891442155309,
+          "search_targetness_mean": 0.1454171796569899,
+          "search_targetness_max": 0.28387450057977776,
+          "search_targetness_entropy": 0.09640968753734866,
+          "search_effective_sample_size": 692950.2802595088,
+          "search_extension_weight_ratio": 0.11572541120919971,
+          "search_available_count": 95.5480883518225,
+          "search_extension_count": 37.11539223454834,
+          "search_overlap_count": 58.43269611727417,
+          "observation_error_m": 0.24792439067845487,
+          "motion_error_valid_m": 0.269888446201377,
+          "search_error_valid_m": 0.2431153262022251,
+          "final_error_m": 0.2300479762881947,
+          "motion_helpful_rate": 0.16916550272004163,
+          "search_helpful_rate": 0.5589400699772472,
+          "motion_weight": 0.24560774223976392,
+          "search_weight": 0.100680621058227,
+          "search_applied_rate": 0.2981378763866878,
+          "search_helpful_precision": 0.575801518812138,
+          "fusion_ramp": 1,
+          "motion_candidate_valid_rate": 0.9042690174326465,
+          "motion_prior_rmse": 0.2646691855323603,
+          "motion_constant_velocity_rmse": 0.29976132287453455
+        }
+      ],
+      "drivers": [
+        {
+          "priority": 1,
+          "finding": "Motion+Search v2.1 collapses exactly after fusion activation",
+          "evidence": "epoch10=32.406 best Success; epoch15=22.896/21.687; epoch60=25.848/25.177; versus v2 final -28.284/-39.578",
+          "interpretation": "The failure aligns with the 10-19 ramp and is not a late-training overfit pattern.",
+          "confidence": "verified"
+        },
+        {
+          "priority": 2,
+          "finding": "B0 optimization did not collapse",
+          "evidence": "epoch60 center loss search/full=0.02220/0.02127; observation error=0.248/0.248 m",
+          "interpretation": "The recursive validation collapse is downstream of auxiliary proposal use, not visible as B0 supervised-loss degradation.",
+          "confidence": "verified"
+        },
+        {
+          "priority": 3,
+          "finding": "The advantage gate is not selective",
+          "evidence": "search-only selects about 97.8% of valid Search rows; helpful precision 55.8% versus 54.7% prevalence; conditional weight about 0.486",
+          "interpretation": "The gate behaves close to an availability gate and nearly reaches the normal 0.5 mass cap, failing the 70% helpful-precision target.",
+          "confidence": "verified"
+        },
+        {
+          "priority": 4,
+          "finding": "Motion is over-used relative to its helpfulness",
+          "evidence": "epoch60 valid=90.4%, helpful=16.9%, conditional applied weight about 0.272; motion/search/obs error=0.270/0.243/0.248 m",
+          "interpretation": "Teacher-forced one-step fused loss rewards partial corrections that are not safe under recursive history feedback.",
+          "confidence": "verified metrics; closed-loop mechanism likely"
+        },
+        {
+          "priority": 5,
+          "finding": "Invalid Search rows inject a 1e6 ESS feature into the shared gate",
+          "evidence": "epoch60 Search unavailable=69.3%; logged mean ESS=692950, while inferred valid-row ESS is about 8.4 and the branch contains at most 128 points",
+          "interpretation": "_masked_softmax returns zero weights for invalid rows, then 1/clamp(0,1e-6) creates 1e6; AdvantageGatedProposalFusion consumes it without validity masking. This can contaminate motion decisions whenever Search is invalid.",
+          "confidence": "code defect verified; causal share high-confidence inference"
+        },
+        {
+          "priority": 6,
+          "finding": "Observation-queried Search evidence is better than the old Search path",
+          "evidence": "coverage +7.41 pp; foreground points +104.1%; proposal loss -24.0%; search-only final=52.743/63.046 versus legacy 49.655/56.392",
+          "interpretation": "Source-aware overlap and observation query repaired much of the old Search degradation, but did not establish a gain over the strongest B0.",
+          "confidence": "verified"
+        }
+      ],
+      "decisions": [
+        {
+          "question": "Did Search-v2.1 improve over legacy search-only?",
+          "criterion": "epoch60 and late-3 both improve",
+          "observed": "final +3.088 S / +6.654 P; late-3 +2.381 / +6.174",
+          "decision": "PASS: the Search redesign is materially better than the legacy path"
+        },
+        {
+          "question": "Did Search-v2.1 beat SeqTrack?",
+          "criterion": "+0.5 Success and +1.0 Precision at epoch60; late-3 non-negative",
+          "observed": "versus historical SeqTrack final +1.757/+3.084, late-3 +1.705/+2.904",
+          "decision": "NUMERICAL PASS versus historical SeqTrack, but not a formal matched-B0 promotion"
+        },
+        {
+          "question": "Did Search-v2.1 beat the strongest available B0 guardrail?",
+          "criterion": "+0.5 Success and +1.0 Precision at epoch60; late-3 non-negative",
+          "observed": "final -0.617/-1.336; late-3 -1.093/-1.337",
+          "decision": "FAIL against historical B0; same-commit matched B0 is still missing"
+        },
+        {
+          "question": "Did full B2-v2.1 improve over B2-v2?",
+          "criterion": "epoch60 and late-3 should improve or at least remain stable",
+          "observed": "final -28.284/-39.578; late-3 -28.669/-40.648",
+          "decision": "CATASTROPHIC FAIL: do not promote or run more seeds"
+        },
+        {
+          "question": "Did full B2-v2.1 at least beat the anomalous new control?",
+          "criterion": "both epoch60 metrics should be non-negative",
+          "observed": "final -5.836/-6.160",
+          "decision": "FAIL even against the weak requested control"
+        },
+        {
+          "question": "Is Search gate selection reliable enough?",
+          "criterion": "applied weight >=0.1 helpful precision >=70%",
+          "observed": "Search-only helpful precision 55.8%; prevalence 54.7%",
+          "decision": "FAIL: selection adds only a small lift over natural prevalence"
+        }
+      ],
+      "integrity_visible": [
+        {
+          "run_id": "SEQTRACK_NEW",
+          "run_exists": true,
+          "provenance_present": false,
+          "git_commit": null,
+          "git_dirty": "unknown",
+          "config_path": null,
+          "seed": 42,
+          "batch_size": 16,
+          "workers": 4,
+          "epochs": 60,
+          "init_checkpoint": null,
+          "validation_points": 12,
+          "checkpoint_count": 6,
+          "last_checkpoint_present": true,
+          "status": "complete_missing_provenance"
+        },
+        {
+          "run_id": "B0_HIST",
+          "run_exists": true,
+          "provenance_present": true,
+          "git_commit": "d86990ce5304258822c1748d17f997f6ec003e9c",
+          "git_dirty": "False",
+          "config_path": "cfgs/ct_v2/01_seqtrack3d_baseline.yaml",
+          "seed": 42,
+          "batch_size": 16,
+          "workers": 4,
+          "epochs": 60,
+          "init_checkpoint": null,
+          "validation_points": 12,
+          "checkpoint_count": 6,
+          "last_checkpoint_present": true,
+          "status": "complete_comparable_contract"
+        },
+        {
+          "run_id": "B2V2_FULL",
+          "run_exists": true,
+          "provenance_present": true,
+          "git_commit": "a486a3612b6d865bd44a8f14eb63c6e92ae1949f",
+          "git_dirty": "False",
+          "config_path": "cfgs/ct_v2/03_ct_motion_search_v2.yaml",
+          "seed": 42,
+          "batch_size": 16,
+          "workers": 4,
+          "epochs": 60,
+          "init_checkpoint": null,
+          "validation_points": 12,
+          "checkpoint_count": 6,
+          "last_checkpoint_present": true,
+          "status": "complete_comparable_contract"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "run_exists": true,
+          "provenance_present": true,
+          "git_commit": "16c2b8b3719815cbd970e7e59aea204819c2c567",
+          "git_dirty": "False",
+          "config_path": "cfgs/ct_v2/08_seqtrack3d_search_v21.yaml",
+          "seed": 42,
+          "batch_size": 16,
+          "workers": 4,
+          "epochs": 60,
+          "init_checkpoint": null,
+          "validation_points": 12,
+          "checkpoint_count": 6,
+          "last_checkpoint_present": true,
+          "status": "complete_comparable_contract"
+        },
+        {
+          "run_id": "V21_FULL",
+          "run_exists": true,
+          "provenance_present": true,
+          "git_commit": "16c2b8b3719815cbd970e7e59aea204819c2c567",
+          "git_dirty": "False",
+          "config_path": "cfgs/ct_v2/09_ct_motion_search_v21.yaml",
+          "seed": 42,
+          "batch_size": 16,
+          "workers": 4,
+          "epochs": 60,
+          "init_checkpoint": null,
+          "validation_points": 12,
+          "checkpoint_count": 6,
+          "last_checkpoint_present": true,
+          "status": "complete_comparable_contract"
+        }
+      ],
+      "checkpoints": [
+        {
+          "run_id": "V21_SEARCH",
+          "checkpoint": "last.ckpt",
+          "epoch": 60,
+          "global_step": 75720,
+          "help_bias_motion": -3.891820192337036,
+          "help_bias_search": -3.806023120880127,
+          "help_weight_norm_motion": 0,
+          "help_weight_norm_search": 0.6632915735244751,
+          "step_bias_motion": 0,
+          "step_bias_search": 0.0386541523039341,
+          "step_weight_norm_motion": 0,
+          "step_weight_norm_search": 0.5929570198059082
+        },
+        {
+          "run_id": "V21_FULL",
+          "checkpoint": "last.ckpt",
+          "epoch": 60,
+          "global_step": 75720,
+          "help_bias_motion": -3.8281569480895996,
+          "help_bias_search": -3.799901008605957,
+          "help_weight_norm_motion": 0.7733073830604553,
+          "help_weight_norm_search": 0.7321720123291016,
+          "step_bias_motion": 0.028528794646263123,
+          "step_bias_search": 0.039055969566106796,
+          "step_weight_norm_motion": 1.0636736154556274,
+          "step_weight_norm_search": 0.725558876991272
+        }
+      ],
+      "code_audit": [
+        {
+          "file": "models/ct_v2/motion.py",
+          "symbol": "TrajectorySearchEvidenceV21.forward",
+          "verified_behavior": "Invalid rows have zero pool weights; ESS computes 1/clamp(sum(w^2),1e-6), producing 1e6.",
+          "risk": "Out-of-range invalid-row statistic"
+        },
+        {
+          "file": "models/ct_v2/motion.py",
+          "symbol": "AdvantageGatedProposalFusion.forward",
+          "verified_behavior": "Raw search ESS enters the shared gate input without search-valid masking or normalization.",
+          "risk": "Search invalidity can alter motion gating"
+        },
+        {
+          "file": "models/seqtrack3d.py",
+          "symbol": "compute_loss / advantage fusion",
+          "verified_behavior": "Fused loss is one-step teacher-forced; step loss is restricted to helpful candidates.",
+          "risk": "One-step gain does not enforce closed-loop safety"
+        },
+        {
+          "file": "datasets/sampler.py",
+          "symbol": "source-aware endpoint sampling",
+          "verified_behavior": "B0 1024 points remain intact; endpoint overlap and extension use an independent 128-point branch.",
+          "risk": "No baseline point-budget regression"
+        }
+      ],
+      "next_steps": [
+        {
+          "order": 1,
+          "action": "Stop full v2.1 promotion",
+          "change": "Do not run seed43/44 or robustness suites from the current full checkpoint.",
+          "decision_unlocked": "Avoid spending compute on a structurally broken fusion path.",
+          "gpu_cost": "none"
+        },
+        {
+          "order": 2,
+          "action": "Run same-checkpoint four-mode inference",
+          "change": "Evaluate obs, obs_motion, obs_search, and full for epoch60 full and search-only checkpoints.",
+          "decision_unlocked": "Directly separate B0, motion, search, and interaction effects.",
+          "gpu_cost": "low; inference only"
+        },
+        {
+          "order": 3,
+          "action": "Fix invalid-row evidence statistics",
+          "change": "Set ESS and all Search statistics to zero when search_valid is false; normalize ESS by valid_count or log1p before the gate.",
+          "decision_unlocked": "Remove the verified 1e6 out-of-range feature and isolate gate calibration.",
+          "gpu_cost": "none for code/tests"
+        },
+        {
+          "order": 4,
+          "action": "Make auxiliary use truly selective",
+          "change": "Do not supervise step on only helpful rows while allowing near-cap weights everywhere; add abstention/calibration diagnostics and cap motion more tightly.",
+          "decision_unlocked": "Require helpful precision to exceed 70% before recursive use.",
+          "gpu_cost": "short diagnostic training before 60 epochs"
+        },
+        {
+          "order": 5,
+          "action": "Train same-commit matched B0",
+          "change": "Commit 16c2b8b, seed42, batch16, workers4, scratch, 60 epochs.",
+          "decision_unlocked": "Establish whether Search-only truly raises the project's B0.",
+          "gpu_cost": "one 60-epoch run"
+        }
+      ],
+      "cause_timeline_visible": [
+        {
+          "run_id": "SEQTRACK_NEW",
+          "arm": "SeqTrack control (2026-08-01, anomalous)",
+          "epoch": 10,
+          "success": 26.760393142700195,
+          "precision": 33.793216705322266,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "SEQTRACK_NEW",
+          "arm": "SeqTrack control (2026-08-01, anomalous)",
+          "epoch": 15,
+          "success": 31.950769424438477,
+          "precision": 32.92341613769531,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "SEQTRACK_NEW",
+          "arm": "SeqTrack control (2026-08-01, anomalous)",
+          "epoch": 60,
+          "success": 31.683805465698242,
+          "precision": 31.33698081970215,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "epoch": 10,
+          "success": 46.09081268310547,
+          "precision": 65.21444702148438,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "epoch": 15,
+          "success": 45.729759216308594,
+          "precision": 50.54158020019531,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "epoch": 60,
+          "success": 50.98577880859375,
+          "precision": 59.96171188354492,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "epoch": 10,
+          "success": 30.90262794494629,
+          "precision": 36.177242279052734,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "epoch": 15,
+          "success": 51.74070739746094,
+          "precision": 63.87199783325195,
+          "advantage_fusion_ramp_expected": 0.5,
+          "interpretation": "fusion_ramping"
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "epoch": 60,
+          "success": 52.74288558959961,
+          "precision": 63.045955657958984,
+          "advantage_fusion_ramp_expected": 1,
+          "interpretation": "fusion_full"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "epoch": 10,
+          "success": 32.405906677246094,
+          "precision": 31.001094818115234,
+          "advantage_fusion_ramp_expected": 0,
+          "interpretation": "fusion_off"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "epoch": 15,
+          "success": 22.896060943603516,
+          "precision": 21.687089920043945,
+          "advantage_fusion_ramp_expected": 0.5,
+          "interpretation": "fusion_ramping"
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "epoch": 60,
+          "success": 25.847923278808594,
+          "precision": 25.177244186401367,
+          "advantage_fusion_ramp_expected": 1,
+          "interpretation": "fusion_full"
+        }
+      ],
+      "base_loss_visible": [
+        {
+          "run_id": "SEQTRACK_NEW",
+          "arm": "SeqTrack control (2026-08-01, anomalous)",
+          "epoch": 60,
+          "loss_total": 0.22026913394640818,
+          "loss_center": 0.021471804696786116,
+          "loss_angle": 0.0002506172811777516,
+          "loss_seg": 0.04503968468440694,
+          "loss_bc": 0.06560889146365993
+        },
+        {
+          "run_id": "SEQTRACK_HIST",
+          "arm": "SeqTrack historical seed42 reference",
+          "epoch": 60,
+          "loss_total": 0.21872659758465415,
+          "loss_center": 0.02105112928379085,
+          "loss_angle": 0.00022943141163095167,
+          "loss_seg": 0.046839215462103415,
+          "loss_bc": 0.0677916125088883
+        },
+        {
+          "run_id": "V21_SEARCH",
+          "arm": "B2-v2.1 search-only",
+          "epoch": 60,
+          "loss_total": 0.2908941668099628,
+          "loss_center": 0.022196441163012254,
+          "loss_angle": 0.00024217615997595968,
+          "loss_seg": 0.046168072875323464,
+          "loss_bc": 0.06702145745331295
+        },
+        {
+          "run_id": "V21_FULL",
+          "arm": "B2-v2.1 motion + search + advantage fusion",
+          "epoch": 60,
+          "loss_total": 0.2997107733802637,
+          "loss_center": 0.02127186483046757,
+          "loss_angle": 0.00022417388344626347,
+          "loss_seg": 0.04656317190041326,
+          "loss_bc": 0.06477389572905569
+        }
+      ],
+      "seqtrack_checkpoint_audit": [
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": 320,
+          "exact_tensor_count": 28,
+          "changed_tensor_count": 292,
+          "new_only_key_count": 0,
+          "historical_only_key_count": 0,
+          "exact_initial_loss_step_prefix": 3,
+          "new_workers": 4,
+          "historical_workers": 12,
+          "new_provenance_present": false,
+          "historical_provenance_present": false,
+          "interpretation": "Same key set and identical first loss steps, then a different stochastic training/BatchNorm path; exact code and data state remain unprovable.",
+          "bn_rank": null,
+          "bn_tensor": null,
+          "bn_max_abs_difference": null
+        },
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": null,
+          "exact_tensor_count": null,
+          "changed_tensor_count": null,
+          "new_only_key_count": null,
+          "historical_only_key_count": null,
+          "exact_initial_loss_step_prefix": null,
+          "new_workers": null,
+          "historical_workers": null,
+          "new_provenance_present": null,
+          "historical_provenance_present": null,
+          "interpretation": "Largest BatchNorm running-stat divergence at epoch10.",
+          "bn_rank": 1,
+          "bn_tensor": "feature_pointnet.seq_per_point2.0.1.running_var",
+          "bn_max_abs_difference": 15.04142951965332
+        },
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": null,
+          "exact_tensor_count": null,
+          "changed_tensor_count": null,
+          "new_only_key_count": null,
+          "historical_only_key_count": null,
+          "exact_initial_loss_step_prefix": null,
+          "new_workers": null,
+          "historical_workers": null,
+          "new_provenance_present": null,
+          "historical_provenance_present": null,
+          "interpretation": "Largest BatchNorm running-stat divergence at epoch10.",
+          "bn_rank": 2,
+          "bn_tensor": "seg_pointnet.seq_per_point2.0.1.running_mean",
+          "bn_max_abs_difference": 10.535785675048828
+        },
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": null,
+          "exact_tensor_count": null,
+          "changed_tensor_count": null,
+          "new_only_key_count": null,
+          "historical_only_key_count": null,
+          "exact_initial_loss_step_prefix": null,
+          "new_workers": null,
+          "historical_workers": null,
+          "new_provenance_present": null,
+          "historical_provenance_present": null,
+          "interpretation": "Largest BatchNorm running-stat divergence at epoch10.",
+          "bn_rank": 3,
+          "bn_tensor": "mini_pointnet.features.15.running_var",
+          "bn_max_abs_difference": 9.332590103149414
+        },
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": null,
+          "exact_tensor_count": null,
+          "changed_tensor_count": null,
+          "new_only_key_count": null,
+          "historical_only_key_count": null,
+          "exact_initial_loss_step_prefix": null,
+          "new_workers": null,
+          "historical_workers": null,
+          "new_provenance_present": null,
+          "historical_provenance_present": null,
+          "interpretation": "Largest BatchNorm running-stat divergence at epoch10.",
+          "bn_rank": 4,
+          "bn_tensor": "feature_pointnet.seq_per_point2.0.1.running_mean",
+          "bn_max_abs_difference": 9.236358642578125
+        },
+        {
+          "comparison": "SEQTRACK_NEW_vs_SEQTRACK_HIST",
+          "checkpoint_epoch": 10,
+          "shared_tensor_count": null,
+          "exact_tensor_count": null,
+          "changed_tensor_count": null,
+          "new_only_key_count": null,
+          "historical_only_key_count": null,
+          "exact_initial_loss_step_prefix": null,
+          "new_workers": null,
+          "historical_workers": null,
+          "new_provenance_present": null,
+          "historical_provenance_present": null,
+          "interpretation": "Largest BatchNorm running-stat divergence at epoch10.",
+          "bn_rank": 5,
+          "bn_tensor": "mini_pointnet.features.15.running_mean",
+          "bn_max_abs_difference": 8.231504440307617
+        }
+      ],
+      "retrain_decision": [
+        {
+          "question": "Do the two severe regressions have the same root cause?",
+          "evidence": "Both are amplified by recursive history feedback, but SeqTrack is low without an intervention and lacks provenance; V2.1 full splits from Search-only exactly when fusion ramps on.",
+          "decision": "No: shared amplifier, different proximate trigger.",
+          "confidence": "high"
+        },
+        {
+          "question": "Did B0 supervised optimization collapse in V2.1 full?",
+          "evidence": "Epoch60 center/angle/seg/box-cloud losses remain comparable to Search-only despite a 26-38 point validation gap.",
+          "decision": "No evidence of a B0 training-loss collapse.",
+          "confidence": "high for supervised losses; recursive obs mode pending"
+        },
+        {
+          "question": "Should current V2.1 full be retrained unchanged?",
+          "evidence": "Fusion timing, non-selective gate use, 16.9% Motion helpfulness, and the verified invalid-row ESS=1e6 defect are structural risks.",
+          "decision": "No. First run four-mode inference and repair the gate inputs.",
+          "confidence": "high"
+        },
+        {
+          "question": "Will a corrected V2.1 full require retraining?",
+          "evidence": "Masking/normalizing gate features and changing abstention or supervision changes the learned routing distribution.",
+          "decision": "Yes, retrain corrected full from scratch after a ramp smoke test.",
+          "confidence": "high"
+        },
+        {
+          "question": "Should Search-only be retrained now?",
+          "evidence": "Its encoder is materially better than legacy Search; formal gain is blocked by the missing same-commit matched B0, not by a catastrophic collapse.",
+          "decision": "Not immediately; preserve checkpoint and run obs/obs_search attribution.",
+          "confidence": "medium-high"
+        }
+      ]
+    }
+  },
+  "sources": []
+}

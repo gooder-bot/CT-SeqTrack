@@ -5,6 +5,7 @@ Modified by Aron Lin at Jun 6 17:39:22 CST 2023
 """
 
 import csv
+import json
 from pathlib import Path
 
 import torch
@@ -65,6 +66,8 @@ class BaseModelMF(pl.LightningModule):
         self.n_frames = TorchNumFrames()
         self._proposal_sequence_diagnostics = []
         self._proposal_test_diagnostics = []
+        self._b3_sequence_rollouts = []
+        self._b3_test_rollouts = []
 
 
     def configure_optimizers(self):
@@ -180,10 +183,13 @@ class BaseModelMF(pl.LightningModule):
             motion_valid and motion_error + margin <= observation_error)
         search_helpful = bool(
             search_valid and search_error + margin <= observation_error)
+        weight_key = (
+            "b3_applied_weight" if "b3_applied_weight" in output
+            else "advantage_applied_weight")
         motion_weight = self._proposal_scalar(
-            output, "advantage_applied_weight", column=0)
+            output, weight_key, column=0)
         search_weight = self._proposal_scalar(
-            output, "advantage_applied_weight", column=1)
+            output, weight_key, column=1)
 
         row = {
             "frame_id": int(frame_id),
@@ -215,6 +221,18 @@ class BaseModelMF(pl.LightningModule):
                 output, "advantage_step_ratio", column=0),
             "search_step_ratio": self._proposal_scalar(
                 output, "advantage_step_ratio", column=1),
+            "b3_motion_q10": self._proposal_scalar(
+                output, "b3_gain_quantiles", column=0),
+            "b3_motion_q50": self._proposal_scalar(
+                output, "b3_gain_quantiles", column=1),
+            "b3_search_q10": self._proposal_scalar(
+                output, "b3_gain_quantiles", column=2),
+            "b3_search_q50": self._proposal_scalar(
+                output, "b3_gain_quantiles", column=3),
+            "b3_selected_index": int(self._proposal_scalar(
+                output, "b3_selected_index", default=0)),
+            "b3_abstained": self._proposal_scalar(
+                output, "b3_abstained", default=1.0),
             "motion_weight": motion_weight,
             "search_weight": search_weight,
             "search_materially_selected": int(search_weight >= 0.1),
@@ -239,6 +257,149 @@ class BaseModelMF(pl.LightningModule):
                 output, "search_v21_extension_weight_ratio"),
         }
         return row
+
+    def _build_b3_rollout_row(
+            self, output, this_box, reference_box, frame_id):
+        """Build one GT-labelled CRPA training row outside model forward."""
+        target_box = points_utils.transform_box(this_box, reference_box)
+        target_xy = np.asarray(target_box.center[:2], dtype=np.float32)
+        observation_xy = output[
+            "observation_aux_estimation_boxes"
+        ].detach().cpu().numpy().reshape(-1, 4)[0, :2].astype(np.float32)
+        router_features = output[
+            "b3_router_features"
+        ].detach().cpu().numpy().reshape(1, -1)[0].astype(np.float32)
+        residual = output[
+            "b3_candidate_residual_xy"
+        ].detach().cpu().numpy().reshape(2, 2).astype(np.float32)
+        valid = output[
+            "b3_candidate_valid"
+        ].detach().cpu().numpy().reshape(2).astype(np.float32)
+        step_cap = float(self._proposal_scalar(output, "b3_step_cap"))
+        radius = float(self._proposal_scalar(output, "b3_fusion_radius"))
+        target_offset = target_xy - observation_xy
+        numerator = np.sum(residual * target_offset[None, :], axis=1)
+        denominator = np.sum(residual * residual, axis=1) + 1e-6
+        oracle_alpha = np.clip(numerator / denominator, 0.0, step_cap) * valid
+        oracle_xy = observation_xy[None, :] + oracle_alpha[:, None] * residual
+        observation_error = float(np.linalg.norm(observation_xy - target_xy))
+        oracle_error = np.linalg.norm(
+            oracle_xy - target_xy[None, :], axis=1).astype(np.float32)
+        oracle_gain = np.maximum(
+            observation_error - oracle_error, 0.0).astype(np.float32) * valid
+        oracle_step_ratio = (
+            oracle_alpha / max(step_cap, 1e-6)).astype(np.float32) * valid
+        return {
+            "frame_id": np.int64(frame_id),
+            "router_features": router_features,
+            "observation_xy": observation_xy,
+            "target_xy": target_xy,
+            "candidate_residual_xy": residual,
+            "candidate_valid": valid,
+            "step_cap": np.float32(step_cap),
+            "fusion_radius": np.float32(radius),
+            "oracle_gain": oracle_gain,
+            "oracle_alpha": oracle_alpha.astype(np.float32),
+            "oracle_step_ratio": oracle_step_ratio,
+            "observation_error": np.float32(observation_error),
+            "oracle_candidate_error": oracle_error,
+        }
+
+    def _build_v22_proposal_diagnostic_row(
+            self, output, data_dict, this_box, reference_box, frame_id):
+        """Build a GT-labelled v2.2 attribution row outside forward."""
+        target_box = points_utils.transform_box(this_box, reference_box)
+        target_xy = np.asarray(target_box.center[:2], dtype=np.float64)
+
+        def tensor_xy(key, fallback):
+            value = output.get(key)
+            if value is None:
+                return np.asarray(fallback, dtype=np.float64)
+            return value.detach().cpu().numpy().reshape(-1, 4 if value.shape[-1] == 4 else 2)[0, :2].astype(np.float64)
+
+        observation_xy = tensor_xy(
+            "observation_aux_estimation_boxes", target_xy)
+        motion_xy = tensor_xy("motion_prior_xy", observation_xy)
+        raw_search_xy = tensor_xy("search_raw_vote_xy", observation_xy)
+        refined_xy = tensor_xy(
+            "motion_search_refined_xy", observation_xy)
+        final_xy = tensor_xy("aux_estimation_boxes", observation_xy)
+        observation_error = float(np.linalg.norm(observation_xy - target_xy))
+        motion_error = float(np.linalg.norm(motion_xy - target_xy))
+        raw_search_error = float(np.linalg.norm(raw_search_xy - target_xy))
+        refined_error = float(np.linalg.norm(refined_xy - target_xy))
+        final_error = float(np.linalg.norm(final_xy - target_xy))
+        margin = float(getattr(self.config, "advantage_help_margin", 0.05))
+        motion_valid = self._proposal_scalar(
+            output, "motion_prior_valid") > 0.0
+        refined_valid = self._proposal_scalar(
+            output, "motion_search_candidate_valid") > 0.0
+        selected = int(self._proposal_scalar(
+            output, "signed_selected_candidate", default=0.0))
+        alpha = self._proposal_scalar(
+            output, "signed_applied_alpha", default=0.0)
+        motion_helpful = bool(
+            motion_valid and motion_error + margin <= observation_error)
+        refined_helpful = bool(
+            refined_valid and refined_error + margin <= observation_error)
+        intervention = selected in (1, 2) and alpha > 0
+        selected_error = (
+            motion_error if selected == 1
+            else refined_error if selected == 2
+            else observation_error)
+        return {
+            "frame_id": int(frame_id),
+            "geometry_valid": int(self._proposal_scalar(
+                data_dict, "search_v22_geometry_valid") > 0.0),
+            "motion_valid": int(motion_valid),
+            "search_valid": int(refined_valid),
+            "observation_error": observation_error,
+            "motion_error": motion_error,
+            "raw_search_error": raw_search_error,
+            "search_error": refined_error,
+            "final_error": final_error,
+            "motion_helpful": int(motion_helpful),
+            "search_helpful": int(refined_helpful),
+            "search_materially_selected": int(selected == 2 and alpha > 0),
+            "search_weight": alpha if selected == 2 else 0.0,
+            "intervention": int(intervention),
+            "selected_helpful": int(
+                (selected == 1 and motion_helpful)
+                or (selected == 2 and refined_helpful)),
+            "selected_harmful": int(
+                intervention and selected_error > observation_error),
+            "selected_candidate": selected,
+            "selected_step_ratio": self._proposal_scalar(
+                output, "signed_selected_step_ratio"),
+            "step_cap": self._proposal_scalar(output, "signed_step_cap"),
+            "gain_threshold": self._proposal_scalar(
+                output, "signed_gain_threshold"),
+            "abstained": self._proposal_scalar(
+                output, "signed_abstained", default=1.0),
+            "motion_q10": self._proposal_scalar(
+                output, "signed_gain_quantiles", column=0),
+            "motion_q50": self._proposal_scalar(
+                output, "signed_gain_quantiles", column=1),
+            "motion_search_q10": self._proposal_scalar(
+                output, "signed_gain_quantiles", column=2),
+            "motion_search_q50": self._proposal_scalar(
+                output, "signed_gain_quantiles", column=3),
+            "presence_probability": self._proposal_scalar(
+                output, "search_presence_probability"),
+            "normalized_ess": self._proposal_scalar(
+                output, "search_normalized_ess"),
+            "raw_ess": self._proposal_scalar(output, "search_raw_ess"),
+            "available_count": self._proposal_scalar(
+                data_dict, "search_v22_available_count"),
+            "extension_count": self._proposal_scalar(
+                data_dict, "search_v22_extension_count"),
+            "overlap_count": self._proposal_scalar(
+                data_dict, "search_v22_overlap_count"),
+            "correction_x": self._proposal_scalar(
+                output, "signed_correction_xy", column=0),
+            "correction_y": self._proposal_scalar(
+                output, "signed_correction_xy", column=1),
+        }
 
     @staticmethod
     def _write_csv_rows(path, rows):
@@ -301,8 +462,65 @@ class BaseModelMF(pl.LightningModule):
                     if selected else float("nan")),
                 "search_weight_mean": finite_mean("search_weight"),
             })
+            if "intervention" in group[0]:
+                interventions = [
+                    row for row in group if bool(row["intervention"])]
+                tracklet_rows[-1].update({
+                    "intervention_rate": finite_mean("intervention"),
+                    "selected_helpful_precision": (
+                        float(np.mean([
+                            row["selected_helpful"]
+                            for row in interventions]))
+                        if interventions else float("nan")),
+                    "selected_harm_rate": (
+                        float(np.mean([
+                            row["selected_harmful"]
+                            for row in interventions]))
+                        if interventions else float("nan")),
+                })
         self._write_csv_rows(
             output_dir / "proposal_tracklets.csv", tracklet_rows)
+
+    def _write_b3_test_rollouts(self):
+        rows = self._b3_test_rollouts
+        if not rows or int(getattr(self, "global_rank", 0)) != 0:
+            return
+        logger = getattr(self, "logger", None)
+        log_dir = getattr(logger, "log_dir", None)
+        if log_dir is None:
+            save_dir = getattr(logger, "save_dir", ".")
+            log_dir = Path(save_dir) / "b3_rollouts"
+        output_dir = Path(log_dir) / "b3_rollouts"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        keys = [
+            "frame_id", "router_features", "observation_xy", "target_xy",
+            "candidate_residual_xy", "candidate_valid", "step_cap",
+            "fusion_radius", "oracle_gain", "oracle_alpha",
+            "oracle_step_ratio", "observation_error",
+            "oracle_candidate_error",
+        ]
+        arrays = {
+            key: np.stack([row[key] for row in rows], axis=0)
+            for key in keys
+        }
+        arrays["tracklet_id"] = np.asarray(
+            [row["tracklet_id"] for row in rows], dtype=np.int64)
+        arrays["tracklet_key"] = np.asarray(
+            [row["tracklet_key"] for row in rows], dtype=np.str_)
+        np.savez_compressed(output_dir / "b3_rollouts.npz", **arrays)
+        manifest = {
+            "schema": "ct_seqtrack.b3_crpa_rollout.v1",
+            "row_count": len(rows),
+            "tracklet_count": len(set(arrays["tracklet_key"].tolist())),
+            "router_feature_dim": int(arrays["router_features"].shape[1]),
+            "proposal_inference_mode": str(getattr(
+                self.config, "proposal_inference_mode", "full")),
+            "seed": int(getattr(self.config, "seed", 42) or 42),
+        }
+        with (output_dir / "manifest.json").open(
+                "w", encoding="utf-8") as output_file:
+            json.dump(manifest, output_file, indent=2, sort_keys=True)
+            output_file.write("\n")
 
     def evaluate_one_sequence(self, sequence):
         """
@@ -321,6 +539,7 @@ class BaseModelMF(pl.LightningModule):
         m4_filter = self._build_m4_filter() if m4_enabled else None
         m4_diagnostics = []
         proposal_diagnostics = []
+        b3_rollouts = []
         for frame_id in range(len(sequence)):  # tracklet
             if frame_id == 0:
                 # the first frame
@@ -406,6 +625,24 @@ class BaseModelMF(pl.LightningModule):
                                 ref_bb,
                                 frame_id,
                             ))
+                    if (bool(getattr(
+                            self.config,
+                            "export_proposal_diagnostics",
+                            False))
+                            and "motion_search_refined_xy" in forward_output):
+                        proposal_diagnostics.append(
+                            self._build_v22_proposal_diagnostic_row(
+                                forward_output,
+                                data_dict,
+                                this_bb,
+                                ref_bb,
+                                frame_id,
+                            ))
+                    if (bool(getattr(
+                            self.config, "export_b3_rollouts", False))
+                            and "b3_router_features" in forward_output):
+                        b3_rollouts.append(self._build_b3_rollout_row(
+                            forward_output, this_bb, ref_bb, frame_id))
                     if m4_filter_enabled:
                         if (m4_prediction is not None
                                 and m4_prediction.get("valid", False)):
@@ -483,6 +720,7 @@ class BaseModelMF(pl.LightningModule):
 
         self._m4_sequence_diagnostics = m4_diagnostics
         self._proposal_sequence_diagnostics = proposal_diagnostics
+        self._b3_sequence_rollouts = b3_rollouts
         return ious, distances, results_bbs
 
     def _m4_timestamp(self, sequence, frame_id):
@@ -610,6 +848,22 @@ class BaseModelMF(pl.LightningModule):
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
             self._proposal_test_diagnostics.append(row)
+        test_dataset = getattr(
+            getattr(self.trainer, "test_dataloaders", None), "dataset", None)
+        if test_dataset is None:
+            test_loaders = getattr(self.trainer, "test_dataloaders", None)
+            if isinstance(test_loaders, (list, tuple)) and test_loaders:
+                test_dataset = getattr(test_loaders[0], "dataset", None)
+        tracklet_key = (
+            test_dataset.get_tracklet_key(batch_idx)
+            if test_dataset is not None
+            and hasattr(test_dataset, "get_tracklet_key")
+            else f"tracklet/{int(batch_idx)}")
+        for row in self._b3_sequence_rollouts:
+            row = dict(row)
+            row["tracklet_id"] = int(batch_idx)
+            row["tracklet_key"] = str(tracklet_key)
+            self._b3_test_rollouts.append(row)
         end_time = time.time()
         runtime = end_time-start_time
         n_frames = len(sequence)
@@ -640,6 +894,7 @@ class BaseModelMF(pl.LightningModule):
 
     def on_test_epoch_start(self):
         self._proposal_test_diagnostics = []
+        self._b3_test_rollouts = []
 
     def on_test_epoch_end(self):
         self.logger.experiment.add_scalars('metrics/test/current',
@@ -656,6 +911,8 @@ class BaseModelMF(pl.LightningModule):
         if bool(getattr(
                 self.config, "export_proposal_diagnostics", False)):
             self._write_proposal_test_diagnostics()
+        if bool(getattr(self.config, "export_b3_rollouts", False)):
+            self._write_b3_test_rollouts()
 
 class MotionBaseModelMF(BaseModelMF):
     def __init__(self, config, **kwargs):
@@ -826,13 +1083,22 @@ class MotionBaseModelMF(BaseModelMF):
             self.config, "use_search_evidence_v2", False))
         use_search_evidence_v21 = bool(getattr(
             self.config, "use_search_evidence_v21", False))
-        if use_search_evidence_v2 and use_search_evidence_v21:
+        use_search_evidence_v22 = bool(getattr(
+            self.config, "use_motion_conditioned_search_v22", False))
+        if sum(map(bool, (
+                use_search_evidence_v2,
+                use_search_evidence_v21,
+                use_search_evidence_v22))) > 1:
             raise ValueError(
-                "Search Evidence v2 and v2.1 are mutually exclusive")
+                "Search Evidence v2, v2.1, and v2.2 are exclusive")
         use_endpoint_search_evidence = (
-            use_search_evidence_v2 or use_search_evidence_v21)
+            use_search_evidence_v2
+            or use_search_evidence_v21
+            or use_search_evidence_v22)
         search_config_prefix = (
-            "search_v21" if use_search_evidence_v21 else "search_v2")
+            "search_v22" if use_search_evidence_v22
+            else "search_v21" if use_search_evidence_v21
+            else "search_v2")
 
         def search_config_value(name, default):
             return getattr(
@@ -1029,7 +1295,7 @@ class MotionBaseModelMF(BaseModelMF):
             search_v2_seed = (
                 int(frame_id) * 1664525 + 1013904223
             ) & 0xFFFFFFFF
-            if use_search_evidence_v21:
+            if use_search_evidence_v21 or use_search_evidence_v22:
                 (search_v2_points,
                  search_v2_point_valid_mask,
                  search_v2_point_source,
@@ -1275,6 +1541,47 @@ class MotionBaseModelMF(BaseModelMF):
                     [search_v2_sampling["extension_count"]],
                     device=self.device, dtype=torch.float32),
                 "search_v21_overlap_count": torch.tensor(
+                    [search_v2_sampling["overlap_count"]],
+                    device=self.device, dtype=torch.float32),
+            })
+        if use_search_evidence_v22:
+            data_dict.update({
+                "search_v22_points": torch.tensor(
+                    search_v2_points[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_point_valid_mask": torch.tensor(
+                    search_v2_point_valid_mask[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_point_source": torch.tensor(
+                    search_v2_point_source[None, :],
+                    device=self.device, dtype=torch.long),
+                "search_v22_geometry_valid": torch.tensor(
+                    [search_v2_sampling["active"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_support_anchor_xy": torch.tensor(
+                    search_v2_endpoint_xy[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_query_delta_t": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "query_delta_t", effective_delta_t_list[0])],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_gap_ratio": torch.tensor(
+                    [search_v2_diagnostics.get("gap_ratio", 1.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_sigma_parallel": torch.tensor(
+                    [search_v2_diagnostics.get("sigma_parallel", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_sigma_perpendicular": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "sigma_perpendicular", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_available_count": torch.tensor(
+                    [search_v2_sampling["available_count"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_extension_count": torch.tensor(
+                    [search_v2_sampling["extension_count"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v22_overlap_count": torch.tensor(
                     [search_v2_sampling["overlap_count"]],
                     device=self.device, dtype=torch.float32),
             })

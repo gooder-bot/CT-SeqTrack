@@ -229,9 +229,11 @@ def parse_config():
     parser.add_argument(
         '--proposal-mode', '--proposal_mode',
         dest='proposal_inference_mode',
-        choices=('obs', 'obs_motion', 'obs_search', 'full'),
+        choices=(
+            'obs', 'obs_motion', 'obs_search', 'full',
+            'obs_motion_search', 'full_selective'),
         default=argparse.SUPPRESS,
-        help='Evaluation-only B2-v2.1 proposal attribution mode.')
+        help='Evaluation-only B2 proposal attribution mode.')
 
     args = parser.parse_args()
     if (hasattr(args, 'proposal_inference_mode') and not args.test):

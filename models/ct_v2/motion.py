@@ -1386,6 +1386,455 @@ class AdvantageGatedProposalFusion(nn.Module):
         }
 
 
+class ClosedLoopRiskAwareProposalRouter(nn.Module):
+    """Observation-anchored, selective top-1 motion/search arbitration.
+
+    The router predicts conservative and median counterfactual gains for the
+    two auxiliary candidates.  It never consumes labels in ``forward``: GT is
+    used only by the offline rollout trainer.  An untrained router is an exact
+    observation fallback because its lower-quantile head is initialized below
+    the non-negative intervention threshold.
+    """
+
+    SCALAR_FEATURE_NAMES = (
+        "obs_log_points",
+        "obs_log_foreground",
+        "obs_mean_foreground",
+        "obs_history_valid_ratio",
+        "obs_delta_t_ratio",
+        "obs_segmentation_entropy",
+        "obs_refinement_dx_over_radius",
+        "obs_refinement_dy_over_radius",
+        "obs_refinement_norm_over_radius",
+        "motion_log_sigma_x",
+        "motion_log_sigma_y",
+        "motion_history_valid_ratio",
+        "search_targetness_mean",
+        "search_targetness_max",
+        "search_targetness_entropy",
+        "search_effective_sample_size",
+        "search_extension_weight_ratio",
+        "search_log_available_count",
+        "search_log_extension_count",
+        "search_log_overlap_count",
+        "motion_residual_x_over_radius",
+        "motion_residual_y_over_radius",
+        "search_residual_x_over_radius",
+        "search_residual_y_over_radius",
+        "motion_residual_norm_over_radius",
+        "search_residual_norm_over_radius",
+        "motion_search_distance_over_radius",
+        "motion_search_cosine",
+        "query_delta_t",
+        "gap_ratio",
+        "motion_valid",
+        "search_valid",
+    )
+
+    def __init__(
+            self,
+            observation_dim=256,
+            motion_dim=128,
+            search_dim=128,
+            observation_stats_dim=5,
+            context_dim=32,
+            hidden_dim=96,
+            gain_threshold=0.0,
+            radius_base=0.5,
+            radius_per_second=0.5,
+            radius_max=2.0,
+            normal_step_cap=0.35,
+            gap_step_cap=0.60,
+            eps=1e-6):
+        super().__init__()
+        self.observation_dim = int(observation_dim)
+        self.motion_dim = int(motion_dim)
+        self.search_dim = int(search_dim)
+        self.observation_stats_dim = int(observation_stats_dim)
+        self.scalar_dim = len(self.SCALAR_FEATURE_NAMES)
+        self.radius_base = float(radius_base)
+        self.radius_per_second = float(radius_per_second)
+        self.radius_max = float(radius_max)
+        self.normal_step_cap = float(normal_step_cap)
+        self.gap_step_cap = float(gap_step_cap)
+        self.eps = float(eps)
+        if self.observation_stats_dim != 5:
+            raise ValueError("CRPA currently requires five observation stats")
+        if not 0.0 <= self.normal_step_cap <= self.gap_step_cap <= 1.0:
+            raise ValueError("CRPA step caps must satisfy 0 <= normal <= gap <= 1")
+        if self.radius_base < 0.0 or self.radius_max <= 0.0:
+            raise ValueError("CRPA radii must be positive")
+
+        def branch_projection(input_dim):
+            return nn.Sequential(
+                nn.LayerNorm(int(input_dim)),
+                nn.Linear(int(input_dim), int(context_dim)),
+                nn.ReLU(inplace=True),
+            )
+
+        self.observation_projection = branch_projection(self.observation_dim)
+        self.motion_projection = branch_projection(self.motion_dim)
+        self.search_projection = branch_projection(self.search_dim)
+        self.trunk = nn.Sequential(
+            nn.Linear(3 * int(context_dim) + self.scalar_dim,
+                      int(hidden_dim)),
+            nn.LayerNorm(int(hidden_dim)),
+            nn.ReLU(inplace=True),
+        )
+        self.median_gain_head = nn.Linear(int(hidden_dim), 2)
+        self.gain_spread_head = nn.Linear(int(hidden_dim), 2)
+        self.step_head = nn.Linear(int(hidden_dim), 2)
+        nn.init.zeros_(self.median_gain_head.weight)
+        nn.init.zeros_(self.median_gain_head.bias)
+        nn.init.zeros_(self.gain_spread_head.weight)
+        initial_spread = 0.05
+        nn.init.constant_(
+            self.gain_spread_head.bias,
+            math.log(math.expm1(initial_spread)))
+        nn.init.zeros_(self.step_head.weight)
+        nn.init.zeros_(self.step_head.bias)
+
+        self.register_buffer(
+            "scalar_feature_mean", torch.zeros(self.scalar_dim))
+        self.register_buffer(
+            "scalar_feature_std", torch.ones(self.scalar_dim))
+        self.register_buffer(
+            "calibrated_gain_threshold",
+            torch.tensor(float(gain_threshold), dtype=torch.float32))
+
+    @property
+    def export_feature_dim(self):
+        return (
+            self.observation_dim + self.motion_dim
+            + self.search_dim + self.scalar_dim)
+
+    @staticmethod
+    def _batch_scalar(value, reference, default=0.0):
+        batch_size = reference.shape[0]
+        if value is None:
+            return reference.new_full((batch_size, 1), float(default))
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(
+                value, device=reference.device, dtype=reference.dtype)
+        value = value.to(
+            device=reference.device, dtype=reference.dtype).reshape(-1)
+        if value.numel() == 1:
+            value = value.repeat(batch_size)
+        elif value.numel() != batch_size:
+            raise ValueError("CRPA scalar must contain one value per sample")
+        return value.reshape(batch_size, 1)
+
+    @staticmethod
+    def _clip_norm(vector, radius, eps=1e-6):
+        norm = torch.linalg.norm(vector, dim=-1, keepdim=True)
+        scale = torch.minimum(
+            torch.ones_like(norm), radius / torch.clamp(norm, min=eps))
+        return vector * scale
+
+    def set_scalar_normalization(self, mean, std):
+        mean = torch.as_tensor(
+            mean, device=self.scalar_feature_mean.device,
+            dtype=self.scalar_feature_mean.dtype).reshape(-1)
+        std = torch.as_tensor(
+            std, device=self.scalar_feature_std.device,
+            dtype=self.scalar_feature_std.dtype).reshape(-1)
+        if mean.numel() != self.scalar_dim or std.numel() != self.scalar_dim:
+            raise ValueError("CRPA scalar normalization has the wrong width")
+        self.scalar_feature_mean.copy_(mean)
+        self.scalar_feature_std.copy_(torch.clamp(std, min=1e-4))
+
+    def set_gain_threshold(self, value):
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("CRPA gain threshold must be finite")
+        self.calibrated_gain_threshold.fill_(value)
+
+    def _build_scalar_features(
+            self,
+            observation_xy,
+            observation_stats,
+            observation_entropy,
+            observation_refinement_xy,
+            motion_log_sigma_xy,
+            history_valid_ratio,
+            search_targetness_mean,
+            search_targetness_max,
+            search_entropy,
+            search_effective_sample_size,
+            search_extension_weight_ratio,
+            search_available_count,
+            search_extension_count,
+            search_overlap_count,
+            motion_residual,
+            search_residual,
+            radius,
+            query_delta_t,
+            gap_ratio,
+            motion_valid,
+            search_valid):
+        safe_radius = torch.clamp(radius, min=self.eps)
+        observation_refinement_xy = torch.nan_to_num(
+            observation_refinement_xy, nan=0.0, posinf=0.0, neginf=0.0)
+        refinement_normalized = observation_refinement_xy / safe_radius
+        refinement_norm = torch.linalg.norm(
+            observation_refinement_xy, dim=1, keepdim=True) / safe_radius
+        motion_normalized = motion_residual / safe_radius
+        search_normalized = search_residual / safe_radius
+        motion_norm = torch.linalg.norm(
+            motion_residual, dim=1, keepdim=True) / safe_radius
+        search_norm = torch.linalg.norm(
+            search_residual, dim=1, keepdim=True) / safe_radius
+        motion_search = torch.linalg.norm(
+            motion_residual - search_residual,
+            dim=1, keepdim=True) / safe_radius
+        cosine = (
+            motion_residual * search_residual).sum(dim=1, keepdim=True) / (
+                torch.clamp(
+                    torch.linalg.norm(motion_residual, dim=1, keepdim=True)
+                    * torch.linalg.norm(search_residual, dim=1, keepdim=True),
+                    min=self.eps))
+        both_nonzero = (motion_norm > self.eps) & (search_norm > self.eps)
+        cosine = torch.where(both_nonzero, cosine, torch.zeros_like(cosine))
+
+        search_scalars = [
+            search_targetness_mean,
+            search_targetness_max,
+            search_entropy,
+            search_effective_sample_size,
+            search_extension_weight_ratio,
+        ]
+        search_scalars = [torch.nan_to_num(self._batch_scalar(
+            value, observation_xy), nan=0.0, posinf=0.0, neginf=0.0)
+            for value in search_scalars]
+        counts = [
+            search_available_count,
+            search_extension_count,
+            search_overlap_count,
+        ]
+        counts = [
+            torch.log1p(torch.clamp(torch.nan_to_num(self._batch_scalar(
+                value, observation_xy), nan=0.0), min=0.0)) / 8.0
+            for value in counts]
+        features = torch.cat((
+            torch.nan_to_num(
+                observation_stats, nan=0.0, posinf=0.0, neginf=0.0),
+            torch.nan_to_num(self._batch_scalar(
+                observation_entropy, observation_xy), nan=0.0),
+            refinement_normalized,
+            refinement_norm,
+            torch.nan_to_num(
+                motion_log_sigma_xy, nan=0.0, posinf=0.0, neginf=0.0),
+            torch.nan_to_num(self._batch_scalar(
+                history_valid_ratio, observation_xy), nan=0.0),
+            *search_scalars,
+            *counts,
+            motion_normalized,
+            search_normalized,
+            motion_norm,
+            search_norm,
+            motion_search,
+            torch.nan_to_num(cosine, nan=0.0, posinf=0.0, neginf=0.0),
+            query_delta_t,
+            gap_ratio,
+            motion_valid.to(observation_xy.dtype),
+            search_valid.to(observation_xy.dtype),
+        ), dim=1)
+        if features.shape[1] != self.scalar_dim:
+            raise RuntimeError(
+                f"CRPA scalar schema mismatch: {features.shape[1]} "
+                f"!= {self.scalar_dim}")
+        return features
+
+    def predict_exported_features(self, export_features):
+        if (export_features.dim() != 2
+                or export_features.shape[1] != self.export_feature_dim):
+            raise ValueError(
+                "CRPA export features have an incompatible shape")
+        obs_end = self.observation_dim
+        motion_end = obs_end + self.motion_dim
+        search_end = motion_end + self.search_dim
+        observation_feature = export_features[:, :obs_end]
+        motion_feature = export_features[:, obs_end:motion_end]
+        search_feature = export_features[:, motion_end:search_end]
+        scalar_feature = export_features[:, search_end:]
+        scalar_feature = (
+            scalar_feature - self.scalar_feature_mean.unsqueeze(0)
+        ) / torch.clamp(
+            self.scalar_feature_std.unsqueeze(0), min=1e-4)
+        hidden = self.trunk(torch.cat((
+            self.observation_projection(observation_feature),
+            self.motion_projection(motion_feature),
+            self.search_projection(search_feature),
+            scalar_feature,
+        ), dim=1))
+        q50 = self.median_gain_head(hidden)
+        q10 = q50 - torch.nn.functional.softplus(
+            self.gain_spread_head(hidden))
+        step_logits = self.step_head(hidden)
+        return {
+            "q10": q10,
+            "q50": q50,
+            "step_logits": step_logits,
+            "step_ratio": torch.sigmoid(step_logits),
+        }
+
+    def forward(
+            self,
+            observation_box,
+            observation_feature,
+            observation_stats,
+            observation_entropy,
+            observation_refinement_xy,
+            motion_feature,
+            motion_proposal_xy,
+            motion_log_sigma_xy,
+            motion_valid,
+            history_valid_ratio,
+            search_evidence_token,
+            search_proposal_xy,
+            search_valid,
+            search_targetness_mean,
+            search_targetness_max,
+            search_entropy,
+            search_effective_sample_size,
+            search_extension_weight_ratio,
+            search_available_count,
+            search_extension_count,
+            search_overlap_count,
+            query_delta_t,
+            gap_ratio,
+            enabled_scale=1.0):
+        if observation_box.dim() != 2 or observation_box.shape[1] != 4:
+            raise ValueError("CRPA observation box must have shape [B,4]")
+        enabled_scale = float(enabled_scale)
+        if not 0.0 <= enabled_scale <= 1.0:
+            raise ValueError("CRPA enabled scale must be in [0,1]")
+
+        observation = observation_box.detach()
+        observation_xy = observation[:, :2]
+        observation_feature = observation_feature.detach()
+        observation_stats = observation_stats.detach()
+        motion_feature = motion_feature.detach()
+        motion_xy = motion_proposal_xy.detach()
+        motion_log_sigma_xy = motion_log_sigma_xy.detach()
+        search_evidence_token = search_evidence_token.detach()
+        search_xy = search_proposal_xy.detach()
+        observation_refinement_xy = observation_refinement_xy.detach()
+
+        motion_valid = self._batch_scalar(
+            motion_valid, observation_xy) > 0
+        search_valid = self._batch_scalar(
+            search_valid, observation_xy) > 0
+        motion_finite = (
+            torch.isfinite(motion_xy).all(dim=1, keepdim=True)
+            & torch.isfinite(motion_feature).all(dim=1, keepdim=True)
+            & torch.isfinite(motion_log_sigma_xy).all(dim=1, keepdim=True))
+        search_finite = (
+            torch.isfinite(search_xy).all(dim=1, keepdim=True)
+            & torch.isfinite(search_evidence_token).all(dim=1, keepdim=True))
+        motion_valid = motion_valid & motion_finite
+        search_valid = search_valid & search_finite
+        motion_xy = torch.where(
+            torch.isfinite(motion_xy), motion_xy, observation_xy)
+        search_xy = torch.where(
+            torch.isfinite(search_xy), search_xy, observation_xy)
+        query_dt = torch.clamp(torch.nan_to_num(self._batch_scalar(
+            query_delta_t, observation_xy, default=0.1), nan=0.1), min=0.0)
+        gap_ratio = torch.clamp(torch.nan_to_num(self._batch_scalar(
+            gap_ratio, observation_xy, default=1.0), nan=1.0), min=0.0)
+        radius = torch.clamp(
+            self.radius_base + self.radius_per_second * query_dt,
+            max=self.radius_max)
+        motion_residual = self._clip_norm(
+            motion_xy - observation_xy, radius, eps=self.eps)
+        search_residual = self._clip_norm(
+            search_xy - observation_xy, radius, eps=self.eps)
+        scalar_features = self._build_scalar_features(
+            observation_xy,
+            observation_stats,
+            observation_entropy,
+            observation_refinement_xy,
+            motion_log_sigma_xy,
+            history_valid_ratio,
+            search_targetness_mean,
+            search_targetness_max,
+            search_entropy,
+            search_effective_sample_size,
+            search_extension_weight_ratio,
+            search_available_count,
+            search_extension_count,
+            search_overlap_count,
+            motion_residual,
+            search_residual,
+            radius,
+            query_dt,
+            gap_ratio,
+            motion_valid,
+            search_valid,
+        )
+        export_features = torch.cat((
+            torch.nan_to_num(
+                observation_feature, nan=0.0, posinf=0.0, neginf=0.0),
+            torch.nan_to_num(
+                motion_feature, nan=0.0, posinf=0.0, neginf=0.0),
+            torch.nan_to_num(
+                search_evidence_token, nan=0.0, posinf=0.0, neginf=0.0),
+            scalar_features,
+        ), dim=1)
+        prediction = self.predict_exported_features(export_features)
+        q10 = prediction["q10"]
+        q50 = prediction["q50"]
+        step_ratio = prediction["step_ratio"]
+        candidate_valid = torch.cat((motion_valid, search_valid), dim=1)
+        invalid_score = torch.finfo(q10.dtype).min
+        selectable_q10 = torch.where(
+            candidate_valid, q10, torch.full_like(q10, invalid_score))
+        selected_score, selected_candidate = selectable_q10.max(dim=1)
+        threshold = self.calibrated_gain_threshold.to(
+            device=q10.device, dtype=q10.dtype)
+        intervene = (
+            (selected_score > threshold)
+            & candidate_valid.any(dim=1)
+            & (enabled_scale > 0.0))
+        selected_one_hot = torch.nn.functional.one_hot(
+            selected_candidate, num_classes=2).to(q10.dtype)
+        selected_one_hot = selected_one_hot * intervene.unsqueeze(1).to(q10.dtype)
+        step_cap = self.normal_step_cap + (
+            self.gap_step_cap - self.normal_step_cap
+        ) * torch.clamp(gap_ratio - 1.0, min=0.0, max=1.0)
+        applied_weight = (
+            selected_one_hot * step_ratio * step_cap * enabled_scale)
+        candidate_residual = torch.stack(
+            (motion_residual, search_residual), dim=1)
+        correction = (
+            applied_weight.unsqueeze(2) * candidate_residual).sum(dim=1)
+        correction = self._clip_norm(correction, radius, eps=self.eps)
+        final_xy = observation_xy + correction
+        final_box = torch.cat((final_xy, observation[:, 2:]), dim=1)
+        selected_index = torch.where(
+            intervene, selected_candidate + 1,
+            torch.zeros_like(selected_candidate))
+        gain_quantiles = torch.stack((q10, q50), dim=2)
+        return final_box, {
+            "b3_gain_quantiles": gain_quantiles,
+            "b3_step_logits": prediction["step_logits"],
+            "b3_step_ratio": step_ratio,
+            "b3_selected_index": selected_index,
+            "b3_selected_score": selected_score,
+            "b3_applied_weight": applied_weight,
+            "b3_correction_xy": correction,
+            "b3_abstained": (~intervene).to(observation_xy.dtype),
+            "b3_candidate_valid": candidate_valid.to(observation_xy.dtype),
+            "b3_candidate_residual_xy": candidate_residual,
+            "b3_step_cap": step_cap.squeeze(1),
+            "b3_fusion_radius": radius.squeeze(1),
+            "b3_gain_threshold": threshold,
+            "b3_router_features": export_features,
+            "b3_scalar_features": scalar_features,
+            "b3_enabled_scale": observation_xy.new_tensor(enabled_scale),
+        }
+
+
 class ZeroInitTrajectoryAdapter(nn.Module):
     """Inject ordered trajectory and second-crop evidence as a safe residual."""
 

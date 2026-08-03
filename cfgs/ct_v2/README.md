@@ -18,6 +18,8 @@ These files are the complete active experiment surface:
 | `05_seqtrack3d_search_only.yaml` | Same B0 network plus data-side time-guided search; completed seed42 screen, rejected |
 | `06_seqtrack3d_pftc_unweighted.yaml` | B0 + canonical point-feature consistency, all pair weights equal |
 | `07_seqtrack3d_dt_pftc.yaml` | B0 + sample-normalized physical-Δt pair weighting |
+| `11_b2_v22_refiner.yaml` | Frozen B0/B1 + motion-conditioned endpoint refiner, 20 epochs |
+| `12_b2_v22_selective.yaml` | Same candidates + offline signed-H=3 selective Top-1 router |
 
 All older YAML files remain valid legacy experiments. They are no longer part
 of the default paper workflow.

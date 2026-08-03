@@ -658,12 +658,21 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         config, 'use_search_evidence_v2', False))
     use_search_evidence_v21 = bool(getattr(
         config, 'use_search_evidence_v21', False))
-    if use_search_evidence_v2 and use_search_evidence_v21:
-        raise ValueError("Search Evidence v2 and v2.1 are mutually exclusive")
+    use_search_evidence_v22 = bool(getattr(
+        config, 'use_motion_conditioned_search_v22', False))
+    if sum(map(bool, (
+            use_search_evidence_v2,
+            use_search_evidence_v21,
+            use_search_evidence_v22))) > 1:
+        raise ValueError("Search Evidence v2, v2.1, and v2.2 are exclusive")
     use_endpoint_search_evidence = (
-        use_search_evidence_v2 or use_search_evidence_v21)
+        use_search_evidence_v2
+        or use_search_evidence_v21
+        or use_search_evidence_v22)
     search_config_prefix = (
-        'search_v21' if use_search_evidence_v21 else 'search_v2')
+        'search_v22' if use_search_evidence_v22
+        else 'search_v21' if use_search_evidence_v21
+        else 'search_v2')
 
     def search_config_value(name, default):
         return getattr(config, f'{search_config_prefix}_{name}', default)
@@ -835,7 +844,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         search_v2_seed = (
             int(independent_seed_base) * 1664525 + 1013904223
         ) & 0xFFFFFFFF
-        if use_search_evidence_v21:
+        if use_search_evidence_v21 or use_search_evidence_v22:
             (search_v2_points,
              search_v2_point_valid_mask,
              search_v2_point_source,
@@ -1124,6 +1133,35 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'search_v21_extension_count': np.float32(
                 search_v2_sampling['extension_count']),
             'search_v21_overlap_count': np.float32(
+                search_v2_sampling['overlap_count']),
+        })
+    if use_search_evidence_v22:
+        data_dict.update({
+            'search_v22_points': search_v2_points.astype('float32'),
+            'search_v22_point_valid_mask':
+                search_v2_point_valid_mask.astype('float32'),
+            'search_v22_point_source':
+                search_v2_point_source.astype('int64'),
+            'search_v22_point_labels':
+                search_v2_point_labels.astype('float32'),
+            'search_v22_geometry_valid': np.float32(
+                search_v2_sampling['active']),
+            'search_v22_support_anchor_xy':
+                search_v2_endpoint_xy.astype('float32'),
+            'search_v22_query_delta_t': np.float32(
+                search_v2_diagnostics.get(
+                    'query_delta_t', effective_delta_t_list[0])),
+            'search_v22_gap_ratio': np.float32(
+                search_v2_diagnostics.get('gap_ratio', 1.0)),
+            'search_v22_sigma_parallel': np.float32(
+                search_v2_diagnostics.get('sigma_parallel', 0.0)),
+            'search_v22_sigma_perpendicular': np.float32(
+                search_v2_diagnostics.get('sigma_perpendicular', 0.0)),
+            'search_v22_available_count': np.float32(
+                search_v2_sampling['available_count']),
+            'search_v22_extension_count': np.float32(
+                search_v2_sampling['extension_count']),
+            'search_v22_overlap_count': np.float32(
                 search_v2_sampling['overlap_count']),
         })
     if use_motion_v3:

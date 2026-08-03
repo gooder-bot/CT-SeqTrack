@@ -5,8 +5,29 @@
 - 基线是同仓库、同训练流程的 SeqTrack3D。
 - 推理只依赖历史预测框、历史/当前点云和 timestamp。
 - 不读取当前 GT、oracle reachability 或未来帧。
-- 搜索总点数固定为 1024，避免用额外算力换指标。
+- legacy v2 搜索总点数固定为 1024；B2-v2.1 保留完整 B0 1024 点，并使用独立
+  128 点 endpoint-evidence 分支，不压缩或替换主干输入。
 - 旧实验开关默认关闭，并与 v2 做 fail-fast 互斥检查。
+
+## 候选创新目标：Frame-Rate-Invariant Dual-Clock Tracking
+
+该目标尚待实验验证。SeqTrack3D 主干继续消费 order clock，学习稳定的序列与
+观测关系；物理分支消费真实 `delta_t`，将不同采样率下的逐帧位移统一为速度，
+并按目标时刻的 query gap 传播状态：
+
+```text
+order clock    -> SeqTrack3D observation backbone
+physical clock -> velocity = delta_x / delta_t
+               -> query displacement = velocity * delta_t_query
+               -> trajectory-endpoint evidence and bounded correction
+```
+
+该分离使 10 Hz、5 Hz、2 Hz 或同一数据集不同 stride 的“一步”不再被视为相同
+物理时间，同时保证物理分支失效时可以回退到 order-only observation。跨数据集
+共享训练不是充分证据：若一个数据集始终对应一个固定 `delta_t`，模型可能把时间
+当作 dataset ID。正式验证必须先在同一数据集内构造多 stride/held-out cadence，
+并证明 `true` 超过 dataset-mean fixed 与 within-dataset shuffled；否则本目标只
+保留为跨帧率假设，不写成已成立贡献。
 
 ## 数据流
 

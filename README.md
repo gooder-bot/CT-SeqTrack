@@ -1,5 +1,12 @@
 # CT-SeqTrack
 
+> **候选创新定位（待验证）**：CT-SeqTrack 进一步研究跨帧率不变的双时钟
+> 3D 跟踪。SeqTrack3D 主干保留 order clock；物理分支用真实 `delta_t` 将
+> “每帧位移”归一为 m/s，并按 query gap 传播运动和查询轨迹端点证据，使一个
+> 共享模型有机会统一不同采样率及未见 cadence。该定位尚不是已有正结论；只有
+> shared-checkpoint 的 `true` 持续超过 dataset-mean fixed、within-dataset
+> shuffled，并在 held-out stride/gap 上成立，才支持 physical-time 因果表述。
+
 CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。第一版 v2
 候选曾从大量互相耦合的实验分支收敛为：
 

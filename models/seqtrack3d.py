@@ -30,6 +30,7 @@ from models.path_distillation import (
 )
 from models.ct_v2 import (
     AdvantageGatedProposalFusion,
+    ClosedLoopRiskAwareProposalRouter,
     ContinuousTimeMotionEncoder,
     JointProposalFusion,
     OrderedPhysicalMotionEncoder,
@@ -41,6 +42,8 @@ from models.ct_v2 import (
     TrajectorySearchEvidenceV21,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
+    MotionConditionedSearchRefiner,
+    SignedHorizonInnovationRouter,
 )
 from models.ct_v2.contracts import (
     build_search_usable_mask,
@@ -76,13 +79,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'use_search_evidence_v21', False))
         self.use_advantage_proposal_fusion = bool(getattr(
             config, 'use_advantage_proposal_fusion', False))
+        self.use_b3_risk_router = bool(getattr(
+            config, 'use_b3_risk_router', False))
+        self.use_motion_conditioned_search_v22 = bool(getattr(
+            config, 'use_motion_conditioned_search_v22', False))
+        self.use_signed_horizon_router = bool(getattr(
+            config, 'use_signed_horizon_router', False))
+        self.v22_freeze_candidate_producers = bool(getattr(
+            config, 'v22_freeze_candidate_producers', False))
+        self.signed_router_enabled_scale = float(getattr(
+            config, 'signed_router_enabled_scale', 1.0))
+        if not 0.0 <= self.signed_router_enabled_scale <= 1.0:
+            raise ValueError("signed_router_enabled_scale must be in [0,1]")
+        self.b3_enabled_scale = float(getattr(
+            config, 'b3_enabled_scale', 1.0))
+        if not 0.0 <= self.b3_enabled_scale <= 1.0:
+            raise ValueError("b3_enabled_scale must be in [0,1]")
         self.proposal_inference_mode = str(getattr(
             config, 'proposal_inference_mode', 'full')).strip().lower()
         if self.proposal_inference_mode not in (
-                'obs', 'obs_motion', 'obs_search', 'full'):
+                'obs', 'obs_motion', 'obs_search', 'full',
+                'obs_motion_search', 'full_selective'):
             raise ValueError(
                 "proposal_inference_mode must be obs, obs_motion, "
-                "obs_search, or full")
+                "obs_search, full, obs_motion_search, or full_selective")
         self.use_ordered_trajectory_encoder = bool(getattr(
             config, 'use_ordered_trajectory_encoder', False))
         self.use_trajectory_search = bool(getattr(
@@ -289,14 +309,34 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_search_evidence_v2 and self.use_search_evidence_v21:
             raise ValueError(
                 "Search Evidence v2 and v2.1 are mutually exclusive")
+        if (self.use_motion_conditioned_search_v22
+                and (self.use_search_evidence_v2
+                     or self.use_search_evidence_v21)):
+            raise ValueError(
+                "B2-v2.2 is isolated from Search Evidence v2/v2.1")
+        if (self.use_motion_conditioned_search_v22
+                and not self.use_b1motion_v3):
+            raise ValueError(
+                "B2-v2.2 requires the B1motion-v3 physical prior")
+        if (self.use_signed_horizon_router
+                and not self.use_motion_conditioned_search_v22):
+            raise ValueError(
+                "signed-horizon routing requires B2-v2.2")
         if (self.use_advantage_proposal_fusion
                 and not self.use_search_evidence_v21):
             raise ValueError(
                 "advantage proposal fusion requires Search Evidence v2.1")
-        if (self.use_search_evidence_v21
-                and not self.use_advantage_proposal_fusion):
+        if self.use_b3_risk_router and not self.use_search_evidence_v21:
             raise ValueError(
-                "Search Evidence v2.1 requires advantage proposal fusion")
+                "B3 CRPA requires Search Evidence v2.1")
+        if self.use_b3_risk_router and self.use_advantage_proposal_fusion:
+            raise ValueError(
+                "B3 CRPA and advantage proposal fusion are mutually exclusive")
+        if (self.use_search_evidence_v21
+                and not (self.use_advantage_proposal_fusion
+                         or self.use_b3_risk_router)):
+            raise ValueError(
+                "Search Evidence v2.1 requires advantage fusion or B3 CRPA")
         if (self.use_search_evidence_v21 and self.use_b1motion_v3
                 and self.use_motion_v3_legacy_fusion):
             raise ValueError(
@@ -393,6 +433,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'search_v21_focal_alpha', 0.75))
         self.search_v21_focal_gamma = float(getattr(
             config, 'search_v21_focal_gamma', 2.0))
+        self.search_v22_match_weight = float(getattr(
+            config, 'search_v22_match_weight', 0.1))
+        self.search_v22_targetness_weight = float(getattr(
+            config, 'search_v22_targetness_weight', 0.2))
+        self.search_v22_vote_weight = float(getattr(
+            config, 'search_v22_vote_weight', 1.0))
+        self.search_v22_raw_proposal_weight = float(getattr(
+            config, 'search_v22_raw_proposal_weight', 1.0))
+        self.search_v22_refined_proposal_weight = float(getattr(
+            config, 'search_v22_refined_proposal_weight', 1.0))
+        self.search_v22_presence_weight = float(getattr(
+            config, 'search_v22_presence_weight', 0.2))
+        self.search_v22_focal_alpha = float(getattr(
+            config, 'search_v22_focal_alpha', 0.75))
+        self.search_v22_focal_gamma = float(getattr(
+            config, 'search_v22_focal_gamma', 2.0))
         self.advantage_fused_weight = float(getattr(
             config, 'advantage_fused_weight', 1.0))
         self.advantage_help_weight = float(getattr(
@@ -484,6 +540,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 or self.advantage_fusion_ramp_epochs < 0):
             raise ValueError(
                 "advantage fusion schedule must be non-negative")
+        if min(
+                self.search_v22_match_weight,
+                self.search_v22_targetness_weight,
+                self.search_v22_vote_weight,
+                self.search_v22_raw_proposal_weight,
+                self.search_v22_refined_proposal_weight,
+                self.search_v22_presence_weight,
+                self.search_v22_focal_gamma) < 0:
+            raise ValueError("B2-v2.2 loss settings must be non-negative")
+        if not 0.0 <= self.search_v22_focal_alpha <= 1.0:
+            raise ValueError("search_v22_focal_alpha must be in [0,1]")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -737,9 +804,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     pool_temperature=float(getattr(
                         config, 'search_v21_pool_temperature', 0.5)),
                 )
-            with torch.random.fork_rng(devices=plugin_cuda_devices):
-                torch.manual_seed(plugin_seed + 21002)
-                self.advantage_proposal_fusion = (
+            if self.use_advantage_proposal_fusion:
+                with torch.random.fork_rng(devices=plugin_cuda_devices):
+                    torch.manual_seed(plugin_seed + 21002)
+                    self.advantage_proposal_fusion = (
                     AdvantageGatedProposalFusion(
                         observation_dim=256,
                         motion_dim=int(getattr(
@@ -764,6 +832,93 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         gap_aux_mass=float(getattr(
                             config, 'advantage_gap_aux_mass', 0.8)),
                     ))
+            if self.use_b3_risk_router:
+                with torch.random.fork_rng(devices=plugin_cuda_devices):
+                    torch.manual_seed(plugin_seed + 21003)
+                    self.b3_risk_router = ClosedLoopRiskAwareProposalRouter(
+                        observation_dim=256,
+                        motion_dim=int(getattr(
+                            config, 'motion_v3_hidden_dim', 128)),
+                        search_dim=int(getattr(
+                            config, 'search_v21_feature_dim', 128)),
+                        observation_stats_dim=5,
+                        context_dim=int(getattr(
+                            config, 'b3_router_context_dim', 32)),
+                        hidden_dim=int(getattr(
+                            config, 'b3_router_hidden_dim', 96)),
+                        gain_threshold=float(getattr(
+                            config, 'b3_gain_threshold', 0.0)),
+                        radius_base=float(getattr(
+                            config, 'b3_radius_base', 0.5)),
+                        radius_per_second=float(getattr(
+                            config, 'b3_radius_per_second', 0.5)),
+                        radius_max=float(getattr(
+                            config, 'b3_radius_max', 2.0)),
+                        normal_step_cap=float(getattr(
+                            config, 'b3_normal_step_cap', 0.35)),
+                        gap_step_cap=float(getattr(
+                            config, 'b3_gap_step_cap', 0.60)),
+                    )
+
+        if self.use_motion_conditioned_search_v22:
+            plugin_seed = int(getattr(config, 'seed', 42) or 42)
+            plugin_cuda_devices = (
+                list(range(torch.cuda.device_count()))
+                if torch.cuda.is_available() else [])
+            with torch.random.fork_rng(devices=plugin_cuda_devices):
+                torch.manual_seed(plugin_seed + 22001)
+                self.motion_conditioned_search_refiner = (
+                    MotionConditionedSearchRefiner(
+                        point_dim=9,
+                        feature_dim=int(getattr(
+                            config, 'search_v22_feature_dim', 128)),
+                        query_dim=int(getattr(
+                            config, 'search_v22_query_dim', 32)),
+                        observation_dim=256,
+                        motion_dim=int(getattr(
+                            config, 'motion_v3_hidden_dim', 128)),
+                        observation_stats_dim=5,
+                        max_vote_offset=float(getattr(
+                            config, 'search_v22_max_vote_offset', 4.0)),
+                        pool_temperature=float(getattr(
+                            config, 'search_v22_pool_temperature', 0.5)),
+                        presence_threshold=float(getattr(
+                            config, 'search_v22_presence_threshold', 0.5)),
+                        radius_base=float(getattr(
+                            config, 'search_v22_radius_base', 0.5)),
+                        radius_per_second=float(getattr(
+                            config, 'search_v22_radius_per_second', 0.5)),
+                        radius_max=float(getattr(
+                            config, 'search_v22_radius_max', 2.0)),
+                    ))
+            if self.use_signed_horizon_router:
+                with torch.random.fork_rng(devices=plugin_cuda_devices):
+                    torch.manual_seed(plugin_seed + 22002)
+                    self.signed_horizon_router = (
+                        SignedHorizonInnovationRouter(
+                            observation_dim=256,
+                            motion_dim=int(getattr(
+                                config, 'motion_v3_hidden_dim', 128)),
+                            search_dim=int(getattr(
+                                config, 'search_v22_feature_dim', 128)),
+                            observation_stats_dim=5,
+                            context_dim=int(getattr(
+                                config, 'signed_router_context_dim', 32)),
+                            hidden_dim=int(getattr(
+                                config, 'signed_router_hidden_dim', 96)),
+                            gain_threshold=float(getattr(
+                                config, 'signed_gain_threshold', 0.0)),
+                            radius_base=float(getattr(
+                                config, 'signed_radius_base', 0.5)),
+                            radius_per_second=float(getattr(
+                                config, 'signed_radius_per_second', 0.5)),
+                            radius_max=float(getattr(
+                                config, 'signed_radius_max', 2.0)),
+                            normal_step_cap=float(getattr(
+                                config, 'signed_normal_step_cap', 0.20)),
+                            gap_step_cap=float(getattr(
+                                config, 'signed_gap_step_cap', 0.35)),
+                        ))
 
         self.m3_teacher = None
         if self.use_m3_path_distillation:
@@ -784,6 +939,28 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 torch.zeros((), dtype=torch.long),
             )
             self._m3_last_ema_global_step = -1
+
+        if self.v22_freeze_candidate_producers:
+            for parameter in self.parameters():
+                parameter.requires_grad_(False)
+            for parameter in (
+                    self.motion_conditioned_search_refiner.parameters()):
+                parameter.requires_grad_(True)
+            self._apply_v22_frozen_module_modes()
+
+    def _apply_v22_frozen_module_modes(self):
+        if not getattr(self, 'v22_freeze_candidate_producers', False):
+            return
+        for name, module in self.named_children():
+            if name == 'motion_conditioned_search_refiner':
+                module.train(self.training)
+            else:
+                module.eval()
+
+    def train(self, mode=True):
+        super().train(mode)
+        self._apply_v22_frozen_module_modes()
+        return self
 
     @torch.no_grad()
     def _initialize_m3_teacher(self, force=False):
@@ -870,6 +1047,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             fg_prob = fg_prob.detach()
         soft_fg_count = fg_prob.sum(dim=1)
         mean_fg_score = fg_prob.mean(dim=1)
+        bounded_fg_prob = torch.clamp(fg_prob, min=1e-6, max=1.0 - 1e-6)
+        segmentation_entropy = -(
+            bounded_fg_prob * torch.log(bounded_fg_prob)
+            + (1.0 - bounded_fg_prob)
+            * torch.log(1.0 - bounded_fg_prob)).mean(dim=1)
         estimated_fg_points = mean_fg_score * torch.clamp(num_points, min=0.0)
 
         valid_history_ratio = input_dict["valid_mask"].to(device=device, dtype=dtype).mean(dim=1)
@@ -901,6 +1083,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "obs_soft_fg_count": soft_fg_count,
             "obs_estimated_fg_points": estimated_fg_points,
             "obs_mean_fg_score": mean_fg_score,
+            "obs_segmentation_entropy": segmentation_entropy,
             "obs_valid_history_ratio": valid_history_ratio,
             "obs_current_delta_t_ratio": current_delta_t_ratio,
             "obs_current_delta_t_real_ratio": real_delta_t_ratio,
@@ -1645,26 +1828,55 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 motion_mode_enabled)
             applied_search_valid = search_output[
                 'search_v21_candidate_valid'] * float(search_mode_enabled)
-            trainer = getattr(self, '_trainer', None)
-            trainer_state = str(getattr(
-                getattr(trainer, 'state', None), 'fn', '')).lower()
-            in_fit_loop = self.training or 'fit' in trainer_state
-            advantage_scale = 1.0
-            if in_fit_loop:
-                epoch = int(getattr(self, 'current_epoch', 0))
-                if epoch < self.advantage_fusion_warmup_epochs:
-                    advantage_scale = 0.0
-                elif self.advantage_fusion_ramp_epochs > 0:
-                    advantage_scale = min(
-                        1.0,
-                        (epoch - self.advantage_fusion_warmup_epochs + 1)
-                        / float(self.advantage_fusion_ramp_epochs))
-
-            updated_aux_box, advantage_diagnostics = (
-                self.advantage_proposal_fusion(
+            if self.use_advantage_proposal_fusion:
+                trainer = getattr(self, '_trainer', None)
+                trainer_state = str(getattr(
+                    getattr(trainer, 'state', None), 'fn', '')).lower()
+                in_fit_loop = self.training or 'fit' in trainer_state
+                advantage_scale = 1.0
+                if in_fit_loop:
+                    epoch = int(getattr(self, 'current_epoch', 0))
+                    if epoch < self.advantage_fusion_warmup_epochs:
+                        advantage_scale = 0.0
+                    elif self.advantage_fusion_ramp_epochs > 0:
+                        advantage_scale = min(
+                            1.0,
+                            (epoch - self.advantage_fusion_warmup_epochs + 1)
+                            / float(self.advantage_fusion_ramp_epochs))
+                updated_aux_box, fusion_diagnostics = (
+                    self.advantage_proposal_fusion(
+                        observation_aux_box,
+                        point_feature,
+                        obs_stats,
+                        v21_motion_feature,
+                        v21_motion_proposal_xy,
+                        v21_motion_log_sigma_xy,
+                        applied_motion_valid,
+                        v21_history_valid_ratio,
+                        search_output['search_v21_evidence_token'],
+                        search_output['search_v21_proposal_xy'],
+                        applied_search_valid,
+                        search_output['search_v21_targetness_mean'],
+                        search_output['search_v21_targetness_max'],
+                        search_output['search_v21_targetness_entropy'],
+                        search_output['search_v21_effective_sample_size'],
+                        search_output['search_v21_extension_weight_ratio'],
+                        input_dict['search_v21_available_count'],
+                        input_dict['search_v21_extension_count'],
+                        input_dict['search_v21_overlap_count'],
+                        input_dict['search_v21_query_delta_t'],
+                        input_dict['search_v21_gap_ratio'],
+                        enabled_scale=advantage_scale,
+                    ))
+            else:
+                observation_refinement_xy = (
+                    observation_aux_box[:, :2] - aux_box[:, :2])
+                updated_aux_box, fusion_diagnostics = self.b3_risk_router(
                     observation_aux_box,
                     point_feature,
                     obs_stats,
+                    obs_aux['obs_segmentation_entropy'],
+                    observation_refinement_xy,
                     v21_motion_feature,
                     v21_motion_proposal_xy,
                     v21_motion_log_sigma_xy,
@@ -1683,9 +1895,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     input_dict['search_v21_overlap_count'],
                     input_dict['search_v21_query_delta_t'],
                     input_dict['search_v21_gap_ratio'],
-                    enabled_scale=advantage_scale,
-                ))
-            output_dict.update(advantage_diagnostics)
+                    enabled_scale=self.b3_enabled_scale,
+                )
+            output_dict.update(fusion_diagnostics)
             output_dict.update({
                 'search_v21_motion_proposal_xy': v21_motion_proposal_xy,
                 'search_v21_motion_candidate_available': v21_motion_valid,
@@ -1696,6 +1908,174 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'proposal_inference_mode_id': point_feature.new_tensor({
                     'obs': 0, 'obs_motion': 1,
                     'obs_search': 2, 'full': 3,
+                }[mode]),
+            })
+
+        if self.use_motion_conditioned_search_v22:
+            required_search_keys = (
+                'search_v22_points',
+                'search_v22_point_valid_mask',
+                'search_v22_point_source',
+                'search_v22_geometry_valid',
+                'search_v22_support_anchor_xy',
+                'search_v22_query_delta_t',
+                'search_v22_gap_ratio',
+                'search_v22_sigma_parallel',
+                'search_v22_sigma_perpendicular',
+                'search_v22_available_count',
+                'search_v22_extension_count',
+                'search_v22_overlap_count',
+            )
+            missing_search = [
+                key for key in required_search_keys if key not in input_dict]
+            if missing_search:
+                raise KeyError(
+                    "B2-v2.2 input is missing: "
+                    + ", ".join(missing_search))
+            if not self.use_b1motion_v3:
+                raise RuntimeError("B2-v2.2 requires a B1 motion state prior")
+
+            raw_search_points = input_dict['search_v22_points'].to(
+                device=point_feature.device, dtype=point_feature.dtype)
+            encoded_search_points = self.encode_point_time(raw_search_points)
+            if encoded_search_points.shape[-1] != 5:
+                raise ValueError(
+                    "B2-v2.2 requires a scalar point-time encoding")
+            support_anchor_xy = input_dict[
+                'search_v22_support_anchor_xy'].to(
+                    device=point_feature.device, dtype=point_feature.dtype)
+            point_xy = raw_search_points[..., :2]
+            delta_to_support = support_anchor_xy.unsqueeze(1) - point_xy
+            delta_to_motion = (
+                motion_prior_proposal_xy.unsqueeze(1) - point_xy)
+            direction_norm = torch.linalg.norm(
+                support_anchor_xy, dim=1, keepdim=True)
+            default_direction = torch.zeros_like(support_anchor_xy)
+            default_direction[:, 0] = 1.0
+            direction = torch.where(
+                (direction_norm > 1e-6).expand_as(support_anchor_xy),
+                support_anchor_xy / torch.clamp(direction_norm, min=1e-6),
+                default_direction)
+            perpendicular = torch.stack((
+                -direction[:, 1], direction[:, 0]), dim=1)
+            sigma_parallel = input_dict[
+                'search_v22_sigma_parallel'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype).reshape(B, 1)
+            sigma_perpendicular = input_dict[
+                'search_v22_sigma_perpendicular'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype).reshape(B, 1)
+            longitudinal = (
+                delta_to_support * direction.unsqueeze(1)
+            ).sum(dim=2) / torch.clamp(sigma_parallel, min=0.25)
+            lateral = (
+                delta_to_support * perpendicular.unsqueeze(1)
+            ).sum(dim=2) / torch.clamp(sigma_perpendicular, min=0.20)
+            # The first nine channels preserve the v2.1 point-encoder shape;
+            # relative-to-motion geometry enters through a separate adapter.
+            search_point_inputs = torch.cat((
+                encoded_search_points,
+                delta_to_support,
+                longitudinal.unsqueeze(2),
+                lateral.unsqueeze(2),
+            ), dim=2)
+
+            search_output = self.motion_conditioned_search_refiner(
+                search_point_inputs,
+                point_xy,
+                delta_to_motion,
+                input_dict['search_v22_point_valid_mask'],
+                input_dict['search_v22_point_source'],
+                input_dict['search_v22_geometry_valid'],
+                support_anchor_xy,
+                point_feature,
+                main_motion['feature'],
+                motion_prior_proposal_xy,
+                main_motion['valid'],
+                obs_stats,
+                input_dict['search_v22_query_delta_t'],
+                input_dict['search_v22_gap_ratio'],
+                sigma_parallel,
+                sigma_perpendicular,
+                input_dict['search_v22_available_count'],
+                input_dict['search_v22_extension_count'],
+                input_dict['search_v22_overlap_count'],
+            )
+            output_dict.update(search_output)
+
+            mode = self.proposal_inference_mode
+            if mode == 'obs_search':
+                raise ValueError(
+                    "B2-v2.2 has no independent obs_search candidate")
+            motion_mode_enabled = mode in ('obs_motion', 'full',
+                                           'full_selective')
+            refined_mode_enabled = mode in (
+                'obs_motion_search', 'full', 'full_selective')
+            applied_motion_valid = (
+                main_motion['valid'] * float(motion_mode_enabled))
+            applied_refined_valid = (
+                search_output['motion_search_candidate_valid']
+                * float(refined_mode_enabled))
+            observation_refinement_xy = (
+                observation_aux_box[:, :2] - aux_box[:, :2])
+
+            if self.use_signed_horizon_router:
+                router_scale = (
+                    0.0 if self.training else self.signed_router_enabled_scale)
+                if mode == 'obs':
+                    router_scale = 0.0
+                updated_aux_box, router_diagnostics = (
+                    self.signed_horizon_router(
+                        observation_aux_box,
+                        point_feature,
+                        obs_stats,
+                        obs_aux['obs_segmentation_entropy'],
+                        observation_refinement_xy,
+                        main_motion['feature'],
+                        motion_prior_proposal_xy,
+                        main_motion['log_sigma_xy'],
+                        applied_motion_valid,
+                        history_valid_ratio,
+                        search_output['search_v22_evidence_token'],
+                        search_output['motion_search_refined_xy'],
+                        applied_refined_valid,
+                        search_output['search_presence_probability'],
+                        search_output['search_v22_targetness_mean'],
+                        search_output['search_v22_targetness_max'],
+                        search_output['search_v22_targetness_entropy'],
+                        search_output['search_normalized_ess'],
+                        search_output['search_v22_extension_weight_ratio'],
+                        input_dict['search_v22_available_count'],
+                        input_dict['search_v22_extension_count'],
+                        input_dict['search_v22_overlap_count'],
+                        support_anchor_xy,
+                        search_output['search_raw_vote_xy'],
+                        input_dict['search_v22_query_delta_t'],
+                        input_dict['search_v22_gap_ratio'],
+                        enabled_scale=router_scale,
+                        forced_candidate=input_dict.get(
+                            'selective_forced_candidate'),
+                        forced_step_ratio=input_dict.get(
+                            'selective_forced_step_ratio'),
+                    ))
+                output_dict.update(router_diagnostics)
+            else:
+                # Refiner-only training/evaluation never writes into history.
+                updated_aux_box = observation_aux_box
+
+            output_dict.update({
+                'motion_prior_xy': motion_prior_proposal_xy,
+                'motion_search_motion_candidate_valid':
+                    applied_motion_valid,
+                'motion_search_refined_candidate_valid':
+                    applied_refined_valid,
+                'proposal_inference_mode_id': point_feature.new_tensor({
+                    'obs': 0,
+                    'obs_motion': 1,
+                    'obs_motion_search': 2,
+                    'full': 3,
+                    'full_selective': 3,
                 }[mode]),
             })
 
@@ -2703,16 +3083,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'search_v21_overlap_count'].float().mean(),
             })
 
-            epoch = int(getattr(self, 'current_epoch', 0))
-            if epoch < self.advantage_fusion_warmup_epochs:
-                advantage_ramp = 0.0
-            elif self.advantage_fusion_ramp_epochs <= 0:
-                advantage_ramp = 1.0
-            else:
-                advantage_ramp = min(
-                    1.0,
-                    (epoch - self.advantage_fusion_warmup_epochs + 1)
-                    / float(self.advantage_fusion_ramp_epochs))
+            advantage_ramp = 0.0
+            if self.use_advantage_proposal_fusion:
+                epoch = int(getattr(self, 'current_epoch', 0))
+                if epoch < self.advantage_fusion_warmup_epochs:
+                    advantage_ramp = 0.0
+                elif self.advantage_fusion_ramp_epochs <= 0:
+                    advantage_ramp = 1.0
+                else:
+                    advantage_ramp = min(
+                        1.0,
+                        (epoch - self.advantage_fusion_warmup_epochs + 1)
+                        / float(self.advantage_fusion_ramp_epochs))
 
             if advantage_ramp > 0.0:
                 observation_xy = aux_estimation_boxes[:, :2].detach()
@@ -2835,6 +3217,132 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         / torch.clamp(
                             applied_search.float().sum(), min=1.0),
                 })
+
+        if self.use_motion_conditioned_search_v22:
+            target_xy = center_label[:, :2].to(
+                device=output['search_raw_vote_xy'].device,
+                dtype=output['search_raw_vote_xy'].dtype)
+            point_labels = data['search_v22_point_labels'].to(
+                device=output['search_v22_targetness_logits'].device,
+                dtype=output['search_v22_targetness_logits'].dtype)
+            point_valid = data['search_v22_point_valid_mask'].to(
+                device=point_labels.device, dtype=point_labels.dtype)
+
+            def v22_focal_bce(logits, target, alpha, gamma):
+                bce = F.binary_cross_entropy_with_logits(
+                    logits, target, reduction='none')
+                probability = torch.sigmoid(logits)
+                p_t = (
+                    target * probability
+                    + (1.0 - target) * (1.0 - probability))
+                alpha_t = (
+                    target * float(alpha)
+                    + (1.0 - target) * (1.0 - float(alpha)))
+                return alpha_t * (1.0 - p_t).pow(float(gamma)) * bce
+
+            match_focal = v22_focal_bce(
+                output['search_v22_match_logits'],
+                point_labels,
+                self.search_v22_focal_alpha,
+                self.search_v22_focal_gamma)
+            targetness_focal = v22_focal_bce(
+                output['search_v22_targetness_logits'],
+                point_labels,
+                self.search_v22_focal_alpha,
+                self.search_v22_focal_gamma)
+            valid_point_count = torch.clamp(point_valid.sum(), min=1.0)
+            loss_search_v22_match = (
+                match_focal * point_valid).sum() / valid_point_count
+            loss_search_v22_targetness = (
+                targetness_focal * point_valid).sum() / valid_point_count
+
+            foreground = point_labels * point_valid
+            foreground_count = foreground.sum(dim=1)
+            vote_error = F.smooth_l1_loss(
+                output['search_v22_point_center_votes'],
+                target_xy.unsqueeze(1).expand_as(
+                    output['search_v22_point_center_votes']),
+                reduction='none').mean(dim=2)
+            loss_search_v22_vote = (
+                vote_error * foreground).sum() / torch.clamp(
+                    foreground.sum(), min=1.0)
+            proposal_valid = (foreground_count >= 1).to(point_labels.dtype)
+            raw_proposal_error = F.smooth_l1_loss(
+                output['search_raw_vote_xy'], target_xy,
+                reduction='none').mean(dim=1)
+            loss_search_v22_raw_proposal = (
+                raw_proposal_error * proposal_valid).sum() / torch.clamp(
+                    proposal_valid.sum(), min=1.0)
+            refined_proposal_error = F.smooth_l1_loss(
+                output['motion_search_refined_xy'], target_xy,
+                reduction='none').mean(dim=1)
+            refined_supervision_valid = (
+                proposal_valid
+                * output['motion_search_candidate_available'].detach())
+            loss_search_v22_refined_proposal = (
+                refined_proposal_error * refined_supervision_valid).sum(
+                ) / torch.clamp(refined_supervision_valid.sum(), min=1.0)
+
+            presence_target = (foreground_count >= 1).to(point_labels.dtype)
+            presence_available = (
+                output['motion_search_candidate_available'].detach())
+            presence_error = F.binary_cross_entropy_with_logits(
+                output['search_presence_logit'],
+                presence_target,
+                reduction='none')
+            loss_search_v22_presence = (
+                presence_error * presence_available).sum() / torch.clamp(
+                    presence_available.sum(), min=1.0)
+
+            loss_total += (
+                self.search_v22_match_weight * loss_search_v22_match
+                + self.search_v22_targetness_weight
+                * loss_search_v22_targetness
+                + self.search_v22_vote_weight * loss_search_v22_vote
+                + self.search_v22_raw_proposal_weight
+                * loss_search_v22_raw_proposal
+                + self.search_v22_refined_proposal_weight
+                * loss_search_v22_refined_proposal
+                + self.search_v22_presence_weight
+                * loss_search_v22_presence)
+            loss_dict.update({
+                'loss_total': loss_total,
+                'loss_search_v22_match': loss_search_v22_match,
+                'loss_search_v22_targetness':
+                    loss_search_v22_targetness,
+                'loss_search_v22_vote': loss_search_v22_vote,
+                'loss_search_v22_raw_proposal':
+                    loss_search_v22_raw_proposal,
+                'loss_search_v22_refined_proposal':
+                    loss_search_v22_refined_proposal,
+                'loss_search_v22_presence': loss_search_v22_presence,
+                'search_v22_foreground_points': foreground_count.mean(),
+                'search_v22_geometry_valid_rate': data[
+                    'search_v22_geometry_valid'].float().mean(),
+                'search_v22_candidate_available_rate': output[
+                    'motion_search_candidate_available'].float().mean(),
+                'search_v22_candidate_valid_rate': output[
+                    'motion_search_candidate_valid'].float().mean(),
+                'search_v22_presence_probability': output[
+                    'search_presence_probability'].mean(),
+                'search_v22_normalized_ess': output[
+                    'search_normalized_ess'].mean(),
+                'search_v22_raw_ess': output['search_raw_ess'].mean(),
+                'search_v22_raw_rmse': torch.linalg.norm(
+                    output['search_raw_vote_xy'].detach() - target_xy,
+                    dim=1).mean(),
+                'search_v22_motion_rmse': torch.linalg.norm(
+                    output['motion_prior_xy'].detach() - target_xy,
+                    dim=1).mean(),
+                'search_v22_refined_rmse': torch.linalg.norm(
+                    output['motion_search_refined_xy'].detach() - target_xy,
+                    dim=1).mean(),
+            })
+            if self.training and not torch.equal(
+                    output['aux_estimation_boxes'],
+                    output['observation_aux_estimation_boxes']):
+                raise RuntimeError(
+                    "B2-v2.2 refiner training must write exact observation")
 
         if self.box_aware:
             prev_bc = torch.flatten(data['prev_bc'], start_dim=1, end_dim=2)

@@ -55,6 +55,22 @@
 
 > 能否在不改变 SeqTrack3D 主干和 token 预算的前提下，用真实时间生成连续时间运动先验，扩展可能的搜索区域，并仅在观测不确定时做有界 proposal 修正？
 
+### 跨数据集、跨帧率假设（待验证）
+
+真实时间更可能在**同一个共享模型同时面对不同采样频率**时体现价值。SeqTrack3D
+只把历史表示为第 1/2/3 帧；例如 10 Hz 与 2 Hz 数据中的“一步”分别对应
+`0.1 s` 与 `0.5 s`，相同物理速度会表现为不同的逐帧位移。显式 `delta_t` 可以先
+把历史位移归一为 m/s，再按当前 query gap 积分，使运动状态在 KITTI、nuScenes、
+Waymo 或同一数据集的 stride-1/2/4 之间具有一致的物理语义。这里相关的是帧率和
+时间跨度，不是数据集的总帧数。
+
+该假设不等于当前已有正结果。若每个固定帧率数据集分别训练一个模型，平均步长
+可以被模型参数隐式吸收，真实时间的增量可能很小；若各数据集的 `delta_t` 近似
+常数，它还可能退化为 dataset ID。正式证据必须来自一个共享 checkpoint，并在
+每个数据集内部加入多 stride 或 held-out cadence，比较 `true`、全局固定、
+dataset-mean fixed 与 within-dataset shuffled。只有 `true` 在同数据集重采样及
+未见间隔上仍领先，才能把跨数据集收益归因于物理时间，而不是数据域识别。
+
 ## 原 v2 候选（已在首筛中否决）
 
 ```text
@@ -132,6 +148,30 @@ canonical geometry，且 final/late-3 都低于 B0，只能作为失败诊断，
 4. **Random-20% 后置**：正常数据晋级后仅作为鲁棒性补充，不用于选择 checkpoint 或调参。
 
 ## 论文贡献表述
+
+### 候选主创新：跨帧率不变的双时钟 3D 跟踪
+
+若后续证据通过，主创新不应只写成“加入真实时间编码”，而应定义为：
+
+> 将多帧 3D SOT 从 frame-relative sequence modeling 推进为
+> frame-rate-invariant physical-time state propagation，使同一个共享模型能够
+> 在不同及未见观测 cadence 下保持一致的运动语义。
+
+该贡献由三部分组成：
+
+1. **问题与表示**：指出 order-only 的“一步位移”在不同帧率下物理含义不一致；
+   用 dual-clock 保留稳定 order backbone，同时以 `delta_x/delta_t` 表示物理
+   运动状态；
+2. **查询时传播与取证**：按 `delta_t_query` 传播 motion proposal，并在预测轨迹
+   端点查询 observation-conditioned 点云证据，而不是按固定帧步扩大主 crop；
+3. **跨帧率验证**：先在同一数据集内使用多 stride 和 held-out cadence 排除
+   数据域混杂，再扩展到 KITTI、nuScenes、Waymo 的共享模型，使用全局固定、
+   dataset-mean fixed、within-dataset shuffled 和 true time 做成对控制。
+
+它的最低成立条件是：同代码、同初始化候选先超过 order-only baseline；随后
+`true` 不仅超过全局 fixed，还要在同数据集重采样和未见 gap 上超过
+dataset-mean fixed 与 within-dataset shuffled。若只在跨数据集汇总上超过全局
+fixed，则只能解释为帧率/数据集尺度校准，不能声称连续时间泛化。
 
 若后续重构模块通过正常集和时间双门槛：
 
