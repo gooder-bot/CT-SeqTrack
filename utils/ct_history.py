@@ -1,5 +1,6 @@
-"""Dependency-light contracts for CT-v2 training-history augmentation."""
+"""Dependency-light contracts for CT training-history augmentation."""
 
+import hashlib
 import numpy as np
 
 
@@ -21,6 +22,41 @@ def normalize_ct_history_training_mode(mode):
             "ct_history_training_mode must be 'canonical', "
             "'correlated_candidate', or 'recursive_candidate'")
     return _CT_HISTORY_TRAINING_MODES[key]
+
+
+CT_HISTORY_MODE_IDS = {
+    "canonical": 0,
+    "correlated_candidate": 1,
+    "recursive_candidate": 2,
+}
+
+
+def select_b2_v3_history_mode(
+        tracklet_key, frame_id, candidate_id, seed=42):
+    """Choose the one causal history consumed by both B1 and B2-v3.
+
+    Candidate zero is always canonical.  Every other assignment is a stable
+    50/50 hash split, so changing point-cloud sampling or worker order cannot
+    change the state seen by either branch.
+    """
+    candidate_id = int(candidate_id)
+    if candidate_id == 0:
+        return "canonical"
+    payload = (
+        f"b2-v3::{int(seed)}::{str(tracklet_key)}::"
+        f"{int(frame_id)}::{candidate_id}"
+    ).encode("utf-8")
+    bucket = hashlib.sha256(payload).digest()[0] & 1
+    return (
+        "correlated_candidate" if bucket == 0
+        else "recursive_candidate"
+    )
+
+
+def b2_v3_history_mode_id(mode):
+    """Return a serialized id for the shared-history audit trail."""
+    normalized = normalize_ct_history_training_mode(mode)
+    return CT_HISTORY_MODE_IDS[normalized]
 
 
 def correlate_candidate_offsets(offsets, correlation, anchor_offset):

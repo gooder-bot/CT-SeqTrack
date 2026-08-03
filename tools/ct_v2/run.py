@@ -20,6 +20,8 @@ CONFIGS = {
     "b3_crpa_v1": ROOT / "cfgs/ct_v2/10_b3_crpa_v1.yaml",
     "b2_v22_refiner": ROOT / "cfgs/ct_v2/11_b2_v22_refiner.yaml",
     "b2_v22_selective": ROOT / "cfgs/ct_v2/12_b2_v22_selective.yaml",
+    "b2_v3_refiner": ROOT / "cfgs/ct_v2/13_b2_v3_refiner.yaml",
+    "b2_v3_selective": ROOT / "cfgs/ct_v2/14_b2_v3_selective.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -27,6 +29,19 @@ CONFIGS = {
         ROOT / "cfgs/ct_v2/06_seqtrack3d_pftc_unweighted.yaml"),
     "pftc": ROOT / "cfgs/ct_v2/07_seqtrack3d_dt_pftc.yaml",
 }
+
+
+def parse_batch_limit(value):
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            "limit-train-batches must be positive")
+    if parsed >= 1.0:
+        if not parsed.is_integer():
+            raise argparse.ArgumentTypeError(
+                "batch counts >= 1 must be whole numbers")
+        return int(parsed)
+    return parsed
 
 
 def parse_args():
@@ -47,7 +62,7 @@ def parse_args():
     parser.add_argument("--preloading", action="store_true")
     parser.add_argument("--check-val-every-n-epoch", type=int)
     parser.add_argument("--save-top-k", type=int)
-    parser.add_argument("--limit-train-batches", type=float)
+    parser.add_argument("--limit-train-batches", type=parse_batch_limit)
     parser.add_argument(
         "--protocol", choices=("normal", "random20", "gap1124"),
         default="normal")
@@ -66,7 +81,8 @@ def parse_args():
         "--proposal-mode",
         choices=(
             "obs", "obs_motion", "obs_search", "full",
-            "obs_motion_search", "full_selective"),
+            "obs_motion_search", "full_selective",
+            "obs_only", "obs_vs_motion", "obs_vs_refined", "obs_vs_all"),
         help="evaluate a B2 checkpoint under a same-weight proposal mode")
     parser.add_argument(
         "--preflight", action="store_true",
@@ -89,9 +105,18 @@ def build_command(args):
         raise ValueError(
             "B2-v2.2 refiner training requires the composed "
             "--init-checkpoint (or an explicit --resume-checkpoint)")
+    if (args.mode == "train" and args.variant == "b2_v3_refiner"
+            and not (args.init_checkpoint or args.resume_checkpoint)):
+        raise ValueError(
+            "B2-v3 refiner training requires the strict composed "
+            "--init-checkpoint (or an explicit --resume-checkpoint)")
     if args.mode == "train" and args.variant == "b2_v22_selective":
         raise ValueError(
             "the signed router is trained offline; b2_v22_selective is "
+            "evaluation-only")
+    if args.mode == "train" and args.variant == "b2_v3_selective":
+        raise ValueError(
+            "the action router is trained offline; b2_v3_selective is "
             "evaluation-only")
     if args.mode == "train" and args.protocol != "normal":
         raise ValueError("v2 training is fixed to the normal dataset protocol")
@@ -108,12 +133,19 @@ def build_command(args):
             args.mode != "test"
             or args.variant not in (
                 "search_v21", "motion_search_v21", "b3_crpa_v1",
-                "b2_v22_refiner", "b2_v22_selective")):
+                "b2_v22_refiner", "b2_v22_selective",
+                "b2_v3_refiner", "b2_v3_selective")):
         raise ValueError(
             "--proposal-mode requires test mode and a supported B2 variant")
     if (args.proposal_mode == "obs_search"
             and args.variant in ("b2_v22_refiner", "b2_v22_selective")):
         raise ValueError("B2-v2.2 has no independent obs_search mode")
+    if (args.variant in ("b2_v3_refiner", "b2_v3_selective")
+            and args.proposal_mode
+            and args.proposal_mode not in (
+                "obs_only", "obs_vs_motion", "obs_vs_refined",
+                "obs_vs_all")):
+        raise ValueError("B2-v3 requires an unambiguous v3 proposal mode")
     if (args.mode == "train"
             and args.variant in ("pftc_unweighted", "pftc")
             and not args.preflight

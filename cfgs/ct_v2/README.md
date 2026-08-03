@@ -20,9 +20,16 @@ These files are the complete active experiment surface:
 | `07_seqtrack3d_dt_pftc.yaml` | B0 + sample-normalized physical-Δt pair weighting |
 | `11_b2_v22_refiner.yaml` | Frozen B0/B1 + motion-conditioned endpoint refiner, 20 epochs |
 | `12_b2_v22_selective.yaml` | Same candidates + offline signed-H=3 selective Top-1 router |
+| `13_b2_v3_refiner.yaml` | Shared B1/B2 state + supervised 384-d evidence, fixed 20-epoch refiner |
+| `14_b2_v3_selective.yaml` | Six-action signed-H=3 router with one on-policy aggregation round |
 
 All older YAML files remain valid legacy experiments. They are no longer part
 of the default paper workflow.
+
+B2-v3 is the active repair path; v2.2 remains frozen for reproduction. Its
+complete initialization, two-round rollout, packaging, evaluation modes, and
+promotion gates are documented in
+`docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md`.
 
 The historical 2026-07-27 seed42 normal-mini screens are complete. B3 finishes at
 25.537 Success / 24.707 Precision and its gate saturates at the configured

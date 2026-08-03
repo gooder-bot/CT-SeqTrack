@@ -11,6 +11,7 @@ import torch
 from easydict import EasyDict
 import os
 import json
+import hashlib
 from pathlib import Path
 
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
@@ -44,6 +45,33 @@ def load_yaml(file_name):
     return load_yaml_config(file_name)
 
 
+def parse_limit_train_batches(value):
+    """Preserve Lightning's int-count versus float-fraction semantics."""
+    parsed = float(value)
+    if not parsed > 0:
+        raise argparse.ArgumentTypeError(
+            "limit_train_batches must be positive")
+    if parsed >= 1.0:
+        if not parsed.is_integer():
+            raise argparse.ArgumentTypeError(
+                "batch counts >= 1 must be whole numbers")
+        return int(parsed)
+    return parsed
+
+
+def tensor_prefix_hash(state_dict, prefix):
+    """Hash names, dtypes, shapes, and bytes for one checkpoint prefix."""
+    digest = hashlib.sha256()
+    keys = sorted(key for key in state_dict if key.startswith(prefix))
+    for key in keys:
+        value = state_dict[key].detach().cpu().contiguous()
+        digest.update(key.encode("utf-8"))
+        digest.update(str(value.dtype).encode("ascii"))
+        digest.update(str(tuple(value.shape)).encode("ascii"))
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest(), keys
+
+
 def load_initial_weights(model, checkpoint_path, report_path=None):
     """Load matching model tensors without restoring optimizer/trainer state."""
     try:
@@ -73,6 +101,25 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         key: value for key, value in normalized.items()
         if key in target_state and target_state[key].shape == value.shape
     }
+    strict_v3 = bool(getattr(
+        model, "use_motion_conditioned_search_v3", False))
+    shape_mismatch = sorted(
+        key for key, value in normalized.items()
+        if key in target_state and target_state[key].shape != value.shape)
+    if strict_v3 and shape_mismatch:
+        raise RuntimeError(
+            "Init checkpoint contains target keys with wrong shapes: "
+            + ", ".join(shape_mismatch[:20]))
+    if strict_v3:
+        nonfinite = sorted(
+            key for key, value in matched.items()
+            if torch.is_tensor(value)
+            and (value.is_floating_point() or value.is_complex())
+            and not bool(torch.isfinite(value).all().item()))
+        if nonfinite:
+            raise RuntimeError(
+                "B2-v3 init contains non-finite tensors: "
+                + ", ".join(nonfinite[:20]))
     critical_prefixes = ("seg_pointnet.", "mini_pointnet.", "motion_mlp.",
                          "feature_pointnet.", "Transformer.")
     missing_critical = [
@@ -83,8 +130,73 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         raise RuntimeError(
             "Init checkpoint is missing baseline model prefixes: "
             + ", ".join(missing_critical))
+    v3_report = None
+    if strict_v3:
+        metadata = payload.get("b2_v3_init")
+        if not isinstance(metadata, dict):
+            raise RuntimeError(
+                "B2-v3 requires a checkpoint composed by the strict v3 "
+                "builder (missing b2_v3_init metadata)")
+        b1_prefix = "physical_motion_encoder."
+        b1_target = sorted(
+            key for key in target_state if key.startswith(b1_prefix))
+        b1_matched = sorted(
+            key for key in matched if key.startswith(b1_prefix))
+        if not b1_target or b1_matched != b1_target:
+            missing = sorted(set(b1_target) - set(b1_matched))
+            raise RuntimeError(
+                "B2-v3 refuses to freeze an incomplete B1 checkpoint: "
+                + ", ".join(missing))
+        migrated_submodules = (
+            "point_mlp.", "source_embedding.", "query_projection.",
+            "key_projection.", "key_norm.",
+            "query_value_projection.", "query_norm.",
+            "local_targetness_head.", "vote_head.",
+        )
+        refiner_prefix = "state_aligned_search_refiner."
+        required_migrated = sorted(
+            key for key in target_state
+            if any(key.startswith(refiner_prefix + submodule)
+                   for submodule in migrated_submodules))
+        missing_migrated = sorted(set(required_migrated) - set(matched))
+        if missing_migrated:
+            raise RuntimeError(
+                "B2-v3 search migration is incomplete: "
+                + ", ".join(missing_migrated))
+        parameter_keys = dict(model.named_parameters())
+        allowed_cold_prefix = "action_consistent_router_v3."
+        missing_frozen = sorted(
+            key for key, parameter in parameter_keys.items()
+            if not parameter.requires_grad
+            and not key.startswith(allowed_cold_prefix)
+            and key not in matched)
+        if missing_frozen:
+            raise RuntimeError(
+                "B2-v3 frozen parameters were not loaded: "
+                + ", ".join(missing_frozen[:30]))
+        b1_hash, _ = tensor_prefix_hash(matched, b1_prefix)
+        expected_b1_hash = metadata.get("b1_prefix_hash")
+        if not expected_b1_hash or b1_hash != expected_b1_hash:
+            raise RuntimeError(
+                "B2-v3 B1 prefix hash does not match builder provenance")
+        expected_migrated = sorted(metadata.get("migrated_target_keys", []))
+        if expected_migrated != required_migrated:
+            raise RuntimeError(
+                "B2-v3 migrated-key manifest does not match this model")
+        v3_report = {
+            "b1_tensor_count": len(b1_target),
+            "b1_prefix_hash": b1_hash,
+            "migrated_tensor_count": len(required_migrated),
+            "missing_frozen_tensor_count": len(missing_frozen),
+        }
     target_state.update(matched)
     model.load_state_dict(target_state, strict=True)
+    if strict_v3:
+        frozen_prefixes = tuple(model.B2_V3_FROZEN_PREFIXES)
+        model._b2_v3_frozen_reference_hashes = {
+            prefix: tensor_prefix_hash(model.state_dict(), prefix)[0]
+            for prefix in frozen_prefixes
+        }
     report = {
         "checkpoint": str(checkpoint_path),
         "selected_prefix_strip": selected_prefix,
@@ -93,6 +205,8 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         "matched_tensor_count": len(matched),
         "new_tensor_count": len(target_state) - len(matched),
     }
+    if v3_report is not None:
+        report["b2_v3"] = v3_report
     if report_path is not None:
         report_path = Path(report_path)
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +227,8 @@ def parse_config():
         '--epoch', type=int, default=argparse.SUPPRESS,
         help='number of epochs (YAML value is used when omitted)')
     parser.add_argument(
-        '--limit_train_batches', type=int, default=argparse.SUPPRESS,
+        '--limit_train_batches', type=parse_limit_train_batches,
+        default=argparse.SUPPRESS,
         help='limit training batches (used by bounded loss preflight runs)')
     parser.add_argument(
         '--save_top_k', type=int, default=argparse.SUPPRESS,
@@ -231,7 +346,8 @@ def parse_config():
         dest='proposal_inference_mode',
         choices=(
             'obs', 'obs_motion', 'obs_search', 'full',
-            'obs_motion_search', 'full_selective'),
+            'obs_motion_search', 'full_selective',
+            'obs_only', 'obs_vs_motion', 'obs_vs_refined', 'obs_vs_all'),
         default=argparse.SUPPRESS,
         help='Evaluation-only B2 proposal attribution mode.')
 

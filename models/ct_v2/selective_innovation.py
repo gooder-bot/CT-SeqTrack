@@ -16,6 +16,86 @@ import torch.nn.functional as F
 
 SELECTIVE_ROLLOUT_SCHEMA = "ct_seqtrack.selective_rollout.v2"
 SELECTIVE_ROUTER_SCHEMA = "ct_seqtrack.signed_horizon_router.v2"
+SELECTIVE_V3_ROLLOUT_SCHEMA = "ct_seqtrack.selective_rollout.v3"
+SELECTIVE_V3_ROUTER_SCHEMA = "ct_seqtrack.action_router.v3"
+B2_V3_PROTECTED_PREFIXES = (
+    "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
+    "motion_state_mlp.", "feature_pointnet.", "Transformer.",
+    "physical_motion_encoder.", "state_aligned_search_refiner.",
+)
+
+
+def _tensor_prefixes_hash(state, prefixes):
+    digest = hashlib.sha256()
+    keys = sorted(
+        key for key in state
+        if any(key.startswith(prefix) for prefix in prefixes))
+    for key in keys:
+        tensor = state[key].detach().cpu().contiguous()
+        digest.update(key.encode("utf-8"))
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(str(tuple(tensor.shape)).encode("ascii"))
+        digest.update(tensor.numpy().tobytes())
+    return digest.hexdigest(), keys
+
+
+def validate_b2_v3_router_package(checkpoint):
+    """Reject cold, uncalibrated, or tampered final-router checkpoints."""
+    package = checkpoint.get("b2_v3_router_package")
+    if not isinstance(package, dict):
+        raise RuntimeError(
+            "B2-v3 selective evaluation requires a checkpoint created by "
+            "package_b2_v3_checkpoint.py")
+    if package.get("schema") != "ct_seqtrack.selective_checkpoint.v3":
+        raise RuntimeError("unsupported B2-v3 router package schema")
+    calibration = package.get("calibration")
+    if (not isinstance(calibration, dict)
+            or calibration.get("status") != "passed"
+            or calibration.get("partition") != "calibration"):
+        raise RuntimeError("B2-v3 selective checkpoint lacks final calibration")
+    state = checkpoint.get("state_dict")
+    if not isinstance(state, dict):
+        raise RuntimeError("B2-v3 package has no state_dict")
+    nonfinite = sorted(
+        key for key, value in state.items()
+        if torch.is_tensor(value)
+        and (value.is_floating_point() or value.is_complex())
+        and not bool(torch.isfinite(value).all().item()))
+    if nonfinite:
+        raise RuntimeError(
+            "B2-v3 package contains non-finite tensors: "
+            + ", ".join(nonfinite[:20]))
+    protected_hash, protected_keys = _tensor_prefixes_hash(
+        state, B2_V3_PROTECTED_PREFIXES)
+    if (not protected_keys
+            or protected_hash != package.get("protected_prefix_hash")):
+        raise RuntimeError("B2-v3 packaged B0/B1/refiner hash is invalid")
+    router_keys = sorted(
+        key for key in state
+        if key.startswith("action_consistent_router_v3."))
+    try:
+        router_tensor_count = int(package.get("router_tensor_count", -1))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("B2-v3 router tensor count is invalid") from error
+    if not router_keys or len(router_keys) != router_tensor_count:
+        raise RuntimeError("B2-v3 packaged router key set is invalid")
+    threshold = state.get(
+        "action_consistent_router_v3.calibrated_gain_threshold")
+    expected_threshold = calibration.get("threshold")
+    try:
+        threshold_matches = (
+            threshold is not None
+            and expected_threshold is not None
+            and bool(torch.isfinite(threshold.detach()).all().item())
+            and abs(float(threshold.detach().cpu().reshape(-1)[0])
+                    - float(expected_threshold)) <= 1e-6)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(
+            "B2-v3 packaged router threshold is invalid") from error
+    if not threshold_matches:
+        raise RuntimeError(
+            "B2-v3 packaged router threshold is inconsistent")
+    return package
 
 
 def _clip_vector_norm(vector, radius, eps=1e-6):
@@ -170,6 +250,41 @@ class MotionConditionedSearchRefiner(nn.Module):
             torch.zeros_like(weights),
         )
 
+    def _filter_finite_points(
+            self, valid, point_inputs, point_xy, delta_to_motion):
+        """Compatibility hook: v2.2 keeps its original validity behavior."""
+        return valid
+
+    def _vote_point_xy(self, point_xy):
+        return point_xy
+
+    def _refinement_motion_xy(self, motion_proposal_xy):
+        return motion_proposal_xy
+
+    def _structural_finite(
+            self, point_inputs, motion_proposal_xy, support_anchor_xy):
+        """Compatibility hook: v2.2 keeps its original validity behavior."""
+        return point_inputs.new_ones((point_inputs.shape[0],))
+
+    def _compose_evidence(self, overlap_token, extension_token, context):
+        return self.source_fusion(torch.cat((
+            overlap_token, extension_token, context), dim=1))
+
+    def _presence_inputs(
+            self, overlap_token, extension_token, context, source_present):
+        return torch.cat((
+            overlap_token, extension_token, context, source_present), dim=1)
+
+    def _candidate_valid(self, candidate_available, presence_probability):
+        presence_valid = (
+            presence_probability >= self.presence_threshold).to(
+                candidate_available.dtype)
+        return candidate_available * presence_valid
+
+    @property
+    def evidence_output_key(self):
+        return "search_v22_evidence_token"
+
     def forward(
             self,
             point_inputs,
@@ -208,6 +323,8 @@ class MotionConditionedSearchRefiner(nn.Module):
             raise ValueError("B2-v2.2 point source must have shape [B,N]")
         if bool(torch.any((source < 0) | (source > 1)).item()):
             raise ValueError("B2-v2.2 point source must be 0 or 1")
+        valid = self._filter_finite_points(
+            valid, point_inputs, point_xy, delta_to_motion)
 
         geometry = (self._batch_scalar(
             geometry_valid, point_inputs) > 0).to(point_inputs.dtype)
@@ -282,12 +399,12 @@ class MotionConditionedSearchRefiner(nn.Module):
             point_feature * overlap_weights.unsqueeze(2)).sum(dim=1)
         extension_token = (
             point_feature * extension_weights.unsqueeze(2)).sum(dim=1)
-        evidence_token = self.source_fusion(torch.cat((
-            overlap_token, extension_token, context), dim=1))
+        evidence_token = self._compose_evidence(
+            overlap_token, extension_token, context)
 
         vote_offsets = self.max_vote_offset * torch.tanh(
             self.vote_head(point_feature))
-        point_center_votes = point_xy + vote_offsets
+        point_center_votes = self._vote_point_xy(point_xy) + vote_offsets
         raw_proposal_xy = (
             point_center_votes * pool_weights.unsqueeze(2)).sum(dim=1)
 
@@ -295,32 +412,34 @@ class MotionConditionedSearchRefiner(nn.Module):
         point_row_valid = (valid_count >= 3).to(point_inputs.dtype)
         candidate_available = (
             point_row_valid * geometry.squeeze(1)
-            * motion_valid_column.squeeze(1))
+            * motion_valid_column.squeeze(1)
+            * self._structural_finite(
+                point_inputs, motion_proposal_xy, support_anchor_xy))
         source_present = torch.stack((
             (overlap_mask.sum(dim=1) > 0).to(point_inputs.dtype),
             (extension_mask.sum(dim=1) > 0).to(point_inputs.dtype),
         ), dim=1)
-        presence_logit = self.presence_head(torch.cat((
-            overlap_token, extension_token, context, source_present),
-            dim=1)).squeeze(1)
+        presence_logit = self.presence_head(self._presence_inputs(
+            overlap_token, extension_token, context,
+            source_present)).squeeze(1)
         presence_probability = torch.sigmoid(presence_logit)
         presence_probability = presence_probability * candidate_available
-        presence_valid = (
-            presence_probability >= self.presence_threshold).to(
-                point_inputs.dtype)
-        candidate_valid = candidate_available * presence_valid
+        candidate_valid = self._candidate_valid(
+            candidate_available, presence_probability)
 
         query_dt = self._batch_scalar(
             query_delta_t, point_inputs, default=0.1)
         refinement_radius = torch.clamp(
             self.radius_base + self.radius_per_second * query_dt,
             max=self.radius_max)
+        safe_motion_proposal_xy = self._refinement_motion_xy(
+            motion_proposal_xy)
         refinement_residual = _clip_vector_norm(
-            raw_proposal_xy - motion_proposal_xy,
+            raw_proposal_xy - safe_motion_proposal_xy,
             refinement_radius,
             eps=self.eps,
         )
-        refined_xy = motion_proposal_xy + refinement_residual
+        refined_xy = safe_motion_proposal_xy + refinement_residual
 
         targetness_mass = (targetness * valid).sum(dim=1)
         targetness_mean = targetness_mass / torch.clamp(
@@ -361,7 +480,7 @@ class MotionConditionedSearchRefiner(nn.Module):
         entropy = entropy * point_row_valid
         extension_weight_ratio = extension_weight_ratio * point_row_valid
 
-        return {
+        output = {
             "search_support_anchor_xy": support_anchor_xy.detach(),
             "search_raw_vote_xy": raw_proposal_xy,
             "motion_search_refined_xy": refined_xy,
@@ -370,11 +489,12 @@ class MotionConditionedSearchRefiner(nn.Module):
             "search_presence_probability": presence_probability,
             "search_overlap_token": overlap_token * point_row,
             "search_extension_token": extension_token * point_row,
+            "search_context_token": (
+                context * candidate_available.unsqueeze(1)),
             "search_normalized_ess": normalized_ess,
             "search_raw_ess": raw_ess,
             "motion_search_candidate_available": candidate_available,
             "motion_search_candidate_valid": candidate_valid,
-            "search_v22_evidence_token": evidence_token,
             "search_v22_match_logits": match_logits,
             "search_v22_local_targetness_logits": local_logits,
             "search_v22_targetness_logits": targetness_logits,
@@ -392,6 +512,101 @@ class MotionConditionedSearchRefiner(nn.Module):
             "search_v22_valid_count": valid_count,
             "search_v22_refinement_radius": refinement_radius.squeeze(1),
         }
+        output[self.evidence_output_key] = evidence_token
+        return output
+
+
+class StateAlignedSearchRefiner(MotionConditionedSearchRefiner):
+    """B2-v3 search evidence aligned with B1's exact causal state.
+
+    The migrated point/query/targetness/vote modules retain their v2.1 names
+    and shapes.  Unlike v2.2, the router-facing evidence is the supervised
+    structured concatenation itself; there is no randomly frozen fusion layer.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        del self.source_fusion
+        self.presence_head = nn.Sequential(
+            nn.Linear(3 * self.feature_dim + 2, self.feature_dim),
+            nn.LayerNorm(self.feature_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.feature_dim, 1),
+        )
+        nn.init.zeros_(self.presence_head[-1].weight)
+        nn.init.constant_(
+            self.presence_head[-1].bias, math.log(0.1 / 0.9))
+
+    @property
+    def evidence_output_key(self):
+        return "search_v3_evidence_components"
+
+    def _filter_finite_points(
+            self, valid, point_inputs, point_xy, delta_to_motion):
+        finite = (
+            torch.isfinite(point_inputs).all(dim=2)
+            & torch.isfinite(point_xy).all(dim=2)
+            & torch.isfinite(delta_to_motion).all(dim=2))
+        return valid * finite.to(valid.dtype)
+
+    def _vote_point_xy(self, point_xy):
+        return torch.nan_to_num(
+            point_xy, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _refinement_motion_xy(self, motion_proposal_xy):
+        return torch.nan_to_num(
+            motion_proposal_xy, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _structural_finite(
+            self, point_inputs, motion_proposal_xy, support_anchor_xy):
+        finite = (
+            torch.isfinite(motion_proposal_xy).all(dim=1)
+            & torch.isfinite(support_anchor_xy).all(dim=1))
+        return finite.to(point_inputs.dtype)
+
+    def _compose_evidence(self, overlap_token, extension_token, context):
+        return torch.cat((overlap_token, extension_token, context), dim=1)
+
+    def _candidate_valid(self, candidate_available, presence_probability):
+        # Presence is a learned feature and loss target, never a hard gate.
+        return candidate_available
+
+    def forward(self, *args, **kwargs):
+        output = super().forward(*args, **kwargs)
+        structural = output[
+            "motion_search_candidate_valid"].unsqueeze(1)
+        output.update({
+            "search_v3_overlap_token": (
+                output["search_overlap_token"] * structural),
+            "search_v3_extension_token": (
+                output["search_extension_token"] * structural),
+            "search_v3_motion_observation_context":
+                output["search_context_token"],
+            "search_v3_presence_logit": output["search_presence_logit"],
+            "search_v3_presence_probability":
+                output["search_presence_probability"],
+            "search_v3_raw_vote_xy": output["search_raw_vote_xy"],
+            "motion_search_v3_refined_xy":
+                output["motion_search_refined_xy"],
+            "motion_search_v3_candidate_structural_valid":
+                output["motion_search_candidate_valid"],
+            "search_v3_match_logits": output["search_v22_match_logits"],
+            "search_v3_targetness_logits":
+                output["search_v22_targetness_logits"],
+            "search_v3_targetness_mean":
+                output["search_v22_targetness_mean"],
+            "search_v3_targetness_max":
+                output["search_v22_targetness_max"],
+            "search_v3_targetness_entropy":
+                output["search_v22_targetness_entropy"],
+            "search_v3_extension_weight_ratio":
+                output["search_v22_extension_weight_ratio"],
+            "search_v3_point_center_votes":
+                output["search_v22_point_center_votes"],
+            "search_v3_normalized_ess": output["search_normalized_ess"],
+            "search_v3_raw_ess": output["search_raw_ess"],
+        })
+        return output
 
 
 class SignedHorizonInnovationRouter(nn.Module):
@@ -782,6 +997,315 @@ class SignedHorizonInnovationRouter(nn.Module):
         }
 
 
+class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
+    """Select and execute the same candidate/step action that q10 scores."""
+
+    POLICY_OBSERVATION = -2
+    POLICY_AUTO = -1
+    POLICY_MOTION = 0
+    POLICY_REFINED = 1
+
+    def __init__(self, *args, search_dim=384, **kwargs):
+        super().__init__(*args, search_dim=search_dim, **kwargs)
+        hidden_dim = self.median_gain_head.in_features
+        action_count = 2 * len(self.STEP_RATIOS)
+        self.median_gain_head = nn.Linear(hidden_dim, action_count)
+        self.gain_spread_head = nn.Linear(hidden_dim, action_count)
+        del self.step_head
+        nn.init.zeros_(self.median_gain_head.weight)
+        nn.init.zeros_(self.median_gain_head.bias)
+        nn.init.zeros_(self.gain_spread_head.weight)
+        nn.init.constant_(
+            self.gain_spread_head.bias, math.log(math.expm1(0.05)))
+
+    def _predict(self, observation_feature, motion_feature, search_feature,
+                 scalar_features):
+        normalized_scalar = (
+            scalar_features - self.scalar_feature_mean.unsqueeze(0)
+        ) / torch.clamp(self.scalar_feature_std.unsqueeze(0), min=1e-4)
+        hidden = self.trunk(torch.cat((
+            self.observation_projection(observation_feature),
+            self.motion_projection(motion_feature),
+            self.search_projection(search_feature),
+            torch.nan_to_num(normalized_scalar),
+        ), dim=1))
+        q50 = self.median_gain_head(hidden).reshape(-1, 2, 3)
+        q10 = q50 - F.softplus(
+            self.gain_spread_head(hidden)).reshape(-1, 2, 3)
+        return q10, q50
+
+    def predict_export_features(self, exported_features):
+        if exported_features.dim() != 2:
+            raise ValueError("router features must have shape [B,D]")
+        if exported_features.shape[1] != self.export_feature_dim:
+            raise ValueError("router feature width mismatch")
+        obs_end = self.observation_dim
+        motion_end = obs_end + self.motion_dim
+        search_end = motion_end + self.search_dim
+        q10, q50 = self._predict(
+            exported_features[:, :obs_end],
+            exported_features[:, obs_end:motion_end],
+            exported_features[:, motion_end:search_end],
+            exported_features[:, search_end:],
+        )
+        return {"q10": q10, "q50": q50}
+
+    def forward(
+            self,
+            observation_box,
+            observation_feature,
+            observation_stats,
+            observation_entropy,
+            observation_refinement_xy,
+            motion_feature,
+            motion_proposal_xy,
+            motion_log_sigma_xy,
+            motion_valid,
+            history_valid_ratio,
+            search_feature,
+            motion_search_xy,
+            motion_search_valid,
+            search_presence,
+            search_targetness_mean,
+            search_targetness_max,
+            search_targetness_entropy,
+            search_normalized_ess,
+            search_extension_weight_ratio,
+            search_available_count,
+            search_extension_count,
+            search_overlap_count,
+            search_support_anchor_xy,
+            search_raw_vote_xy,
+            query_delta_t,
+            gap_ratio,
+            enabled_scale=1.0,
+            policy_override=None,
+            forced_step_ratio=None,
+            action_allowed_mask=None):
+        observation_box = observation_box.detach()
+        observation_feature = observation_feature.detach()
+        observation_stats = observation_stats.detach()
+        motion_feature = motion_feature.detach()
+        search_feature = search_feature.detach()
+
+        def detached(value):
+            return value.detach() if torch.is_tensor(value) else value
+
+        observation_entropy = detached(observation_entropy)
+        observation_refinement_xy = detached(observation_refinement_xy)
+        motion_log_sigma_xy = detached(motion_log_sigma_xy)
+        motion_valid = detached(motion_valid)
+        history_valid_ratio = detached(history_valid_ratio)
+        motion_search_valid = detached(motion_search_valid)
+        search_presence = detached(search_presence)
+        search_targetness_mean = detached(search_targetness_mean)
+        search_targetness_max = detached(search_targetness_max)
+        search_targetness_entropy = detached(search_targetness_entropy)
+        search_normalized_ess = detached(search_normalized_ess)
+        search_extension_weight_ratio = detached(
+            search_extension_weight_ratio)
+        search_available_count = detached(search_available_count)
+        search_extension_count = detached(search_extension_count)
+        search_overlap_count = detached(search_overlap_count)
+        query_delta_t = detached(query_delta_t)
+        gap_ratio = detached(gap_ratio)
+        motion_proposal_xy = motion_proposal_xy.detach()
+        motion_search_xy = motion_search_xy.detach()
+        search_support_anchor_xy = search_support_anchor_xy.detach()
+        search_raw_vote_xy = search_raw_vote_xy.detach()
+        reference = observation_box[:, :2]
+        batch_size = reference.shape[0]
+
+        dt = self._batch_scalar(query_delta_t, reference, default=0.1)
+        gap = self._batch_scalar(gap_ratio, reference, default=1.0)
+        radius = torch.clamp(
+            self.radius_base + self.radius_per_second * dt,
+            max=self.radius_max)
+        motion_residual = _clip_vector_norm(
+            motion_proposal_xy - reference, radius, self.eps)
+        motion_search_residual = _clip_vector_norm(
+            motion_search_xy - reference, radius, self.eps)
+        motion_valid_column = (
+            self._batch_scalar(motion_valid, reference) > 0)
+        motion_search_valid_column = (
+            self._batch_scalar(motion_search_valid, reference) > 0)
+        safe_radius = torch.clamp(radius, min=self.eps)
+        motion_norm = torch.linalg.norm(
+            motion_residual, dim=1, keepdim=True)
+        motion_search_norm = torch.linalg.norm(
+            motion_search_residual, dim=1, keepdim=True)
+        candidate_distance = torch.linalg.norm(
+            motion_proposal_xy - motion_search_xy, dim=1, keepdim=True)
+        cosine = (
+            motion_residual * motion_search_residual).sum(
+                dim=1, keepdim=True) / torch.clamp(
+                    motion_norm * motion_search_norm, min=self.eps)
+        refinement = torch.nan_to_num(
+            observation_refinement_xy) / safe_radius
+        scalar_features = torch.cat((
+            observation_stats,
+            self._batch_scalar(observation_entropy, reference),
+            refinement,
+            torch.linalg.norm(refinement, dim=1, keepdim=True),
+            torch.nan_to_num(motion_log_sigma_xy),
+            self._batch_scalar(history_valid_ratio, reference),
+            self._batch_scalar(search_presence, reference),
+            self._batch_scalar(search_targetness_mean, reference),
+            self._batch_scalar(search_targetness_max, reference),
+            self._batch_scalar(search_targetness_entropy, reference),
+            self._batch_scalar(search_normalized_ess, reference),
+            self._batch_scalar(search_extension_weight_ratio, reference),
+            torch.log1p(torch.clamp(self._batch_scalar(
+                search_available_count, reference), min=0.0)) / 8.0,
+            torch.log1p(torch.clamp(self._batch_scalar(
+                search_extension_count, reference), min=0.0)) / 8.0,
+            torch.log1p(torch.clamp(self._batch_scalar(
+                search_overlap_count, reference), min=0.0)) / 8.0,
+            motion_residual / safe_radius,
+            motion_norm / safe_radius,
+            motion_search_residual / safe_radius,
+            motion_search_norm / safe_radius,
+            candidate_distance / safe_radius,
+            torch.clamp(cosine, -1.0, 1.0),
+            torch.linalg.norm(
+                search_support_anchor_xy - motion_proposal_xy,
+                dim=1, keepdim=True) / safe_radius,
+            torch.linalg.norm(
+                search_raw_vote_xy - motion_proposal_xy,
+                dim=1, keepdim=True) / safe_radius,
+            dt,
+            gap,
+            motion_valid_column.to(reference.dtype),
+            motion_search_valid_column.to(reference.dtype),
+        ), dim=1)
+        if scalar_features.shape[1] != self.scalar_dim:
+            raise RuntimeError(
+                "action router scalar feature contract changed: "
+                f"{scalar_features.shape[1]} != {self.scalar_dim}")
+        exported_features = torch.cat((
+            observation_feature,
+            motion_feature,
+            search_feature,
+            torch.nan_to_num(scalar_features),
+        ), dim=1)
+        q10, q50 = self._predict(
+            observation_feature, motion_feature, search_feature,
+            scalar_features)
+
+        candidate_valid = torch.cat((
+            motion_valid_column, motion_search_valid_column), dim=1)
+        if action_allowed_mask is None:
+            action_allowed = torch.ones_like(candidate_valid)
+        else:
+            action_allowed = action_allowed_mask.to(
+                device=reference.device, dtype=reference.dtype)
+            if action_allowed.shape != candidate_valid.shape:
+                raise ValueError(
+                    "action_allowed_mask must have shape [B,2]")
+            action_allowed = action_allowed > 0
+        selectable_candidate = candidate_valid & action_allowed
+        action_valid = selectable_candidate.unsqueeze(2).expand(-1, -1, 3)
+        masked_q10 = q10.masked_fill(
+            ~action_valid, torch.finfo(q10.dtype).min)
+        flat_q10 = masked_q10.reshape(batch_size, -1)
+        best_q10, flat_action = flat_q10.max(dim=1)
+        selected_index = torch.div(flat_action, 3, rounding_mode='floor')
+        selected_step_class = flat_action.remainder(3)
+        any_valid = action_valid.reshape(batch_size, -1).any(dim=1)
+        step_ratios = self.step_ratio_values.to(
+            device=reference.device, dtype=reference.dtype)
+        selected_step_ratio = step_ratios[selected_step_class]
+        threshold = self.calibrated_gain_threshold.to(
+            device=reference.device, dtype=reference.dtype)
+        intervene = any_valid & (best_q10 > threshold)
+
+        if policy_override is None:
+            policy = reference.new_full(
+                (batch_size,), self.POLICY_AUTO, dtype=torch.long)
+        else:
+            policy = self._batch_scalar(
+                policy_override, reference,
+                default=self.POLICY_AUTO).reshape(-1).to(torch.long)
+        allowed_policy = (
+            (policy == self.POLICY_OBSERVATION)
+            | (policy == self.POLICY_AUTO)
+            | (policy == self.POLICY_MOTION)
+            | (policy == self.POLICY_REFINED))
+        if not bool(torch.all(allowed_policy).item()):
+            raise ValueError("invalid B2-v3 policy override")
+        forced = policy >= 0
+        observation_only = policy == self.POLICY_OBSERVATION
+        if bool(torch.any(forced).item()):
+            if forced_step_ratio is None:
+                raise ValueError(
+                    "forced motion/refined policy requires an explicit step")
+            forced_ratio = self._batch_scalar(
+                forced_step_ratio, reference, default=0.25).reshape(-1)
+            distance = torch.abs(
+                forced_ratio.unsqueeze(1)
+                - step_ratios.unsqueeze(0))
+            forced_step = distance.argmin(dim=1)
+            if bool(torch.any(
+                    distance.min(dim=1).values[forced] > 1e-6).item()):
+                raise ValueError("forced step must be 0.25, 0.5, or 1.0")
+            forced_candidate = torch.clamp(policy, 0, 1)
+            forced_valid = selectable_candidate.gather(
+                1, forced_candidate.unsqueeze(1)).squeeze(1)
+            selected_index = torch.where(
+                forced, forced_candidate, selected_index)
+            selected_step_class = torch.where(
+                forced, forced_step, selected_step_class)
+            selected_step_ratio = step_ratios[selected_step_class]
+            intervene = torch.where(forced, forced_valid, intervene)
+        intervene = intervene & ~observation_only
+
+        enabled_scale = float(enabled_scale)
+        if not 0.0 <= enabled_scale <= 1.0:
+            raise ValueError("action router enabled_scale must be in [0,1]")
+        intervene = intervene & (enabled_scale > 0.0)
+        candidates = torch.stack((
+            motion_residual, motion_search_residual), dim=1)
+        selected_residual = candidates.gather(
+            1,
+            selected_index.reshape(batch_size, 1, 1).expand(-1, 1, 2),
+        ).squeeze(1)
+        gap_state = gap.reshape(-1) > 1.0 + self.eps
+        step_cap = torch.where(
+            gap_state,
+            reference.new_full((batch_size,), self.gap_step_cap),
+            reference.new_full((batch_size,), self.normal_step_cap),
+        )
+        alpha = selected_step_ratio * step_cap
+        alpha = alpha * intervene.to(reference.dtype) * enabled_scale
+        correction = selected_residual * alpha.unsqueeze(1)
+        final_xy = torch.where(
+            intervene.unsqueeze(1), reference + correction, reference)
+        final_box = torch.cat((final_xy, observation_box[:, 2:]), dim=1)
+        selected_candidate = torch.where(
+            intervene, selected_index + 1, torch.zeros_like(selected_index))
+
+        return final_box, {
+            "router_v3_features": exported_features,
+            "router_v3_gain_q10": q10,
+            "router_v3_gain_q50": q50,
+            "router_v3_action_valid": action_valid.to(reference.dtype),
+            "router_v3_candidate_valid": candidate_valid.to(reference.dtype),
+            "router_v3_action_allowed": action_allowed.to(reference.dtype),
+            "router_v3_candidate_residual_xy": candidates,
+            "router_v3_selected_candidate": selected_candidate,
+            "router_v3_selected_candidate_index": selected_index,
+            "router_v3_selected_step_index": selected_step_class,
+            "router_v3_selected_step_ratio": selected_step_ratio,
+            "router_v3_policy_override": policy,
+            "router_v3_step_cap": step_cap,
+            "router_v3_gain_threshold": threshold,
+            "router_v3_abstained": (~intervene).to(reference.dtype),
+            "router_v3_applied_alpha": alpha,
+            "router_v3_correction_xy": correction,
+            "router_v3_fusion_radius": radius.squeeze(1),
+        }
+
+
 def pinball_loss(prediction, target, quantile):
     error = target - prediction
     return torch.maximum(
@@ -828,6 +1352,39 @@ def signed_horizon_router_loss(
         "loss_step": loss_step,
         "best_signed_gain": best_gain,
         "best_step_class": best_step,
+    }
+
+
+def action_consistent_router_loss(
+        prediction,
+        signed_gain,
+        candidate_valid,
+        q10_weight=1.0,
+        q50_weight=0.5):
+    """Supervise each of the six executable actions with its own gain."""
+    if signed_gain.dim() != 3 or signed_gain.shape[1:] != (2, 3):
+        raise ValueError("signed_gain must have shape [B,2,3]")
+    q10 = prediction["q10"]
+    q50 = prediction["q50"]
+    if q10.shape != signed_gain.shape or q50.shape != signed_gain.shape:
+        raise ValueError("router quantiles must match all six action gains")
+    valid = candidate_valid.to(signed_gain.dtype)
+    if valid.shape != signed_gain.shape[:2]:
+        raise ValueError("candidate_valid must have shape [B,2]")
+    action_valid = valid.unsqueeze(2).expand_as(signed_gain)
+    denominator = torch.clamp(action_valid.sum(), min=1.0)
+    loss_q10 = (
+        pinball_loss(q10, signed_gain, 0.10) * action_valid
+    ).sum() / denominator
+    loss_q50 = (
+        pinball_loss(q50, signed_gain, 0.50) * action_valid
+    ).sum() / denominator
+    total = float(q10_weight) * loss_q10 + float(q50_weight) * loss_q50
+    return {
+        "loss": total,
+        "loss_q10": loss_q10,
+        "loss_q50": loss_q50,
+        "action_valid": action_valid,
     }
 
 
@@ -918,6 +1475,73 @@ def calibrate_gain_threshold(
     if not candidates:
         raise RuntimeError(
             "no calibration threshold satisfies precision/harm/coverage "
+            "guardrails")
+    coverage, precision, neg_harm, threshold, count = max(candidates)
+    return {
+        "threshold": threshold,
+        "coverage": coverage,
+        "helpful_precision": precision,
+        "harm_rate": -neg_harm,
+        "selected_count": count,
+    }
+
+
+def calibrate_action_threshold(
+        q10,
+        signed_gain,
+        candidate_valid,
+        min_precision=0.75,
+        max_harm_rate=0.10,
+        min_coverage=0.05,
+        max_coverage=0.25,
+        helpful_margin=0.02,
+        min_selected_count=100):
+    """Calibrate against the exact action selected and later executed."""
+    q10 = np.asarray(q10, dtype=np.float64)
+    gains = np.asarray(signed_gain, dtype=np.float64)
+    valid = np.asarray(candidate_valid, dtype=bool)
+    if q10.ndim != 3 or q10.shape[1:] != (2, 3):
+        raise ValueError("q10 must have shape [N,2,3]")
+    if gains.shape != q10.shape:
+        raise ValueError("signed_gain must match q10")
+    if valid.shape != q10.shape[:2]:
+        raise ValueError("candidate_valid must have shape [N,2]")
+    action_valid = np.repeat(valid[:, :, None], 3, axis=2)
+    masked = np.where(action_valid, q10, -np.inf).reshape(q10.shape[0], -1)
+    selected_action = np.argmax(masked, axis=1)
+    scores = masked[np.arange(masked.shape[0]), selected_action]
+    flat_gain = gains.reshape(gains.shape[0], -1)
+    selected_gain = flat_gain[np.arange(flat_gain.shape[0]), selected_action]
+    finite_scores = scores[np.isfinite(scores)]
+    if finite_scores.size == 0:
+        raise RuntimeError("calibration contains no valid actions")
+    thresholds = np.unique(np.concatenate((
+        np.nextafter(finite_scores.min(), -np.inf).reshape(1),
+        finite_scores,
+        np.nextafter(finite_scores.max(), np.inf).reshape(1),
+    )))
+    candidates = []
+    total = max(1, q10.shape[0])
+    for threshold in thresholds:
+        chosen = np.isfinite(scores) & (scores > threshold)
+        count = int(chosen.sum())
+        coverage = count / float(total)
+        if count == 0:
+            precision = 1.0
+            harm_rate = 0.0
+        else:
+            precision = float(np.mean(
+                selected_gain[chosen] > float(helpful_margin)))
+            harm_rate = float(np.mean(selected_gain[chosen] < 0.0))
+        if (count >= int(min_selected_count)
+                and float(min_coverage) <= coverage <= float(max_coverage)
+                and precision >= float(min_precision)
+                and harm_rate <= float(max_harm_rate)):
+            candidates.append((
+                coverage, precision, -harm_rate, float(threshold), count))
+    if not candidates:
+        raise RuntimeError(
+            "no action threshold satisfies count/precision/harm/coverage "
             "guardrails")
     coverage, precision, neg_harm, threshold, count = max(candidates)
     return {

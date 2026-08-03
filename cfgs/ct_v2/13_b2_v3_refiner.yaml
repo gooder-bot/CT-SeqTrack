@@ -1,0 +1,67 @@
+_base_: 02_ct_motion_v3.yaml
+
+experiment_name: b2_v3_state_aligned_refiner
+
+seed: 42
+batch_size: 16
+workers: 4
+epoch: 20
+from_epoch: 0
+check_val_every_n_epoch: 5
+# Validation tracking is intentionally observation-only during refiner fit.
+# last.ckpt at epoch20 is the contract; candidate diagnostics are secondary.
+save_top_k: 0
+
+use_motion_v3_legacy_fusion: false
+use_search_evidence_v2: false
+use_search_evidence_v21: false
+use_advantage_proposal_fusion: false
+use_b3_risk_router: false
+use_motion_conditioned_search_v22: false
+use_signed_horizon_router: false
+use_motion_conditioned_search_v3: true
+use_action_consistent_router_v3: true
+b2_v3_freeze_candidate_producers: true
+proposal_inference_mode: obs_vs_all
+router_v3_enabled_scale: 1.0
+
+search_v3_point_count: 128
+search_v3_extension_quota: 64
+search_v3_min_points: 3
+search_v3_max_speed: 20.0
+search_v3_max_acceleration: 8.0
+search_v3_max_displacement: 12.0
+search_v3_acceleration_weight: 0.5
+search_v3_max_yaw_rate: 1.5707963267948966
+search_v3_min_displacement: 0.2
+search_v3_history_correlation: 0.75
+
+search_v3_feature_dim: 128
+search_v3_query_dim: 32
+search_v3_pool_temperature: 0.5
+search_v3_max_vote_offset: 4.0
+search_v3_radius_base: 0.5
+search_v3_radius_per_second: 0.5
+search_v3_radius_max: 2.0
+
+search_v3_match_weight: 0.1
+search_v3_targetness_weight: 0.2
+search_v3_vote_weight: 1.0
+search_v3_raw_proposal_weight: 1.0
+search_v3_refined_proposal_weight: 1.0
+search_v3_presence_weight: 0.2
+search_v3_focal_alpha: 0.75
+search_v3_focal_gamma: 2.0
+
+router_v3_context_dim: 32
+router_v3_hidden_dim: 96
+router_v3_gain_threshold: 0.0
+router_v3_radius_base: 0.5
+router_v3_radius_per_second: 0.5
+router_v3_radius_max: 2.0
+router_v3_normal_step_cap: 0.20
+router_v3_gap_step_cap: 0.35
+
+export_proposal_diagnostics: true
+export_v3_candidate_diagnostics: true
+export_b3_rollouts: false

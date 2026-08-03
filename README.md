@@ -7,8 +7,15 @@
 > shared-checkpoint 的 `true` 持续超过 dataset-mean fixed、within-dataset
 > shuffled，并在 held-out stride/gap 上成立，才支持 physical-time 因果表述。
 
-CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。第一版 v2
-候选曾从大量互相耦合的实验分支收敛为：
+CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。当前正在验证的
+B2-v3 主线是 **状态对齐的 motion-conditioned search 与
+action-consistent closed-loop routing**：B1/B2 共享同一个因果 history bundle，
+搜索只作为对 B1 prior 的有界 evidence correction，router 直接学习并执行
+`2 candidates × 3 steps` 六个 signed-gain 动作。它不把“使用历史运动”、
+proposal-refine 或 memory 本身作为创新声明。实现与运行合同见
+[B2-v3 文档](docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md)。
+
+第一版 v2 候选曾从大量互相耦合的实验分支收敛为：
 
 ```text
 SeqTrack3D

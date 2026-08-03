@@ -8,8 +8,10 @@ from nuscenes.utils import geometry_utils
 
 import datasets.points_utils as points_utils
 from utils.ct_history import (
+    b2_v3_history_mode_id,
     build_alternating_aux_history_offsets,
     build_irregular_history_offsets,
+    select_b2_v3_history_mode,
 )
 
 from datasets.misc_utils import get_history_frame_ids_and_masks, \
@@ -330,14 +332,28 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
+    use_search_evidence_v3 = bool(getattr(
+        config, 'use_motion_conditioned_search_v3', False))
+    if use_search_evidence_v3 and not bool(getattr(
+            config, 'use_b1motion_v3', False)):
+        raise ValueError("B2-v3 requires B1motion-v3 shared history")
+    b2_v3_history_mode = None
+    if use_search_evidence_v3:
+        b2_v3_history_mode = select_b2_v3_history_mode(
+            data.get('tracklet_key', data.get('tracklet_id', 'unknown')),
+            this_frame_id if this_frame_id is not None else sample_index,
+            candidate_id,
+            seed=int(getattr(config, 'seed', 42)),
+        )
     ct_motion_history_boxs, ct_search_history_boxs = build_ct_training_histories(
         canonical_prev_boxs,
         ref_boxs,
         candidate_offsets,
         candidate_id,
         candidate_trajectory_mode,
-        training_mode=getattr(
-            config, 'ct_history_training_mode', 'canonical'),
+        training_mode=(
+            b2_v3_history_mode if use_search_evidence_v3
+            else getattr(config, 'ct_history_training_mode', 'canonical')),
         correlation=float(getattr(
             config, 'ct_history_correlation', 0.75)),
         recursive_error_scale=float(getattr(
@@ -380,6 +396,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 motion_main_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
             raise ValueError(
                 "B1motion-v3 newest main history must equal the crop anchor")
+        if use_search_evidence_v3:
+            shared_search_ref_boxs = boxes_to_anchor_parameters(
+                ct_search_history_boxs,
+                ref_boxs[0],
+                degrees=config.degrees,
+            )
+            if not np.array_equal(
+                    motion_main_ref_boxs, shared_search_ref_boxs):
+                raise RuntimeError(
+                    "B2-v3 requires byte-identical B1/B2 history tensors")
 
     real_time_fields = build_time_fields(
         prev_timestamps, current_timestamp,
@@ -663,14 +689,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if sum(map(bool, (
             use_search_evidence_v2,
             use_search_evidence_v21,
-            use_search_evidence_v22))) > 1:
-        raise ValueError("Search Evidence v2, v2.1, and v2.2 are exclusive")
+            use_search_evidence_v22,
+            use_search_evidence_v3))) > 1:
+        raise ValueError(
+            "Search Evidence v2, v2.1, v2.2, and v3 are exclusive")
     use_endpoint_search_evidence = (
         use_search_evidence_v2
         or use_search_evidence_v21
-        or use_search_evidence_v22)
+        or use_search_evidence_v22
+        or use_search_evidence_v3)
     search_config_prefix = (
-        'search_v22' if use_search_evidence_v22
+        'search_v3' if use_search_evidence_v3
+        else 'search_v22' if use_search_evidence_v22
         else 'search_v21' if use_search_evidence_v21
         else 'search_v2')
 
@@ -691,24 +721,28 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     )
     search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
     if use_endpoint_search_evidence:
-        if int(candidate_id) == 0:
+        if use_search_evidence_v3:
+            search_v2_history_mode = b2_v3_history_mode
+            search_v2_history_boxes = ct_search_history_boxs
+        elif int(candidate_id) == 0:
             search_v2_history_mode = 'canonical'
         elif sample_index % 2 == 0:
             search_v2_history_mode = 'correlated_candidate'
         else:
             search_v2_history_mode = 'recursive_candidate'
-        _, search_v2_history_boxes = build_ct_training_histories(
-            canonical_prev_boxs,
-            ref_boxs,
-            candidate_offsets,
-            candidate_id,
-            candidate_trajectory_mode,
-            training_mode=search_v2_history_mode,
-            correlation=float(search_config_value(
-                'history_correlation', 0.75)),
-            recursive_error_scale=1.0,
-            degrees=config.degrees,
-        )
+        if not use_search_evidence_v3:
+            _, search_v2_history_boxes = build_ct_training_histories(
+                canonical_prev_boxs,
+                ref_boxs,
+                candidate_offsets,
+                candidate_id,
+                candidate_trajectory_mode,
+                training_mode=search_v2_history_mode,
+                correlation=float(search_config_value(
+                    'history_correlation', 0.75)),
+                recursive_error_scale=1.0,
+                degrees=config.degrees,
+            )
         search_v2_box, search_v2_diagnostics = (
             build_trajectory_endpoint_search_box(
                 search_v2_history_boxes,
@@ -844,7 +878,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         search_v2_seed = (
             int(independent_seed_base) * 1664525 + 1013904223
         ) & 0xFFFFFFFF
-        if use_search_evidence_v21 or use_search_evidence_v22:
+        if (use_search_evidence_v21 or use_search_evidence_v22
+                or use_search_evidence_v3):
             (search_v2_points,
              search_v2_point_valid_mask,
              search_v2_point_source,
@@ -1164,6 +1199,47 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'search_v22_overlap_count': np.float32(
                 search_v2_sampling['overlap_count']),
         })
+    if use_search_evidence_v3:
+        v3_query_delta_t = np.float32(search_v2_diagnostics.get(
+            'query_delta_t', effective_delta_t_list[0]))
+        if v3_query_delta_t != np.float32(effective_delta_t_list[0]):
+            raise RuntimeError(
+                "B2-v3 query delta_t diverged from the shared B1 clock")
+        data_dict.update({
+            'search_v3_points': search_v2_points.astype('float32'),
+            'search_v3_point_valid_mask':
+                search_v2_point_valid_mask.astype('float32'),
+            'search_v3_point_source':
+                search_v2_point_source.astype('int64'),
+            'search_v3_point_labels':
+                search_v2_point_labels.astype('float32'),
+            'search_v3_geometry_valid': np.float32(
+                search_v2_sampling['active']),
+            'search_v3_support_anchor_xy':
+                search_v2_endpoint_xy.astype('float32'),
+            'search_v3_query_delta_t': v3_query_delta_t,
+            'search_v3_gap_ratio': np.float32(
+                search_v2_diagnostics.get('gap_ratio', 1.0)),
+            'search_v3_sigma_parallel': np.float32(
+                search_v2_diagnostics.get('sigma_parallel', 0.0)),
+            'search_v3_sigma_perpendicular': np.float32(
+                search_v2_diagnostics.get('sigma_perpendicular', 0.0)),
+            'search_v3_available_count': np.float32(
+                search_v2_sampling['available_count']),
+            'search_v3_extension_count': np.float32(
+                search_v2_sampling['extension_count']),
+            'search_v3_overlap_count': np.float32(
+                search_v2_sampling['overlap_count']),
+            'b2_v3_history_ref_boxs':
+                motion_main_ref_boxs.astype('float32'),
+            'b2_v3_history_valid_mask':
+                np.asarray(valid_mask, dtype=np.int64),
+            'b2_v3_history_delta_t':
+                np.asarray(effective_delta_t_list, dtype=np.float32),
+            'b2_v3_history_mode_id': np.int64(
+                b2_v3_history_mode_id(b2_v3_history_mode)),
+            'b2_v3_history_anchor': coordinate_anchor,
+        })
     if use_motion_v3:
         data_dict.update({
             'motion_main_ref_boxs': motion_main_ref_boxs.astype('float32'),
@@ -1173,6 +1249,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 current_delta_t_effective),
             'motion_main_valid_mask': np.asarray(valid_mask, dtype=np.int64),
             'motion_main_target_xy': motion_main_target_xy.astype('float32'),
+            'motion_main_anchor': coordinate_anchor,
         })
         data_dict.update(motion_aux_contract)
     if prev_frame_ids is not None:
@@ -1468,6 +1545,11 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             "this_frame_id": this_frame_id,
             "history_offsets": offsets,
             "sample_index": int(sample_index),
+            "tracklet_id": int(tracklet_id),
+            "tracklet_key": (
+                self.dataset.get_tracklet_key(tracklet_id)
+                if hasattr(self.dataset, "get_tracklet_key")
+                else str(tracklet_id)),
         }
         if motion_aux_offsets is not None:
             motion_aux_frame_ids, motion_aux_valid_mask = (

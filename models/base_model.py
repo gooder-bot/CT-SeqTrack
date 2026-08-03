@@ -307,9 +307,20 @@ class BaseModelMF(pl.LightningModule):
 
     def _build_v22_proposal_diagnostic_row(
             self, output, data_dict, this_box, reference_box, frame_id):
-        """Build a GT-labelled v2.2 attribution row outside forward."""
+        """Build a GT-labelled v2.2/v3 attribution row outside forward."""
+        is_v3 = "search_v3_evidence_components" in output
+        data_prefix = "search_v3" if is_v3 else "search_v22"
         target_box = points_utils.transform_box(this_box, reference_box)
         target_xy = np.asarray(target_box.center[:2], dtype=np.float64)
+        sampled_points = data_dict.get(f"{data_prefix}_points")
+        sampled_mask = data_dict.get(f"{data_prefix}_point_valid_mask")
+        foreground_count = 0
+        if sampled_points is not None and sampled_mask is not None:
+            points_np = sampled_points.detach().cpu().numpy()[0, :, :3]
+            mask_np = sampled_mask.detach().cpu().numpy().reshape(-1) > 0
+            foreground = geometry_utils.points_in_box(
+                target_box, points_np.T, self.config.bb_scale)
+            foreground_count = int(np.sum(foreground & mask_np))
 
         def tensor_xy(key, fallback):
             value = output.get(key)
@@ -333,11 +344,19 @@ class BaseModelMF(pl.LightningModule):
         motion_valid = self._proposal_scalar(
             output, "motion_prior_valid") > 0.0
         refined_valid = self._proposal_scalar(
-            output, "motion_search_candidate_valid") > 0.0
+            output,
+            ("motion_search_v3_candidate_structural_valid"
+             if is_v3 else "motion_search_candidate_valid")) > 0.0
         selected = int(self._proposal_scalar(
-            output, "signed_selected_candidate", default=0.0))
+            output,
+            ("router_v3_selected_candidate"
+             if is_v3 else "signed_selected_candidate"),
+            default=0.0))
         alpha = self._proposal_scalar(
-            output, "signed_applied_alpha", default=0.0)
+            output,
+            ("router_v3_applied_alpha"
+             if is_v3 else "signed_applied_alpha"),
+            default=0.0)
         motion_helpful = bool(
             motion_valid and motion_error + margin <= observation_error)
         refined_helpful = bool(
@@ -349,8 +368,12 @@ class BaseModelMF(pl.LightningModule):
             else observation_error)
         return {
             "frame_id": int(frame_id),
+            "b2_version": "v3" if is_v3 else "v2.2",
             "geometry_valid": int(self._proposal_scalar(
-                data_dict, "search_v22_geometry_valid") > 0.0),
+                data_dict, f"{data_prefix}_geometry_valid") > 0.0),
+            "foreground_count": foreground_count,
+            "valid_foreground": int(
+                refined_valid and foreground_count >= 1),
             "motion_valid": int(motion_valid),
             "search_valid": int(refined_valid),
             "observation_error": observation_error,
@@ -370,35 +393,58 @@ class BaseModelMF(pl.LightningModule):
                 intervention and selected_error > observation_error),
             "selected_candidate": selected,
             "selected_step_ratio": self._proposal_scalar(
-                output, "signed_selected_step_ratio"),
-            "step_cap": self._proposal_scalar(output, "signed_step_cap"),
+                output,
+                ("router_v3_selected_step_ratio"
+                 if is_v3 else "signed_selected_step_ratio")),
+            "step_cap": self._proposal_scalar(
+                output,
+                "router_v3_step_cap" if is_v3 else "signed_step_cap"),
             "gain_threshold": self._proposal_scalar(
-                output, "signed_gain_threshold"),
+                output,
+                ("router_v3_gain_threshold"
+                 if is_v3 else "signed_gain_threshold")),
             "abstained": self._proposal_scalar(
-                output, "signed_abstained", default=1.0),
+                output,
+                ("router_v3_abstained"
+                 if is_v3 else "signed_abstained"), default=1.0),
             "motion_q10": self._proposal_scalar(
-                output, "signed_gain_quantiles", column=0),
+                output,
+                ("router_v3_gain_q10"
+                 if is_v3 else "signed_gain_quantiles"), column=0),
             "motion_q50": self._proposal_scalar(
-                output, "signed_gain_quantiles", column=1),
+                output,
+                ("router_v3_gain_q50"
+                 if is_v3 else "signed_gain_quantiles"),
+                column=0 if is_v3 else 1),
             "motion_search_q10": self._proposal_scalar(
-                output, "signed_gain_quantiles", column=2),
+                output,
+                ("router_v3_gain_q10"
+                 if is_v3 else "signed_gain_quantiles"),
+                column=3 if is_v3 else 2),
             "motion_search_q50": self._proposal_scalar(
-                output, "signed_gain_quantiles", column=3),
+                output,
+                ("router_v3_gain_q50"
+                 if is_v3 else "signed_gain_quantiles"),
+                column=3),
             "presence_probability": self._proposal_scalar(
                 output, "search_presence_probability"),
             "normalized_ess": self._proposal_scalar(
                 output, "search_normalized_ess"),
             "raw_ess": self._proposal_scalar(output, "search_raw_ess"),
             "available_count": self._proposal_scalar(
-                data_dict, "search_v22_available_count"),
+                data_dict, f"{data_prefix}_available_count"),
             "extension_count": self._proposal_scalar(
-                data_dict, "search_v22_extension_count"),
+                data_dict, f"{data_prefix}_extension_count"),
             "overlap_count": self._proposal_scalar(
-                data_dict, "search_v22_overlap_count"),
+                data_dict, f"{data_prefix}_overlap_count"),
             "correction_x": self._proposal_scalar(
-                output, "signed_correction_xy", column=0),
+                output,
+                ("router_v3_correction_xy"
+                 if is_v3 else "signed_correction_xy"), column=0),
             "correction_y": self._proposal_scalar(
-                output, "signed_correction_xy", column=1),
+                output,
+                ("router_v3_correction_xy"
+                 if is_v3 else "signed_correction_xy"), column=1),
         }
 
     @staticmethod
@@ -807,6 +853,17 @@ class BaseModelMF(pl.LightningModule):
         sequence = batch[0]  # unwrap the batch with batch size = 1
         start_time = time.time()
         ious, distances, *_ = self.evaluate_one_sequence(sequence)
+        epoch_number = int(getattr(self, "current_epoch", 0)) + 1
+        if (bool(getattr(
+                self.config, "export_v3_candidate_diagnostics", False))
+                and epoch_number in (5, 10, 15, 20)):
+            if not hasattr(self, "_v3_validation_proposal_diagnostics"):
+                self._v3_validation_proposal_diagnostics = []
+            for row in self._proposal_sequence_diagnostics:
+                row = dict(row)
+                row["tracklet_id"] = int(batch_idx)
+                row["epoch"] = epoch_number
+                self._v3_validation_proposal_diagnostics.append(row)
         end_time = time.time()
         runtime = end_time-start_time
         n_frames = len(sequence)
@@ -838,6 +895,20 @@ class BaseModelMF(pl.LightningModule):
         self.logger.experiment.add_scalars('runtime',
                                        {'runtime':1.0/self.runtime.compute()},
                                        global_step=self.global_step)
+
+        rows = getattr(self, "_v3_validation_proposal_diagnostics", [])
+        if rows and int(getattr(self, "global_rank", 0)) == 0:
+            logger = getattr(self, "logger", None)
+            log_dir = getattr(logger, "log_dir", None)
+            if log_dir is None:
+                log_dir = getattr(logger, "save_dir", ".")
+            epoch_number = int(getattr(self, "current_epoch", 0)) + 1
+            self._write_csv_rows(
+                Path(log_dir) / "candidate_diagnostics"
+                / f"epoch_{epoch_number:02d}.csv",
+                rows,
+            )
+        self._v3_validation_proposal_diagnostics = []
 
 
     def test_step(self, batch, batch_idx):
@@ -913,6 +984,9 @@ class BaseModelMF(pl.LightningModule):
             self._write_proposal_test_diagnostics()
         if bool(getattr(self.config, "export_b3_rollouts", False)):
             self._write_b3_test_rollouts()
+
+    def on_validation_epoch_start(self):
+        self._v3_validation_proposal_diagnostics = []
 
 class MotionBaseModelMF(BaseModelMF):
     def __init__(self, config, **kwargs):
@@ -1085,18 +1159,23 @@ class MotionBaseModelMF(BaseModelMF):
             self.config, "use_search_evidence_v21", False))
         use_search_evidence_v22 = bool(getattr(
             self.config, "use_motion_conditioned_search_v22", False))
+        use_search_evidence_v3 = bool(getattr(
+            self.config, "use_motion_conditioned_search_v3", False))
         if sum(map(bool, (
                 use_search_evidence_v2,
                 use_search_evidence_v21,
-                use_search_evidence_v22))) > 1:
+                use_search_evidence_v22,
+                use_search_evidence_v3))) > 1:
             raise ValueError(
-                "Search Evidence v2, v2.1, and v2.2 are exclusive")
+                "Search Evidence v2, v2.1, v2.2, and v3 are exclusive")
         use_endpoint_search_evidence = (
             use_search_evidence_v2
             or use_search_evidence_v21
-            or use_search_evidence_v22)
+            or use_search_evidence_v22
+            or use_search_evidence_v3)
         search_config_prefix = (
-            "search_v22" if use_search_evidence_v22
+            "search_v3" if use_search_evidence_v3
+            else "search_v22" if use_search_evidence_v22
             else "search_v21" if use_search_evidence_v21
             else "search_v2")
 
@@ -1201,6 +1280,16 @@ class MotionBaseModelMF(BaseModelMF):
                 tube_box, target_center)
         num_points_in_search = this_frame_pc.nbr_points()
 
+        coordinate_anchor_box = ref_boxs[0]
+        coordinate_anchor_theta = (
+            coordinate_anchor_box.orientation.degrees
+            * coordinate_anchor_box.orientation.axis[-1]
+            if self.config.degrees
+            else coordinate_anchor_box.orientation.radians
+            * coordinate_anchor_box.orientation.axis[-1])
+        coordinate_anchor = np.append(
+            coordinate_anchor_box.center,
+            coordinate_anchor_theta).astype(np.float32)
         # canonical_box = points_utils.transform_box(ref_boxs[0], ref_boxs[0])
         ref_boxs = [
             points_utils.transform_box(ref_box, ref_boxs[0]) for ref_box in ref_boxs
@@ -1295,7 +1384,8 @@ class MotionBaseModelMF(BaseModelMF):
             search_v2_seed = (
                 int(frame_id) * 1664525 + 1013904223
             ) & 0xFFFFFFFF
-            if use_search_evidence_v21 or use_search_evidence_v22:
+            if (use_search_evidence_v21 or use_search_evidence_v22
+                    or use_search_evidence_v3):
                 (search_v2_points,
                  search_v2_point_valid_mask,
                  search_v2_point_source,
@@ -1451,7 +1541,23 @@ class MotionBaseModelMF(BaseModelMF):
                 "motion_main_current_delta_t": data_dict[
                     "current_delta_t_effective"],
                 "motion_main_valid_mask": data_dict["valid_mask"],
+                "motion_main_anchor": torch.tensor(
+                    coordinate_anchor[None, :],
+                    device=self.device, dtype=torch.float32),
             })
+            if use_search_evidence_v3:
+                # Both branches own references to the same online recursive
+                # state tensors.  No reconstruction or second clock is allowed.
+                data_dict.update({
+                    "b2_v3_history_ref_boxs": data_dict["ref_boxs"],
+                    "b2_v3_history_delta_t":
+                        data_dict["delta_t_effective"],
+                    "b2_v3_history_valid_mask": data_dict["valid_mask"],
+                    "b2_v3_history_mode_id": torch.tensor(
+                        [2], device=self.device, dtype=torch.int64),
+                    "b2_v3_history_anchor": data_dict[
+                        "motion_main_anchor"],
+                })
         if (use_trajectory_search or bool(getattr(
                 self.config, "use_ordered_trajectory_encoder", False))):
             data_dict.update({
@@ -1582,6 +1688,47 @@ class MotionBaseModelMF(BaseModelMF):
                     [search_v2_sampling["extension_count"]],
                     device=self.device, dtype=torch.float32),
                 "search_v22_overlap_count": torch.tensor(
+                    [search_v2_sampling["overlap_count"]],
+                    device=self.device, dtype=torch.float32),
+            })
+        if use_search_evidence_v3:
+            data_dict.update({
+                "search_v3_points": torch.tensor(
+                    search_v2_points[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_point_valid_mask": torch.tensor(
+                    search_v2_point_valid_mask[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_point_source": torch.tensor(
+                    search_v2_point_source[None, :],
+                    device=self.device, dtype=torch.long),
+                "search_v3_geometry_valid": torch.tensor(
+                    [search_v2_sampling["active"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_support_anchor_xy": torch.tensor(
+                    search_v2_endpoint_xy[None, :],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_query_delta_t": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "query_delta_t", effective_delta_t_list[0])],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_gap_ratio": torch.tensor(
+                    [search_v2_diagnostics.get("gap_ratio", 1.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_sigma_parallel": torch.tensor(
+                    [search_v2_diagnostics.get("sigma_parallel", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_sigma_perpendicular": torch.tensor(
+                    [search_v2_diagnostics.get(
+                        "sigma_perpendicular", 0.0)],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_available_count": torch.tensor(
+                    [search_v2_sampling["available_count"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_extension_count": torch.tensor(
+                    [search_v2_sampling["extension_count"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_overlap_count": torch.tensor(
                     [search_v2_sampling["overlap_count"]],
                     device=self.device, dtype=torch.float32),
             })
