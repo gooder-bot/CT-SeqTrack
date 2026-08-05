@@ -1,0 +1,5 @@
+_base_: 21_ct_joint_full.yaml
+
+experiment_name: ct_seqtrack_joint_minus_b3
+ct_enable_b3: false
+

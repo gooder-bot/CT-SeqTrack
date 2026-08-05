@@ -27,6 +27,10 @@ from models.ct_v2.decoder_token_consistency import (
     DecoderTokenConsistencyLoss,
     GradientRatioWeightSelector,
 )
+from models.ct_v2.joint_full import (
+    JointFullSearchRefiner,
+    JointScalarResidualRouter,
+)
 from models.ct_v2.crpa import (
     CRPA_ROLLOUT_SCHEMA,
     CRPA_ROUTER_SCHEMA,
@@ -85,6 +89,8 @@ __all__ = [
     "PointFeatureTemporalConsistencyLoss",
     "DecoderTokenConsistencyLoss",
     "GradientRatioWeightSelector",
+    "JointFullSearchRefiner",
+    "JointScalarResidualRouter",
     "canonicalize_points",
     "chronological_frame_indices",
     "build_ordered_trajectory_search_box",

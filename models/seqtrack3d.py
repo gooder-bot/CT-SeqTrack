@@ -46,6 +46,8 @@ from models.ct_v2 import (
     DecoderTokenConsistencyLoss,
     GradientRatioWeightSelector,
     JointProposalFusion,
+    JointFullSearchRefiner,
+    JointScalarResidualRouter,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     PointFeatureTemporalConsistencyLoss,
@@ -114,8 +116,37 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "DynamicsEncoder; keep it false to avoid a misleading ablation.")
         self.use_observability_gate = getattr(config, 'use_observability_gate', False)
         self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
+        self.use_ct_joint_full = bool(getattr(
+            config, 'use_ct_joint_full', False))
+        self.ct_enable_b1 = bool(getattr(config, 'ct_enable_b1', True))
+        self.ct_enable_b2 = bool(getattr(config, 'ct_enable_b2', True))
+        self.ct_enable_b3 = bool(getattr(config, 'ct_enable_b3', True))
+        self.ct_enable_shared_motion_anchor = bool(getattr(
+            config, 'ct_enable_shared_motion_anchor', True))
+        self.ct_enable_dynamic_residual_bound = bool(getattr(
+            config, 'ct_enable_dynamic_residual_bound', True))
+        self.ct_enable_query_reliability_gate = bool(getattr(
+            config, 'ct_enable_query_reliability_gate', True))
+        self.ct_expansion_point_count = int(getattr(
+            config, 'ct_expansion_point_count', 256))
+        self.ct_endpoint_quota = int(getattr(
+            config, 'ct_endpoint_quota', 128))
+        self.ct_tube_quota = int(getattr(config, 'ct_tube_quota', 128))
         self.use_b1motion_v3 = bool(getattr(
             config, 'use_b1motion_v3', False))
+        if self.use_ct_joint_full:
+            if not self.use_b1motion_v3:
+                raise ValueError("CT joint Full requires use_b1motion_v3=True")
+            if self.ct_expansion_point_count != (
+                    self.ct_endpoint_quota + self.ct_tube_quota):
+                raise ValueError(
+                    "CT endpoint+tube quotas must equal expansion point count")
+            if min(self.ct_endpoint_quota, self.ct_tube_quota) <= 0:
+                raise ValueError("CT endpoint/tube quotas must be positive")
+            if not (self.ct_enable_shared_motion_anchor
+                    and self.ct_enable_dynamic_residual_bound):
+                raise ValueError(
+                    "CT joint Full requires shared anchor and dynamic bound")
         self.use_calibrated_motion_uncertainty = bool(getattr(
             config, 'use_calibrated_motion_uncertainty', False))
         self.require_b1_calibration_passed = bool(getattr(
@@ -154,6 +185,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'use_recursive_replay_cache', False))
         self.use_uncertainty_geometry = bool(getattr(
             config, 'use_uncertainty_geometry', False))
+        if self.use_ct_joint_full and any((
+                self.use_search_evidence_v2,
+                self.use_search_evidence_v21,
+                self.use_motion_conditioned_search_v22,
+                self.use_motion_conditioned_search_v3,
+                bool(getattr(config, 'use_action_consistent_router_v3', False)),
+                self.use_b1_prepass_support,
+                self.use_recursive_replay_cache)):
+            raise ValueError(
+                "CT joint Full is isolated from legacy B2/B3/prepass/replay paths")
         if ((self.use_asymmetric_dual_query
              or self.use_raw_search_candidate
              or self.use_b1_prepass_support
@@ -598,6 +639,27 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'search_v3_focal_alpha', 0.75))
         self.search_v3_focal_gamma = float(getattr(
             config, 'search_v3_focal_gamma', 2.0))
+        self.ct_query_gate_weight = float(getattr(
+            config, 'ct_query_gate_weight', 0.05))
+        self.ct_targetness_weight = float(getattr(
+            config, 'ct_targetness_weight', 0.2))
+        self.ct_vote_weight = float(getattr(config, 'ct_vote_weight', 1.0))
+        self.ct_raw_search_weight = float(getattr(
+            config, 'ct_raw_search_weight', 1.0))
+        self.ct_router_weight = float(getattr(
+            config, 'ct_router_weight', 0.2))
+        self.ct_correction_weight = float(getattr(
+            config, 'ct_correction_weight', 1.0))
+        self.ct_correction_warmup_epochs = int(getattr(
+            config, 'ct_correction_warmup_epochs', 5))
+        self.ct_correction_ramp_epochs = int(getattr(
+            config, 'ct_correction_ramp_epochs', 10))
+        self.ct_router_help_margin = float(getattr(
+            config, 'ct_router_help_margin', 0.05))
+        self.ct_focal_alpha = float(getattr(
+            config, 'ct_focal_alpha', 0.75))
+        self.ct_focal_gamma = float(getattr(
+            config, 'ct_focal_gamma', 2.0))
         self.advantage_fused_weight = float(getattr(
             config, 'advantage_fused_weight', 1.0))
         self.advantage_help_weight = float(getattr(
@@ -715,6 +777,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError("B2-v3 loss settings must be non-negative")
         if not 0.0 <= self.search_v3_focal_alpha <= 1.0:
             raise ValueError("search_v3_focal_alpha must be in [0,1]")
+        if min(
+                self.ct_query_gate_weight,
+                self.ct_targetness_weight,
+                self.ct_vote_weight,
+                self.ct_raw_search_weight,
+                self.ct_router_weight,
+                self.ct_correction_weight,
+                self.ct_router_help_margin,
+                self.ct_focal_gamma) < 0:
+            raise ValueError("CT joint Full loss settings must be non-negative")
+        if not 0.0 <= self.ct_focal_alpha <= 1.0:
+            raise ValueError("ct_focal_alpha must be in [0,1]")
+        if (self.ct_correction_warmup_epochs < 0
+                or self.ct_correction_ramp_epochs < 0):
+            raise ValueError("CT correction schedule must be non-negative")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -907,6 +984,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     self.use_calibrated_motion_uncertainty),
                 min_direction_speed=float(getattr(
                     config, 'motion_v3_min_direction_speed', 0.2)),
+                shared_kinematic_anchor=(
+                    self.use_ct_joint_full
+                    and self.ct_enable_shared_motion_anchor
+                    and self.ct_enable_dynamic_residual_bound),
+                max_acceleration=float(getattr(
+                    config, 'ct_motion_max_acceleration', 8.0)),
+                max_displacement=float(getattr(
+                    config, 'ct_motion_max_displacement', 12.0)),
+                acceleration_weight=float(getattr(
+                    config, 'ct_motion_acceleration_weight', 0.5)),
             )
             if self.use_motion_v3_legacy_fusion:
                 self.motion_v3_fusion = ReliabilityGatedProposalFusion(
@@ -931,6 +1018,45 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     time_scale=float(getattr(
                         config, 'time_scale', default_time_scale)),
                 )
+            if self.use_ct_joint_full:
+                plugin_seed = int(getattr(config, 'seed', 42) or 42)
+                plugin_cuda_devices = (
+                    list(range(torch.cuda.device_count()))
+                    if torch.cuda.is_available() else [])
+                with torch.random.fork_rng(devices=plugin_cuda_devices):
+                    torch.manual_seed(plugin_seed + 24001)
+                    self.ct_joint_search_refiner = JointFullSearchRefiner(
+                        point_dim=5,
+                        feature_dim=int(getattr(
+                            config, 'ct_search_feature_dim', 128)),
+                        query_dim=64,
+                        motion_dim=int(getattr(
+                            config, 'motion_v3_hidden_dim', 128)),
+                        observation_stats_dim=5,
+                        max_vote_offset=float(getattr(
+                            config, 'ct_search_max_vote_offset', 4.0)),
+                        motion_dropout=float(getattr(
+                            config, 'ct_query_motion_dropout', 0.1)),
+                        gate_init_probability=float(getattr(
+                            config, 'ct_query_gate_init_probability', 0.05)),
+                        mahalanobis_clip=float(getattr(
+                            config, 'ct_mahalanobis_clip', 25.0)),
+                        use_reliability_gate=(
+                            self.ct_enable_query_reliability_gate),
+                    )
+                    self.ct_joint_router = JointScalarResidualRouter(
+                        observation_stats_dim=5,
+                        hidden_dim=int(getattr(
+                            config, 'ct_router_hidden_dim', 64)),
+                        init_probability=float(getattr(
+                            config, 'ct_router_init_probability', 0.05)),
+                        radius_base=float(getattr(
+                            config, 'ct_router_radius_base', 0.5)),
+                        radius_per_second=float(getattr(
+                            config, 'ct_router_radius_per_second', 0.5)),
+                        radius_max=float(getattr(
+                            config, 'ct_router_radius_max', 2.0)),
+                    )
 
         if self.use_search_evidence_v2:
             # These modules are created only after all shared B0 parameters,
@@ -2101,6 +2227,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         points_feature = feature.reshape(B,L*NEW_N,-1)
 
         if (self.use_asymmetric_dual_query
+                or self.use_ct_joint_full
                 or self.use_decoder_token_consistency):
             delta_motion, decoder_state = self.Transformer(
                 box_seq_corners,
@@ -2110,7 +2237,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             )
             observation_query = (
                 decoder_state[:, -1]
-                if self.use_asymmetric_dual_query else None)
+                if (self.use_asymmetric_dual_query
+                    or self.use_ct_joint_full) else None)
             output_dict['decoder_state'] = decoder_state
             if observation_query is not None:
                 output_dict['observation_query'] = observation_query
@@ -2177,6 +2305,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 main_motion['valid'] = torch.zeros_like(main_motion['valid'])
                 main_motion['source_id'] = torch.zeros_like(
                     main_motion['source_id'])
+            if self.use_ct_joint_full and not self.ct_enable_b1:
+                # The deterministic anchor/search support remains available in
+                # -B1.  Only learned residual, uncertainty and query context
+                # are removed, giving an exact architecture-level ablation.
+                main_motion = dict(main_motion)
+                zeros_xy = torch.zeros_like(main_motion['prior_xy'])
+                main_motion['prior_xy'] = main_motion['kinematic_prior_xy']
+                main_motion['mu_xy'] = main_motion['kinematic_prior_xy']
+                main_motion['residual_xy'] = zeros_xy
+                main_motion['residual_unit_parallel_perp'] = zeros_xy
+                main_motion['feature'] = torch.zeros_like(
+                    main_motion['feature'])
+                deterministic_sigma = torch.clamp(
+                    main_motion['envelope_parallel_perp'], min=0.1)
+                main_motion['log_sigma_parallel_perp'] = torch.log(
+                    deterministic_sigma)
             # Both training and recursive inference define the newest history
             # box as the crop anchor.  Keep its (normally exact-zero) origin as
             # a diagnostic, but never add a GT-derived anchor correction to
@@ -2196,6 +2340,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'motion_prior_velocity_xy': main_motion['velocity_xy'],
                 'motion_prior_kinematic_xy':
                     main_motion['kinematic_prior_xy'],
+                'motion_prior_residual_xy': main_motion[
+                    'residual_xy'],
+                'motion_prior_residual_unit_parallel_perp': main_motion[
+                    'residual_unit_parallel_perp'],
+                'motion_prior_envelope_parallel_perp': main_motion[
+                    'envelope_parallel_perp'],
                 'motion_prior_valid': main_motion['valid'],
                 'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],
                 'motion_prior_log_sigma_parallel_perp': main_motion[
@@ -2355,7 +2505,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             enabled_scale=joint_scale,
                         ))
                     output_dict.update(joint_diagnostics)
-            if self.training and 'motion_aux_ref_boxs' in input_dict:
+            if (self.training and 'motion_aux_ref_boxs' in input_dict
+                    and not (self.use_ct_joint_full
+                             and not self.ct_enable_b1)):
                 aux_motion = self.physical_motion_encoder(
                     input_dict['motion_aux_ref_boxs'],
                     input_dict['motion_aux_delta_t'],
@@ -2376,6 +2528,106 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         aux_motion['log_sigma_parallel_perp'],
                     'motion_aux_prior_direction_xy':
                         aux_motion['motion_direction_xy'],
+                })
+
+        if self.use_ct_joint_full:
+            required_joint_keys = (
+                'search_v3_points', 'search_v3_point_valid_mask',
+                'trajectory_search_points',
+                'trajectory_search_point_valid_mask',
+                'trajectory_search_valid',
+                'search_v3_query_delta_t', 'search_v3_gap_ratio',
+            )
+            missing_joint = [
+                key for key in required_joint_keys if key not in input_dict]
+            if missing_joint:
+                raise KeyError(
+                    "CT joint Full input is missing: "
+                    + ", ".join(missing_joint))
+            if observation_query is None:
+                raise RuntimeError(
+                    "CT joint Full requires the final observation decoder query")
+
+            if self.ct_enable_b2:
+                endpoint_points = input_dict['search_v3_points'].to(
+                    device=point_feature.device, dtype=point_feature.dtype)
+                tube_points = input_dict['trajectory_search_points'].to(
+                    device=point_feature.device, dtype=point_feature.dtype)
+                if endpoint_points.shape[1] != self.ct_endpoint_quota:
+                    raise ValueError("CT endpoint quota/data shape mismatch")
+                if tube_points.shape[1] != self.ct_tube_quota:
+                    raise ValueError("CT tube quota/data shape mismatch")
+                raw_joint_points = torch.cat((
+                    endpoint_points, tube_points), dim=1)
+                encoded_joint_points = self.encode_point_time(raw_joint_points)
+                if encoded_joint_points.shape[-1] != 5:
+                    raise ValueError(
+                        "CT joint Full requires scalar point-time encoding")
+                endpoint_mask = input_dict[
+                    'search_v3_point_valid_mask'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype)
+                tube_mask = input_dict[
+                    'trajectory_search_point_valid_mask'].to(
+                    device=point_feature.device,
+                    dtype=point_feature.dtype).reshape(
+                        B, self.ct_tube_quota)
+                joint_mask = torch.cat((endpoint_mask, tube_mask), dim=1)
+                joint_source = torch.cat((
+                    torch.zeros(
+                        (B, self.ct_endpoint_quota),
+                        device=point_feature.device, dtype=torch.long),
+                    torch.ones(
+                        (B, self.ct_tube_quota),
+                        device=point_feature.device, dtype=torch.long),
+                ), dim=1)
+                learned_motion_valid = main_motion['valid'] * float(
+                    self.ct_enable_b1)
+                joint_output = self.ct_joint_search_refiner(
+                    encoded_joint_points,
+                    raw_joint_points[..., :2],
+                    joint_mask,
+                    joint_source,
+                    observation_query,
+                    obs_stats,
+                    main_motion['feature'],
+                    main_motion['kinematic_prior_xy'],
+                    main_motion['prior_xy'],
+                    main_motion['residual_unit_parallel_perp'],
+                    torch.exp(main_motion[
+                        'log_sigma_parallel_perp']),
+                    main_motion['envelope_parallel_perp'],
+                    main_motion['motion_direction_xy'],
+                    learned_motion_valid,
+                    input_dict['search_v3_query_delta_t'],
+                    input_dict['search_v3_gap_ratio'],
+                    history_valid_ratio,
+                )
+                output_dict.update(joint_output)
+                updated_aux_box, router_output = self.ct_joint_router(
+                    observation_aux_box,
+                    joint_output['ct_search_raw_xy'],
+                    joint_output['ct_search_candidate_valid'],
+                    obs_stats,
+                    joint_output['ct_search_targetness_mean'],
+                    joint_output['ct_search_targetness_max'],
+                    joint_output['ct_search_targetness_entropy'],
+                    joint_output['ct_search_normalized_ess'],
+                    joint_output['ct_query_gate'],
+                    input_dict['search_v3_query_delta_t'],
+                    input_dict['search_v3_gap_ratio'],
+                    enabled=self.ct_enable_b3,
+                )
+                output_dict.update(router_output)
+                output_dict['ct_final_box'] = updated_aux_box
+            else:
+                updated_aux_box = observation_aux_box
+                output_dict.update({
+                    'ct_search_candidate_valid': point_feature.new_zeros((B,)),
+                    'ct_query_gate': point_feature.new_zeros((B,)),
+                    'ct_router_gate': point_feature.new_zeros((B,)),
+                    'ct_router_applied_gate': point_feature.new_zeros((B,)),
+                    'ct_final_box': observation_aux_box,
                 })
 
         if self.use_search_evidence_v21:
@@ -3622,7 +3874,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     loss_trajectory_adapter_norm,
             })
 
-        if self.use_b1motion_v3:
+        if (self.use_b1motion_v3
+                and not (self.use_ct_joint_full
+                         and not self.ct_enable_b1)):
             def masked_mean(per_sample, valid):
                 valid = valid.to(
                     device=per_sample.device,
@@ -3643,7 +3897,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             ).mean(dim=1)
             main_valid = output['motion_prior_valid']
             uncertainty_terms = None
-            if self.use_calibrated_motion_uncertainty:
+            if (self.use_calibrated_motion_uncertainty
+                    or self.use_ct_joint_full):
                 uncertainty_terms = physical_motion_uncertainty_loss(
                     output['motion_prior_xy'],
                     main_target,
@@ -3753,7 +4008,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 ).mean(dim=1)
                 aux_valid = output['motion_aux_prior_valid']
                 aux_uncertainty_terms = None
-                if self.use_calibrated_motion_uncertainty:
+                if (self.use_calibrated_motion_uncertainty
+                        or self.use_ct_joint_full):
                     aux_uncertainty_terms = physical_motion_uncertainty_loss(
                         output['motion_aux_prior_xy'],
                         aux_target,
@@ -3911,6 +4167,148 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             final_xy.detach() - target_xy, dim=1),
                         main_valid),
                 })
+
+        if self.use_ct_joint_full and self.ct_enable_b2:
+            target_xy = center_label[:, :2].to(
+                device=output['ct_search_raw_xy'].device,
+                dtype=output['ct_search_raw_xy'].dtype)
+            endpoint_labels = data['search_v3_point_labels'].to(
+                device=target_xy.device, dtype=target_xy.dtype)
+            tube_labels = data['trajectory_search_point_labels'].to(
+                device=target_xy.device, dtype=target_xy.dtype)
+            point_labels = torch.cat((endpoint_labels, tube_labels), dim=1)
+            endpoint_valid = data['search_v3_point_valid_mask'].to(
+                device=target_xy.device, dtype=target_xy.dtype)
+            tube_valid = data['trajectory_search_point_valid_mask'].to(
+                device=target_xy.device, dtype=target_xy.dtype).reshape(
+                    -1, self.ct_tube_quota)
+            point_valid = torch.cat((endpoint_valid, tube_valid), dim=1)
+            point_labels = point_labels * point_valid
+
+            targetness_logits = output['ct_search_targetness_logits']
+            bce = F.binary_cross_entropy_with_logits(
+                targetness_logits, point_labels, reduction='none')
+            probability = torch.sigmoid(targetness_logits)
+            p_t = (
+                point_labels * probability
+                + (1.0 - point_labels) * (1.0 - probability))
+            alpha_t = (
+                point_labels * self.ct_focal_alpha
+                + (1.0 - point_labels) * (1.0 - self.ct_focal_alpha))
+            focal = alpha_t * (1.0 - p_t).pow(self.ct_focal_gamma) * bce
+            loss_ct_targetness = (
+                focal * point_valid).sum() / torch.clamp(
+                    point_valid.sum(), min=1.0)
+
+            foreground = point_labels * point_valid
+            foreground_count = foreground.sum(dim=1)
+            vote_error = F.smooth_l1_loss(
+                output['ct_search_point_votes'],
+                target_xy.unsqueeze(1).expand_as(
+                    output['ct_search_point_votes']),
+                reduction='none').mean(dim=2)
+            loss_ct_vote = (
+                vote_error * foreground).sum() / torch.clamp(
+                    foreground.sum(), min=1.0)
+            proposal_valid = (
+                (foreground_count >= 1).to(target_xy.dtype)
+                * output['ct_search_candidate_valid'].detach())
+            raw_per_sample = F.smooth_l1_loss(
+                output['ct_search_raw_xy'], target_xy,
+                reduction='none').mean(dim=1)
+            loss_ct_raw_search = (
+                raw_per_sample * proposal_valid).sum() / torch.clamp(
+                    proposal_valid.sum(), min=1.0)
+
+            loss_ct_query_gate = target_xy.new_zeros(())
+            if (self.ct_enable_b1
+                    and self.ct_enable_query_reliability_gate):
+                kinematic_error = torch.linalg.norm(
+                    output['motion_prior_kinematic_xy'].detach() - target_xy,
+                    dim=1)
+                learned_error = torch.linalg.norm(
+                    output['motion_prior_xy'].detach() - target_xy, dim=1)
+                query_target = torch.sigmoid(
+                    (kinematic_error - learned_error) / 0.25)
+                query_gate_error = F.binary_cross_entropy_with_logits(
+                    output['ct_query_gate_logit'], query_target,
+                    reduction='none')
+                query_valid = output['motion_prior_valid'].detach()
+                loss_ct_query_gate = (
+                    query_gate_error * query_valid).sum() / torch.clamp(
+                        query_valid.sum(), min=1.0)
+
+            loss_ct_router = target_xy.new_zeros(())
+            loss_ct_correction = target_xy.new_zeros(())
+            correction_ramp = 0.0
+            if self.ct_enable_b3:
+                observation_xy = aux_estimation_boxes[:, :2].detach()
+                observation_error = torch.linalg.norm(
+                    observation_xy - target_xy, dim=1)
+                raw_error = torch.linalg.norm(
+                    output['ct_search_raw_xy'].detach() - target_xy, dim=1)
+                router_target = (
+                    raw_error + self.ct_router_help_margin
+                    < observation_error).to(target_xy.dtype)
+                router_error = F.binary_cross_entropy_with_logits(
+                    output['ct_router_logit'], router_target,
+                    reduction='none')
+                router_valid = output[
+                    'ct_search_candidate_valid'].detach()
+                loss_ct_router = (
+                    router_error * router_valid).sum() / torch.clamp(
+                        router_valid.sum(), min=1.0)
+                epoch = int(getattr(self, 'current_epoch', 0))
+                if epoch >= self.ct_correction_warmup_epochs:
+                    correction_ramp = (
+                        1.0 if self.ct_correction_ramp_epochs <= 0
+                        else min(
+                            1.0,
+                            (epoch - self.ct_correction_warmup_epochs + 1)
+                            / float(self.ct_correction_ramp_epochs)))
+                correction_per_sample = F.smooth_l1_loss(
+                    output['ct_final_box'][:, :2], target_xy,
+                    reduction='none').mean(dim=1)
+                loss_ct_correction = (
+                    correction_per_sample * router_valid).sum(
+                    ) / torch.clamp(router_valid.sum(), min=1.0)
+
+            loss_total += (
+                self.ct_targetness_weight * loss_ct_targetness
+                + self.ct_vote_weight * loss_ct_vote
+                + self.ct_raw_search_weight * loss_ct_raw_search
+                + self.ct_query_gate_weight * loss_ct_query_gate
+                + self.ct_router_weight * loss_ct_router
+                + correction_ramp * self.ct_correction_weight
+                * loss_ct_correction)
+            loss_dict.update({
+                'loss_total': loss_total,
+                'loss_ct_targetness': loss_ct_targetness,
+                'loss_ct_vote': loss_ct_vote,
+                'loss_ct_raw_search': loss_ct_raw_search,
+                'loss_ct_query_gate': loss_ct_query_gate,
+                'loss_ct_router': loss_ct_router,
+                'loss_ct_correction': loss_ct_correction,
+                'ct_correction_ramp': target_xy.new_tensor(correction_ramp),
+                'ct_foreground_points': foreground_count.mean(),
+                'ct_candidate_valid_rate': output[
+                    'ct_search_candidate_valid'].float().mean(),
+                'ct_query_gate_mean': output['ct_query_gate'].mean(),
+                'ct_query_shift_norm': output[
+                    'ct_query_shift_norm'].mean(),
+                'ct_motion_residual_saturation': output[
+                    'ct_motion_residual_saturation'].mean(),
+                'ct_router_gate_mean': output['ct_router_gate'].mean(),
+                'ct_raw_search_rmse': torch.linalg.norm(
+                    output['ct_search_raw_xy'].detach() - target_xy,
+                    dim=1).mean(),
+                'ct_observation_rmse': torch.linalg.norm(
+                    aux_estimation_boxes[:, :2].detach() - target_xy,
+                    dim=1).mean(),
+                'ct_final_rmse': torch.linalg.norm(
+                    output['ct_final_box'][:, :2].detach() - target_xy,
+                    dim=1).mean(),
+            })
 
         if self.use_search_evidence_v2:
             target_xy = center_label[:, :2].to(

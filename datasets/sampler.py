@@ -364,8 +364,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
-    use_search_evidence_v3 = bool(getattr(
-        config, 'use_motion_conditioned_search_v3', False))
+    use_ct_joint_full = bool(getattr(config, 'use_ct_joint_full', False))
+    use_search_evidence_v3 = (
+        bool(getattr(config, 'use_motion_conditioned_search_v3', False))
+        or use_ct_joint_full)
     if use_search_evidence_v3 and not bool(getattr(
             config, 'use_b1motion_v3', False)):
         raise ValueError("B2-v3 requires B1motion-v3 shared history")
@@ -649,8 +651,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         (0, baseline_search_points.shape[1]),
         dtype=baseline_search_points.dtype,
     )
-    use_trajectory_search = bool(
-        getattr(config, 'use_trajectory_search', False))
+    use_trajectory_search = (
+        bool(getattr(config, 'use_trajectory_search', False))
+        or use_ct_joint_full)
     if bool(getattr(config, 'use_time_guided_search', False)) and use_trajectory_search:
         raise ValueError(
             "legacy time-guided search and ordered trajectory search are "
@@ -683,17 +686,29 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     base_width=float(getattr(
                         config, 'trajectory_search_base_width', 2.0)),
                     max_length=float(getattr(
-                        config, 'trajectory_search_max_length', 20.0)),
+                        config, 'ct_tube_max_length', 24.0)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_max_length', 20.0)),
                     max_width=float(getattr(
-                        config, 'trajectory_search_max_width', 8.0)),
+                        config, 'ct_tube_max_width', 8.0)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_max_width', 8.0)),
                     max_speed=float(getattr(
-                        config, 'trajectory_search_max_speed', 20.0)),
+                        config, 'ct_motion_max_speed', 20.0)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_max_speed', 20.0)),
                     max_acceleration=float(getattr(
-                        config, 'trajectory_search_max_acceleration', 8.0)),
+                        config, 'ct_motion_max_acceleration', 8.0)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_max_acceleration', 8.0)),
                     max_displacement=float(getattr(
-                        config, 'trajectory_search_max_displacement', 12.0)),
+                        config, 'ct_motion_max_displacement', 12.0)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_max_displacement', 12.0)),
                     acceleration_weight=float(getattr(
-                        config, 'trajectory_search_acceleration_weight', 0.5)),
+                        config, 'ct_motion_acceleration_weight', 0.5)
+                        if use_ct_joint_full else getattr(
+                            config, 'trajectory_search_acceleration_weight', 0.5)),
                     sigma_parallel_scale=float(getattr(
                         config, 'trajectory_search_sigma_parallel_scale', 2.0)),
                     sigma_perpendicular_scale=float(getattr(
@@ -704,8 +719,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                         config, 'trajectory_search_min_delta_t', 0.75)),
                     min_gap_ratio=float(getattr(
                         config, 'trajectory_search_min_gap_ratio', 1.5)),
-                    allow_normal_cadence=bool(getattr(
-                        config, 'trajectory_search_allow_normal_cadence', False)),
+                    allow_normal_cadence=(
+                        True if use_ct_joint_full else bool(getattr(
+                            config,
+                            'trajectory_search_allow_normal_cadence', False))),
+                    require_recent_transition=use_ct_joint_full,
                 ))
         else:
             ct_search_box, ct_search_diagnostics = build_time_guided_search_box(
@@ -768,6 +786,21 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         else 'search_v2')
 
     def search_config_value(name, default):
+        if use_ct_joint_full:
+            joint_mapping = {
+                'point_count': 'ct_endpoint_quota',
+                'extension_quota': 'ct_endpoint_quota',
+                'min_points': 'ct_search_min_points',
+                'max_length': 'ct_tube_max_length',
+                'max_width': 'ct_tube_max_width',
+                'max_speed': 'ct_motion_max_speed',
+                'max_acceleration': 'ct_motion_max_acceleration',
+                'max_displacement': 'ct_motion_max_displacement',
+                'acceleration_weight': 'ct_motion_acceleration_weight',
+            }
+            field = joint_mapping.get(name)
+            if field is not None:
+                return getattr(config, field, default)
         return getattr(config, f'{search_config_prefix}_{name}', default)
 
     search_v2_box = None
@@ -809,8 +842,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         replay_b1 = (
             recursive_replay.get('b1')
             if recursive_replay is not None else None)
-        use_prepass_support = bool(getattr(
-            config, 'use_b1_prepass_support', False))
+        use_prepass_support = (
+            False if use_ct_joint_full else bool(getattr(
+                config, 'use_b1_prepass_support', False)))
         support_prediction = replay_b1
         if isinstance(replay_b1, dict) and recursive_replay is not None:
             support_prediction = dict(replay_b1)
@@ -847,6 +881,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 'max_yaw_rate', np.pi / 2.0)),
             fallback_min_displacement=float(search_config_value(
                 'min_displacement', 0.2)),
+            fallback_require_recent_transition=use_ct_joint_full,
         )
         if search_v2_box is not None:
             learned_prior_support = (
@@ -901,7 +936,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
     ]
     trajectory_search_points = np.zeros(
-        (int(getattr(config, 'trajectory_search_point_count', 128)),
+        (int(getattr(config, 'ct_tube_quota', 128)
+             if use_ct_joint_full else getattr(
+                 config, 'trajectory_search_point_count', 128)),
          baseline_search_points.shape[1]),
         dtype=np.float32,
     )
@@ -910,6 +947,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'sample_count': 0,
         'available_count': 0,
     }
+    trajectory_search_point_valid_mask = np.zeros(
+        (trajectory_search_points.shape[0],), dtype=np.float32)
     if use_trajectory_search:
         # Keep every baseline token exactly as in B0.  The extension is encoded
         # by a separate lightweight branch instead of stealing a fixed quota.
@@ -918,15 +957,32 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             config.point_sample_size,
             seed=current_sampling_seed,
         )[0]
-        trajectory_search_points, trajectory_search_sampling = (
-            sample_search_extension(
-                baseline_search_points,
-                expanded_search_points,
-                int(getattr(config, 'trajectory_search_point_count', 128)),
-                min_expansion_points=int(getattr(
-                    config, 'trajectory_search_min_points', 16)),
-                seed=current_sampling_seed,
-            ))
+        if use_ct_joint_full:
+            (trajectory_search_points,
+             trajectory_search_point_valid_mask,
+             _, trajectory_search_sampling) = (
+                sample_source_aware_endpoint_points(
+                    baseline_search_points[:0],
+                    expanded_search_points,
+                    sample_size=int(getattr(config, 'ct_tube_quota', 128)),
+                    extension_quota=int(getattr(
+                        config, 'ct_tube_quota', 128)),
+                    min_points=int(getattr(
+                        config, 'ct_search_min_points', 3)),
+                    seed=current_sampling_seed,
+                ))
+        else:
+            trajectory_search_points, trajectory_search_sampling = (
+                sample_search_extension(
+                    baseline_search_points,
+                    expanded_search_points,
+                    int(getattr(config, 'trajectory_search_point_count', 128)),
+                    min_expansion_points=int(getattr(
+                        config, 'trajectory_search_min_points', 16)),
+                    seed=current_sampling_seed,
+                ))
+            trajectory_search_point_valid_mask.fill(
+                float(trajectory_search_sampling['active']))
         ct_search_sampling = {
             'baseline_sample_count': int(config.point_sample_size),
             'expansion_sample_count': int(
@@ -1005,6 +1061,32 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     'min_points', 3)),
                 seed=search_v2_seed,
             )
+    if use_ct_joint_full and not search_v2_sampling['active']:
+        # Invalid/stationary histories retain a usable B2 fallback without
+        # exposing the current GT: reuse only the ordinary B0 current crop.
+        independent_seed_base = (
+            current_sampling_seed
+            if current_sampling_seed is not None else sample_index)
+        search_v2_seed = (
+            int(independent_seed_base) * 1664525 + 1013904223
+        ) & 0xFFFFFFFF
+        (search_v2_points,
+         search_v2_point_valid_mask,
+         search_v2_point_source,
+         search_v2_sampling) = sample_source_aware_endpoint_points(
+            baseline_search_points,
+            baseline_search_points,
+            sample_size=search_v2_point_count,
+            extension_quota=0,
+            min_points=int(search_config_value('min_points', 3)),
+            seed=search_v2_seed,
+        )
+        search_v2_diagnostics.update({
+            'prior_source': 'base_only',
+            'source_id': 0,
+            'endpoint_center': np.asarray(
+                search_history_boxes[0].center, dtype=np.float64),
+        })
     ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
     num_points_in_search = int(len(baseline_search_points))
     if ct_search_active:
@@ -1019,6 +1101,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         config.bb_scale,
     ).astype(np.float32)
     search_v2_point_labels *= search_v2_point_valid_mask
+    trajectory_search_point_labels = geometry_utils.points_in_box(
+        this_box,
+        trajectory_search_points.T[:3, :],
+        config.bb_scale,
+    ).astype(np.float32)
+    trajectory_search_point_labels *= trajectory_search_point_valid_mask
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
     if candidate_id != 0:
@@ -1214,6 +1302,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 trajectory_velocity_label.astype('float32'),
             'trajectory_search_points':
                 trajectory_search_points.astype('float32'),
+            'trajectory_search_point_labels':
+                trajectory_search_point_labels.astype('float32'),
+            'trajectory_search_point_valid_mask':
+                trajectory_search_point_valid_mask.astype('float32'),
             'trajectory_search_valid': np.float32(
                 trajectory_search_sampling['active']),
             'trajectory_search_gap_ratio': np.float32(

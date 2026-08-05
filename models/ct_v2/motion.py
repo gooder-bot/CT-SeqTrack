@@ -327,7 +327,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             residual_velocity_scale=4.0,
             initial_sigma=0.5,
             motion_aligned_uncertainty=False,
-            min_direction_speed=0.2):
+            min_direction_speed=0.2,
+            shared_kinematic_anchor=False,
+            max_acceleration=8.0,
+            max_displacement=12.0,
+            acceleration_weight=0.5):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
         self.step_dim = int(step_dim)
@@ -337,6 +341,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.motion_aligned_uncertainty = bool(
             motion_aligned_uncertainty)
         self.min_direction_speed = float(min_direction_speed)
+        self.shared_kinematic_anchor = bool(shared_kinematic_anchor)
+        self.max_acceleration = float(max_acceleration)
+        self.max_displacement = float(max_displacement)
+        self.acceleration_weight = float(acceleration_weight)
         if self.hidden_dim <= 0 or self.step_dim <= 0:
             raise ValueError("physical motion encoder dimensions must be positive")
         if self.residual_velocity_scale <= 0:
@@ -345,6 +353,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             raise ValueError("physical initial sigma must be positive")
         if self.min_direction_speed < 0:
             raise ValueError("minimum direction speed must be non-negative")
+        if self.max_acceleration <= 0 or self.max_displacement <= 0:
+            raise ValueError(
+                "shared-anchor acceleration/displacement caps must be positive")
+        if not 0.0 <= self.acceleration_weight <= 1.0:
+            raise ValueError("shared-anchor acceleration weight must be in [0,1]")
 
         # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
         # query/pair ratio, and transition-valid flag.
@@ -492,6 +505,9 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 "prior_xy": zeros_xy,
                 "mu_xy": zeros_xy,
                 "kinematic_prior_xy": zeros_xy,
+                "residual_unit_parallel_perp": zeros_xy,
+                "residual_xy": zeros_xy,
+                "envelope_parallel_perp": zeros_xy,
                 **uncertainty,
                 "direction_xy": uncertainty["motion_direction_xy"],
                 "valid": ref_boxs.new_zeros((batch_size,)),
@@ -583,34 +599,134 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         recent_pair_valid = pair_valid[:, 0]
         valid = (recent_pair_valid & finite_row).to(ref_boxs.dtype)
         base_velocity = velocity_xy[:, 0] * valid.unsqueeze(1)
-        residual_velocity = self.residual_velocity_scale * torch.tanh(
-            self.velocity_residual_head(context))
-        predicted_velocity = (
-            base_velocity + residual_velocity) * valid.unsqueeze(1)
-        prior_xy = predicted_velocity * query_gap.unsqueeze(1)
-        kinematic_prior_xy = (
-            base_velocity * query_gap.unsqueeze(1) * valid.unsqueeze(1))
-        raw_log_sigma = torch.clamp(
-            self.log_sigma_head(context), min=-4.0, max=2.5)
+        if self.shared_kinematic_anchor:
+            # The deterministic anchor mirrors utils.ct_search exactly: the
+            # newest velocity is primary and the next valid transition only
+            # supplies a bounded, deliberately under-weighted acceleration.
+            older_pair_valid = (
+                pair_valid[:, 1] if pair_valid.shape[1] > 1
+                else torch.zeros_like(recent_pair_valid))
+            older_velocity = (
+                velocity_xy[:, 1] if velocity_xy.shape[1] > 1
+                else torch.zeros_like(base_velocity))
+            acceleration_gap = torch.clamp(
+                0.5 * (pair_gap[:, 0] + (
+                    pair_gap[:, 1] if pair_gap.shape[1] > 1
+                    else pair_gap[:, 0])),
+                min=self.eps,
+            )
+            acceleration = (
+                (base_velocity - older_velocity)
+                / acceleration_gap.unsqueeze(1))
+            acceleration = acceleration * older_pair_valid.to(
+                ref_boxs.dtype).unsqueeze(1)
+            acceleration_norm = torch.linalg.norm(
+                acceleration, dim=1, keepdim=True)
+            acceleration = acceleration * torch.clamp(
+                self.max_acceleration / torch.clamp(
+                    acceleration_norm, min=self.eps),
+                max=1.0,
+            )
+            kinematic_prior_xy = (
+                base_velocity * query_gap.unsqueeze(1)
+                + self.acceleration_weight * 0.5 * acceleration
+                * query_gap.pow(2).unsqueeze(1))
+            displacement_norm = torch.linalg.norm(
+                kinematic_prior_xy, dim=1, keepdim=True)
+            kinematic_prior_xy = kinematic_prior_xy * torch.clamp(
+                self.max_displacement / torch.clamp(
+                    displacement_norm, min=self.eps),
+                max=1.0,
+            ) * valid.unsqueeze(1)
+
+            velocity_spread = torch.linalg.norm(
+                base_velocity - older_velocity, dim=1)
+            velocity_spread = velocity_spread * older_pair_valid.to(
+                ref_boxs.dtype)
+            envelope_parallel = torch.clamp(
+                0.25 + 0.25 * query_gap
+                + 0.5 * velocity_spread * query_gap,
+                max=4.0,
+            )
+            envelope_perpendicular = torch.clamp(
+                0.20 + 0.15 * query_gap
+                + 0.25 * velocity_spread * query_gap,
+                max=3.0,
+            )
+            envelope = torch.stack((
+                envelope_parallel, envelope_perpendicular), dim=1)
+
+            anchor_norm = torch.linalg.norm(
+                kinematic_prior_xy, dim=1, keepdim=True)
+            base_direction, _, _ = motion_aligned_axes(
+                base_velocity,
+                min_speed=self.min_direction_speed,
+                eps=self.eps,
+            )
+            direction = torch.where(
+                (anchor_norm > self.eps).expand_as(kinematic_prior_xy),
+                kinematic_prior_xy / torch.clamp(anchor_norm, min=self.eps),
+                base_direction,
+            )
+            perpendicular = torch.stack((
+                -direction[:, 1], direction[:, 0]), dim=1)
+            residual_unit = torch.tanh(
+                self.velocity_residual_head(context)) * valid.unsqueeze(1)
+            residual_xy = (
+                direction * (residual_unit[:, 0:1]
+                             * envelope_parallel.unsqueeze(1))
+                + perpendicular * (residual_unit[:, 1:2]
+                                   * envelope_perpendicular.unsqueeze(1)))
+            prior_xy = (kinematic_prior_xy + residual_xy) * valid.unsqueeze(1)
+            predicted_velocity = prior_xy / torch.clamp(
+                query_gap.unsqueeze(1), min=self.eps)
+
+            raw_sigma = self.log_sigma_head(context)
+            bounded_sigma = (
+                0.1 + (envelope - 0.1)
+                * torch.sigmoid(raw_sigma))
+            bounded_sigma = torch.clamp(bounded_sigma, min=0.1)
+            raw_log_sigma = torch.log(bounded_sigma)
+            uncertainty = motion_aligned_covariance(
+                base_velocity,
+                raw_log_sigma,
+                min_speed=self.min_direction_speed,
+                eps=self.eps,
+                direction_xy=direction,
+            )
+        else:
+            residual_velocity = self.residual_velocity_scale * torch.tanh(
+                self.velocity_residual_head(context))
+            predicted_velocity = (
+                base_velocity + residual_velocity) * valid.unsqueeze(1)
+            prior_xy = predicted_velocity * query_gap.unsqueeze(1)
+            kinematic_prior_xy = (
+                base_velocity * query_gap.unsqueeze(1) * valid.unsqueeze(1))
+            raw_log_sigma = torch.clamp(
+                self.log_sigma_head(context), min=-4.0, max=2.5)
+            envelope = ref_boxs.new_zeros((batch_size, 2))
+            residual_unit = ref_boxs.new_zeros((batch_size, 2))
+            residual_xy = prior_xy - kinematic_prior_xy
         base_direction, _, base_speed = motion_aligned_axes(
             base_velocity,
             min_speed=self.min_direction_speed,
             eps=self.eps,
         )
-        displacement_norm = torch.linalg.norm(
-            prior_xy, dim=1, keepdim=True)
-        displacement_direction = torch.where(
-            (displacement_norm > self.eps).expand_as(prior_xy),
-            prior_xy / torch.clamp(displacement_norm, min=self.eps),
-            base_direction,
-        )
-        direction = torch.where(
-            (base_speed < self.min_direction_speed).unsqueeze(1),
-            displacement_direction,
-            base_direction,
-        )
-        uncertainty = self._uncertainty_outputs(
-            base_velocity, raw_log_sigma, direction_xy=direction)
+        if not self.shared_kinematic_anchor:
+            displacement_norm = torch.linalg.norm(
+                prior_xy, dim=1, keepdim=True)
+            displacement_direction = torch.where(
+                (displacement_norm > self.eps).expand_as(prior_xy),
+                prior_xy / torch.clamp(displacement_norm, min=self.eps),
+                base_direction,
+            )
+            direction = torch.where(
+                (base_speed < self.min_direction_speed).unsqueeze(1),
+                displacement_direction,
+                base_direction,
+            )
+            uncertainty = self._uncertainty_outputs(
+                base_velocity, raw_log_sigma, direction_xy=direction)
         gap_ratio = torch.where(
             valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw))
         return {
@@ -620,6 +736,9 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             "prior_xy": prior_xy,
             "mu_xy": prior_xy,
             "kinematic_prior_xy": kinematic_prior_xy,
+            "residual_unit_parallel_perp": residual_unit,
+            "residual_xy": residual_xy,
+            "envelope_parallel_perp": envelope,
             **uncertainty,
             "direction_xy": uncertainty["motion_direction_xy"],
             "valid": valid,

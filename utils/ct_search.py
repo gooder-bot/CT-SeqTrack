@@ -127,7 +127,8 @@ def estimate_ordered_trajectory(
         max_speed=20.0,
         max_acceleration=8.0,
         max_displacement=12.0,
-        acceleration_weight=0.5):
+        acceleration_weight=0.5,
+        require_recent_transition=False):
     """Causally extrapolate an ordered box history without learned weights.
 
     Histories are expected in the project's native recent-to-old order.  The
@@ -163,6 +164,8 @@ def estimate_ordered_trajectory(
         transitions.append((index, gap, velocity))
     if not transitions:
         return {"valid": False, "reason": "no_valid_transition"}
+    if bool(require_recent_transition) and transitions[0][0] != 0:
+        return {"valid": False, "reason": "invalid_recent_transition"}
 
     # ``transitions`` follows recent-to-old order, so entry zero is the state
     # closest to the query.  Older motion is used only to estimate acceleration.
@@ -239,7 +242,8 @@ def build_ordered_trajectory_search_box(
         min_displacement=0.2,
         min_delta_t=0.75,
         min_gap_ratio=1.5,
-        allow_normal_cadence=False):
+        allow_normal_cadence=False,
+        require_recent_transition=False):
     """Build an uncertainty-aware second crop from ordered causal history.
 
     The normal baseline crop is never replaced.  Unless
@@ -255,6 +259,7 @@ def build_ordered_trajectory_search_box(
         max_acceleration=max_acceleration,
         max_displacement=max_displacement,
         acceleration_weight=acceleration_weight,
+        require_recent_transition=require_recent_transition,
     )
     if not estimate.get("valid", False):
         return None, estimate
@@ -325,7 +330,8 @@ def build_trajectory_endpoint_search_box(
         max_displacement=12.0,
         acceleration_weight=0.5,
         max_yaw_rate=math.pi / 2.0,
-        min_displacement=0.2):
+        min_displacement=0.2,
+        require_recent_transition=False):
     """Build the compact B2-v2 crop at the predicted trajectory endpoint.
 
     The latest historical box is copied without changing its dimensions.  Its
@@ -341,6 +347,7 @@ def build_trajectory_endpoint_search_box(
         max_acceleration=max_acceleration,
         max_displacement=max_displacement,
         acceleration_weight=acceleration_weight,
+        require_recent_transition=require_recent_transition,
     )
     if not estimate.get("valid", False):
         return None, estimate
@@ -598,7 +605,8 @@ def resolve_b1_search_support(
         fallback_max_displacement=12.0,
         fallback_acceleration_weight=0.5,
         fallback_max_yaw_rate=math.pi / 2.0,
-        fallback_min_displacement=0.2):
+        fallback_min_displacement=0.2,
+        fallback_require_recent_transition=False):
     """Resolve the identical B1/fallback/base-only support in all paths."""
     query_delta_t = float(delta_t[0]) if len(delta_t) else 0.0
     if (bool(use_b1_prepass) and isinstance(prediction, dict)
@@ -630,6 +638,7 @@ def resolve_b1_search_support(
         acceleration_weight=fallback_acceleration_weight,
         max_yaw_rate=fallback_max_yaw_rate,
         min_displacement=fallback_min_displacement,
+        require_recent_transition=fallback_require_recent_transition,
     )
     diagnostics["prior_source"] = (
         "fallback_cv" if support is not None else "base_only")

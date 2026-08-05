@@ -151,3 +151,21 @@ PFTC configs are unchanged for reproduction.
 Configs `19` and `20` are `experimental_only`.  The default runner refuses
 them unless `--allow-experimental-b4` is supplied; they are excluded from the
 B1–B3 paper path.
+
+## 2026-08-05 joint Full coupling
+
+`21_ct_joint_full.yaml` replaces the staged prepass/replay/router chain with a
+single scratch-trained path.  A deterministic ordered-motion anchor defines
+both the 128-point endpoint crop and 128-point swept tube; B1 predicts only a
+bounded residual inside that envelope.  B2 uses a reliability-gated residual
+query and emits raw Search, and B3 is one observation/raw-Search scalar gate.
+
+The three matched retraining ablations are:
+
+- `21_ct_joint_minus_b1.yaml`: deterministic anchor/tube plus observation query;
+- `21_ct_joint_minus_b2.yaml`: exact observation output;
+- `21_ct_joint_minus_b3.yaml`: full bounded raw-Search correction.
+
+These configs never invoke B1 prepass, recursive replay, calibrated sidecars,
+or the offline v3 action router.  `point_sample_size` remains 1024; the extra
+256 points are consumed only by the lightweight joint search branch.

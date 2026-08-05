@@ -28,6 +28,10 @@ CONFIGS = {
     "b1_b2_b3": ROOT / "cfgs/ct_v2/18_b1_b2_b3_selective.yaml",
     "b4_alignment": ROOT / "cfgs/ct_v2/19_b4_decoder_alignment.yaml",
     "b4_anticollapse": ROOT / "cfgs/ct_v2/20_b4_decoder_anticollapse.yaml",
+    "joint_full": ROOT / "cfgs/ct_v2/21_ct_joint_full.yaml",
+    "joint_minus_b1": ROOT / "cfgs/ct_v2/21_ct_joint_minus_b1.yaml",
+    "joint_minus_b2": ROOT / "cfgs/ct_v2/21_ct_joint_minus_b2.yaml",
+    "joint_minus_b3": ROOT / "cfgs/ct_v2/21_ct_joint_minus_b3.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -72,13 +76,17 @@ def parse_args():
     parser.add_argument("--save-top-k", type=int)
     parser.add_argument("--limit-train-batches", type=parse_batch_limit)
     parser.add_argument(
-        "--protocol", choices=("normal", "random20", "gap1124"),
+        "--protocol",
+        choices=("normal", "random20", "gap1124", "burst_drop"),
         default="normal")
     parser.add_argument(
         "--time-mode", choices=("true", "fixed", "shuffled"), default="true")
     parser.add_argument(
         "--time-manifest",
         help="required for shuffled time; ignored by true/fixed")
+    parser.add_argument(
+        "--protocol-manifest",
+        help="frozen endpoint-selection manifest shared across time controls")
     parser.add_argument(
         "--pftc-weight", type=float,
         help="override the frozen PFTC lambda")
@@ -329,7 +337,12 @@ def build_command(args):
         command.extend(("--init_checkpoint", args.init_checkpoint))
     if args.time_manifest:
         command.extend(("--dynamics_time_manifest", args.time_manifest))
-    if args.protocol == "random20":
+    if args.protocol_manifest:
+        command.extend((
+            "--test_virtual_rate_mode", "manifest",
+            "--test_virtual_rate_manifest", args.protocol_manifest,
+        ))
+    elif args.protocol == "random20":
         command.extend((
             "--test_virtual_rate_mode", "random_drop",
             "--test_virtual_rate_drop_prob", "0.2",
@@ -339,6 +352,12 @@ def build_command(args):
     elif args.protocol == "gap1124":
         command.extend((
             "--test_virtual_rate_mode", "gap_pattern",
+        ))
+    elif args.protocol == "burst_drop":
+        command.extend((
+            "--test_virtual_rate_mode", "burst_drop",
+            "--test_virtual_rate_seed", str(args.seed),
+            "--test_virtual_rate_max_gap", "5",
         ))
     return command
 

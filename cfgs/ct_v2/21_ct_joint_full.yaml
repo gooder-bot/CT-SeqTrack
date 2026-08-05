@@ -1,0 +1,79 @@
+_base_: 02_ct_motion_v3.yaml
+
+experiment_name: ct_seqtrack_joint_full
+
+# New paper-facing path.  Legacy prepass/replay/search/router generations stay
+# disabled; endpoint and tube support are generated causally from one history.
+use_ct_joint_full: true
+ct_enable_b1: true
+ct_enable_b2: true
+ct_enable_b3: true
+ct_enable_shared_motion_anchor: true
+ct_enable_dynamic_residual_bound: true
+ct_enable_query_reliability_gate: true
+use_motion_v3_legacy_fusion: false
+use_search_evidence_v2: false
+use_search_evidence_v21: false
+use_motion_conditioned_search_v22: false
+use_motion_conditioned_search_v3: false
+use_action_consistent_router_v3: false
+use_b1_prepass_support: false
+use_recursive_replay_cache: false
+use_calibrated_motion_uncertainty: false
+require_b1_calibration_artifact: false
+require_b1_calibration_passed: false
+proposal_inference_mode: observation
+export_proposal_diagnostics: true
+
+# B0 always keeps its original 1024 current-frame tokens.  These points are
+# consumed only by the lightweight B2 branch.
+ct_expansion_point_count: 256
+ct_endpoint_quota: 128
+ct_tube_quota: 128
+ct_search_min_points: 3
+ct_search_training_history: correlated_candidate
+ct_tube_max_length: 24.0
+ct_tube_max_width: 8.0
+ct_motion_max_speed: 20.0
+ct_motion_max_acceleration: 8.0
+ct_motion_max_displacement: 12.0
+ct_motion_acceleration_weight: 0.5
+trajectory_search_base_length: 4.0
+trajectory_search_base_width: 2.0
+trajectory_search_sigma_parallel_scale: 2.0
+trajectory_search_sigma_perpendicular_scale: 2.0
+trajectory_search_min_displacement: 0.2
+
+# B1 shared-anchor residual and B2 query reliability gate.
+motion_v3_min_direction_speed: 0.2
+ct_search_feature_dim: 128
+ct_search_max_vote_offset: 4.0
+ct_mahalanobis_clip: 25.0
+ct_query_motion_dropout: 0.1
+ct_query_gate_init_probability: 0.05
+
+# Binary observation/raw-Search router.
+ct_router_hidden_dim: 64
+ct_router_init_probability: 0.05
+ct_router_radius_base: 0.5
+ct_router_radius_per_second: 0.5
+ct_router_radius_max: 2.0
+ct_router_help_margin: 0.05
+
+# L = L_B0 + .1 B1-main + .1 B1-gap + .05 B1-NLL
+#   + .05 query-gate + .2 targetness + vote + raw + .2 router
+#   + correction-ramp * correction.
+motion_v3_prior_weight: 0.1
+motion_v3_aux_prior_weight: 0.1
+motion_v3_nll_weight: 0.05
+motion_v3_aux_nll_weight: 0.0
+ct_query_gate_weight: 0.05
+ct_targetness_weight: 0.2
+ct_vote_weight: 1.0
+ct_raw_search_weight: 1.0
+ct_router_weight: 0.2
+ct_correction_weight: 1.0
+ct_correction_warmup_epochs: 5
+ct_correction_ramp_epochs: 10
+ct_focal_alpha: 0.75
+ct_focal_gamma: 2.0

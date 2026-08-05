@@ -581,6 +581,97 @@ class BaseModelMF(pl.LightningModule):
             })
         return row
 
+    def _build_ct_joint_diagnostic_row(
+            self, output, data_dict, this_box, reference_box, frame_id):
+        """Export paper-facing joint-Full diagnostics; GT stays outside forward."""
+        target_box = points_utils.transform_box(this_box, reference_box)
+        target_xy = np.asarray(target_box.center[:2], dtype=np.float64)
+
+        def xy(key, fallback):
+            value = output.get(key)
+            if value is None:
+                return np.asarray(fallback, dtype=np.float64)
+            return value.detach().cpu().numpy().reshape(-1, value.shape[-1])[
+                0, :2].astype(np.float64)
+
+        observation = xy("observation_aux_estimation_boxes", (0.0, 0.0))
+        kinematic = xy("motion_prior_kinematic_xy", observation)
+        learned = xy("motion_prior_xy", kinematic)
+        raw_search = xy("ct_search_raw_xy", observation)
+        final = xy("aux_estimation_boxes", observation)
+
+        def foreground_count(points_key, mask_key):
+            points = data_dict.get(points_key)
+            mask = data_dict.get(mask_key)
+            if points is None or mask is None:
+                return 0
+            points_np = points.detach().cpu().numpy()[0, :, :3]
+            mask_np = mask.detach().cpu().numpy().reshape(-1) > 0
+            foreground = geometry_utils.points_in_box(
+                target_box, points_np.T, self.config.bb_scale)
+            return int(np.sum(foreground & mask_np))
+
+        endpoint_foreground = foreground_count(
+            "search_v3_points", "search_v3_point_valid_mask")
+        tube_foreground = foreground_count(
+            "trajectory_search_points",
+            "trajectory_search_point_valid_mask")
+        sigma = output.get("motion_prior_log_sigma_parallel_perp")
+        sigma_np = (
+            np.exp(sigma.detach().cpu().numpy().reshape(-1, 2)[0])
+            if sigma is not None else np.asarray((np.nan, np.nan)))
+        residual_unit = output.get(
+            "motion_prior_residual_unit_parallel_perp")
+        residual_unit_np = (
+            residual_unit.detach().cpu().numpy().reshape(-1, 2)[0]
+            if residual_unit is not None else np.zeros(2, dtype=np.float32))
+        return {
+            "frame_id": int(frame_id),
+            "b2_version": "ct_joint_full",
+            "query_delta_t": self._proposal_scalar(
+                data_dict, "search_v3_query_delta_t"),
+            "gap_ratio": self._proposal_scalar(
+                data_dict, "search_v3_gap_ratio", default=1.0),
+            "endpoint_foreground_count": endpoint_foreground,
+            "tube_foreground_count": tube_foreground,
+            "foreground_count": endpoint_foreground + tube_foreground,
+            "search_valid": int(self._proposal_scalar(
+                output, "ct_search_candidate_valid") > 0.0),
+            "observation_error": float(np.linalg.norm(
+                observation - target_xy)),
+            "kinematic_error": float(np.linalg.norm(
+                kinematic - target_xy)),
+            "learned_motion_error": float(np.linalg.norm(
+                learned - target_xy)),
+            "raw_search_error": float(np.linalg.norm(
+                raw_search - target_xy)),
+            "final_error": float(np.linalg.norm(final - target_xy)),
+            "query_gate": self._proposal_scalar(
+                output, "ct_query_gate"),
+            "query_shift_norm": self._proposal_scalar(
+                output, "ct_query_shift_norm"),
+            "router_gate": self._proposal_scalar(
+                output, "ct_router_gate"),
+            "router_applied_gate": self._proposal_scalar(
+                output, "ct_router_applied_gate"),
+            "router_radius": self._proposal_scalar(
+                output, "ct_router_radius"),
+            "residual_unit_parallel": float(residual_unit_np[0]),
+            "residual_unit_perpendicular": float(residual_unit_np[1]),
+            "residual_saturation": self._proposal_scalar(
+                output, "ct_motion_residual_saturation"),
+            "sigma_parallel": float(sigma_np[0]),
+            "sigma_perpendicular": float(sigma_np[1]),
+            "targetness_mean": self._proposal_scalar(
+                output, "ct_search_targetness_mean"),
+            "targetness_max": self._proposal_scalar(
+                output, "ct_search_targetness_max"),
+            "targetness_entropy": self._proposal_scalar(
+                output, "ct_search_targetness_entropy"),
+            "normalized_ess": self._proposal_scalar(
+                output, "ct_search_normalized_ess"),
+        }
+
     @staticmethod
     def _write_csv_rows(path, rows):
         if not rows:
@@ -827,6 +918,19 @@ class BaseModelMF(pl.LightningModule):
                                 frame_id,
                                 previous_target_box=sequence[
                                     frame_id - 1]["3d_bbox"],
+                            ))
+                    if (bool(getattr(
+                            self.config,
+                            "export_proposal_diagnostics",
+                            False))
+                            and "ct_search_raw_xy" in forward_output):
+                        proposal_diagnostics.append(
+                            self._build_ct_joint_diagnostic_row(
+                                forward_output,
+                                data_dict,
+                                this_bb,
+                                ref_bb,
+                                frame_id,
                             ))
                     if (bool(getattr(
                             self.config, "export_b3_rollouts", False))
@@ -1239,8 +1343,11 @@ class MotionBaseModelMF(BaseModelMF):
             "valid": False,
             "query_delta_t": float(effective_delta_t_list[0]),
         }
-        use_trajectory_search = bool(getattr(
-            self.config, "use_trajectory_search", False))
+        use_ct_joint_full = bool(getattr(
+            self.config, "use_ct_joint_full", False))
+        use_trajectory_search = (
+            bool(getattr(self.config, "use_trajectory_search", False))
+            or use_ct_joint_full)
         if (bool(getattr(self.config, "use_time_guided_search", False))
                 and use_trajectory_search):
             raise ValueError(
@@ -1259,17 +1366,32 @@ class MotionBaseModelMF(BaseModelMF):
                         base_width=float(getattr(
                             self.config, "trajectory_search_base_width", 2.0)),
                         max_length=float(getattr(
-                            self.config, "trajectory_search_max_length", 20.0)),
+                            self.config, "ct_tube_max_length", 24.0)
+                            if use_ct_joint_full else getattr(
+                                self.config,
+                                "trajectory_search_max_length", 20.0)),
                         max_width=float(getattr(
                             self.config, "trajectory_search_max_width", 8.0)),
                         max_speed=float(getattr(
-                            self.config, "trajectory_search_max_speed", 20.0)),
+                            self.config, "ct_motion_max_speed", 20.0)
+                            if use_ct_joint_full else getattr(
+                                self.config,
+                                "trajectory_search_max_speed", 20.0)),
                         max_acceleration=float(getattr(
-                            self.config, "trajectory_search_max_acceleration", 8.0)),
+                            self.config, "ct_motion_max_acceleration", 8.0)
+                            if use_ct_joint_full else getattr(
+                                self.config,
+                                "trajectory_search_max_acceleration", 8.0)),
                         max_displacement=float(getattr(
-                            self.config, "trajectory_search_max_displacement", 12.0)),
+                            self.config, "ct_motion_max_displacement", 12.0)
+                            if use_ct_joint_full else getattr(
+                                self.config,
+                                "trajectory_search_max_displacement", 12.0)),
                         acceleration_weight=float(getattr(
-                            self.config, "trajectory_search_acceleration_weight", 0.5)),
+                            self.config, "ct_motion_acceleration_weight", 0.5)
+                            if use_ct_joint_full else getattr(
+                                self.config,
+                                "trajectory_search_acceleration_weight", 0.5)),
                         sigma_parallel_scale=float(getattr(
                             self.config, "trajectory_search_sigma_parallel_scale", 2.0)),
                         sigma_perpendicular_scale=float(getattr(
@@ -1280,10 +1402,12 @@ class MotionBaseModelMF(BaseModelMF):
                             self.config, "trajectory_search_min_delta_t", 0.75)),
                         min_gap_ratio=float(getattr(
                             self.config, "trajectory_search_min_gap_ratio", 1.5)),
-                        allow_normal_cadence=bool(getattr(
-                            self.config,
-                            "trajectory_search_allow_normal_cadence",
-                            False)),
+                        allow_normal_cadence=(
+                            True if use_ct_joint_full else bool(getattr(
+                                self.config,
+                                "trajectory_search_allow_normal_cadence",
+                                False))),
+                        require_recent_transition=use_ct_joint_full,
                     ))
             else:
                 ct_search_box, ct_search_diagnostics = (
@@ -1324,8 +1448,10 @@ class MotionBaseModelMF(BaseModelMF):
             self.config, "use_search_evidence_v21", False))
         use_search_evidence_v22 = bool(getattr(
             self.config, "use_motion_conditioned_search_v22", False))
-        use_search_evidence_v3 = bool(getattr(
-            self.config, "use_motion_conditioned_search_v3", False))
+        use_search_evidence_v3 = (
+            bool(getattr(
+                self.config, "use_motion_conditioned_search_v3", False))
+            or use_ct_joint_full)
         if sum(map(bool, (
                 use_search_evidence_v2,
                 use_search_evidence_v21,
@@ -1345,6 +1471,21 @@ class MotionBaseModelMF(BaseModelMF):
             else "search_v2")
 
         def search_config_value(name, default):
+            if use_ct_joint_full:
+                joint_mapping = {
+                    'point_count': 'ct_endpoint_quota',
+                    'extension_quota': 'ct_endpoint_quota',
+                    'min_points': 'ct_search_min_points',
+                    'max_length': 'ct_tube_max_length',
+                    'max_width': 'ct_tube_max_width',
+                    'max_speed': 'ct_motion_max_speed',
+                    'max_acceleration': 'ct_motion_max_acceleration',
+                    'max_displacement': 'ct_motion_max_displacement',
+                    'acceleration_weight': 'ct_motion_acceleration_weight',
+                }
+                field = joint_mapping.get(name)
+                if field is not None:
+                    return getattr(self.config, field, default)
             return getattr(
                 self.config, f"{search_config_prefix}_{name}", default)
 
@@ -1363,8 +1504,9 @@ class MotionBaseModelMF(BaseModelMF):
         search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
         if use_endpoint_search_evidence:
             motion_prediction = kwargs.get("motion_prediction")
-            use_prepass = bool(getattr(
-                self.config, "use_b1_prepass_support", False))
+            use_prepass = (
+                False if use_ct_joint_full else bool(getattr(
+                    self.config, "use_b1_prepass_support", False)))
             search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
                 ref_boxs,
                 effective_delta_t_list,
@@ -1399,6 +1541,7 @@ class MotionBaseModelMF(BaseModelMF):
                     'max_yaw_rate', np.pi / 2.0)),
                 fallback_min_displacement=float(search_config_value(
                     'min_displacement', 0.2)),
+                fallback_require_recent_transition=use_ct_joint_full,
             )
             if search_v2_box is not None:
                 learned_prior_support = (
@@ -1499,8 +1642,9 @@ class MotionBaseModelMF(BaseModelMF):
         prev_points_list = [points_utils.regularize_pc(prev_frame_pc.points.T, self.config.point_sample_size)[0] for prev_frame_pc in prev_frame_pcs] #采样到特定数量,这里的策略是在已有的点里面重复随机选，直到达到特定数量
 
         trajectory_search_points = np.zeros(
-            (int(getattr(
-                self.config, "trajectory_search_point_count", 128)),
+            (int(getattr(self.config, "ct_tube_quota", 128)
+                 if use_ct_joint_full else getattr(
+                     self.config, "trajectory_search_point_count", 128)),
              baseline_search_points.shape[1]),
             dtype=np.float32,
         )
@@ -1509,22 +1653,42 @@ class MotionBaseModelMF(BaseModelMF):
             "sample_count": 0,
             "available_count": 0,
         }
+        trajectory_search_point_valid_mask = np.zeros(
+            (trajectory_search_points.shape[0],), dtype=np.float32)
         if use_trajectory_search:
             this_points, idx_this = points_utils.regularize_pc(
                 baseline_search_points,
                 self.config.point_sample_size,
                 seed=1,
             )
-            trajectory_search_points, trajectory_search_sampling = (
-                sample_search_extension(
-                    baseline_search_points,
-                    expanded_search_points,
-                    int(getattr(
-                        self.config, "trajectory_search_point_count", 128)),
-                    min_expansion_points=int(getattr(
-                        self.config, "trajectory_search_min_points", 16)),
-                    seed=1,
-                ))
+            if use_ct_joint_full:
+                (trajectory_search_points,
+                 trajectory_search_point_valid_mask,
+                 _, trajectory_search_sampling) = (
+                    sample_source_aware_endpoint_points(
+                        baseline_search_points[:0],
+                        expanded_search_points,
+                        sample_size=int(getattr(
+                            self.config, "ct_tube_quota", 128)),
+                        extension_quota=int(getattr(
+                            self.config, "ct_tube_quota", 128)),
+                        min_points=int(getattr(
+                            self.config, "ct_search_min_points", 3)),
+                        seed=1,
+                    ))
+            else:
+                trajectory_search_points, trajectory_search_sampling = (
+                    sample_search_extension(
+                        baseline_search_points,
+                        expanded_search_points,
+                        int(getattr(
+                            self.config, "trajectory_search_point_count", 128)),
+                        min_expansion_points=int(getattr(
+                            self.config, "trajectory_search_min_points", 16)),
+                        seed=1,
+                    ))
+                trajectory_search_point_valid_mask.fill(
+                    float(trajectory_search_sampling["active"]))
             ct_search_sampling = {
                 "baseline_sample_count": int(self.config.point_sample_size),
                 "expansion_sample_count": int(
@@ -1610,6 +1774,25 @@ class MotionBaseModelMF(BaseModelMF):
                         'min_points', 3)),
                     seed=search_v2_seed,
                 )
+        if use_ct_joint_full and not search_v2_sampling["active"]:
+            search_v2_seed = (
+                int(frame_id) * 1664525 + 1013904223
+            ) & 0xFFFFFFFF
+            (search_v2_points,
+             search_v2_point_valid_mask,
+             search_v2_point_source,
+             search_v2_sampling) = sample_source_aware_endpoint_points(
+                baseline_search_points,
+                baseline_search_points,
+                sample_size=search_v2_point_count,
+                extension_quota=0,
+                min_points=int(search_config_value('min_points', 3)),
+                seed=search_v2_seed,
+            )
+            search_v2_diagnostics.update({
+                "prior_source": "base_only",
+                "source_id": 0,
+            })
         search_has_usable_points = num_points_in_search > 2
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
@@ -1764,6 +1947,9 @@ class MotionBaseModelMF(BaseModelMF):
             data_dict.update({
                 "trajectory_search_points": torch.tensor(
                     trajectory_search_points[None, :],
+                    device=self.device, dtype=torch.float32),
+                "trajectory_search_point_valid_mask": torch.tensor(
+                    trajectory_search_point_valid_mask[None, :],
                     device=self.device, dtype=torch.float32),
                 "trajectory_search_valid": torch.tensor(
                     [trajectory_search_sampling["active"]],
