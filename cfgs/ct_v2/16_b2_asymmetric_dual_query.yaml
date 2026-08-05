@@ -1,0 +1,24 @@
+_base_: 13_b2_v3_refiner.yaml
+
+experiment_name: b2_asymmetric_dual_query_raw_search
+
+# P2: hand endpoint support is retained so only query semantics and the raw
+# candidate change.  The residual head starts at exact q_search == q_obs.
+use_asymmetric_dual_query: true
+use_raw_search_candidate: true
+use_b1_prepass_support: false
+use_uncertainty_geometry: false
+use_action_consistent_router_v3: false
+proposal_inference_mode: observation
+
+# The formal chain never reads current-frame GT dimensions.  The inherited
+# direction threshold also keeps downstream configs 17/18 aligned with B1.
+observation_safe_bbox_size: true
+motion_v3_min_direction_speed: 0.2
+
+search_v3_predict_utility: true
+search_v3_utility_weight: 0.2
+search_v3_utility_margin: 0.05
+search_v3_refined_proposal_weight: 0.0
+dual_query_hidden_dim: 128
+dual_query_gate_max: 0.5

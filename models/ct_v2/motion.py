@@ -9,6 +9,109 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from models.dynamics import DynamicsEncoder, wrap_angle
 
 
+def motion_aligned_axes(velocity_xy, min_speed=0.2, eps=1e-6):
+    """Return stable parallel/perpendicular axes for planar motion."""
+    if velocity_xy.dim() != 2 or velocity_xy.shape[1] != 2:
+        raise ValueError("velocity_xy must have shape [B,2]")
+    speed = torch.linalg.norm(velocity_xy, dim=1, keepdim=True)
+    fallback = torch.zeros_like(velocity_xy)
+    fallback[:, 0] = 1.0
+    direction = torch.where(
+        (speed >= float(min_speed)).expand_as(velocity_xy),
+        velocity_xy / torch.clamp(speed, min=float(eps)),
+        fallback,
+    )
+    perpendicular = torch.stack(
+        (-direction[:, 1], direction[:, 0]), dim=1)
+    return direction, perpendicular, speed.squeeze(1)
+
+
+def motion_aligned_covariance(
+        velocity_xy, log_sigma_parallel_perp, min_speed=0.2, eps=1e-6,
+        direction_xy=None):
+    """Convert motion-frame standard deviations to an XY covariance."""
+    if log_sigma_parallel_perp.shape != velocity_xy.shape:
+        raise ValueError(
+            "log_sigma_parallel_perp must match velocity_xy")
+    default_direction, _, speed = motion_aligned_axes(
+        velocity_xy, min_speed=min_speed, eps=eps)
+    if direction_xy is None:
+        direction = default_direction
+    else:
+        if direction_xy.shape != velocity_xy.shape:
+            raise ValueError("direction_xy must match velocity_xy")
+        direction_norm = torch.linalg.norm(
+            direction_xy, dim=1, keepdim=True)
+        direction = torch.where(
+            (direction_norm > float(eps)).expand_as(direction_xy),
+            direction_xy / torch.clamp(direction_norm, min=float(eps)),
+            default_direction,
+        )
+    perpendicular = torch.stack(
+        (-direction[:, 1], direction[:, 0]), dim=1)
+    log_sigma = log_sigma_parallel_perp
+    low_speed = speed < float(min_speed)
+    isotropic = log_sigma.mean(dim=1, keepdim=True).expand_as(log_sigma)
+    log_sigma = torch.where(low_speed.unsqueeze(1), isotropic, log_sigma)
+    variance = torch.exp(2.0 * log_sigma)
+    covariance = (
+        variance[:, 0, None, None]
+        * direction.unsqueeze(2) * direction.unsqueeze(1)
+        + variance[:, 1, None, None]
+        * perpendicular.unsqueeze(2) * perpendicular.unsqueeze(1)
+    )
+    marginal_log_sigma = 0.5 * torch.log(torch.clamp(
+        torch.diagonal(covariance, dim1=1, dim2=2), min=float(eps)))
+    return {
+        "log_sigma_parallel_perp": log_sigma,
+        "covariance_xy": covariance,
+        "motion_direction_xy": direction,
+        "log_sigma_xy": marginal_log_sigma,
+        "motion_speed": speed,
+    }
+
+
+def physical_motion_uncertainty_loss(
+        mean_xy, target_xy, log_sigma_parallel_perp,
+        motion_direction_xy, valid, eps=1e-6):
+    """Masked-ready robust mean and heteroscedastic Gaussian terms.
+
+    Returned losses are per sample.  Callers own weighting and masked
+    reduction so this helper can also be used by calibration diagnostics.
+    """
+    if mean_xy.shape != target_xy.shape or mean_xy.shape[-1] != 2:
+        raise ValueError("mean_xy and target_xy must both have shape [B,2]")
+    if log_sigma_parallel_perp.shape != mean_xy.shape:
+        raise ValueError("motion log sigma must have shape [B,2]")
+    if motion_direction_xy.shape != mean_xy.shape:
+        raise ValueError("motion direction must have shape [B,2]")
+    perpendicular = torch.stack((
+        -motion_direction_xy[:, 1], motion_direction_xy[:, 0]), dim=1)
+    error = target_xy - mean_xy
+    aligned_error = torch.stack((
+        (error * motion_direction_xy).sum(dim=1),
+        (error * perpendicular).sum(dim=1),
+    ), dim=1)
+    safe_log_sigma = torch.clamp(
+        torch.nan_to_num(log_sigma_parallel_perp), min=-4.0, max=2.5)
+    nll_per_axis = 0.5 * (
+        aligned_error.pow(2) * torch.exp(-2.0 * safe_log_sigma)
+        + 2.0 * safe_log_sigma)
+    robust_mean = torch.nn.functional.smooth_l1_loss(
+        mean_xy, target_xy, reduction="none").mean(dim=1)
+    valid = valid.to(device=mean_xy.device, dtype=mean_xy.dtype).reshape(-1)
+    finite = (
+        torch.isfinite(aligned_error).all(dim=1)
+        & torch.isfinite(nll_per_axis).all(dim=1)
+    ).to(mean_xy.dtype)
+    return {
+        "mean_per_sample": robust_mean,
+        "nll_per_sample": nll_per_axis.sum(dim=1),
+        "aligned_error": aligned_error,
+        "valid": valid * finite,
+    }
+
+
 class ContinuousTimeMotionEncoder(DynamicsEncoder):
     """Legacy CT-v2 encoder kept for historical checkpoint compatibility."""
 
@@ -222,19 +325,26 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             eps=1e-3,
             time_scale=0.5,
             residual_velocity_scale=4.0,
-            initial_sigma=0.5):
+            initial_sigma=0.5,
+            motion_aligned_uncertainty=False,
+            min_direction_speed=0.2):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
         self.step_dim = int(step_dim)
         self.eps = float(eps)
         self.time_scale = max(float(time_scale), self.eps)
         self.residual_velocity_scale = float(residual_velocity_scale)
+        self.motion_aligned_uncertainty = bool(
+            motion_aligned_uncertainty)
+        self.min_direction_speed = float(min_direction_speed)
         if self.hidden_dim <= 0 or self.step_dim <= 0:
             raise ValueError("physical motion encoder dimensions must be positive")
         if self.residual_velocity_scale <= 0:
             raise ValueError("physical residual velocity scale must be positive")
         if initial_sigma <= 0:
             raise ValueError("physical initial sigma must be positive")
+        if self.min_direction_speed < 0:
+            raise ValueError("minimum direction speed must be non-negative")
 
         # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
         # query/pair ratio, and transition-valid flag.
@@ -259,6 +369,65 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         nn.init.zeros_(self.velocity_residual_head.bias)
         nn.init.zeros_(self.log_sigma_head.weight)
         nn.init.constant_(self.log_sigma_head.bias, math.log(initial_sigma))
+        # Historical B1-v3 instances keep this non-persistent.  The new
+        # calibrated path stores it in checkpoints without breaking strict
+        # loading of old state dictionaries.
+        self.register_buffer(
+            "log_sigma_calibration",
+            torch.zeros(2),
+            persistent=self.motion_aligned_uncertainty,
+        )
+
+    def set_uncertainty_calibration(self, log_scale):
+        value = torch.as_tensor(
+            log_scale,
+            device=self.log_sigma_calibration.device,
+            dtype=self.log_sigma_calibration.dtype,
+        ).reshape(-1)
+        if value.numel() == 1:
+            value = value.repeat(2)
+        if value.numel() != 2 or not bool(torch.isfinite(value).all()):
+            raise ValueError("calibration log scale must contain two finite values")
+        self.log_sigma_calibration.copy_(value)
+
+    def _uncertainty_outputs(
+            self, basis_velocity_xy, raw_log_sigma, direction_xy=None):
+        if not self.motion_aligned_uncertainty:
+            direction, _, speed = motion_aligned_axes(
+                basis_velocity_xy,
+                min_speed=max(self.eps, 1e-6), eps=self.eps)
+            if direction_xy is not None:
+                direction_norm = torch.linalg.norm(
+                    direction_xy, dim=1, keepdim=True)
+                direction = torch.where(
+                    (direction_norm > self.eps).expand_as(direction_xy),
+                    direction_xy / torch.clamp(
+                        direction_norm, min=self.eps),
+                    direction,
+                )
+            return {
+                "log_sigma_parallel_perp": raw_log_sigma,
+                "covariance_xy": torch.diag_embed(
+                    torch.exp(2.0 * raw_log_sigma)),
+                "motion_direction_xy": direction,
+                "log_sigma_xy": raw_log_sigma,
+                "motion_speed": speed,
+            }
+        calibrated = torch.clamp(
+            raw_log_sigma
+            + self.log_sigma_calibration.to(
+                device=raw_log_sigma.device,
+                dtype=raw_log_sigma.dtype).unsqueeze(0),
+            min=-4.0,
+            max=2.5,
+        )
+        return motion_aligned_covariance(
+            basis_velocity_xy,
+            calibrated,
+            min_speed=self.min_direction_speed,
+            eps=self.eps,
+            direction_xy=direction_xy,
+        )
 
     def _format_query_gap(self, value, batch_size, reference):
         if value is None:
@@ -314,14 +483,21 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         initial_log_sigma = ref_boxs.new_full(
             (batch_size, 2), self.log_sigma_head.bias[0].item())
         if history_length < 2:
+            uncertainty = self._uncertainty_outputs(
+                zeros_xy, initial_log_sigma)
             return {
                 "feature": zeros_feature,
                 "velocity_xy": zeros_xy,
+                "basis_velocity_xy": zeros_xy,
                 "prior_xy": zeros_xy,
+                "mu_xy": zeros_xy,
                 "kinematic_prior_xy": zeros_xy,
-                "log_sigma_xy": initial_log_sigma,
+                **uncertainty,
+                "direction_xy": uncertainty["motion_direction_xy"],
                 "valid": ref_boxs.new_zeros((batch_size,)),
                 "gap_ratio": ref_boxs.new_ones((batch_size,)),
+                "source_id": torch.zeros(
+                    batch_size, device=ref_boxs.device, dtype=torch.long),
             }
 
         if safe_delta_t.shape[1] < history_length:
@@ -363,11 +539,20 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         # A zero vector is not a no-op for a GRU with biases.  Compact valid
         # transitions before packing so padded history cannot alter the state.
         projected = projected * chronological_valid.unsqueeze(-1)
-        compact_indices = torch.argsort(
-            (~chronological_valid).to(torch.int64),
-            dim=1,
-            stable=True,
-        )
+        # Use unique order-aware keys instead of ``stable=True`` so the
+        # checkpoint remains runnable on the project's PyTorch 1.8 stack.
+        # Valid entries retain their chronological indices; invalid entries
+        # are shifted behind them.  Because every key is unique, an unstable
+        # sort cannot permute valid transitions with equal keys.
+        chronological_index = torch.arange(
+            chronological_valid.shape[1],
+            device=chronological_valid.device,
+            dtype=torch.int64,
+        ).unsqueeze(0)
+        compact_key = chronological_index + (
+            (~chronological_valid).to(torch.int64)
+            * chronological_valid.shape[1])
+        compact_indices = torch.argsort(compact_key, dim=1)
         compact_projected = torch.gather(
             projected,
             dim=1,
@@ -397,7 +582,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
 
         recent_pair_valid = pair_valid[:, 0]
         valid = (recent_pair_valid & finite_row).to(ref_boxs.dtype)
-        base_velocity = velocity_xy[:, 0]
+        base_velocity = velocity_xy[:, 0] * valid.unsqueeze(1)
         residual_velocity = self.residual_velocity_scale * torch.tanh(
             self.velocity_residual_head(context))
         predicted_velocity = (
@@ -405,18 +590,41 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         prior_xy = predicted_velocity * query_gap.unsqueeze(1)
         kinematic_prior_xy = (
             base_velocity * query_gap.unsqueeze(1) * valid.unsqueeze(1))
-        log_sigma_xy = torch.clamp(
+        raw_log_sigma = torch.clamp(
             self.log_sigma_head(context), min=-4.0, max=2.5)
+        base_direction, _, base_speed = motion_aligned_axes(
+            base_velocity,
+            min_speed=self.min_direction_speed,
+            eps=self.eps,
+        )
+        displacement_norm = torch.linalg.norm(
+            prior_xy, dim=1, keepdim=True)
+        displacement_direction = torch.where(
+            (displacement_norm > self.eps).expand_as(prior_xy),
+            prior_xy / torch.clamp(displacement_norm, min=self.eps),
+            base_direction,
+        )
+        direction = torch.where(
+            (base_speed < self.min_direction_speed).unsqueeze(1),
+            displacement_direction,
+            base_direction,
+        )
+        uncertainty = self._uncertainty_outputs(
+            base_velocity, raw_log_sigma, direction_xy=direction)
         gap_ratio = torch.where(
             valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw))
         return {
             "feature": context * valid.unsqueeze(1),
             "velocity_xy": predicted_velocity,
+            "basis_velocity_xy": base_velocity,
             "prior_xy": prior_xy,
+            "mu_xy": prior_xy,
             "kinematic_prior_xy": kinematic_prior_xy,
-            "log_sigma_xy": log_sigma_xy,
+            **uncertainty,
+            "direction_xy": uncertainty["motion_direction_xy"],
             "valid": valid,
             "gap_ratio": gap_ratio,
+            "source_id": (valid > 0).to(torch.long),
         }
 
 

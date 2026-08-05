@@ -1,10 +1,12 @@
 # Created by zenn at 2021/4/27
 # Modified by Aron Lin at Jun 4 20:32:36 CST 2023 
 
+import copy
 import numpy as np
 import torch
 from easydict import EasyDict
 from nuscenes.utils import geometry_utils
+from pyquaternion import Quaternion
 
 import datasets.points_utils as points_utils
 from utils.ct_history import (
@@ -43,13 +45,14 @@ from utils.candidate_utils import (
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
-    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    resolve_b1_search_support,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
 )
+from utils.replay_cache import RecursiveReplayCache, replay_config_sha256
 
 
 def no_processing(data, *args):
@@ -208,7 +211,11 @@ def motion_processing(data, config, template_transform=None, search_transform=No
         'box_label_prev': box_label_prev,
         'motion_label': motion_label,
         'motion_state_label': motion_state_label.astype('int'),
-        'bbox_size': this_box.wlh,
+        'bbox_size': (
+            coordinate_anchor_box.wlh
+            if bool(getattr(
+                config, 'observation_safe_bbox_size', False))
+            else this_box.wlh),
         'seg_label': stack_seg_label.astype('int'),
     }
 
@@ -237,7 +244,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_frames = data['prev_frames']
     this_frame = data['this_frame']
     candidate_id = data['candidate_id']
-    valid_mask = data['valid_mask']
+    recursive_replay = data.get('recursive_replay')
+    valid_mask = (
+        list(recursive_replay['history_valid_mask'])
+        if recursive_replay is not None else data['valid_mask'])
     num_hist = len(valid_mask)
     empty_counter = 0
 
@@ -332,6 +342,28 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
+    if recursive_replay is not None:
+        if int(candidate_id) != 0:
+            raise ValueError(
+                "recursive replay is defined for candidate_id=0 only")
+        replay_rows = np.asarray(
+            recursive_replay['history_boxes_world'], dtype=np.float64)
+        if replay_rows.shape != (num_hist, 7):
+            raise ValueError(
+                f"recursive replay history must have shape {(num_hist, 7)}")
+        ref_boxs = []
+        for source_box, row in zip(canonical_prev_boxs, replay_rows):
+            replay_box = copy.deepcopy(source_box)
+            replay_box.center = row[:3].copy()
+            replay_box.wlh = row[3:6].copy()
+            replay_box.orientation = Quaternion(
+                axis=[0, 0, 1], radians=float(row[6]))
+            ref_boxs.append(replay_box)
+        candidate_offsets = equivalent_local_offsets(
+            canonical_prev_boxs, ref_boxs, degrees=config.degrees)
+        candidate_shared_transform = np.zeros(3, dtype=np.float32)
+        candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
+
     use_search_evidence_v3 = bool(getattr(
         config, 'use_motion_conditioned_search_v3', False))
     if use_search_evidence_v3 and not bool(getattr(
@@ -339,12 +371,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         raise ValueError("B2-v3 requires B1motion-v3 shared history")
     b2_v3_history_mode = None
     if use_search_evidence_v3:
-        b2_v3_history_mode = select_b2_v3_history_mode(
-            data.get('tracklet_key', data.get('tracklet_id', 'unknown')),
-            this_frame_id if this_frame_id is not None else sample_index,
-            candidate_id,
-            seed=int(getattr(config, 'seed', 42)),
-        )
+        b2_v3_history_mode = (
+            'recursive_replay' if recursive_replay is not None
+            else select_b2_v3_history_mode(
+                data.get('tracklet_key', data.get('tracklet_id', 'unknown')),
+                this_frame_id if this_frame_id is not None else sample_index,
+                candidate_id,
+                seed=int(getattr(config, 'seed', 42)),
+            ))
     ct_motion_history_boxs, ct_search_history_boxs = build_ct_training_histories(
         canonical_prev_boxs,
         ref_boxs,
@@ -360,6 +394,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             config, 'ct_history_recursive_error_scale', 1.0)),
         degrees=config.degrees,
     )
+    if recursive_replay is not None:
+        # The cache already contains the causal frozen-B0 rollout.  Applying
+        # another synthetic perturbation here would recreate the train/test
+        # mismatch that the replay path is designed to remove.
+        ct_motion_history_boxs = ref_boxs
+        ct_search_history_boxs = ref_boxs
     canonical_ref_boxs = boxes_to_anchor_parameters(
         canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
     use_ordered_trajectory = bool(getattr(
@@ -436,6 +476,29 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     (effective_relative_timestamps, effective_delta_t_list,
      effective_local_timestamps, effective_current_timestamp) = (
         effective_time_fields)
+    if recursive_replay is not None:
+        replay_delta_t = np.asarray(
+            recursive_replay['delta_t'], dtype=np.float32)
+        if replay_delta_t.shape != (num_hist,):
+            raise ValueError(
+                "recursive replay delta_t must match history length")
+        if (not np.isfinite(replay_delta_t).all()
+                or np.any(replay_delta_t <= 0)):
+            raise ValueError(
+                "recursive replay delta_t must be finite and positive")
+        replay_current_delta_t = float(
+            recursive_replay['current_delta_t'])
+        if (not np.isfinite(replay_current_delta_t)
+                or replay_current_delta_t <= 0):
+            raise ValueError(
+                "recursive replay current_delta_t must be finite and positive")
+        effective_delta_t_list = replay_delta_t.tolist()
+        # Keep relative clock diagnostics internally consistent with the
+        # cached physical intervals (newest-to-oldest ordering).
+        cumulative = np.cumsum(replay_delta_t)
+        effective_relative_timestamps = (-cumulative).tolist()
+        effective_local_timestamps = np.asarray(
+            effective_relative_timestamps + [0.0], dtype=np.float32)
     motion_aux_contract = None
     if use_motion_v3:
         motion_aux_prev_frames = data.get('motion_aux_prev_frames')
@@ -743,37 +806,76 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 recursive_error_scale=1.0,
                 degrees=config.degrees,
             )
-        search_v2_box, search_v2_diagnostics = (
-            build_trajectory_endpoint_search_box(
-                search_v2_history_boxes,
-                effective_delta_t_list,
-                valid_mask=valid_mask,
-                max_speed=float(search_config_value('max_speed', 20.0)),
-                max_acceleration=float(search_config_value(
-                    'max_acceleration', 8.0)),
-                max_displacement=float(search_config_value(
-                    'max_displacement', 12.0)),
-                acceleration_weight=float(search_config_value(
-                    'acceleration_weight', 0.5)),
-                max_yaw_rate=float(search_config_value(
-                    'max_yaw_rate', np.pi / 2.0)),
-                min_displacement=float(search_config_value(
-                    'min_displacement', 0.2)),
-            ))
+        replay_b1 = (
+            recursive_replay.get('b1')
+            if recursive_replay is not None else None)
+        use_prepass_support = bool(getattr(
+            config, 'use_b1_prepass_support', False))
+        support_prediction = replay_b1
+        if isinstance(replay_b1, dict) and recursive_replay is not None:
+            support_prediction = dict(replay_b1)
+            support_prediction.setdefault(
+                'current_delta_t', recursive_replay['current_delta_t'])
+        search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
+            search_v2_history_boxes,
+            effective_delta_t_list,
+            valid_mask,
+            prediction=support_prediction,
+            use_b1_prepass=use_prepass_support,
+            use_dynamic_sigma=bool(getattr(
+                config, 'search_v3_use_dynamic_sigma', False)),
+            fixed_margins=(
+                float(getattr(
+                    config, 'search_v3_fixed_margin_parallel', 2.0)),
+                float(getattr(
+                    config, 'search_v3_fixed_margin_perpendicular', 1.0)),
+            ),
+            coverage_scale=float(getattr(
+                config, 'search_v3_coverage_scale', 2.448)),
+            min_direction_speed=float(getattr(
+                config, 'motion_v3_min_direction_speed', 0.2)),
+            max_length=float(search_config_value('max_length', 24.0)),
+            max_width=float(search_config_value('max_width', 10.0)),
+            fallback_max_speed=float(search_config_value('max_speed', 20.0)),
+            fallback_max_acceleration=float(search_config_value(
+                'max_acceleration', 8.0)),
+            fallback_max_displacement=float(search_config_value(
+                'max_displacement', 12.0)),
+            fallback_acceleration_weight=float(search_config_value(
+                'acceleration_weight', 0.5)),
+            fallback_max_yaw_rate=float(search_config_value(
+                'max_yaw_rate', np.pi / 2.0)),
+            fallback_min_displacement=float(search_config_value(
+                'min_displacement', 0.2)),
+        )
         if search_v2_box is not None:
+            learned_prior_support = (
+                search_v2_diagnostics.get('prior_source') == 'b1')
             search_v2_expanded_pc = (
                 points_utils.generate_subwindow_with_aroundboxs(
                     this_pc,
                     search_v2_box,
                     ref_boxs[0],
-                    scale=config.bb_scale,
-                    offset=config.bb_offset,
+                    scale=(1.0 if learned_prior_support
+                           else config.bb_scale),
+                    offset=(0.0 if learned_prior_support
+                            else config.bb_offset),
                 ))
             search_v2_expanded_points = search_v2_expanded_pc.points.T
-            search_v2_local_box = points_utils.transform_box(
-                search_v2_box, ref_boxs[0])
-            search_v2_endpoint_xy = np.asarray(
-                search_v2_local_box.center[:2], dtype=np.float32)
+            endpoint_center = search_v2_diagnostics.get('endpoint_center')
+            if endpoint_center is not None:
+                endpoint_box = copy.deepcopy(ref_boxs[0])
+                endpoint_box.center = np.asarray(
+                    endpoint_center, dtype=np.float64)
+                endpoint_local = points_utils.transform_box(
+                    endpoint_box, ref_boxs[0])
+                search_v2_endpoint_xy = np.asarray(
+                    endpoint_local.center[:2], dtype=np.float32)
+            else:
+                search_v2_local_box = points_utils.transform_box(
+                    search_v2_box, ref_boxs[0])
+                search_v2_endpoint_xy = np.asarray(
+                    search_v2_local_box.center[:2], dtype=np.float32)
 
     # Preserve the pre-normalization anchor: ref_boxs[0] becomes approximately
     # zero after transform_box(), so the normalized tensor cannot prove that
@@ -1019,6 +1121,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     current_delta_t_effective = (
         effective_delta_t_list[0] if len(effective_delta_t_list) > 0
         else float(getattr(config, 'dynamics_fixed_delta_t', default_time_step)))
+    if recursive_replay is not None:
+        current_delta_t_effective = float(
+            recursive_replay['current_delta_t'])
     # Supervision is always defined in physical time. A fixed/shuffled negative
     # control may alter only the time consumed by DynamicsEncoder.
     dynamics_displacement_label, velocity_label = canonical_dynamics_targets(
@@ -1230,6 +1335,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 search_v2_sampling['extension_count']),
             'search_v3_overlap_count': np.float32(
                 search_v2_sampling['overlap_count']),
+            'search_v3_prior_source_id': np.int64(
+                search_v2_diagnostics.get('source_id', 0)),
+            'search_v3_support_truncated': np.float32(
+                bool(search_v2_diagnostics.get('truncated', False))),
+            'search_v3_support_requested_extent': np.asarray((
+                search_v2_diagnostics.get('requested_length', 0.0),
+                search_v2_diagnostics.get('requested_width', 0.0),
+            ), dtype=np.float32),
+            'search_v3_support_actual_extent': np.asarray((
+                search_v2_diagnostics.get('length', 0.0),
+                search_v2_diagnostics.get('width', 0.0),
+            ), dtype=np.float32),
             'b2_v3_history_ref_boxs':
                 motion_main_ref_boxs.astype('float32'),
             'b2_v3_history_valid_mask':
@@ -1240,6 +1357,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 b2_v3_history_mode_id(b2_v3_history_mode)),
             'b2_v3_history_anchor': coordinate_anchor,
         })
+        if replay_b1 is not None:
+            data_dict.update({
+                'replay_b1_contract_present': np.float32(1.0),
+                'replay_b1_mu_xy': np.asarray(
+                    replay_b1['mu_xy'], dtype=np.float32),
+                'replay_b1_direction_xy': np.asarray(
+                    replay_b1['direction_xy'], dtype=np.float32),
+                'replay_b1_log_sigma_parallel_perp': np.asarray(
+                    replay_b1['log_sigma_parallel_perp'], dtype=np.float32),
+                'replay_b1_gap_ratio': np.float32(
+                    replay_b1['gap_ratio']),
+                'replay_b1_valid': np.float32(
+                    bool(replay_b1['valid'])),
+            })
     if use_motion_v3:
         data_dict.update({
             'motion_main_ref_boxs': motion_main_ref_boxs.astype('float32'),
@@ -1410,6 +1541,27 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.use_twc or self.use_m3_path_distillation)
         self.use_b1motion_v3 = bool(getattr(
             self.config, 'use_b1motion_v3', False))
+        self.use_recursive_replay_cache = bool(getattr(
+            self.config, 'use_recursive_replay_cache', False))
+        self.recursive_replay_cache = None
+        if self.use_recursive_replay_cache:
+            cache_dir = getattr(
+                self.config, 'recursive_replay_cache_dir', None)
+            if not cache_dir:
+                raise ValueError(
+                    "use_recursive_replay_cache requires "
+                    "recursive_replay_cache_dir")
+            expected_manifest = {
+                'dataset': str(getattr(
+                    self.config, 'dataset', 'unknown')),
+                'split': str(getattr(
+                    self.config, 'train_split', 'train')),
+                'replay_config_sha256': replay_config_sha256(self.config),
+            }
+            self.recursive_replay_cache = RecursiveReplayCache(
+                cache_dir, expected_manifest=expected_manifest)
+        self.recursive_replay_require_all = bool(getattr(
+            self.config, 'recursive_replay_require_all', True))
         self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
             getattr(self.config, 'candidate_trajectory_mode', 'independent'))
         self.trajectory_training_irregular_probability = float(getattr(
@@ -1535,6 +1687,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         prev_frames_tuple = self.dataset.get_frames(tracklet_id, frame_ids=prev_frame_ids)
         prev_frames_dict = create_history_frame_dict(prev_frames_tuple)
+        tracklet_key = (
+            self.dataset.get_tracklet_key(tracklet_id)
+            if hasattr(self.dataset, "get_tracklet_key")
+            else str(tracklet_id))
         data = {
             "first_frame": first_frame,
             "prev_frames": prev_frames_dict,
@@ -1546,11 +1702,17 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             "history_offsets": offsets,
             "sample_index": int(sample_index),
             "tracklet_id": int(tracklet_id),
-            "tracklet_key": (
-                self.dataset.get_tracklet_key(tracklet_id)
-                if hasattr(self.dataset, "get_tracklet_key")
-                else str(tracklet_id)),
+            "tracklet_key": tracklet_key,
         }
+        if self.recursive_replay_cache is not None:
+            replay = self.recursive_replay_cache.get(
+                tracklet_key, this_frame_id)
+            if replay is None and self.recursive_replay_require_all:
+                raise KeyError(
+                    f"recursive replay missing {tracklet_key} frame "
+                    f"{this_frame_id}")
+            if replay is not None:
+                data["recursive_replay"] = replay
         if motion_aux_offsets is not None:
             motion_aux_frame_ids, motion_aux_valid_mask = (
                 get_history_frame_ids_and_masks(

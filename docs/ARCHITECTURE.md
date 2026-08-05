@@ -1,5 +1,13 @@
 # CT-SeqTrack v2 架构
 
+> **历史文档（2026-08-04 起不再作为当前设计）**：本文记录已完成/已否决的
+> v2、B2-v2.1 与旧融合链，适合复现实验和追溯代码。最新审计发现 B1 learned
+> prior 与 B2 hand-coded endpoint 是两个竞争的运动模型，且 B2 的 B1-centered
+> clip 会伤害 raw Search candidate。当前目标架构、模块完成度和消融顺序见
+> [B1–B4 连接重构与消融计划](B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)；
+> 具体耦合张量、梯度边界和在线 pre-pass 合同见
+> [非对称双查询耦合规范](ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md)。
+
 ## 设计约束
 
 - 基线是同仓库、同训练流程的 SeqTrack3D。

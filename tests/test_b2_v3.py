@@ -4,6 +4,7 @@ import io
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -11,6 +12,7 @@ import torch
 
 from models.ct_v2.selective_innovation import (
     ActionConsistentInnovationRouter,
+    SELECTIVE_V4_ROLLOUT_SCHEMA,
     StateAlignedSearchRefiner,
     action_consistent_router_loss,
     calibrate_action_threshold,
@@ -35,7 +37,22 @@ from tools.selective_v3_common import (
     tensor_prefix_hash,
     write_v3_rollout_artifact,
 )
-from tools.train_action_router_v3 import validate_training_stage
+from tools.calibrate_b3_router_recursive import (
+    select_recursive_calibration_result,
+)
+from tools.build_b2_v3_five_mode_metrics import (
+    observation_max_abs,
+    ope_metrics,
+    paired_tracklet_bootstrap,
+)
+from tools.train_action_router_v3 import (
+    build_recursive_threshold_candidates,
+    validate_training_stage,
+)
+from utils.replay_cache import (
+    b1_calibration_config_sha256,
+    b2_candidate_config_sha256,
+)
 
 
 class SharedHistoryContractTest(unittest.TestCase):
@@ -55,6 +72,39 @@ class SharedHistoryContractTest(unittest.TestCase):
         select_b2_v3_history_mode("track", 8, 3, 42)
         actual = np.random.rand(4)
         self.assertTrue(np.array_equal(actual, expected))
+
+
+class FiveModeMetricTest(unittest.TestCase):
+    def test_ope_metrics_and_paired_tracklet_bootstrap(self):
+        observation = {
+            "a": (np.asarray([1.0, 0.2]), np.asarray([0.0, 1.5])),
+            "b": (np.asarray([1.0, 0.4]), np.asarray([0.0, 1.0])),
+        }
+        oracle = {
+            "a": (np.asarray([1.0, 0.8]), np.asarray([0.0, 0.2])),
+            "b": (np.asarray([1.0, 0.9]), np.asarray([0.0, 0.1])),
+        }
+        baseline = ope_metrics(
+            np.concatenate([value[0] for value in observation.values()]),
+            np.concatenate([value[1] for value in observation.values()]))
+        improved = ope_metrics(
+            np.concatenate([value[0] for value in oracle.values()]),
+            np.concatenate([value[1] for value in oracle.values()]))
+        self.assertGreater(improved["success"], baseline["success"])
+        self.assertGreater(improved["precision"], baseline["precision"])
+        result = paired_tracklet_bootstrap(
+            observation, oracle, samples=100, seed=7)
+        self.assertGreater(result["oracle_success_gain_ci95"][0], 0.0)
+        self.assertGreater(result["oracle_precision_gain_ci95"][0], 0.0)
+
+    def test_observation_invariance_requires_alignment(self):
+        reference = {("track", 1): {
+            "observation_x": "1", "observation_y": "2",
+            "observation_z": "3", "observation_yaw": "4"}}
+        identical = {("track", 1): dict(reference[("track", 1)])}
+        self.assertEqual(observation_max_abs(reference, identical), 0.0)
+        with self.assertRaises(ValueError):
+            observation_max_abs(reference, {})
 
 
 class StateAlignedRefinerTest(unittest.TestCase):
@@ -192,8 +242,9 @@ class ActionRouterTest(unittest.TestCase):
 
     def test_forced_action_executes_exact_candidate_and_step(self):
         router = ActionConsistentInnovationRouter()
-        _, diagnostics = router(
-            **self._inputs(),
+        inputs = self._inputs()
+        final_box, diagnostics = router(
+            **inputs,
             policy_override=torch.tensor([
                 router.POLICY_MOTION, router.POLICY_REFINED]),
             forced_step_ratio=torch.tensor([0.25, 1.0]))
@@ -203,6 +254,35 @@ class ActionRouterTest(unittest.TestCase):
         self.assertTrue(torch.equal(
             diagnostics["router_v3_selected_step_index"],
             torch.tensor([0, 2])))
+        self.assertTrue(torch.equal(final_box[:, 2:],
+                                    inputs["observation_box"][:, 2:]))
+
+    def test_step_ratio_precedes_single_safety_cap(self):
+        router = ActionConsistentInnovationRouter(
+            normal_step_cap=0.20, gap_step_cap=0.35)
+        inputs = self._inputs(batch=1)
+        inputs["observation_box"] = torch.zeros(1, 4)
+        inputs["motion_proposal_xy"] = torch.tensor([[0.4, 0.0]])
+        inputs["motion_search_xy"] = torch.tensor([[2.0, 0.0]])
+        inputs["gap_ratio"] = torch.ones(1)
+        quarter, quarter_diag = router(
+            **inputs,
+            policy_override=torch.tensor([router.POLICY_MOTION]),
+            forced_step_ratio=torch.tensor([0.25]))
+        full, full_diag = router(
+            **inputs,
+            policy_override=torch.tensor([router.POLICY_MOTION]),
+            forced_step_ratio=torch.tensor([1.0]))
+        self.assertTrue(torch.allclose(
+            quarter[:, :2], torch.tensor([[0.1, 0.0]]), atol=1e-6))
+        self.assertTrue(torch.allclose(
+            full[:, :2], torch.tensor([[0.2, 0.0]]), atol=1e-6))
+        self.assertAlmostEqual(
+            float(quarter_diag["router_v3_applied_alpha"]), 0.25,
+            places=6)
+        self.assertAlmostEqual(
+            float(full_diag["router_v3_applied_alpha"]), 0.5,
+            places=6)
 
     def test_auto_selects_and_executes_the_same_highest_q10_action(self):
         router = ActionConsistentInnovationRouter()
@@ -270,6 +350,58 @@ class ActionRouterTest(unittest.TestCase):
         self.assertGreater(
             float(router.search_projection[1].weight.grad.abs().sum()), 0.0)
 
+    def test_scalar_router_ignores_high_dimensional_embeddings(self):
+        torch.manual_seed(19)
+        router = ActionConsistentInnovationRouter(
+            observation_dim=4, motion_dim=3, search_dim=6,
+            scalar_only=True)
+        first = torch.randn(5, router.export_feature_dim)
+        second = first.clone()
+        embedding_width = 4 + 3 + 6
+        second[:, :embedding_width] = torch.randn_like(
+            second[:, :embedding_width]) * 100.0
+        first_prediction = router.predict_export_features(first)
+        second_prediction = router.predict_export_features(second)
+        self.assertTrue(torch.equal(
+            first_prediction["q10"], second_prediction["q10"]))
+        self.assertTrue(torch.equal(
+            first_prediction["q50"], second_prediction["q50"]))
+
+    def test_scalar_router_consumes_explicit_utility_signal(self):
+        router = ActionConsistentInnovationRouter(
+            scalar_only=True, use_utility_feature=True)
+        inputs = self._inputs()
+        _, diagnostics = router(
+            **inputs, search_utility=torch.tensor([0.2, 0.8]),
+            support_truncated=torch.tensor([0.0, 1.0]))
+        scalars = diagnostics["router_v3_features"][:, -router.scalar_dim:]
+        utility_index = router.scalar_feature_names.index("search_utility")
+        targetness_index = router.scalar_feature_names.index(
+            "search_targetness_max")
+        truncated_index = router.scalar_feature_names.index(
+            "support_truncated")
+        self.assertTrue(torch.equal(
+            scalars[:, utility_index], torch.tensor([0.2, 0.8])))
+        self.assertTrue(torch.equal(
+            scalars[:, targetness_index], inputs["search_targetness_max"]))
+        self.assertTrue(torch.equal(
+            scalars[:, truncated_index], torch.tensor([0.0, 1.0])))
+        self.assertEqual(router.action_names[-1], "SEARCH@1")
+
+    def test_v4_schema_and_clipping_are_bound_to_state(self):
+        router = ActionConsistentInnovationRouter(
+            scalar_only=True, use_utility_feature=True)
+        low = torch.full((router.scalar_dim,), -1.0)
+        high = torch.full((router.scalar_dim,), 1.0)
+        router.set_scalar_clipping(low, high)
+        state = router.state_dict()
+        self.assertIn("scalar_clip_low", state)
+        self.assertIn("scalar_clip_high", state)
+        clone = ActionConsistentInnovationRouter(
+            scalar_only=True, use_utility_feature=True)
+        clone.load_state_dict(state, strict=True)
+        self.assertEqual(clone.feature_schema_hash, router.feature_schema_hash)
+
     def test_calibration_uses_exact_action(self):
         rows = 100
         q10 = np.zeros((rows, 2, 3), dtype=np.float64)
@@ -282,6 +414,36 @@ class ActionRouterTest(unittest.TestCase):
             min_selected_count=5)
         self.assertGreaterEqual(result["helpful_precision"], 0.75)
         self.assertLessEqual(result["harm_rate"], 0.10)
+
+    def test_recursive_threshold_grid_and_final_selection_are_safe(self):
+        q10 = np.full((50, 2, 3), -2.0, dtype=np.float64)
+        q10[:, 0, 0] = np.linspace(-1.0, 1.0, 50)
+        candidates = build_recursive_threshold_candidates(
+            q10, np.ones((50, 2), dtype=bool), max_count=11)
+        self.assertLessEqual(len(candidates), 11)
+        self.assertLess(candidates[0], -1.0)
+        self.assertGreater(candidates[-1], 1.0)
+
+        best = select_recursive_calibration_result([
+            {
+                "threshold": 0.1, "recursive_success": 0.61,
+                "harm_rate": 0.04, "intervention_count": 8,
+            },
+            {
+                "threshold": 0.2, "recursive_success": 0.63,
+                "harm_rate": 0.06, "intervention_count": 4,
+            },
+            {
+                "threshold": 0.3, "recursive_success": 0.62,
+                "harm_rate": 0.02, "intervention_count": 3,
+            },
+        ], baseline_success=0.60, max_harm_rate=0.05)
+        self.assertEqual(best["threshold"], 0.3)
+        with self.assertRaises(RuntimeError):
+            select_recursive_calibration_result([{
+                "threshold": 0.5, "recursive_success": 0.59,
+                "harm_rate": 0.0, "intervention_count": 1,
+            }], baseline_success=0.60)
 
 
 class StrictInitializationTest(unittest.TestCase):
@@ -309,6 +471,18 @@ class StrictInitializationTest(unittest.TestCase):
                 source["search_evidence_v21." + key] = value
         migrated, _ = collect_migrated_search_state(source)
         self.assertEqual(len(migrated), 33)
+        dual_migrated, _ = collect_migrated_search_state(
+            source, dual_query=True)
+        dual_weight = dual_migrated[
+            "state_aligned_search_refiner.query_projection.0.weight"]
+        self.assertEqual(tuple(dual_weight.shape), (32, 69))
+        expected_query = source[
+            "search_evidence_v21.query_projection.0.weight"
+        ][:, :-5].reshape(dual_weight.shape[0], 64, 4).mean(dim=2)
+        self.assertTrue(torch.equal(dual_weight[:, :64], expected_query))
+        self.assertTrue(torch.equal(
+            dual_weight[:, -5:],
+            source["search_evidence_v21.query_projection.0.weight"][:, -5:]))
         broken = {
             key: value for key, value in source.items()
             if not key.startswith("search_evidence_v21.vote_head.")
@@ -354,6 +528,92 @@ class StrictInitializationTest(unittest.TestCase):
                 "state_dict": broken,
                 "b2_v3_frozen_reference_hashes": hashes,
             }, path)
+            with self.assertRaises(RuntimeError):
+                load_matching_v3_model_state(DummyV3(), path)
+
+    def test_rollout_loader_enforces_b1_calibration_binding(self):
+        class CalibratedMotion(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1))
+                self.register_buffer(
+                    "log_sigma_calibration", torch.tensor([0.1, -0.2]))
+
+        class DummyV3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                for name in (
+                        "seg_pointnet", "mini_pointnet", "motion_mlp",
+                        "motion_state_mlp", "feature_pointnet", "Transformer",
+                        "state_aligned_search_refiner",
+                        "action_consistent_router_v3"):
+                    setattr(self, name, torch.nn.Linear(1, 1, bias=False))
+                self.physical_motion_encoder = CalibratedMotion()
+                self.require_b1_calibration_artifact = True
+                self.require_b1_calibration_passed = True
+                self.config_contract_required = True
+                self.config = SimpleNamespace(
+                    dataset="nuscenes", train_split="mini_train",
+                    search_v3_fixed_margin_parallel=1.5,
+                    search_v3_fixed_margin_perpendicular=0.75)
+                self.config.require_b2_candidate_config_contract = True
+
+        prefixes = (
+            "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
+            "motion_state_mlp.", "feature_pointnet.", "Transformer.",
+            "physical_motion_encoder.",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "candidate.ckpt"
+            source_model = DummyV3()
+            state = source_model.state_dict()
+            hashes = {
+                prefix: tensor_prefix_hash(state, prefix)[0]
+                for prefix in prefixes
+            }
+            calibration = {
+                "schema": "ct_seqtrack.b1_uncertainty_calibration.v2",
+                "log_scale_parallel_perpendicular": [0.1, -0.2],
+                "fixed_margin_parallel_perpendicular_95": [1.5, 0.75],
+                "source_artifact": {
+                    "partition": "calibration",
+                    "dataset": "nuscenes",
+                    "split": "mini_train",
+                    "b1_config_sha256": b1_calibration_config_sha256(
+                        source_model.config),
+                },
+                "promotion": {"passed": True},
+            }
+
+            config_sha = b2_candidate_config_sha256(source_model.config)
+
+            def save_with(candidate_calibration, candidate_config=config_sha):
+                torch.save({
+                    "state_dict": state,
+                    "b2_v3_frozen_reference_hashes": hashes,
+                    "b1_uncertainty_calibration": candidate_calibration,
+                    "b2_v3_candidate_config_sha256": candidate_config,
+                }, path)
+
+            save_with(calibration)
+            loaded = DummyV3()
+            load_matching_v3_model_state(loaded, path)
+            self.assertEqual(
+                loaded.config.search_v3_fixed_margin_parallel, 1.5)
+
+            bad_scale = dict(calibration)
+            bad_scale["log_scale_parallel_perpendicular"] = [0.2, -0.2]
+            save_with(bad_scale)
+            with self.assertRaises(RuntimeError):
+                load_matching_v3_model_state(DummyV3(), path)
+
+            save_with(calibration, candidate_config="wrong-config")
+            with self.assertRaises(RuntimeError):
+                load_matching_v3_model_state(DummyV3(), path)
+
+            bad_promotion = dict(calibration)
+            bad_promotion["promotion"] = {"passed": False}
+            save_with(bad_promotion)
             with self.assertRaises(RuntimeError):
                 load_matching_v3_model_state(DummyV3(), path)
 
@@ -460,6 +720,29 @@ class TwoRoundRolloutTest(unittest.TestCase):
             self.assertEqual(
                 manifest["policy_after_intervention"],
                 "explicit_observation")
+
+    def test_formal_v4_rollout_loads_required_success_arrays(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "formal"
+            row = self._row(1)
+            row.update({
+                "candidate_success": np.ones((2, 3), dtype=np.float32),
+                "observation_success": np.float32(0.5),
+                "success_gain": np.full((2, 3), 0.5, dtype=np.float32),
+            })
+            manifest = self._manifest(0, "observation")
+            manifest.update({
+                "schema": SELECTIVE_V4_ROLLOUT_SCHEMA,
+                "feature_schema": {"scalar_dim": 37},
+                "feature_schema_hash": "feature-hash",
+                "candidate_checkpoint_sha256": "candidate-hash",
+                "candidate_config_sha256": "config-hash",
+                "promotion_manifest_sha256": "promotion-hash",
+            })
+            write_v3_rollout_artifact(output, [row], manifest)
+            arrays, loaded, _ = load_v3_rollout_artifact(output)
+            self.assertEqual(loaded["schema"], SELECTIVE_V4_ROLLOUT_SCHEMA)
+            self.assertEqual(arrays["success_gain"].shape, (1, 2, 3))
 
     def test_router_training_stage_is_strict(self):
         round0 = self._manifest(0, "observation")

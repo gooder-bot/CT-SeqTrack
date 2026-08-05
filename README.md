@@ -7,13 +7,44 @@
 > shared-checkpoint 的 `true` 持续超过 dataset-mean fixed、within-dataset
 > shuffled，并在 held-out stride/gap 上成立，才支持 physical-time 因果表述。
 
-CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。当前正在验证的
-B2-v3 主线是 **状态对齐的 motion-conditioned search 与
-action-consistent closed-loop routing**：B1/B2 共享同一个因果 history bundle，
-搜索只作为对 B1 prior 的有界 evidence correction，router 直接学习并执行
-`2 candidates × 3 steps` 六个 signed-gain 动作。它不把“使用历史运动”、
-proposal-refine 或 memory 本身作为创新声明。实现与运行合同见
-[B2-v3 文档](docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md)。
+CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。2026-08-04 的
+代码—数据链审计已据此修复正式配置 15–18：B1/B2 使用同一方向与 replay
+history 合同，base crop 保留，正式 raw Search 不再围绕 B1 二次裁剪。旧配置
+01–14 的行为保持不变，继续用于复现历史失败。
+
+当前目标主线是：**B1 连续时间均值与校准风险 → B2 base-preserving support
+与非对称 `q_obs/q_search` 双查询证据 → B3 observation-anchored 保守闭环决策**。
+B1 只单向耦合 B2 的 auxiliary geometry/query，原 SeqTrack3D observation 路径
+保持 motion-independent fail-safe；step 属于 B3 动作，不是第三个 candidate。
+B4 暂时退出论文主线。完整的完成度判断、连接重构、晋级门槛和消融顺序只以
+[B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
+为准；正式数据传输、online pre-pass、双 query、梯度边界和耦合消融见
+[不确定性感知非对称双查询耦合](docs/ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md)。
+[B2-v3 文档](docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md)保留为当前版本的实现与
+复现记录，不再代表下一版方法决策。
+
+## 2026-08-05 当前判断
+
+- **B1**：mean/NLL、统一运动方向、低速各向同性、calibration artifact 和
+  fixed-margin fallback 的工程合同已完成；coverage/NLL/cadence 实验尚未给出
+  晋级结论。
+- **B2**：工程前半段完成，科学方法仍未完成。motion/raw/refined endpoint error
+  为 `2.9045/2.6496/2.7344`；`refined - raw = +0.0848`，tracklet 95% CI
+  `[+0.0379,+0.1323]`，说明当前 B1-centered refinement 显著伤害 raw candidate。
+- **B2 数据链**：训练/验证 structural-valid 为 `30.58%/5.79%`，验证
+  foreground-valid 只有 `66/2004 = 3.29%`，presence AUC 为 `0.497`。
+- **B3**：v4 feature schema、raw Search 身份绑定、实际 H=3 recursive Success
+  阈值校准与 packaging gate 已完成；B2 promotion 未通过前仍不得训练正式 B3。
+- **B4**：仅保留 experimental-only 的 EMA projector + online stop-gradient
+  representation 短测，不是完整 EMA encoder teacher，也不阻塞 B1–B3。
+
+最近的实现出口是同 checkpoint 五模式归因、独立 `raw_search_xy`/no-clip、
+Transformer final decoder state 兼容 API、B1 calibration/replay v2，以及
+`q_obs/q_search` 双查询与 B3 v4 artifact。代码就绪不代表 promotion 已通过。
+可执行清单见 [need_to_do.md](need_to_do.md)，论文表格见
+[refined_plan.md](refined_plan.md)。
+
+以下内容保留为历史实验与失败证据，不代表当前优先级。
 
 第一版 v2 候选曾从大量互相耦合的实验分支收敛为：
 
@@ -55,8 +86,10 @@ TWC、旧 Observability Gate、M3 EMA teacher、M4 Kalman/filter 等路线保留
 历史代码，默认配置全部关闭。当前三模块候选没有晋级；第二阶段一致性和记忆
 继续暂停。
 
-详细数据流见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，论文计划见
-[refined_plan.md](refined_plan.md)。关于真实时间的投入产出、Random-20%
+历史 v2 数据流见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；当前目标数据流与
+论文计划分别见
+[B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
+和 [refined_plan.md](refined_plan.md)。关于真实时间的投入产出、Random-20%
 现实性、ChronoTrack/近期工作借鉴顺序和现有模块审计，见
 [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
 服务器上的 KITTI、nuScenes-mini 和 nuScenes Python 包路径及其正确用法见

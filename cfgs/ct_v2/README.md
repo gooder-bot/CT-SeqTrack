@@ -1,6 +1,14 @@
 # CT-SeqTrack v2 configs
 
-These files are the complete active experiment surface:
+> Status update (2026-08-04): configs `13` and `14` are frozen diagnostic and
+> reproduction artifacts, not the recommended next paper workflow. The V3
+> B1-centered refiner failed its candidate gate; config `14` must not be trained
+> until an independent raw Search candidate passes the new gate. See
+> [`docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md`](../../docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
+> and the dedicated
+> [asymmetric dual-query coupling specification](../../docs/ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md).
+
+These files are the complete available configuration surface:
 
 | Config | Purpose |
 | --- | --- |
@@ -26,10 +34,12 @@ These files are the complete active experiment surface:
 All older YAML files remain valid legacy experiments. They are no longer part
 of the default paper workflow.
 
-B2-v3 is the active repair path; v2.2 remains frozen for reproduction. Its
-complete initialization, two-round rollout, packaging, evaluation modes, and
-promotion gates are documented in
-`docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md`.
+B2-v3 remains frozen for reproduction; its initialization, two-round rollout,
+packaging, evaluation modes, and historical promotion gates are documented in
+`docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md`. The active repair order is raw
+Search attribution and removal of the B1-centered clip, final-decoder-state
+`q_obs/q_search` validation, B1 uncertainty calibration, B1 pre-pass plus
+base-preserving support/replay repair, and only then B3.
 
 The historical 2026-07-27 seed42 normal-mini screens are complete. B3 finishes at
 25.537 Success / 24.707 Precision and its gate saturates at the configured
@@ -127,3 +137,17 @@ Standard-cadence training is mandatory.  `--protocol random20` and
 `--protocol gap1124` are evaluation controls only;
 `--time-mode true|fixed|shuffled` changes
 `timestamps_effective`, never frame order or correspondence topology.
+
+## 2026-08-04 B1–B4 refactor configs
+
+Configs 15–20 implement the new staged contract: calibrated B1, raw
+Search/asymmetric dual query, pre-pass plus recursive replay support,
+scalar-first H=3 B3, and the optional decoder-token B4 kill test.  Their exact
+data contracts, checkpoint transition command, replay export, and five-mode
+attribution commands are documented in
+`docs/B1_B4_REFACTOR_IMPLEMENTATION.md`.  Historical configs 01–14 and the old
+PFTC configs are unchanged for reproduction.
+
+Configs `19` and `20` are `experimental_only`.  The default runner refuses
+them unless `--allow-experimental-b4` is supplied; they are excluded from the
+B1–B3 paper path.

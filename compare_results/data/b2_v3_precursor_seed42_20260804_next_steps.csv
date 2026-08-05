@@ -1,0 +1,6 @@
+﻿order,action,why,gate
+1,Keep the existing strict seed42 V3 init,The new v2.1 full source has worse epoch60 search proposal loss/error than the already selected old full source.,Verify init SHA256 and run the two-optimizer-step preflight.
+2,Train cfg13 B2-v3 refiner for exactly 20 epochs,This is the first run that activates shared B1/B2 history and the supervised 384-d evidence path.,Use epoch20 last.ckpt; refined valid-foreground RMSE must beat both B1 motion and raw Search.
+3,"Run round0, provisional router, round1, merge and final calibration",The current full collapse confirms recursive state shift matters.,"Calibration precision >=75%, harm <=10%, coverage 5-25%, at least 100 selected states."
+4,Package and evaluate obs_only/obs_vs_motion/obs_vs_refined/obs_vs_all,Only same-checkpoint modes isolate the selective intervention.,obs_vs_all >54.132 S / 64.755 P and >=obs_only +0.5/+1.0.
+5,Run seeds43/44 only after seed42 passes,The current evidence is one seed and no completed V3 model.,Three-seed mean gain positive with no catastrophic seed.

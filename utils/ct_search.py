@@ -393,6 +393,252 @@ def build_trajectory_endpoint_search_box(
     return endpoint, estimate
 
 
+def build_uncertainty_prior_tube(
+        latest_box,
+        mu_xy,
+        sigma_parallel_perpendicular,
+        velocity_xy,
+        valid=True,
+        coverage_scale=2.448,
+        min_direction_speed=0.2,
+        max_length=24.0,
+        max_width=10.0,
+        source_id=1,
+        direction_xy=None):
+    """Build a base-preserving prior tube from a learned local B1 state.
+
+    ``mu_xy`` and ``velocity_xy`` are expressed in the latest recursive box
+    coordinate system.  This function consumes no current-frame ground truth.
+    The caller unions the returned support with the untouched B0 crop.
+    """
+    if latest_box is None or not bool(valid):
+        return None, {
+            "valid": False,
+            "reason": "invalid_motion_prior",
+            "source_id": int(source_id),
+        }
+    mu_xy = np.asarray(mu_xy, dtype=np.float64).reshape(-1)
+    sigma = np.asarray(
+        sigma_parallel_perpendicular, dtype=np.float64).reshape(-1)
+    velocity_xy = np.asarray(velocity_xy, dtype=np.float64).reshape(-1)
+    if (mu_xy.size != 2 or sigma.size != 2 or velocity_xy.size != 2
+            or not np.isfinite(mu_xy).all()
+            or not np.isfinite(sigma).all()
+            or not np.isfinite(velocity_xy).all()):
+        return None, {
+            "valid": False,
+            "reason": "non_finite_motion_prior",
+            "source_id": int(source_id),
+        }
+    coverage_scale = max(float(coverage_scale), 0.0)
+    sigma = np.maximum(sigma, 1e-3)
+    latest_yaw = _signed_box_yaw(latest_box)
+    cosine = math.cos(latest_yaw)
+    sine = math.sin(latest_yaw)
+
+    def local_to_world(vector):
+        return np.asarray((
+            cosine * vector[0] - sine * vector[1],
+            sine * vector[0] + cosine * vector[1],
+        ), dtype=np.float64)
+
+    world_displacement = local_to_world(mu_xy)
+    world_velocity = local_to_world(velocity_xy)
+    displacement_norm = float(np.linalg.norm(world_displacement))
+    speed = float(np.linalg.norm(world_velocity))
+    if direction_xy is not None:
+        local_direction = np.asarray(direction_xy, dtype=np.float64).reshape(-1)
+        if local_direction.size != 2 or not np.isfinite(local_direction).all():
+            return None, {
+                "valid": False,
+                "reason": "invalid_motion_direction",
+                "source_id": int(source_id),
+            }
+        direction_norm = float(np.linalg.norm(local_direction))
+        if direction_norm <= 1e-9:
+            local_direction = np.asarray((1.0, 0.0), dtype=np.float64)
+        else:
+            local_direction = local_direction / direction_norm
+        world_direction = local_to_world(local_direction)
+        direction_yaw = math.atan2(world_direction[1], world_direction[0])
+    elif speed >= float(min_direction_speed):
+        direction_yaw = math.atan2(world_velocity[1], world_velocity[0])
+    elif displacement_norm > 1e-6:
+        direction_yaw = math.atan2(
+            world_displacement[1], world_displacement[0])
+    else:
+        direction_yaw = latest_yaw
+
+    size = np.asarray(latest_box.wlh, dtype=np.float64)
+    object_width = max(float(size[0]), 1e-3)
+    object_length = max(float(size[1]), 1e-3)
+    parallel_half_extent = (
+        0.5 * displacement_norm + 0.5 * object_length
+        + coverage_scale * float(sigma[0]))
+    perpendicular_half_extent = (
+        0.5 * object_width + coverage_scale * float(sigma[1]))
+    requested_length = 2.0 * parallel_half_extent
+    requested_width = 2.0 * perpendicular_half_extent
+    length = min(float(max_length), requested_length)
+    width = min(float(max_width), requested_width)
+    truncated = (
+        length + 1e-9 < requested_length
+        or width + 1e-9 < requested_width)
+    if not np.isfinite(length + width) or length <= 0 or width <= 0:
+        return None, {
+            "valid": False,
+            "reason": "invalid_support_size",
+            "source_id": int(source_id),
+        }
+
+    tube = copy.deepcopy(latest_box)
+    center = np.asarray(latest_box.center, dtype=np.float64).copy()
+    center[:2] += 0.5 * world_displacement
+    tube.center = center
+    orientation_type = latest_box.orientation.__class__
+    tube.orientation = orientation_type(
+        axis=[0, 0, 1], radians=_wrap_radians(direction_yaw))
+    tube.wlh = size.copy()
+    tube.wlh[0] = width
+    tube.wlh[1] = length
+    return tube, {
+        "valid": True,
+        "reason": "ok",
+        "source_id": int(source_id),
+        "displacement": displacement_norm,
+        "speed": speed,
+        "sigma_parallel": float(sigma[0]),
+        "sigma_perpendicular": float(sigma[1]),
+        "coverage_scale": coverage_scale,
+        "length": length,
+        "width": width,
+        "requested_length": requested_length,
+        "requested_width": requested_width,
+        "truncated": bool(truncated),
+        "endpoint_center": (
+            np.asarray(latest_box.center, dtype=np.float64)
+            + np.r_[world_displacement, 0.0]),
+    }
+
+
+def build_b1_uncertainty_support(
+        latest_box,
+        prediction,
+        *,
+        use_dynamic_sigma,
+        fixed_margins=(2.0, 1.0),
+        coverage_scale=2.448,
+        min_direction_speed=0.2,
+        max_length=24.0,
+        max_width=10.0):
+    """Pure B1-to-support contract shared by training and inference.
+
+    ``prediction`` is a frozen box-only B1 result in the latest recursive
+    anchor coordinate system.  Fixed margins are represented as 95% residual
+    half-extents and converted back to sigma units only for the common tube
+    implementation.  The current-frame target is deliberately absent from
+    this interface.
+    """
+    if not isinstance(prediction, dict):
+        return None, {
+            "valid": False,
+            "reason": "missing_motion_prior",
+            "source_id": 0,
+        }
+    scale = max(float(coverage_scale), 1e-6)
+    if bool(use_dynamic_sigma):
+        log_sigma = np.asarray(
+            prediction.get("log_sigma_parallel_perp"), dtype=np.float64)
+        if log_sigma.size != 2 or not np.isfinite(log_sigma).all():
+            return None, {
+                "valid": False,
+                "reason": "invalid_dynamic_sigma",
+                "source_id": int(prediction.get("source_id", 1)),
+            }
+        sigma = np.exp(log_sigma.reshape(2))
+    else:
+        margins = np.asarray(fixed_margins, dtype=np.float64).reshape(-1)
+        if margins.size != 2 or not np.isfinite(margins).all():
+            return None, {
+                "valid": False,
+                "reason": "invalid_fixed_margins",
+                "source_id": int(prediction.get("source_id", 1)),
+            }
+        sigma = np.maximum(margins, 1e-3) / scale
+    return build_uncertainty_prior_tube(
+        latest_box,
+        prediction.get("mu_xy", (0.0, 0.0)),
+        sigma,
+        prediction.get("velocity_xy", (0.0, 0.0)),
+        valid=bool(prediction.get("valid", False)),
+        coverage_scale=scale,
+        min_direction_speed=float(min_direction_speed),
+        max_length=float(max_length),
+        max_width=float(max_width),
+        source_id=int(prediction.get("source_id", 1)),
+        direction_xy=prediction.get("direction_xy"),
+    )
+
+
+def resolve_b1_search_support(
+        history_boxes,
+        delta_t,
+        valid_mask,
+        *,
+        prediction=None,
+        use_b1_prepass=False,
+        use_dynamic_sigma=False,
+        fixed_margins=(2.0, 1.0),
+        coverage_scale=2.448,
+        min_direction_speed=0.2,
+        max_length=24.0,
+        max_width=10.0,
+        fallback_max_speed=20.0,
+        fallback_max_acceleration=8.0,
+        fallback_max_displacement=12.0,
+        fallback_acceleration_weight=0.5,
+        fallback_max_yaw_rate=math.pi / 2.0,
+        fallback_min_displacement=0.2):
+    """Resolve the identical B1/fallback/base-only support in all paths."""
+    query_delta_t = float(delta_t[0]) if len(delta_t) else 0.0
+    if (bool(use_b1_prepass) and isinstance(prediction, dict)
+            and bool(prediction.get("valid", False))):
+        support, diagnostics = build_b1_uncertainty_support(
+            history_boxes[0], prediction,
+            use_dynamic_sigma=use_dynamic_sigma,
+            fixed_margins=fixed_margins,
+            coverage_scale=coverage_scale,
+            min_direction_speed=min_direction_speed,
+            max_length=max_length,
+            max_width=max_width,
+        )
+        if support is not None:
+            diagnostics.update({
+                "query_delta_t": float(prediction.get(
+                    "current_delta_t", query_delta_t)),
+                "gap_ratio": float(prediction.get("gap_ratio", 1.0)),
+                "prior_source": "b1",
+            })
+            return support, diagnostics
+    support, diagnostics = build_trajectory_endpoint_search_box(
+        history_boxes,
+        delta_t,
+        valid_mask=valid_mask,
+        max_speed=fallback_max_speed,
+        max_acceleration=fallback_max_acceleration,
+        max_displacement=fallback_max_displacement,
+        acceleration_weight=fallback_acceleration_weight,
+        max_yaw_rate=fallback_max_yaw_rate,
+        min_displacement=fallback_min_displacement,
+    )
+    diagnostics["prior_source"] = (
+        "fallback_cv" if support is not None else "base_only")
+    diagnostics["source_id"] = 2 if support is not None else 0
+    diagnostics.setdefault("query_delta_t", query_delta_t)
+    diagnostics.setdefault("gap_ratio", 1.0)
+    return support, diagnostics
+
+
 def _sample_rows(points, sample_size, rng):
     points = np.asarray(points)
     if sample_size <= 0:

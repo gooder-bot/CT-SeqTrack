@@ -27,11 +27,14 @@ def parse_args():
 
 
 def rows_from_arrays(arrays):
-    numeric = (
+    numeric = [
         "tracklet_id", "frame_id", "router_features", "candidate_valid",
         "candidate_residual_xy", "signed_gain", "candidate_cost",
         "observation_cost", "rollout_length",
-    )
+    ]
+    numeric.extend(key for key in (
+        "candidate_success", "observation_success", "success_gain")
+                   if key in arrays)
     for index in range(arrays["router_features"].shape[0]):
         row = {key: arrays[key][index] for key in numeric}
         row["tracklet_key"] = str(arrays["tracklet_key"][index])
@@ -51,9 +54,14 @@ def main():
     if (on_policy_manifest.get("round") != 1
             or on_policy_manifest.get("state_policy") != "router"):
         raise ValueError("second artifact must be round-1 router policy")
-    invariant_fields = (
+    invariant_fields = [
         "candidate_checkpoint_sha256", "config_sha256", "split", "seed",
-        "horizon", "gamma", "tracklets_evaluated", "partition_tracklets")
+        "horizon", "gamma", "tracklets_evaluated", "partition_tracklets"]
+    formal_v4 = observation_manifest.get(
+        "schema") == "ct_seqtrack.selective_rollout.v4"
+    if formal_v4:
+        invariant_fields.extend((
+            "feature_schema_hash", "promotion_manifest_sha256"))
     for field in invariant_fields:
         if observation_manifest.get(field) != on_policy_manifest.get(field):
             raise ValueError(f"rollout rounds disagree on {field}")
@@ -76,6 +84,7 @@ def main():
     rows = list(rows_from_arrays(observation))
     rows.extend(rows_from_arrays(on_policy))
     manifest = {
+        "schema": observation_manifest["schema"],
         "candidate_checkpoint": observation_manifest[
             "candidate_checkpoint"],
         "candidate_checkpoint_sha256": observation_manifest[
@@ -94,6 +103,16 @@ def main():
             {"manifest": on_policy_manifest, "hashes": on_policy_hashes},
         ],
     }
+    if formal_v4:
+        manifest.update({
+            "candidate_config_sha256": observation_manifest[
+                "candidate_config_sha256"],
+            "promotion_manifest_sha256": observation_manifest[
+                "promotion_manifest_sha256"],
+            "feature_schema": observation_manifest["feature_schema"],
+            "feature_schema_hash": observation_manifest[
+                "feature_schema_hash"],
+        })
     npz_path, manifest_path = write_v3_rollout_artifact(
         args.output, rows, manifest)
     print(json.dumps({

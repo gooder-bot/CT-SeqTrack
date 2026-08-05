@@ -22,6 +22,12 @@ CONFIGS = {
     "b2_v22_selective": ROOT / "cfgs/ct_v2/12_b2_v22_selective.yaml",
     "b2_v3_refiner": ROOT / "cfgs/ct_v2/13_b2_v3_refiner.yaml",
     "b2_v3_selective": ROOT / "cfgs/ct_v2/14_b2_v3_selective.yaml",
+    "b1_calibrated": ROOT / "cfgs/ct_v2/15_b1_calibrated.yaml",
+    "b2_dual_query": ROOT / "cfgs/ct_v2/16_b2_asymmetric_dual_query.yaml",
+    "b1_b2_replay": ROOT / "cfgs/ct_v2/17_b1_b2_replay_support.yaml",
+    "b1_b2_b3": ROOT / "cfgs/ct_v2/18_b1_b2_b3_selective.yaml",
+    "b4_alignment": ROOT / "cfgs/ct_v2/19_b4_decoder_alignment.yaml",
+    "b4_anticollapse": ROOT / "cfgs/ct_v2/20_b4_decoder_anticollapse.yaml",
     "motion_search": ROOT / "cfgs/ct_v2/03_ct_motion_search.yaml",
     "full": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2.yaml",
     "full_dataset": ROOT / "cfgs/ct_v2/04_ct_seqtrack_v2_full.yaml",
@@ -54,6 +60,8 @@ def parse_args():
         "--resume-checkpoint",
         help="training checkpoint that restores model, optimizer, and epoch state")
     parser.add_argument("--path", help="override the nuScenes dataset root")
+    parser.add_argument(
+        "--split", help="test split override, e.g. mini_train calibration")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tag", default="")
     parser.add_argument("--epochs", type=int)
@@ -75,6 +83,24 @@ def parse_args():
         "--pftc-weight", type=float,
         help="override the frozen PFTC lambda")
     parser.add_argument(
+        "--replay-cache",
+        help="enable a hash-validated recursive replay cache")
+    parser.add_argument(
+        "--dynamic-sigma", action="store_true",
+        help="P4: require promoted B1 calibration and use dynamic support")
+    parser.add_argument(
+        "--geometry-off", action="store_true",
+        help="P4 ablation: disable uncertainty geometry but keep B1 support")
+    parser.add_argument(
+        "--force-b1-invalid", action="store_true",
+        help="evaluation control for observation invariance")
+    parser.add_argument(
+        "--shuffle-b1-signal", action="store_true",
+        help="evaluation control that perturbs only the B1 history signal")
+    parser.add_argument(
+        "--allow-experimental-b4", action="store_true",
+        help="explicitly opt into experimental-only B4 variants")
+    parser.add_argument(
         "--fusion-off", action="store_true",
         help="evaluate a motion_v3 checkpoint with exact observation-only output")
     parser.add_argument(
@@ -82,7 +108,9 @@ def parse_args():
         choices=(
             "obs", "obs_motion", "obs_search", "full",
             "obs_motion_search", "full_selective",
-            "obs_only", "obs_vs_motion", "obs_vs_refined", "obs_vs_all"),
+            "obs_only", "obs_vs_motion", "obs_vs_refined", "obs_vs_all",
+            "observation", "motion", "raw_search", "legacy_clipped",
+            "selective"),
         help="evaluate a B2 checkpoint under a same-weight proposal mode")
     parser.add_argument(
         "--preflight", action="store_true",
@@ -94,18 +122,26 @@ def parse_args():
 def build_command(args):
     if args.mode == "test" and not args.checkpoint:
         raise ValueError("--checkpoint is required in test mode")
+    if (args.variant in ("b4_alignment", "b4_anticollapse")
+            and not args.allow_experimental_b4):
+        raise ValueError(
+            "B4 is experimental-only; pass --allow-experimental-b4 to "
+            "run it outside the B1-B3 paper pipeline")
     if args.resume_checkpoint and args.mode != "train":
         raise ValueError("--resume-checkpoint is training-only")
     if args.resume_checkpoint and (
             args.checkpoint or args.init_checkpoint):
         raise ValueError(
             "--resume-checkpoint cannot be combined with checkpoint initialization")
+    if args.split and args.mode != "test":
+        raise ValueError("--split is evaluation-only")
     if (args.mode == "train" and args.variant == "b2_v22_refiner"
             and not (args.init_checkpoint or args.resume_checkpoint)):
         raise ValueError(
             "B2-v2.2 refiner training requires the composed "
             "--init-checkpoint (or an explicit --resume-checkpoint)")
-    if (args.mode == "train" and args.variant == "b2_v3_refiner"
+    if (args.mode == "train" and args.variant in (
+            "b2_v3_refiner", "b2_dual_query", "b1_b2_replay")
             and not (args.init_checkpoint or args.resume_checkpoint)):
         raise ValueError(
             "B2-v3 refiner training requires the strict composed "
@@ -117,6 +153,10 @@ def build_command(args):
     if args.mode == "train" and args.variant == "b2_v3_selective":
         raise ValueError(
             "the action router is trained offline; b2_v3_selective is "
+            "evaluation-only")
+    if args.mode == "train" and args.variant == "b1_b2_b3":
+        raise ValueError(
+            "the B3 action router is trained offline; b1_b2_b3 is "
             "evaluation-only")
     if args.mode == "train" and args.protocol != "normal":
         raise ValueError("v2 training is fixed to the normal dataset protocol")
@@ -134,18 +174,41 @@ def build_command(args):
             or args.variant not in (
                 "search_v21", "motion_search_v21", "b3_crpa_v1",
                 "b2_v22_refiner", "b2_v22_selective",
-                "b2_v3_refiner", "b2_v3_selective")):
+                "b2_v3_refiner", "b2_v3_selective", "b2_dual_query",
+                "b1_b2_replay", "b1_b2_b3")):
         raise ValueError(
             "--proposal-mode requires test mode and a supported B2 variant")
     if (args.proposal_mode == "obs_search"
             and args.variant in ("b2_v22_refiner", "b2_v22_selective")):
         raise ValueError("B2-v2.2 has no independent obs_search mode")
-    if (args.variant in ("b2_v3_refiner", "b2_v3_selective")
+    if (args.variant in (
+            "b2_v3_refiner", "b2_v3_selective", "b2_dual_query",
+            "b1_b2_replay", "b1_b2_b3")
             and args.proposal_mode
             and args.proposal_mode not in (
                 "obs_only", "obs_vs_motion", "obs_vs_refined",
-                "obs_vs_all")):
+                "obs_vs_all", "observation", "motion", "raw_search",
+                "legacy_clipped", "selective")):
         raise ValueError("B2-v3 requires an unambiguous v3 proposal mode")
+    if args.replay_cache and (
+            args.mode != "train"
+            or args.variant not in ("b1_b2_replay",)):
+        raise ValueError(
+            "--replay-cache is training-only for b1_b2_replay")
+    if args.dynamic_sigma and args.variant != "b1_b2_replay":
+        raise ValueError("--dynamic-sigma is reserved for b1_b2_replay")
+    if args.geometry_off and args.variant != "b1_b2_replay":
+        raise ValueError("--geometry-off is reserved for b1_b2_replay")
+    if args.force_b1_invalid and (
+            args.mode != "test" or args.variant != "b1_b2_replay"):
+        raise ValueError(
+            "--force-b1-invalid is test-only for b1_b2_replay")
+    if args.shuffle_b1_signal and (
+            args.mode != "test" or args.variant != "b1_b2_replay"):
+        raise ValueError(
+            "--shuffle-b1-signal is test-only for b1_b2_replay")
+    if args.force_b1_invalid and args.shuffle_b1_signal:
+        raise ValueError("B1 invariance controls must be run separately")
     if (args.mode == "train"
             and args.variant in ("pftc_unweighted", "pftc")
             and not args.preflight
@@ -165,6 +228,18 @@ def build_command(args):
         default_tag += "-fusion-off"
     if args.proposal_mode:
         default_tag += f"-{args.proposal_mode}"
+    if args.split:
+        default_tag += f"-{args.split}"
+    if args.dynamic_sigma:
+        default_tag += "-dynamic-sigma"
+    if args.geometry_off:
+        default_tag += "-geometry-off"
+    if args.replay_cache:
+        default_tag += "-recursive-replay"
+    if args.force_b1_invalid:
+        default_tag += "-forced-invalid-b1"
+    if args.shuffle_b1_signal:
+        default_tag += "-shuffled-b1"
     if args.preflight:
         default_tag += "-pftc-preflight-200"
     command = [
@@ -181,6 +256,8 @@ def build_command(args):
     ]
     if args.path:
         command.extend(("--path", args.path))
+    if args.split:
+        command.extend(("--test_split", args.split))
     if args.epochs is not None:
         if args.mode != "train" or args.epochs <= 0:
             raise ValueError("--epochs must be positive and is training-only")
@@ -221,6 +298,22 @@ def build_command(args):
         command.extend(("--motion_v3_fusion_scale", "0.0"))
     if args.proposal_mode:
         command.extend(("--proposal-mode", args.proposal_mode))
+    if args.replay_cache:
+        command.extend((
+            "--use_recursive_replay_cache",
+            "--recursive_replay_cache_dir", args.replay_cache,
+        ))
+    if args.dynamic_sigma:
+        command.extend((
+            "--search_v3_use_dynamic_sigma",
+            "--require_b1_calibration_passed",
+        ))
+    if args.geometry_off:
+        command.append("--disable_uncertainty_geometry")
+    if args.force_b1_invalid:
+        command.append("--force_b1_invalid")
+    if args.shuffle_b1_signal:
+        command.append("--shuffle_b1_signal")
     if args.preflight:
         command.extend((
             "--pftc_weight", "0.0",

@@ -1,0 +1,20 @@
+_base_: 17_b1_b2_replay_support.yaml
+
+experiment_name: ct_seqtrack_b1_b2_b3_selective
+
+# Evaluation only after the B2 gates pass and a train-tracklet-calibrated
+# H=3 action router has been packaged.
+use_action_consistent_router_v3: true
+router_v3_scalar_only: true
+router_v3_use_utility_feature: true
+use_calibrated_motion_uncertainty: true
+require_b1_calibration_passed: true
+search_v3_use_dynamic_sigma: true
+proposal_inference_mode: selective
+router_v3_enabled_scale: 1.0
+router_v3_normal_step_cap: 0.20
+router_v3_gap_step_cap: 0.35
+b2_v3_require_packaged_router: true
+require_b2_candidate_config_contract: true
+export_proposal_diagnostics: true
+export_b3_rollouts: true

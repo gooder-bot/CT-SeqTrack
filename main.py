@@ -12,6 +12,7 @@ from easydict import EasyDict
 import os
 import json
 import hashlib
+import subprocess
 from pathlib import Path
 
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
@@ -22,10 +23,20 @@ from pytorch_lightning import seed_everything
 from datasets import get_dataset
 from models import get_model
 from utils.run_provenance import write_run_provenance
+from utils.replay_cache import (
+    B0_STATE_PREFIXES,
+    B1_STATE_PREFIXES,
+    b1_calibration_config_sha256,
+    replay_config_sha256,
+    sha256_json,
+    tensor_prefixes_sha256,
+    validate_b1_calibration_state,
+    validate_replay_cache_manifest,
+)
 
-torch.set_float32_matmul_precision("high")
+if hasattr(torch, "set_float32_matmul_precision"):
+    torch.set_float32_matmul_precision("high")
 
-import matplotlib.pyplot as plt
 import sys
 
 import datetime
@@ -70,6 +81,32 @@ def tensor_prefix_hash(state_dict, prefix):
         digest.update(str(tuple(value.shape)).encode("ascii"))
         digest.update(value.numpy().tobytes())
     return digest.hexdigest(), keys
+
+
+def current_git_commit():
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent,
+        check=True, capture_output=True, text=True)
+    return completed.stdout.strip()
+
+
+def load_b1_calibration_contract(path, *, checkpoint=False):
+    if checkpoint:
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            payload = torch.load(path, map_location="cpu")
+        calibration = payload.get("b1_uncertainty_calibration", {})
+    else:
+        calibration = json.loads(Path(path).read_text(encoding="utf-8"))
+    if (not isinstance(calibration, dict)
+            or calibration.get("schema")
+            != "ct_seqtrack.b1_uncertainty_calibration.v2"
+            or len(calibration.get(
+                "fixed_margin_parallel_perpendicular_95", [])) != 2):
+        raise RuntimeError(
+            "B1 calibration input is not a verified v2 artifact")
+    return calibration
 
 
 def load_initial_weights(model, checkpoint_path, report_path=None):
@@ -137,6 +174,15 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
             raise RuntimeError(
                 "B2-v3 requires a checkpoint composed by the strict v3 "
                 "builder (missing b2_v3_init metadata)")
+        model._b2_v3_init_provenance = dict(metadata)
+        if bool(getattr(model, 'use_asymmetric_dual_query', False)):
+            if (metadata.get('schema') != 'ct_seqtrack.b2_v3_init.v2'
+                    or not bool(metadata.get('dual_query_migration'))
+                    or metadata.get('dual_query_projection_init')
+                    != 'legacy_observation_group_mean_4'):
+                raise RuntimeError(
+                    "asymmetric dual-query training requires the v2 "
+                    "non-zero final-decoder query migration")
         b1_prefix = "physical_motion_encoder."
         b1_target = sorted(
             key for key in target_state if key.startswith(b1_prefix))
@@ -189,8 +235,65 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
             "migrated_tensor_count": len(required_migrated),
             "missing_frozen_tensor_count": len(missing_frozen),
         }
+    calibration = payload.get('b1_uncertainty_calibration')
+    if isinstance(calibration, dict):
+        validate_b1_calibration_state(calibration, normalized)
+    if bool(getattr(model, 'require_b1_calibration_artifact', False)):
+        if (not isinstance(calibration, dict)
+                or calibration.get('schema')
+                != 'ct_seqtrack.b1_uncertainty_calibration.v2'
+                or len(calibration.get(
+                    'fixed_margin_parallel_perpendicular_95', [])) != 2):
+            raise RuntimeError(
+                "initialization checkpoint lacks a verified v2 B1 "
+                "calibration artifact with fixed residual margins")
+        source = calibration.get('source_artifact', {})
+        if (source.get('partition') != 'calibration'
+                or source.get('dataset') != str(getattr(
+                    model.config, 'dataset', 'unknown'))
+                or source.get('split') != str(getattr(
+                    model.config, 'train_split', 'train'))
+                or source.get('b1_config_sha256')
+                != b1_calibration_config_sha256(model.config)):
+            raise RuntimeError(
+                "initialization B1 calibration provenance mismatch")
+    if bool(getattr(model, 'require_b1_calibration_passed', False)):
+        if (not isinstance(calibration, dict)
+                or not bool(calibration.get(
+                    'promotion', {}).get('passed'))):
+            raise RuntimeError(
+                "initialization checkpoint lacks a promoted B1 calibration")
+    if isinstance(calibration, dict):
+        model._b1_uncertainty_calibration = calibration
+        margins = calibration.get(
+            'fixed_margin_parallel_perpendicular_95')
+        if isinstance(margins, (list, tuple)) and len(margins) == 2:
+            model.config.search_v3_fixed_margin_parallel = float(margins[0])
+            model.config.search_v3_fixed_margin_perpendicular = float(
+                margins[1])
     target_state.update(matched)
     model.load_state_dict(target_state, strict=True)
+    if bool(getattr(model, 'use_recursive_replay_cache', False)):
+        cache_dir = getattr(
+            model.config, 'recursive_replay_cache_dir', None)
+        if not cache_dir:
+            raise RuntimeError(
+                "formal replay initialization requires a cache directory")
+        expected_replay = {
+            'dataset': str(getattr(
+                model.config, 'dataset', 'unknown')),
+            'split': str(getattr(
+                model.config, 'train_split', 'train')),
+            'replay_config_sha256': replay_config_sha256(model.config),
+            'commit': current_git_commit(),
+            'b0_state_sha256': tensor_prefixes_sha256(
+                model.state_dict(), B0_STATE_PREFIXES),
+            'b1_state_sha256': tensor_prefixes_sha256(
+                model.state_dict(), B1_STATE_PREFIXES),
+            'b1_calibration_sha256': sha256_json(calibration),
+        }
+        validate_replay_cache_manifest(
+            cache_dir, expected_manifest=expected_replay)
     if strict_v3:
         frozen_prefixes = tuple(model.B2_V3_FROZEN_PREFIXES)
         model._b2_v3_frozen_reference_hashes = {
@@ -243,6 +346,9 @@ def parse_config():
     parser.add_argument(
         '--path', type=str, default=argparse.SUPPRESS,
         help='override the dataset root from the YAML config')
+    parser.add_argument(
+        '--test_split', type=str, default=argparse.SUPPRESS,
+        help='override the evaluation split (for train-tracklet calibration)')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
     parser.add_argument(
         '--init_checkpoint', type=str, default=None,
@@ -342,12 +448,44 @@ def parse_config():
         '--motion_v3_fusion_scale', type=float, default=argparse.SUPPRESS,
         help='B1motion-v3 runtime fusion scale; use zero for observation-only evaluation.')
     parser.add_argument(
+        '--recursive_replay_cache_dir', default=argparse.SUPPRESS,
+        help='Hash-validated frozen B0/B1 recursive replay cache.')
+    parser.add_argument(
+        '--use_recursive_replay_cache', action='store_true',
+        default=argparse.SUPPRESS,
+        help='Use the recursive replay cache for training histories.')
+    parser.add_argument(
+        '--b1_calibration_artifact_path', default=argparse.SUPPRESS,
+        help='Verified v2 calibration JSON used to freeze B1 residual margins.')
+    parser.add_argument(
+        '--search_v3_use_dynamic_sigma', action='store_true',
+        default=argparse.SUPPRESS,
+        help='Use promoted calibrated B1 sigma for the B2 support tube.')
+    parser.add_argument(
+        '--require_b1_calibration_passed', action='store_true',
+        default=argparse.SUPPRESS,
+        help='Reject checkpoints whose B1 calibration did not pass promotion.')
+    parser.add_argument(
+        '--disable_uncertainty_geometry', dest='use_uncertainty_geometry',
+        action='store_false', default=argparse.SUPPRESS,
+        help='P4 ablation: retain B1 support but disable geometry features.')
+    parser.add_argument(
+        '--force_b1_invalid', action='store_true',
+        default=argparse.SUPPRESS,
+        help='Evaluation control: invalidate B1 without changing observation.')
+    parser.add_argument(
+        '--shuffle_b1_signal', action='store_true',
+        default=argparse.SUPPRESS,
+        help='Evaluation control: mismatch B1 box order without changing B0.')
+    parser.add_argument(
         '--proposal-mode', '--proposal_mode',
         dest='proposal_inference_mode',
         choices=(
             'obs', 'obs_motion', 'obs_search', 'full',
             'obs_motion_search', 'full_selective',
-            'obs_only', 'obs_vs_motion', 'obs_vs_refined', 'obs_vs_all'),
+            'obs_only', 'obs_vs_motion', 'obs_vs_refined', 'obs_vs_all',
+            'observation', 'motion', 'raw_search', 'legacy_clipped',
+            'selective'),
         default=argparse.SUPPRESS,
         help='Evaluation-only B2 proposal attribution mode.')
 
@@ -356,6 +494,34 @@ def parse_config():
         raise ValueError("--proposal_mode is evaluation-only")
     config = load_yaml(args.cfg)
     config.update(vars(args))  # override the configuration using the value in args
+    if config.get('require_b1_calibration_artifact', False):
+        calibration_path = config.get('b1_calibration_artifact_path')
+        calibration = None
+        if calibration_path:
+            calibration = load_b1_calibration_contract(calibration_path)
+        elif not config.get('test', False):
+            checkpoint_path = (
+                config.get('init_checkpoint') or config.get('checkpoint'))
+            if checkpoint_path:
+                calibration = load_b1_calibration_contract(
+                    checkpoint_path, checkpoint=True)
+        if calibration is None and not config.get('test', False):
+            raise RuntimeError(
+                "formal fixed-margin training requires a B1 calibration "
+                "artifact or calibrated initialization checkpoint")
+        if calibration is not None:
+            source = calibration.get('source_artifact', {})
+            if (source.get('partition') != 'calibration'
+                    or source.get('dataset') != config.get('dataset')
+                    or source.get('split') != config.get('train_split')
+                    or source.get('b1_config_sha256')
+                    != b1_calibration_config_sha256(config)):
+                raise RuntimeError(
+                    "B1 calibration partition/dataset does not match runtime")
+            margins = calibration[
+                'fixed_margin_parallel_perpendicular_95']
+            config['search_v3_fixed_margin_parallel'] = float(margins[0])
+            config['search_v3_fixed_margin_perpendicular'] = float(margins[1])
     defaults = {
         'batch_size': 100,
         'epoch': 60,

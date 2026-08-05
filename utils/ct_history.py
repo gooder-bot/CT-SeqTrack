@@ -11,6 +11,7 @@ _CT_HISTORY_TRAINING_MODES = {
     "correlated_candidate": "correlated_candidate",
     "recursive": "recursive_candidate",
     "recursive_candidate": "recursive_candidate",
+    "recursive_replay": "recursive_replay",
 }
 
 
@@ -20,7 +21,8 @@ def normalize_ct_history_training_mode(mode):
     if key not in _CT_HISTORY_TRAINING_MODES:
         raise ValueError(
             "ct_history_training_mode must be 'canonical', "
-            "'correlated_candidate', or 'recursive_candidate'")
+            "'correlated_candidate', 'recursive_candidate', or "
+            "'recursive_replay'")
     return _CT_HISTORY_TRAINING_MODES[key]
 
 
@@ -28,6 +30,7 @@ CT_HISTORY_MODE_IDS = {
     "canonical": 0,
     "correlated_candidate": 1,
     "recursive_candidate": 2,
+    "recursive_replay": 3,
 }
 
 

@@ -1,0 +1,2 @@
+structural_rows,positive_rows,negative_rows,auc,average_precision,positive_mean_probability,negative_mean_probability
+116,66,50,0.49727272727272726,0.5837775971687715,0.9363692019903807,0.8769627110799775

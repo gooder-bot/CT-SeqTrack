@@ -6,6 +6,7 @@ labelling, and selective routing have distinct training boundaries here.
 """
 
 import hashlib
+import json
 import math
 
 import numpy as np
@@ -18,10 +19,13 @@ SELECTIVE_ROLLOUT_SCHEMA = "ct_seqtrack.selective_rollout.v2"
 SELECTIVE_ROUTER_SCHEMA = "ct_seqtrack.signed_horizon_router.v2"
 SELECTIVE_V3_ROLLOUT_SCHEMA = "ct_seqtrack.selective_rollout.v3"
 SELECTIVE_V3_ROUTER_SCHEMA = "ct_seqtrack.action_router.v3"
+SELECTIVE_V4_ROLLOUT_SCHEMA = "ct_seqtrack.selective_rollout.v4"
+SELECTIVE_V4_ROUTER_SCHEMA = "ct_seqtrack.action_router.v4"
 B2_V3_PROTECTED_PREFIXES = (
     "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
     "motion_state_mlp.", "feature_pointnet.", "Transformer.",
     "physical_motion_encoder.", "state_aligned_search_refiner.",
+    "asymmetric_dual_query.",
 )
 
 
@@ -39,23 +43,114 @@ def _tensor_prefixes_hash(state, prefixes):
     return digest.hexdigest(), keys
 
 
-def validate_b2_v3_router_package(checkpoint):
+def validate_trainable_parameter_prefixes(
+        named_parameters, allowed_prefixes, required_prefixes):
+    named_parameters = list(named_parameters)
+    allowed_prefixes = tuple(allowed_prefixes)
+    required_prefixes = set(required_prefixes)
+    unexpected = sorted(
+        name for name, parameter in named_parameters
+        if parameter.requires_grad and not name.startswith(allowed_prefixes))
+    if unexpected:
+        raise RuntimeError(
+            "trainable parameters escaped the formal prefix contract: "
+            + ", ".join(unexpected[:20]))
+    actual = {
+        prefix for prefix in allowed_prefixes
+        if any(name.startswith(prefix) and parameter.requires_grad
+               for name, parameter in named_parameters)}
+    if actual != required_prefixes:
+        raise RuntimeError(
+            f"formal trainable prefixes are incomplete: "
+            f"expected={sorted(required_prefixes)}, actual={sorted(actual)}")
+    return actual
+
+
+def require_nonzero_finite_gradient(named_parameters, prefix):
+    gradients = [
+        parameter.grad.detach()
+        for name, parameter in named_parameters
+        if name.startswith(prefix) and parameter.requires_grad
+        and parameter.grad is not None]
+    if not gradients:
+        raise RuntimeError(f"no gradients for trainable prefix {prefix}")
+    if (not all(bool(torch.isfinite(gradient).all().item())
+                for gradient in gradients)
+            or not any(bool(torch.count_nonzero(gradient).item())
+                       for gradient in gradients)):
+        raise RuntimeError(
+            f"invalid or zero gradients for trainable prefix {prefix}")
+    return True
+
+
+def validate_b2_v3_router_package(checkpoint, router=None):
     """Reject cold, uncalibrated, or tampered final-router checkpoints."""
     package = checkpoint.get("b2_v3_router_package")
     if not isinstance(package, dict):
         raise RuntimeError(
             "B2-v3 selective evaluation requires a checkpoint created by "
             "package_b2_v3_checkpoint.py")
-    if package.get("schema") != "ct_seqtrack.selective_checkpoint.v3":
+    package_schema = package.get("schema")
+    if package_schema not in (
+            "ct_seqtrack.selective_checkpoint.v3",
+            "ct_seqtrack.selective_checkpoint.v4"):
         raise RuntimeError("unsupported B2-v3 router package schema")
+    if package_schema == "ct_seqtrack.selective_checkpoint.v4":
+        for key in (
+                "feature_schema", "feature_schema_hash",
+                "scalar_normalization", "action_names", "step_ratios",
+                "candidate_checkpoint_sha256", "candidate_config_sha256",
+                "promotion_manifest_sha256"):
+            if package.get(key) is None:
+                raise RuntimeError(f"B3 v4 router package lacks {key}")
+        if router is None:
+            raise RuntimeError(
+                "B3 v4 package validation requires the runtime router")
+        if package.get("feature_schema") != router.feature_schema:
+            raise RuntimeError("B3 v4 feature names/order mismatch")
+        if package.get(
+                "feature_schema_hash") != router.feature_schema_hash:
+            raise RuntimeError("B3 v4 feature schema hash mismatch")
+        if package.get("action_names") != router.action_names:
+            raise RuntimeError("B3 v4 action order mismatch")
+        if package.get("step_ratios") != list(router.STEP_RATIOS):
+            raise RuntimeError("B3 v4 step ratio mismatch")
     calibration = package.get("calibration")
     if (not isinstance(calibration, dict)
             or calibration.get("status") != "passed"
             or calibration.get("partition") != "calibration"):
         raise RuntimeError("B2-v3 selective checkpoint lacks final calibration")
+    if (package_schema == "ct_seqtrack.selective_checkpoint.v4"
+            and (calibration.get("method") != "recursive_tracklet_scan_v4"
+                 or calibration.get("final_recursive") is not True
+                 or int(calibration.get("intervention_count", 0)) <= 0
+                 or float(calibration.get("harm_rate", 1.0)) > 0.05)):
+        raise RuntimeError(
+            "B3 v4 requires a non-empty safe recursive tracklet calibration")
     state = checkpoint.get("state_dict")
     if not isinstance(state, dict):
         raise RuntimeError("B2-v3 package has no state_dict")
+    if package_schema == "ct_seqtrack.selective_checkpoint.v4":
+        normalization = package["scalar_normalization"]
+        normalization_keys = {
+            "mean": "scalar_feature_mean",
+            "std": "scalar_feature_std",
+            "p1": "scalar_clip_low",
+            "p99": "scalar_clip_high",
+        }
+        for metadata_key, state_suffix in normalization_keys.items():
+            value = state.get(
+                "action_consistent_router_v3." + state_suffix)
+            expected = normalization.get(metadata_key)
+            if value is None or expected is None:
+                raise RuntimeError(
+                    f"B3 v4 normalization lacks {metadata_key}")
+            expected_tensor = torch.as_tensor(
+                expected, dtype=value.dtype, device=value.device)
+            if (expected_tensor.shape != value.shape
+                    or not torch.equal(value, expected_tensor)):
+                raise RuntimeError(
+                    f"B3 v4 normalization mismatch for {metadata_key}")
     nonfinite = sorted(
         key for key, value in state.items()
         if torch.is_tensor(value)
@@ -105,6 +200,91 @@ def _clip_vector_norm(vector, radius, eps=1e-6):
     return vector * scale
 
 
+class AsymmetricDualQueryAdapter(nn.Module):
+    """Build a motion-guided search query without modifying q_obs.
+
+    The residual head is exactly zero initialized.  Consequently a newly
+    constructed adapter returns a bit-identical detached observation query,
+    while B1 invalid rows continue to do so after training.
+    """
+
+    def __init__(
+            self,
+            observation_dim=64,
+            motion_dim=128,
+            hidden_dim=128,
+            gate_max=0.5):
+        super().__init__()
+        self.observation_dim = int(observation_dim)
+        self.motion_dim = int(motion_dim)
+        self.gate_max = float(gate_max)
+        if min(self.observation_dim, self.motion_dim, int(hidden_dim)) <= 0:
+            raise ValueError("dual-query dimensions must be positive")
+        if not 0.0 <= self.gate_max <= 1.0:
+            raise ValueError("dual-query gate_max must be in [0,1]")
+        self.residual = nn.Sequential(
+            nn.LayerNorm(self.motion_dim + 4),
+            nn.Linear(self.motion_dim + 4, int(hidden_dim)),
+            nn.ReLU(inplace=True),
+            nn.Linear(int(hidden_dim), self.observation_dim),
+        )
+        self.gate = nn.Sequential(
+            nn.Linear(4, int(hidden_dim) // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(int(hidden_dim) // 2, 1),
+        )
+        nn.init.zeros_(self.residual[-1].weight)
+        nn.init.zeros_(self.residual[-1].bias)
+
+    @staticmethod
+    def _column(value, reference, default=0.0):
+        batch_size = reference.shape[0]
+        if value is None:
+            return reference.new_full((batch_size, 1), float(default))
+        value = torch.as_tensor(
+            value, device=reference.device,
+            dtype=reference.dtype).reshape(-1)
+        if value.numel() == 1:
+            value = value.repeat(batch_size)
+        if value.numel() != batch_size:
+            raise ValueError("dual-query scalar must contain one value per row")
+        return value.reshape(batch_size, 1)
+
+    def forward(
+            self, observation_query, motion_feature,
+            log_sigma_parallel_perp, query_delta_t, gap_ratio,
+            motion_valid):
+        if (observation_query.dim() != 2
+                or observation_query.shape[1] != self.observation_dim):
+            raise ValueError("observation_query has the wrong shape")
+        if (motion_feature.dim() != 2
+                or motion_feature.shape[1] != self.motion_dim):
+            raise ValueError("motion_feature has the wrong shape")
+        observation = observation_query.detach()
+        motion = motion_feature.detach()
+        sigma = torch.nan_to_num(
+            log_sigma_parallel_perp.detach().to(observation),
+            nan=0.0, posinf=2.5, neginf=-4.0)
+        if sigma.shape != (observation.shape[0], 2):
+            raise ValueError("motion sigma must have shape [B,2]")
+        dt = self._column(query_delta_t, observation, default=0.1)
+        gap = self._column(gap_ratio, observation, default=1.0)
+        scalar = torch.cat((sigma, dt, gap), dim=1)
+        valid = (
+            self._column(motion_valid, observation) > 0).to(
+                observation.dtype)
+        gate = (
+            self.gate_max * torch.sigmoid(self.gate(scalar)) * valid)
+        residual = self.residual(torch.cat((motion, scalar), dim=1))
+        search_query = observation + gate * residual
+        return search_query, {
+            "dual_query_residual": residual,
+            "dual_query_gate": gate.squeeze(1),
+            "dual_query_delta_norm": torch.linalg.norm(
+                search_query - observation, dim=1),
+        }
+
+
 class MotionConditionedSearchRefiner(nn.Module):
     """Use endpoint point evidence to refine, rather than compete with, B1.
 
@@ -121,6 +301,8 @@ class MotionConditionedSearchRefiner(nn.Module):
             observation_dim=256,
             motion_dim=128,
             observation_stats_dim=5,
+            query_observation_dim=None,
+            require_motion_valid=True,
             max_vote_offset=4.0,
             pool_temperature=0.5,
             presence_threshold=0.5,
@@ -130,7 +312,12 @@ class MotionConditionedSearchRefiner(nn.Module):
             eps=1e-6):
         super().__init__()
         self.feature_dim = int(feature_dim)
+        self.point_dim = int(point_dim)
         self.query_dim = int(query_dim)
+        self.query_observation_dim = int(
+            observation_dim if query_observation_dim is None
+            else query_observation_dim)
+        self.require_motion_valid = bool(require_motion_valid)
         self.max_vote_offset = float(max_vote_offset)
         self.pool_temperature = float(pool_temperature)
         self.presence_threshold = float(presence_threshold)
@@ -171,7 +358,8 @@ class MotionConditionedSearchRefiner(nn.Module):
         )
         self.film_scale = nn.Linear(self.feature_dim, self.feature_dim)
         self.film_shift = nn.Linear(self.feature_dim, self.feature_dim)
-        query_input_dim = int(observation_dim) + int(observation_stats_dim)
+        query_input_dim = (
+            self.query_observation_dim + int(observation_stats_dim))
         self.query_projection = nn.Sequential(
             nn.Linear(query_input_dim, self.query_dim),
             nn.LayerNorm(self.query_dim),
@@ -305,9 +493,12 @@ class MotionConditionedSearchRefiner(nn.Module):
             sigma_perpendicular,
             available_count=None,
             extension_count=None,
-            overlap_count=None):
-        if point_inputs.dim() != 3 or point_inputs.shape[-1] != 9:
-            raise ValueError("B2-v2.2 point inputs must have shape [B,N,9]")
+            overlap_count=None,
+            query_feature=None):
+        if (point_inputs.dim() != 3
+                or point_inputs.shape[-1] != self.point_dim):
+            raise ValueError(
+                "B2 point inputs must have shape [B,N,point_dim]")
         if point_xy.shape != point_inputs.shape[:2] + (2,):
             raise ValueError("B2-v2.2 point xy must have shape [B,N,2]")
         if delta_to_motion.shape != point_xy.shape:
@@ -349,6 +540,15 @@ class MotionConditionedSearchRefiner(nn.Module):
         ), dim=1)
 
         observation_feature = observation_feature.detach()
+        if query_feature is None:
+            query_feature = observation_feature
+        # An explicit query is produced by the trainable asymmetric adapter.
+        # Its B0/B1 inputs are already detached inside that adapter, so
+        # detaching again here would silently sever all B2 loss gradients to
+        # the adapter itself.
+        if query_feature.shape != (
+                batch_size, self.query_observation_dim):
+            raise ValueError("B2 query_feature has the wrong shape")
         motion_feature = motion_feature.detach()
         observation_stats = observation_stats.detach()
         motion_proposal_xy = motion_proposal_xy.detach()
@@ -374,7 +574,7 @@ class MotionConditionedSearchRefiner(nn.Module):
         point_feature = point_feature * (1.0 + film_scale) + film_shift
 
         query = self.query_projection(torch.nan_to_num(torch.cat((
-            observation_feature, observation_stats), dim=1)))
+            query_feature, observation_stats), dim=1)))
         key = self.key_norm(self.key_projection(point_feature))
         match_logits = (
             key * query.unsqueeze(1)).sum(dim=2) / math.sqrt(
@@ -412,9 +612,11 @@ class MotionConditionedSearchRefiner(nn.Module):
         point_row_valid = (valid_count >= 3).to(point_inputs.dtype)
         candidate_available = (
             point_row_valid * geometry.squeeze(1)
-            * motion_valid_column.squeeze(1)
             * self._structural_finite(
                 point_inputs, motion_proposal_xy, support_anchor_xy))
+        if self.require_motion_valid:
+            candidate_available = (
+                candidate_available * motion_valid_column.squeeze(1))
         source_present = torch.stack((
             (overlap_mask.sum(dim=1) > 0).to(point_inputs.dtype),
             (extension_mask.sum(dim=1) > 0).to(point_inputs.dtype),
@@ -511,6 +713,7 @@ class MotionConditionedSearchRefiner(nn.Module):
             "search_v22_point_center_votes": point_center_votes,
             "search_v22_valid_count": valid_count,
             "search_v22_refinement_radius": refinement_radius.squeeze(1),
+            "search_source_present": source_present,
         }
         output[self.evidence_output_key] = evidence_token
         return output
@@ -524,8 +727,9 @@ class StateAlignedSearchRefiner(MotionConditionedSearchRefiner):
     structured concatenation itself; there is no randomly frozen fusion layer.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, predict_utility=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.predict_utility = bool(predict_utility)
         del self.source_fusion
         self.presence_head = nn.Sequential(
             nn.Linear(3 * self.feature_dim + 2, self.feature_dim),
@@ -536,6 +740,16 @@ class StateAlignedSearchRefiner(MotionConditionedSearchRefiner):
         nn.init.zeros_(self.presence_head[-1].weight)
         nn.init.constant_(
             self.presence_head[-1].bias, math.log(0.1 / 0.9))
+        if self.predict_utility:
+            self.utility_head = nn.Sequential(
+                nn.Linear(3 * self.feature_dim + 2, self.feature_dim),
+                nn.LayerNorm(self.feature_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.feature_dim, 1),
+            )
+            nn.init.zeros_(self.utility_head[-1].weight)
+            nn.init.constant_(
+                self.utility_head[-1].bias, math.log(0.1 / 0.9))
 
     @property
     def evidence_output_key(self):
@@ -606,6 +820,21 @@ class StateAlignedSearchRefiner(MotionConditionedSearchRefiner):
             "search_v3_normalized_ess": output["search_normalized_ess"],
             "search_v3_raw_ess": output["search_raw_ess"],
         })
+        if self.predict_utility:
+            utility_inputs = torch.cat((
+                output["search_v3_overlap_token"],
+                output["search_v3_extension_token"],
+                output["search_v3_motion_observation_context"],
+                output["search_source_present"],
+            ), dim=1)
+            utility_logit = self.utility_head(utility_inputs).squeeze(1)
+            structural = output[
+                "motion_search_v3_candidate_structural_valid"]
+            output.update({
+                "search_v3_utility_logit": utility_logit,
+                "search_v3_utility_probability": (
+                    torch.sigmoid(utility_logit) * structural),
+            })
         return output
 
 
@@ -845,10 +1074,11 @@ class SignedHorizonInnovationRouter(nn.Module):
         radius = torch.clamp(
             self.radius_base + self.radius_per_second * dt,
             max=self.radius_max)
-        motion_residual = _clip_vector_norm(
-            motion_proposal_xy - reference, radius, self.eps)
-        motion_search_residual = _clip_vector_norm(
-            motion_search_xy - reference, radius, self.eps)
+        # Candidate actions retain their raw observation-anchored residuals.
+        # The single safety limiter is applied only after the exact source and
+        # step action has been selected below.
+        motion_residual = motion_proposal_xy - reference
+        motion_search_residual = motion_search_xy - reference
         motion_valid_column = (
             self._batch_scalar(motion_valid, reference) > 0)
         motion_search_valid_column = (
@@ -1003,10 +1233,30 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
     POLICY_OBSERVATION = -2
     POLICY_AUTO = -1
     POLICY_MOTION = 0
-    POLICY_REFINED = 1
+    POLICY_SEARCH = 1
+    POLICY_REFINED = POLICY_SEARCH  # read-only alias for v3 artifacts
 
-    def __init__(self, *args, search_dim=384, **kwargs):
+    def __init__(self, *args, search_dim=384, scalar_only=False,
+                 use_utility_feature=False, **kwargs):
         super().__init__(*args, search_dim=search_dim, **kwargs)
+        self.scalar_only = bool(scalar_only)
+        self.use_utility_feature = bool(use_utility_feature)
+        self.scalar_feature_names = list(self.SCALAR_FEATURE_NAMES)
+        if self.use_utility_feature:
+            self.scalar_feature_names.extend((
+                "search_utility", "support_truncated"))
+            old_input = self.trunk[0]
+            self.scalar_dim = len(self.scalar_feature_names)
+            self.trunk[0] = nn.Linear(
+                old_input.in_features + 2, old_input.out_features)
+            self.scalar_feature_mean = torch.zeros(self.scalar_dim)
+            self.scalar_feature_std = torch.ones(self.scalar_dim)
+            self.register_buffer(
+                "scalar_clip_low",
+                torch.full((self.scalar_dim,), float("-inf")))
+            self.register_buffer(
+                "scalar_clip_high",
+                torch.full((self.scalar_dim,), float("inf")))
         hidden_dim = self.median_gain_head.in_features
         action_count = 2 * len(self.STEP_RATIOS)
         self.median_gain_head = nn.Linear(hidden_dim, action_count)
@@ -1018,8 +1268,66 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
         nn.init.constant_(
             self.gain_spread_head.bias, math.log(math.expm1(0.05)))
 
+    @property
+    def action_names(self):
+        return [
+            f"{source}@{ratio:g}"
+            for source in ("MOTION", "SEARCH")
+            for ratio in self.STEP_RATIOS
+        ]
+
+    @property
+    def feature_schema(self):
+        return {
+            "observation_dim": self.observation_dim,
+            "motion_dim": self.motion_dim,
+            "search_dim": self.search_dim,
+            "scalar_feature_names": list(self.scalar_feature_names),
+            "scalar_dim": self.scalar_dim,
+            "feature_dim": self.export_feature_dim,
+            "scalar_only": self.scalar_only,
+            "use_utility_feature": self.use_utility_feature,
+            "action_names": self.action_names,
+            "step_ratios": list(self.STEP_RATIOS),
+        }
+
+    @property
+    def feature_schema_hash(self):
+        encoded = json.dumps(
+            self.feature_schema, sort_keys=True,
+            separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def set_scalar_clipping(self, low, high):
+        if not hasattr(self, "scalar_clip_low"):
+            raise RuntimeError(
+                "scalar clipping belongs to the formal v4 router schema")
+        low = torch.as_tensor(
+            low, device=self.scalar_clip_low.device,
+            dtype=self.scalar_clip_low.dtype).reshape(-1)
+        high = torch.as_tensor(
+            high, device=self.scalar_clip_high.device,
+            dtype=self.scalar_clip_high.dtype).reshape(-1)
+        if (low.numel() != self.scalar_dim
+                or high.numel() != self.scalar_dim
+                or not bool(torch.isfinite(low).all())
+                or not bool(torch.isfinite(high).all())
+                or bool(torch.any(low > high))):
+            raise ValueError("router p1/p99 clipping contract is invalid")
+        self.scalar_clip_low.copy_(low)
+        self.scalar_clip_high.copy_(high)
+
     def _predict(self, observation_feature, motion_feature, search_feature,
                  scalar_features):
+        if self.scalar_only:
+            observation_feature = torch.zeros_like(observation_feature)
+            motion_feature = torch.zeros_like(motion_feature)
+            search_feature = torch.zeros_like(search_feature)
+        if hasattr(self, "scalar_clip_low"):
+            scalar_features = torch.maximum(
+                scalar_features, self.scalar_clip_low.unsqueeze(0))
+            scalar_features = torch.minimum(
+                scalar_features, self.scalar_clip_high.unsqueeze(0))
         normalized_scalar = (
             scalar_features - self.scalar_feature_mean.unsqueeze(0)
         ) / torch.clamp(self.scalar_feature_std.unsqueeze(0), min=1e-4)
@@ -1081,7 +1389,9 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
             enabled_scale=1.0,
             policy_override=None,
             forced_step_ratio=None,
-            action_allowed_mask=None):
+            action_allowed_mask=None,
+            search_utility=None,
+            support_truncated=None):
         observation_box = observation_box.detach()
         observation_feature = observation_feature.detach()
         observation_stats = observation_stats.detach()
@@ -1098,6 +1408,8 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
         history_valid_ratio = detached(history_valid_ratio)
         motion_search_valid = detached(motion_search_valid)
         search_presence = detached(search_presence)
+        search_utility = detached(search_utility)
+        support_truncated = detached(support_truncated)
         search_targetness_mean = detached(search_targetness_mean)
         search_targetness_max = detached(search_targetness_max)
         search_targetness_entropy = detached(search_targetness_entropy)
@@ -1121,10 +1433,10 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
         radius = torch.clamp(
             self.radius_base + self.radius_per_second * dt,
             max=self.radius_max)
-        motion_residual = _clip_vector_norm(
-            motion_proposal_xy - reference, radius, self.eps)
-        motion_search_residual = _clip_vector_norm(
-            motion_search_xy - reference, radius, self.eps)
+        # Candidate semantics stay raw.  Execution applies the chosen ratio
+        # first and the normal/gap safety cap exactly once below.
+        motion_residual = motion_proposal_xy - reference
+        motion_search_residual = motion_search_xy - reference
         motion_valid_column = (
             self._batch_scalar(motion_valid, reference) > 0)
         motion_search_valid_column = (
@@ -1142,7 +1454,7 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
                     motion_norm * motion_search_norm, min=self.eps)
         refinement = torch.nan_to_num(
             observation_refinement_xy) / safe_radius
-        scalar_features = torch.cat((
+        scalar_columns = [
             observation_stats,
             self._batch_scalar(observation_entropy, reference),
             refinement,
@@ -1177,7 +1489,13 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
             gap,
             motion_valid_column.to(reference.dtype),
             motion_search_valid_column.to(reference.dtype),
-        ), dim=1)
+        ]
+        if self.use_utility_feature:
+            scalar_columns.extend((
+                self._batch_scalar(search_utility, reference),
+                self._batch_scalar(support_truncated, reference),
+            ))
+        scalar_features = torch.cat(scalar_columns, dim=1)
         if scalar_features.shape[1] != self.scalar_dim:
             raise RuntimeError(
                 "action router scalar feature contract changed: "
@@ -1230,7 +1548,7 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
             (policy == self.POLICY_OBSERVATION)
             | (policy == self.POLICY_AUTO)
             | (policy == self.POLICY_MOTION)
-            | (policy == self.POLICY_REFINED))
+            | (policy == self.POLICY_SEARCH))
         if not bool(torch.all(allowed_policy).item()):
             raise ValueError("invalid B2-v3 policy override")
         forced = policy >= 0
@@ -1238,7 +1556,7 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
         if bool(torch.any(forced).item()):
             if forced_step_ratio is None:
                 raise ValueError(
-                    "forced motion/refined policy requires an explicit step")
+                    "forced motion/search policy requires an explicit step")
             forced_ratio = self._batch_scalar(
                 forced_step_ratio, reference, default=0.25).reshape(-1)
             distance = torch.abs(
@@ -1275,9 +1593,16 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
             reference.new_full((batch_size,), self.gap_step_cap),
             reference.new_full((batch_size,), self.normal_step_cap),
         )
-        alpha = selected_step_ratio * step_cap
-        alpha = alpha * intervene.to(reference.dtype) * enabled_scale
-        correction = selected_residual * alpha.unsqueeze(1)
+        requested_correction = (
+            selected_residual * selected_step_ratio.unsqueeze(1))
+        correction = _clip_vector_norm(
+            requested_correction, step_cap.unsqueeze(1), self.eps)
+        correction = (
+            correction * intervene.to(reference.dtype).unsqueeze(1)
+            * enabled_scale)
+        residual_norm = torch.linalg.norm(
+            selected_residual, dim=1).clamp_min(self.eps)
+        alpha = torch.linalg.norm(correction, dim=1) / residual_norm
         final_xy = torch.where(
             intervene.unsqueeze(1), reference + correction, reference)
         final_box = torch.cat((final_xy, observation_box[:, 2:]), dim=1)
@@ -1303,6 +1628,8 @@ class ActionConsistentInnovationRouter(SignedHorizonInnovationRouter):
             "router_v3_applied_alpha": alpha,
             "router_v3_correction_xy": correction,
             "router_v3_fusion_radius": radius.squeeze(1),
+            "router_v3_scalar_only": reference.new_tensor(
+                float(self.scalar_only)),
         }
 
 
@@ -1420,7 +1747,7 @@ def calibrate_gain_threshold(
         candidate_valid,
         step_class=None,
         min_precision=0.75,
-        max_harm_rate=0.10,
+        max_harm_rate=0.05,
         min_coverage=0.05,
         max_coverage=0.25,
         helpful_margin=0.02):

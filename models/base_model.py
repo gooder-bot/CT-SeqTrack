@@ -5,6 +5,7 @@ Modified by Aron Lin at Jun 6 17:39:22 CST 2023
 """
 
 import csv
+import copy
 import json
 from pathlib import Path
 
@@ -37,13 +38,14 @@ from models.state_filter import (
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
-    build_trajectory_endpoint_search_box,
     build_time_guided_search_box,
+    resolve_b1_search_support,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
 )
+from utils.replay_cache import b2_candidate_config_sha256
 
 import time
 
@@ -306,7 +308,8 @@ class BaseModelMF(pl.LightningModule):
         }
 
     def _build_v22_proposal_diagnostic_row(
-            self, output, data_dict, this_box, reference_box, frame_id):
+            self, output, data_dict, this_box, reference_box, frame_id,
+            previous_target_box=None):
         """Build a GT-labelled v2.2/v3 attribution row outside forward."""
         is_v3 = "search_v3_evidence_components" in output
         data_prefix = "search_v3" if is_v3 else "search_v22"
@@ -321,6 +324,17 @@ class BaseModelMF(pl.LightningModule):
             foreground = geometry_utils.points_in_box(
                 target_box, points_np.T, self.config.bb_scale)
             foreground_count = int(np.sum(foreground & mask_np))
+        baseline_foreground_count = 0
+        baseline_points = data_dict.get("points")
+        if baseline_points is not None:
+            sample_size = int(getattr(
+                self.config, "point_sample_size", 0))
+            if sample_size > 0:
+                baseline_np = baseline_points.detach().cpu().numpy()[
+                    0, -sample_size:, :3]
+                baseline_foreground_count = int(np.sum(
+                    geometry_utils.points_in_box(
+                        target_box, baseline_np.T, self.config.bb_scale)))
 
         def tensor_xy(key, fallback):
             value = output.get(key)
@@ -328,18 +342,50 @@ class BaseModelMF(pl.LightningModule):
                 return np.asarray(fallback, dtype=np.float64)
             return value.detach().cpu().numpy().reshape(-1, 4 if value.shape[-1] == 4 else 2)[0, :2].astype(np.float64)
 
-        observation_xy = tensor_xy(
-            "observation_aux_estimation_boxes", target_xy)
+        observation_box4 = output[
+            "observation_aux_estimation_boxes"
+        ].detach().cpu().numpy().reshape(-1, 4)[0].astype(np.float64)
+        observation_xy = observation_box4[:2]
         motion_xy = tensor_xy("motion_prior_xy", observation_xy)
-        raw_search_xy = tensor_xy("search_raw_vote_xy", observation_xy)
+        raw_search_xy = tensor_xy(
+            "search_v3_raw_vote_xy" if is_v3 else "search_raw_vote_xy",
+            observation_xy)
         refined_xy = tensor_xy(
-            "motion_search_refined_xy", observation_xy)
+            ("motion_search_v3_refined_xy"
+             if is_v3 else "motion_search_refined_xy"), observation_xy)
         final_xy = tensor_xy("aux_estimation_boxes", observation_xy)
+
+        def candidate_quality(candidate_xy):
+            offset = observation_box4.copy()
+            offset[:2] = np.asarray(candidate_xy, dtype=np.float64)
+            candidate_box = points_utils.getOffsetBB(
+                reference_box, offset, degrees=self.config.degrees,
+                use_z=self.config.use_z, limit_box=self.config.limit_box)
+            return (
+                float(estimateOverlap(
+                    this_box, candidate_box, dim=self.config.IoU_space,
+                    up_axis=self.config.up_axis)),
+                float(estimateAccuracy(
+                    this_box, candidate_box, dim=self.config.IoU_space,
+                    up_axis=self.config.up_axis)),
+            )
+
+        formal_diagnostics = bool(
+            is_v3 and getattr(
+                self.config, "use_asymmetric_dual_query", False))
+        if formal_diagnostics:
+            observation_iou, observation_distance = candidate_quality(
+                observation_xy)
+            raw_search_iou, raw_search_distance = candidate_quality(
+                raw_search_xy)
+            final_iou, final_distance = candidate_quality(final_xy)
         observation_error = float(np.linalg.norm(observation_xy - target_xy))
         motion_error = float(np.linalg.norm(motion_xy - target_xy))
         raw_search_error = float(np.linalg.norm(raw_search_xy - target_xy))
         refined_error = float(np.linalg.norm(refined_xy - target_xy))
         final_error = float(np.linalg.norm(final_xy - target_xy))
+        official_search_is_raw = bool(self._proposal_scalar(
+            output, "official_search_is_raw", default=float(is_v3)) > 0.5)
         margin = float(getattr(self.config, "advantage_help_margin", 0.05))
         motion_valid = self._proposal_scalar(
             output, "motion_prior_valid") > 0.0
@@ -359,19 +405,52 @@ class BaseModelMF(pl.LightningModule):
             default=0.0)
         motion_helpful = bool(
             motion_valid and motion_error + margin <= observation_error)
+        raw_search_helpful = bool(
+            refined_valid
+            and raw_search_error + margin <= observation_error)
         refined_helpful = bool(
             refined_valid and refined_error + margin <= observation_error)
         intervention = selected in (1, 2) and alpha > 0
         selected_error = (
             motion_error if selected == 1
-            else refined_error if selected == 2
+            else (raw_search_error
+                  if official_search_is_raw else refined_error)
+            if selected == 2
             else observation_error)
-        return {
+        previous_error = float("nan")
+        if previous_target_box is not None:
+            previous_error = float(np.linalg.norm(
+                np.asarray(reference_box.center, dtype=np.float64)[:2]
+                - np.asarray(
+                    previous_target_box.center, dtype=np.float64)[:2]))
+        sigma_mahalanobis_sq = float("nan")
+        if is_v3 and motion_valid:
+            direction_value = output.get("motion_prior_direction_xy")
+            log_sigma_value = output.get(
+                "motion_prior_log_sigma_parallel_perp")
+            if direction_value is not None and log_sigma_value is not None:
+                direction_xy = direction_value.detach().cpu().numpy(
+                    ).reshape(-1, 2)[0]
+                perpendicular_xy = np.asarray(
+                    [-direction_xy[1], direction_xy[0]])
+                motion_residual = target_xy - motion_xy
+                aligned_error = np.asarray((
+                    np.dot(motion_residual, direction_xy),
+                    np.dot(motion_residual, perpendicular_xy),
+                ))
+                log_sigma_pp = log_sigma_value.detach().cpu().numpy(
+                    ).reshape(-1, 2)[0]
+                sigma_mahalanobis_sq = float(np.sum(
+                    (aligned_error * np.exp(-log_sigma_pp)) ** 2))
+        row = {
             "frame_id": int(frame_id),
             "b2_version": "v3" if is_v3 else "v2.2",
             "geometry_valid": int(self._proposal_scalar(
                 data_dict, f"{data_prefix}_geometry_valid") > 0.0),
             "foreground_count": foreground_count,
+            "baseline_foreground_count": baseline_foreground_count,
+            "base_reachable": int(baseline_foreground_count >= 1),
+            "prior_reachable": int(foreground_count >= 1),
             "valid_foreground": int(
                 refined_valid and foreground_count >= 1),
             "motion_valid": int(motion_valid),
@@ -379,16 +458,25 @@ class BaseModelMF(pl.LightningModule):
             "observation_error": observation_error,
             "motion_error": motion_error,
             "raw_search_error": raw_search_error,
-            "search_error": refined_error,
+            "legacy_clipped_error": refined_error,
+            "search_error": (
+                raw_search_error if is_v3 else refined_error),
             "final_error": final_error,
+            "previous_error": previous_error,
             "motion_helpful": int(motion_helpful),
-            "search_helpful": int(refined_helpful),
+            "raw_search_helpful": int(raw_search_helpful),
+            "legacy_clipped_helpful": int(refined_helpful),
+            "search_helpful": int(
+                raw_search_helpful if is_v3 else refined_helpful),
+            "utility_target": int(raw_search_helpful),
             "search_materially_selected": int(selected == 2 and alpha > 0),
             "search_weight": alpha if selected == 2 else 0.0,
             "intervention": int(intervention),
             "selected_helpful": int(
                 (selected == 1 and motion_helpful)
-                or (selected == 2 and refined_helpful)),
+                or (selected == 2 and (
+                    raw_search_helpful
+                    if official_search_is_raw else refined_helpful))),
             "selected_harmful": int(
                 intervention and selected_error > observation_error),
             "selected_candidate": selected,
@@ -427,7 +515,39 @@ class BaseModelMF(pl.LightningModule):
                  if is_v3 else "signed_gain_quantiles"),
                 column=3),
             "presence_probability": self._proposal_scalar(
-                output, "search_presence_probability"),
+                output, ("search_v3_presence_probability"
+                         if is_v3 else "search_presence_probability")),
+            "utility_probability": self._proposal_scalar(
+                output, "search_v3_utility_probability"),
+            "presence_target": int(foreground_count >= 1),
+            "prior_source_id": int(self._proposal_scalar(
+                data_dict, f"{data_prefix}_prior_source_id")),
+            "gap_ratio": self._proposal_scalar(
+                data_dict, f"{data_prefix}_gap_ratio", default=1.0),
+            "support_truncated": int(self._proposal_scalar(
+                data_dict, f"{data_prefix}_support_truncated") > 0.0),
+            "support_requested_length": self._proposal_scalar(
+                data_dict, f"{data_prefix}_support_requested_extent",
+                column=0),
+            "support_requested_width": self._proposal_scalar(
+                data_dict, f"{data_prefix}_support_requested_extent",
+                column=1),
+            "support_actual_length": self._proposal_scalar(
+                data_dict, f"{data_prefix}_support_actual_extent",
+                column=0),
+            "support_actual_width": self._proposal_scalar(
+                data_dict, f"{data_prefix}_support_actual_extent",
+                column=1),
+            "sigma_mahalanobis_sq": sigma_mahalanobis_sq,
+            "sigma_coverage_50": int(
+                np.isfinite(sigma_mahalanobis_sq)
+                and sigma_mahalanobis_sq <= 1.38629436112),
+            "sigma_coverage_80": int(
+                np.isfinite(sigma_mahalanobis_sq)
+                and sigma_mahalanobis_sq <= 3.21887582487),
+            "sigma_coverage_95": int(
+                np.isfinite(sigma_mahalanobis_sq)
+                and sigma_mahalanobis_sq <= 5.99146454711),
             "normalized_ess": self._proposal_scalar(
                 output, "search_normalized_ess"),
             "raw_ess": self._proposal_scalar(output, "search_raw_ess"),
@@ -446,6 +566,20 @@ class BaseModelMF(pl.LightningModule):
                 ("router_v3_correction_xy"
                  if is_v3 else "signed_correction_xy"), column=1),
         }
+        if formal_diagnostics:
+            row.update({
+                "observation_x": float(observation_box4[0]),
+                "observation_y": float(observation_box4[1]),
+                "observation_z": float(observation_box4[2]),
+                "observation_yaw": float(observation_box4[3]),
+                "observation_iou": observation_iou,
+                "observation_distance": observation_distance,
+                "raw_search_iou": raw_search_iou,
+                "raw_search_distance": raw_search_distance,
+                "final_iou": final_iou,
+                "final_distance": final_distance,
+            })
+        return row
 
     @staticmethod
     def _write_csv_rows(path, rows):
@@ -615,17 +749,25 @@ class BaseModelMF(pl.LightningModule):
                     if m4_filter is not None else None
                 )
 
-                # construct input dict
-                if m4_enabled:
-                    data_dict, ref_bb = self.build_input_dict(
-                        sequence,
-                        frame_id,
-                        results_bbs,
-                        m4_prediction=m4_prediction,
-                    )
-                else:
-                    data_dict, ref_bb = self.build_input_dict(
+                # B1 is intentionally run before point cropping.  It only
+                # consumes recursive history boxes and timestamps; the
+                # current annotation is never passed to the pre-pass.
+                motion_prediction = None
+                if bool(getattr(
+                        self.config, "use_b1_prepass_support", False)):
+                    predictor = getattr(self, "predict_motion_prepass", None)
+                    if predictor is None:
+                        raise RuntimeError(
+                            "B1 pre-pass support requires a motion predictor")
+                    motion_prediction = predictor(
                         sequence, frame_id, results_bbs)
+                build_kwargs = {}
+                if m4_enabled:
+                    build_kwargs["m4_prediction"] = m4_prediction
+                if motion_prediction is not None:
+                    build_kwargs["motion_prediction"] = motion_prediction
+                data_dict, ref_bb = self.build_input_dict(
+                    sequence, frame_id, results_bbs, **build_kwargs)
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
                     if (m4_filter_enabled
@@ -683,6 +825,8 @@ class BaseModelMF(pl.LightningModule):
                                 this_bb,
                                 ref_bb,
                                 frame_id,
+                                previous_target_box=sequence[
+                                    frame_id - 1]["3d_bbox"],
                             ))
                     if (bool(getattr(
                             self.config, "export_b3_rollouts", False))
@@ -915,10 +1059,6 @@ class BaseModelMF(pl.LightningModule):
         sequence = batch[0]  # unwrap the batch with batch size = 1
         start_time = time.time()
         ious, distances, result_bbs, *_= self.evaluate_one_sequence(sequence)
-        for row in self._proposal_sequence_diagnostics:
-            row = dict(row)
-            row["tracklet_id"] = int(batch_idx)
-            self._proposal_test_diagnostics.append(row)
         test_dataset = getattr(
             getattr(self.trainer, "test_dataloaders", None), "dataset", None)
         if test_dataset is None:
@@ -930,6 +1070,17 @@ class BaseModelMF(pl.LightningModule):
             if test_dataset is not None
             and hasattr(test_dataset, "get_tracklet_key")
             else f"tracklet/{int(batch_idx)}")
+        for row in self._proposal_sequence_diagnostics:
+            row = dict(row)
+            row["tracklet_id"] = int(batch_idx)
+            if bool(getattr(
+                    self.config, "use_asymmetric_dual_query", False)):
+                row["tracklet_key"] = str(tracklet_key)
+                row["dataset_split"] = str(getattr(
+                    self.config, "test_split", "unknown"))
+                row["candidate_config_sha256"] = (
+                    b2_candidate_config_sha256(self.config))
+            self._proposal_test_diagnostics.append(row)
         for row in self._b3_sequence_rollouts:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
@@ -996,13 +1147,27 @@ class MotionBaseModelMF(BaseModelMF):
     def build_input_dict(self, sequence, frame_id, results_bbs, **kwargs): # Note: There may be cases of input with empty point clouds
         assert frame_id > 0, "no need to construct an input_dict at frame 0"
 
+        if (bool(getattr(
+                self.config, "use_b1_prepass_support", False))
+                and kwargs.get("motion_prediction") is None):
+            predictor = getattr(self, "predict_motion_prepass", None)
+            if predictor is None:
+                raise RuntimeError(
+                    "B1 pre-pass support requires a motion predictor")
+            kwargs["motion_prediction"] = predictor(
+                sequence, frame_id, results_bbs)
+
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(frame_id,self.hist_num)
         prev_frames = [sequence[id] for id in prev_frame_ids]
         this_frame = sequence[frame_id]
         this_pc = this_frame['pc']
-        bbox_size = this_frame['3d_bbox'].wlh
         prev_pcs = [frame['pc'] for frame in prev_frames]
         ref_boxs = get_last_n_bounding_boxes(results_bbs,valid_mask)
+        bbox_size = (
+            ref_boxs[0].wlh
+            if bool(getattr(
+                self.config, 'observation_safe_bbox_size', False))
+            else this_frame['3d_bbox'].wlh)
         num_hist = len(valid_mask)
         default_time_step = getattr(
             self.config, 'default_time_step',
@@ -1197,36 +1362,72 @@ class MotionBaseModelMF(BaseModelMF):
         )
         search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
         if use_endpoint_search_evidence:
-            search_v2_box, search_v2_diagnostics = (
-                build_trajectory_endpoint_search_box(
-                    ref_boxs,
-                    effective_delta_t_list,
-                    valid_mask=valid_mask,
-                    max_speed=float(search_config_value('max_speed', 20.0)),
-                    max_acceleration=float(search_config_value(
-                        'max_acceleration', 8.0)),
-                    max_displacement=float(search_config_value(
-                        'max_displacement', 12.0)),
-                    acceleration_weight=float(search_config_value(
-                        'acceleration_weight', 0.5)),
-                    max_yaw_rate=float(search_config_value(
-                        'max_yaw_rate', np.pi / 2.0)),
-                    min_displacement=float(search_config_value(
-                        'min_displacement', 0.2)),
-                ))
+            motion_prediction = kwargs.get("motion_prediction")
+            use_prepass = bool(getattr(
+                self.config, "use_b1_prepass_support", False))
+            search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
+                ref_boxs,
+                effective_delta_t_list,
+                valid_mask,
+                prediction=motion_prediction,
+                use_b1_prepass=use_prepass,
+                use_dynamic_sigma=bool(getattr(
+                    self.config, "search_v3_use_dynamic_sigma", False)),
+                fixed_margins=(
+                    float(getattr(
+                        self.config,
+                        "search_v3_fixed_margin_parallel", 2.0)),
+                    float(getattr(
+                        self.config,
+                        "search_v3_fixed_margin_perpendicular", 1.0)),
+                ),
+                coverage_scale=float(getattr(
+                    self.config, "search_v3_coverage_scale", 2.448)),
+                min_direction_speed=float(getattr(
+                    self.config, "motion_v3_min_direction_speed", 0.2)),
+                max_length=float(search_config_value('max_length', 24.0)),
+                max_width=float(search_config_value('max_width', 10.0)),
+                fallback_max_speed=float(search_config_value(
+                    'max_speed', 20.0)),
+                fallback_max_acceleration=float(search_config_value(
+                    'max_acceleration', 8.0)),
+                fallback_max_displacement=float(search_config_value(
+                    'max_displacement', 12.0)),
+                fallback_acceleration_weight=float(search_config_value(
+                    'acceleration_weight', 0.5)),
+                fallback_max_yaw_rate=float(search_config_value(
+                    'max_yaw_rate', np.pi / 2.0)),
+                fallback_min_displacement=float(search_config_value(
+                    'min_displacement', 0.2)),
+            )
             if search_v2_box is not None:
+                learned_prior_support = (
+                    search_v2_diagnostics.get("prior_source") == "b1")
                 search_v2_pc = points_utils.generate_subwindow_with_aroundboxs(
                     this_pc,
                     search_v2_box,
                     ref_boxs[0],
-                    scale=self.config.bb_scale,
-                    offset=self.config.bb_offset,
+                    scale=(1.0 if learned_prior_support
+                           else self.config.bb_scale),
+                    offset=(0.0 if learned_prior_support
+                            else self.config.bb_offset),
                 )
                 search_v2_expanded_points = search_v2_pc.points.T
-                search_v2_local_box = points_utils.transform_box(
-                    search_v2_box, ref_boxs[0])
-                search_v2_endpoint_xy = np.asarray(
-                    search_v2_local_box.center[:2], dtype=np.float32)
+                endpoint_center = search_v2_diagnostics.get(
+                    "endpoint_center")
+                if endpoint_center is not None:
+                    endpoint_box = copy.deepcopy(ref_boxs[0])
+                    endpoint_box.center = np.asarray(
+                        endpoint_center, dtype=np.float64)
+                    endpoint_local = points_utils.transform_box(
+                        endpoint_box, ref_boxs[0])
+                    search_v2_endpoint_xy = np.asarray(
+                        endpoint_local.center[:2], dtype=np.float32)
+                else:
+                    search_v2_local_box = points_utils.transform_box(
+                        search_v2_box, ref_boxs[0])
+                    search_v2_endpoint_xy = np.asarray(
+                        search_v2_local_box.center[:2], dtype=np.float32)
         num_points_in_search_baseline = this_frame_pc.nbr_points()
         num_points_in_search_tube = 0
         tube_box = None
@@ -1730,6 +1931,20 @@ class MotionBaseModelMF(BaseModelMF):
                     device=self.device, dtype=torch.float32),
                 "search_v3_overlap_count": torch.tensor(
                     [search_v2_sampling["overlap_count"]],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_prior_source_id": torch.tensor(
+                    [search_v2_diagnostics.get("source_id", 0)],
+                    device=self.device, dtype=torch.long),
+                "search_v3_support_truncated": torch.tensor(
+                    [bool(search_v2_diagnostics.get("truncated", False))],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_support_requested_extent": torch.tensor(
+                    [[search_v2_diagnostics.get("requested_length", 0.0),
+                      search_v2_diagnostics.get("requested_width", 0.0)]],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_support_actual_extent": torch.tensor(
+                    [[search_v2_diagnostics.get("length", 0.0),
+                      search_v2_diagnostics.get("width", 0.0)]],
                     device=self.device, dtype=torch.float32),
             })
         if m4_diagnostics_enabled:

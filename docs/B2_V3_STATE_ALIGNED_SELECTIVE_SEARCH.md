@@ -1,5 +1,16 @@
 # B2-v3：状态对齐的 Motion-Conditioned Selective Search
 
+> **实现记录 / 当前版本已停止晋级（2026-08-04）**：本文的 shared-history、
+> 初始化、冻结 hash、rollout 和打包合同仍是有效复现资料，但不再代表下一版方法
+> 设计。seed42 结果显示 raw search error `2.6496` 优于 B1-centered refined
+> error `2.7344`，差值 `+0.0848` 的 tracklet 95% CI 为
+> `[+0.0379,+0.1323]`；foreground-valid 仅 `3.29%`，presence AUC `0.497`。
+> 因此当前 refiner connection 未通过，B3 router 暂停。新的数据流、修复顺序和
+> promotion gate 见
+> [B1–B4 连接重构与消融计划](B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)；
+> 推荐的局部紧耦合/全局解耦接口见
+> [非对称双查询耦合规范](ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md)。
+
 ## 论文主线与边界
 
 主线名称为 **State-Aligned Motion-Conditioned Search with

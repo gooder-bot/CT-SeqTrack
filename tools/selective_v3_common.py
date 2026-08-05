@@ -13,6 +13,8 @@ from models.ct_v2 import (
     ActionConsistentInnovationRouter,
     SELECTIVE_V3_ROLLOUT_SCHEMA,
     SELECTIVE_V3_ROUTER_SCHEMA,
+    SELECTIVE_V4_ROLLOUT_SCHEMA,
+    SELECTIVE_V4_ROUTER_SCHEMA,
 )
 from tools.selective_innovation_common import (
     ConfigMap,
@@ -22,6 +24,8 @@ from tools.selective_innovation_common import (
     sha256_file,
     torch_load,
 )
+from utils.checkpoint_loading import apply_b1_calibration_contract
+from utils.replay_cache import b2_candidate_config_sha256
 
 
 def build_v3_router_from_config(config):
@@ -40,6 +44,9 @@ def build_v3_router_from_config(config):
         normal_step_cap=float(getattr(
             config, "router_v3_normal_step_cap", 0.20)),
         gap_step_cap=float(getattr(config, "router_v3_gap_step_cap", 0.35)),
+        scalar_only=bool(getattr(config, "router_v3_scalar_only", False)),
+        use_utility_feature=bool(getattr(
+            config, "router_v3_use_utility_feature", False)),
     )
 
 
@@ -71,7 +78,9 @@ def load_matching_v3_model_state(model, checkpoint_path):
         key: value for key, value in normalized.items()
         if key in target and target[key].shape == value.shape
     }
-    missing_target = sorted(set(target) - set(matched))
+    missing_target = sorted(
+        key for key in set(target) - set(matched)
+        if not key.startswith("action_consistent_router_v3."))
     unexpected_source = sorted(set(normalized) - set(target))
     if missing_target or unexpected_source:
         raise RuntimeError(
@@ -110,6 +119,17 @@ def load_matching_v3_model_state(model, checkpoint_path):
         if not keys or actual_hash != frozen_hashes.get(required):
             raise RuntimeError(
                 f"B2-v3 frozen checkpoint hash mismatch: {required}")
+    apply_b1_calibration_contract(model, payload, matched)
+    model_config = getattr(model, "config", {})
+    if bool(getattr(
+            model_config, "require_b2_candidate_config_contract", False)):
+        stored_candidate_config = payload.get(
+            "b2_v3_candidate_config_sha256")
+        expected_candidate_config = b2_candidate_config_sha256(model_config)
+        if (not stored_candidate_config
+                or stored_candidate_config != expected_candidate_config):
+            raise RuntimeError(
+                "B2 candidate checkpoint/config contract mismatch")
     target.update(matched)
     model.load_state_dict(target, strict=True)
     return {
@@ -123,8 +143,16 @@ def load_matching_v3_model_state(model, checkpoint_path):
 
 def load_v3_router_sidecar(router, path, require_passed=True):
     payload = torch_load(path)
-    if payload.get("schema") != SELECTIVE_V3_ROUTER_SCHEMA:
+    expected_schema = (
+        SELECTIVE_V4_ROUTER_SCHEMA
+        if router.use_utility_feature else SELECTIVE_V3_ROUTER_SCHEMA)
+    if payload.get("schema") != expected_schema:
         raise ValueError("unsupported B2-v3 router sidecar schema")
+    if expected_schema == SELECTIVE_V4_ROUTER_SCHEMA:
+        if payload.get("feature_schema_hash") != router.feature_schema_hash:
+            raise ValueError("router sidecar feature schema hash mismatch")
+        if payload.get("feature_schema") != router.feature_schema:
+            raise ValueError("router sidecar feature names/order mismatch")
     status = str(payload.get("calibration", {}).get("status", "unknown"))
     if require_passed and status != "passed":
         raise RuntimeError(
@@ -147,11 +175,15 @@ def write_v3_rollout_artifact(output_dir, rows, manifest):
         raise ValueError("cannot write an empty B2-v3 rollout artifact")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    numeric_keys = (
+    numeric_keys = [
         "tracklet_id", "frame_id", "router_features", "candidate_valid",
         "candidate_residual_xy", "signed_gain", "candidate_cost",
         "observation_cost", "rollout_length",
-    )
+    ]
+    for optional in (
+            "candidate_success", "observation_success", "success_gain"):
+        if optional in rows[0]:
+            numeric_keys.append(optional)
     arrays = {
         key: np.stack([row[key] for row in rows], axis=0)
         for key in numeric_keys
@@ -164,10 +196,11 @@ def write_v3_rollout_artifact(output_dir, rows, manifest):
     np.savez_compressed(npz_path, **arrays)
     payload = dict(manifest)
     payload.update({
-        "schema": SELECTIVE_V3_ROLLOUT_SCHEMA,
+        "schema": payload.get("schema", SELECTIVE_V3_ROLLOUT_SCHEMA),
         "row_count": len(rows),
         "tracklet_count": len(set(arrays["tracklet_key"].tolist())),
         "router_feature_dim": int(arrays["router_features"].shape[1]),
+        "npz_sha256": sha256_file(npz_path),
         "step_ratios": [0.25, 0.5, 1.0],
         "content_sha256": canonical_sha256({
             "tracklet_key": arrays["tracklet_key"].tolist(),
@@ -189,10 +222,27 @@ def load_v3_rollout_artifact(path):
         raise FileNotFoundError("B2-v3 rollout artifact is incomplete")
     with manifest_path.open("r", encoding="utf-8") as input_file:
         manifest = json.load(input_file)
-    if manifest.get("schema") != SELECTIVE_V3_ROLLOUT_SCHEMA:
+    if manifest.get("schema") not in (
+            SELECTIVE_V3_ROLLOUT_SCHEMA, SELECTIVE_V4_ROLLOUT_SCHEMA):
         raise ValueError("unsupported B2-v3 rollout schema")
+    if (manifest.get("npz_sha256") is not None
+            and sha256_file(npz_path) != manifest.get("npz_sha256")):
+        raise ValueError("B2-v3 rollout NPZ SHA256 mismatch")
     with np.load(npz_path, allow_pickle=False) as archive:
         arrays = {key: archive[key] for key in archive.files}
+    if manifest.get("schema") == SELECTIVE_V4_ROLLOUT_SCHEMA:
+        for required in (
+                "feature_schema", "feature_schema_hash",
+                "candidate_checkpoint_sha256", "candidate_config_sha256",
+                "promotion_manifest_sha256", "npz_sha256"):
+            if not manifest.get(required):
+                raise ValueError(
+                    f"formal rollout manifest lacks {required}")
+        for required in (
+                "candidate_success", "observation_success", "success_gain"):
+            if required not in arrays:
+                raise ValueError(
+                    f"formal rollout arrays lack {required}")
     rows = int(arrays["router_features"].shape[0])
     if rows != int(manifest.get("row_count", -1)):
         raise ValueError("B2-v3 rollout row count mismatch")
@@ -200,6 +250,11 @@ def load_v3_rollout_artifact(path):
         raise ValueError("B2-v3 signed_gain shape is invalid")
     if arrays["candidate_valid"].shape[1:] != (2,):
         raise ValueError("B2-v3 candidate_valid shape is invalid")
+    if manifest.get("schema") == SELECTIVE_V4_ROLLOUT_SCHEMA:
+        if (arrays["candidate_success"].shape[1:] != (2, 3)
+                or arrays["success_gain"].shape[1:] != (2, 3)
+                or arrays["observation_success"].shape[1:] != ()):
+            raise ValueError("formal recursive Success arrays are invalid")
     for key, value in arrays.items():
         if value.shape[0] != rows:
             raise ValueError(f"rollout field {key} has a bad row count")

@@ -1,0 +1,853 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "B2-v3 Refiner 复核：Raw Search 有信号，当前 Refiner 未过门",
+    "description": "Seed42 cfg13 candidate quality, generalization and promotion diagnosis.",
+    "generatedAt": "2026-08-04T07:19:58.346045+00:00",
+    "sources": [
+      {
+        "id": "headline_source",
+        "label": "Consolidated refiner findings",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_headline.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "One-row reconciliation of candidate quality, coverage, presence and robustness findings.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_headline.csv', header=true)"
+        }
+      },
+      {
+        "id": "candidate_source",
+        "label": "Candidate diagnostics by checkpoint",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_candidate_epochs.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Valid-foreground candidate errors and validation coverage at epochs 5/10/15/20.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_candidate_epochs.csv', header=true)"
+        }
+      },
+      {
+        "id": "training_source",
+        "label": "Training epoch diagnostics",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_training_epochs.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Unsmoothed TensorBoard scalars aggregated over 1,262 batches per epoch.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_training_epochs.csv', header=true)"
+        }
+      },
+      {
+        "id": "comparison_source",
+        "label": "Epoch20 candidate comparison",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_comparison.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Same-state valid-foreground mean center errors at epoch20.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_comparison.csv', header=true)"
+        }
+      },
+      {
+        "id": "presence_source",
+        "label": "Epoch20 presence diagnostic",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_presence.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Presence discrimination on structurally valid recursive validation states.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_presence.csv', header=true)"
+        }
+      },
+      {
+        "id": "robustness_source",
+        "label": "Tracklet-cluster bootstrap",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_robustness.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Twenty-thousand tracklet-cluster bootstrap draws for paired candidate deltas.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_robustness.csv', header=true)"
+        }
+      },
+      {
+        "id": "integrity_source",
+        "label": "Run integrity audit",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_integrity.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Configuration, initialization, frozen-state and completion checks.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_integrity.csv', header=true)"
+        }
+      },
+      {
+        "id": "decision_source",
+        "label": "Promotion decision register",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_decisions.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Applies the seed42 candidate-stage promotion contract.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_decisions.csv', header=true)"
+        }
+      },
+      {
+        "id": "next_source",
+        "label": "Corrective action register",
+        "path": "compare_results/data/b2_v3_refiner_seed42_20260804_next_steps.csv",
+        "query": {
+          "language": "sql",
+          "engine": "DuckDB",
+          "description": "Orders the minimum corrective work before router promotion.",
+          "executed_at": "2026-08-04",
+          "sql": "SELECT * FROM read_csv_auto('compare_results/data/b2_v3_refiner_seed42_20260804_next_steps.csv', header=true)"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "candidate_error_chart",
+        "title": "Valid-foreground candidate error by checkpoint",
+        "subtitle": "mini_val recursive states; lower is better, 64-66 eligible rows per checkpoint.",
+        "type": "line",
+        "dataset": "candidate_error_long",
+        "sourceId": "candidate_source",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "mean_error",
+            "type": "quantitative",
+            "label": "Mean center error"
+          },
+          "color": {
+            "field": "candidate",
+            "type": "nominal",
+            "label": "Candidate"
+          },
+          "tooltip": [
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "candidate",
+              "type": "nominal",
+              "label": "Candidate"
+            },
+            {
+              "field": "mean_error",
+              "type": "quantitative",
+              "label": "Mean center error"
+            }
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Mean center error"
+      },
+      {
+        "id": "coverage_chart",
+        "title": "Search structural-valid rate: training versus validation",
+        "subtitle": "Epoch20; same structural-valid field, validation is recursive observation-policy state.",
+        "type": "bar",
+        "dataset": "coverage",
+        "sourceId": "training_source",
+        "encodings": {
+          "x": {
+            "field": "population",
+            "type": "nominal",
+            "label": "Population"
+          },
+          "y": {
+            "field": "structural_rate",
+            "type": "quantitative",
+            "label": "Structural-valid rate"
+          },
+          "tooltip": [
+            {
+              "field": "population",
+              "type": "nominal",
+              "label": "Population"
+            },
+            {
+              "field": "structural_rate",
+              "type": "quantitative",
+              "label": "Rate"
+            }
+          ]
+        },
+        "xAxisTitle": "Population",
+        "yAxisTitle": "Structural-valid rate"
+      }
+    ],
+    "tables": [
+      {
+        "id": "comparison_table",
+        "title": "Epoch20 candidate comparison",
+        "subtitle": "Valid-foreground rows only; lower error is better.",
+        "dataset": "comparison",
+        "sourceId": "comparison_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "mean_error",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "candidate",
+            "label": "Candidate",
+            "type": "text"
+          },
+          {
+            "field": "mean_error",
+            "label": "Mean error",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "presence_table",
+        "title": "Presence generalization",
+        "subtitle": "Structurally valid validation rows; foreground presence is the target.",
+        "dataset": "presence",
+        "sourceId": "presence_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "auc",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "structural_rows",
+            "label": "Rows",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "positive_rows",
+            "label": "FG present",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "negative_rows",
+            "label": "FG absent",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "auc",
+            "label": "AUC",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "positive_mean_probability",
+            "label": "Mean p | FG",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "negative_mean_probability",
+            "label": "Mean p | no FG",
+            "type": "number",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "decision_table",
+        "title": "Seed42 candidate-stage promotion checks",
+        "subtitle": "Final tracking promotion remains blocked until all candidate gates pass.",
+        "dataset": "decisions",
+        "sourceId": "decision_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "check",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "check",
+            "label": "Check",
+            "type": "text"
+          },
+          {
+            "field": "criterion",
+            "label": "Criterion",
+            "type": "text"
+          },
+          {
+            "field": "observed",
+            "label": "Observed",
+            "type": "text"
+          },
+          {
+            "field": "status",
+            "label": "Status",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "next_table",
+        "title": "Minimum corrective path",
+        "subtitle": "Do not repeat cfg13 unchanged or advance to final router training.",
+        "dataset": "next_steps",
+        "sourceId": "next_source",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "order",
+            "label": "#",
+            "type": "number",
+            "format": "number"
+          },
+          {
+            "field": "action",
+            "label": "Action",
+            "type": "text"
+          },
+          {
+            "field": "why",
+            "label": "Why",
+            "type": "text"
+          },
+          {
+            "field": "gate",
+            "label": "Gate",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# B2-v3 Refiner 复核：Raw Search 有信号，当前 Refiner 未过门"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "sourceId": "headline_source",
+        "body": "## 技术结论：有 Search 信号，但还不能说 B2-v3 有效或涨分\n\nepoch20 valid-foreground 上，raw Search error 为 **2.650**，优于 B1 motion 的 **2.905**；但 B2-v3 refined 为 **2.734**，比 raw Search **差 0.085**。因此 refiner 只通过 refined-vs-motion，未通过 refined-vs-raw 的强制 gate。训练期 tracking 输出是 observation，当前 Success/Precision 不是 B2 增益。"
+      },
+      {
+        "id": "candidate_finding",
+        "type": "markdown",
+        "sourceId": "headline_source",
+        "body": "## 固定 B1 锚定正在持续吃掉 raw Search 的优势\n\nrefined-minus-raw 从 epoch5 的 **+0.039** 扩大到 epoch20 的 **+0.085**。tracklet-cluster bootstrap 的 epoch20 95% 区间为 **[+0.038, +0.132]**，方向稳定为退化。66个有效前景状态中，固定截断实际改变21个；其中伤害15个、帮助6个，改变状态的平均 raw→refined 退化为 **+0.267**。"
+      },
+      {
+        "id": "candidate_error",
+        "type": "chart",
+        "chartId": "candidate_error_chart"
+      },
+      {
+        "id": "comparison",
+        "type": "table",
+        "tableId": "comparison_table"
+      },
+      {
+        "id": "distribution_finding",
+        "type": "markdown",
+        "sourceId": "headline_source",
+        "body": "## 训练状态与递归验证状态严重失配\n\nepoch20 training structural-valid rate 为 **30.6%**，而 mini_val 递归状态只有 **5.8%**；valid-foreground 进一步只有 **3.3%（66/2004）**。训练增强产生的 Search 激活远多于在线状态，导致 evidence/presence 学到的分布不能直接泛化。"
+      },
+      {
+        "id": "coverage",
+        "type": "chart",
+        "chartId": "coverage_chart"
+      },
+      {
+        "id": "presence_finding",
+        "type": "markdown",
+        "sourceId": "headline_source",
+        "body": "## Presence 在 held-out 递归状态上几乎等于随机\n\n116个结构有效状态中只有66个真正含前景。presence AUC 为 **0.497**；有前景/无前景的平均概率却分别为 **0.936/0.877**。训练 presence loss 接近零，但验证无法识别 endpoint crop miss，说明训练中缺少递归 hard negatives。"
+      },
+      {
+        "id": "presence",
+        "type": "table",
+        "tableId": "presence_table"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "sourceId": "integrity_source",
+        "body": "## 范围与数据合同：运行本身健康\n\n本次为正式 cfg13、seed42、mini_train/mini_val、20 epochs、25,240 optimizer steps。严格初始化加载367/411个目标张量；B1 14个张量和33个迁移张量完整，全部冻结 B0/B1 tensor 与 init bitwise 相同；33个迁移 Search tensor 全部更新。"
+      },
+      {
+        "id": "method",
+        "type": "markdown",
+        "sourceId": "robustness_source",
+        "body": "## 方法：同状态配对误差与 tracklet-cluster bootstrap\n\n候选误差只在 `valid_foreground=1` 上比较；每个 epoch 读取完整 CSV。稳健性区间按 tracklet 整簇重采样20,000次，避免把同一轨迹的连续帧当成独立样本。训练指标由每 epoch 1,262 个 unsmoothed TensorBoard batch scalar 重新聚合。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 限制：样本小，且尚未测 H=3 闭环动作收益\n\nepoch20 只有66个 valid-foreground 状态、21条 tracklet；这足以判定当前 refined-vs-raw 方向为负，但不足以证明 raw Search 一定带来最终 tracking 涨分。当前没有 round0/round1、calibrated router 或同 checkpoint 四模式结果。"
+      },
+      {
+        "id": "decision",
+        "type": "table",
+        "tableId": "decision_table"
+      },
+      {
+        "id": "recommendation",
+        "type": "markdown",
+        "sourceId": "next_source",
+        "body": "## 下一步：暂停正式 router，先修 refiner 的两个失败点\n\n不要原样重跑 cfg13，也不要直接训练 final router。先让 raw Search 成为可执行诊断动作，确认 H=3 潜力；随后把固定 B1 clip 改为可学习的 motion↔raw reliability blend，并用递归 observation-policy hard negatives 训练 presence/evidence。修正版 seed42 同时击败motion 和 raw 后，再恢复两轮 rollout 流程。"
+      },
+      {
+        "id": "next",
+        "type": "table",
+        "tableId": "next_table"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 仍需回答的问题\n\n- raw Search 在 H=3 forced-action rollout 中是否仍优于 refined？\n- learned reliability blend 能否在 held-out tracklets 上同时超过 motion 与 raw？\n- 加入递归 hard negatives 后，presence AUC、harm screening 与可校准 coverage 能否恢复？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-04T07:19:58.346045+00:00",
+    "datasets": {
+      "headline": [
+        {
+          "motion_error": 2.904547660035223,
+          "raw_search_error": 2.6496321780075105,
+          "refined_error": 2.7344412105890674,
+          "refined_minus_motion": -0.17010644944615602,
+          "refined_minus_raw": 0.08480903258155766,
+          "refined_minus_raw_ci_low": 0.03790700008215809,
+          "refined_minus_raw_ci_high": 0.1323085860587953,
+          "changed_rows": 21,
+          "changed_harm_rows": 15,
+          "changed_help_rows": 6,
+          "changed_mean_delta": 0.2665426749737888,
+          "train_structural_rate": 0.30576465927099844,
+          "validation_structural_rate": 0.05788423153692615,
+          "validation_valid_foreground_rate": 0.03293413173652695,
+          "validation_valid_foreground_n": 66.0,
+          "presence_auc": 0.49727272727272726,
+          "presence_positive_mean": 0.9363692019903807,
+          "presence_negative_mean": 0.8769627110799775
+        }
+      ],
+      "candidate_epochs": [
+        {
+          "epoch": 5,
+          "rows": 2004,
+          "structural_n": 117,
+          "structural_rate": 0.058383233532934134,
+          "valid_foreground_n": 65,
+          "valid_foreground_rate": 0.03243512974051896,
+          "foreground_given_structural": 0.5555555555555556,
+          "observation_error": 2.7042438956106296,
+          "motion_error": 2.873938640323966,
+          "raw_search_error": 2.766542775883431,
+          "refined_error": 2.8054761167717372,
+          "refined_minus_motion": -0.06846252355222779,
+          "refined_minus_raw": 0.038933340888306044,
+          "raw_minus_observation": 0.06229888027280224,
+          "refined_minus_observation": 0.10123222116110833,
+          "refined_win_motion_rate": 0.5384615384615384,
+          "refined_win_raw_rate": 0.15384615384615385,
+          "presence_auc": 0.420414201183432,
+          "presence_ap": 0.49041645198871675,
+          "presence_positive_mean": 0.9488492406618136,
+          "presence_negative_mean": 0.8892806825908617
+        },
+        {
+          "epoch": 10,
+          "rows": 2004,
+          "structural_n": 115,
+          "structural_rate": 0.05738522954091816,
+          "valid_foreground_n": 64,
+          "valid_foreground_rate": 0.031936127744510975,
+          "foreground_given_structural": 0.5565217391304348,
+          "observation_error": 2.729561304397019,
+          "motion_error": 2.8993859375818745,
+          "raw_search_error": 2.725224779850175,
+          "refined_error": 2.7859913777955394,
+          "refined_minus_motion": -0.11339455978633664,
+          "refined_minus_raw": 0.060766597945365215,
+          "raw_minus_observation": -0.004336524546845792,
+          "refined_minus_observation": 0.05643007339851942,
+          "refined_win_motion_rate": 0.53125,
+          "refined_win_raw_rate": 0.15625,
+          "presence_auc": 0.4840686274509804,
+          "presence_ap": 0.541551538638831,
+          "presence_positive_mean": 0.9274502835323801,
+          "presence_negative_mean": 0.8732644142491707
+        },
+        {
+          "epoch": 15,
+          "rows": 2004,
+          "structural_n": 114,
+          "structural_rate": 0.05688622754491018,
+          "valid_foreground_n": 65,
+          "valid_foreground_rate": 0.03243512974051896,
+          "foreground_given_structural": 0.5701754385964912,
+          "observation_error": 2.6990250372178655,
+          "motion_error": 2.8528535177190295,
+          "raw_search_error": 2.6149540650689227,
+          "refined_error": 2.6914979608958816,
+          "refined_minus_motion": -0.16135555682314665,
+          "refined_minus_raw": 0.07654389582695847,
+          "raw_minus_observation": -0.08407097214894332,
+          "refined_minus_observation": -0.007527076321984884,
+          "refined_win_motion_rate": 0.6,
+          "refined_win_raw_rate": 0.13846153846153847,
+          "presence_auc": 0.4459968602825746,
+          "presence_ap": 0.570439663152889,
+          "presence_positive_mean": 0.948154389557357,
+          "presence_negative_mean": 0.8882149973865219
+        },
+        {
+          "epoch": 20,
+          "rows": 2004,
+          "structural_n": 116,
+          "structural_rate": 0.05788423153692615,
+          "valid_foreground_n": 66,
+          "valid_foreground_rate": 0.03293413173652695,
+          "foreground_given_structural": 0.5689655172413793,
+          "observation_error": 2.7396077291899594,
+          "motion_error": 2.904547660035223,
+          "raw_search_error": 2.6496321780075105,
+          "refined_error": 2.7344412105890674,
+          "refined_minus_motion": -0.17010644944615602,
+          "refined_minus_raw": 0.08480903258155766,
+          "raw_minus_observation": -0.08997555118245236,
+          "refined_minus_observation": -0.005166518600894687,
+          "refined_win_motion_rate": 0.6060606060606061,
+          "refined_win_raw_rate": 0.19696969696969696,
+          "presence_auc": 0.49727272727272726,
+          "presence_ap": 0.5837775971687715,
+          "presence_positive_mean": 0.9363692019903807,
+          "presence_negative_mean": 0.8769627110799775
+        }
+      ],
+      "training_epochs": [
+        {
+          "epoch": 5,
+          "train_structural_rate": 0.3058141838351823,
+          "train_presence_probability": 0.2911770327258213,
+          "train_presence_loss": 0.014736173471613757,
+          "train_raw_proposal_loss": 0.012577137834180125,
+          "train_refined_proposal_loss": 0.021295654615022197
+        },
+        {
+          "epoch": 10,
+          "train_structural_rate": 0.3047741679873217,
+          "train_presence_probability": 0.29155787400193417,
+          "train_presence_loss": 0.011525873222189812,
+          "train_raw_proposal_loss": 0.01047396915373034,
+          "train_refined_proposal_loss": 0.019970430797797242
+        },
+        {
+          "epoch": 15,
+          "train_structural_rate": 0.3072999207606973,
+          "train_presence_probability": 0.29351699404512926,
+          "train_presence_loss": 0.005881537351643802,
+          "train_raw_proposal_loss": 0.009102780988757985,
+          "train_refined_proposal_loss": 0.017064426939227145
+        },
+        {
+          "epoch": 20,
+          "train_structural_rate": 0.30576465927099844,
+          "train_presence_probability": 0.292255950586216,
+          "train_presence_loss": 0.0017729973648370257,
+          "train_raw_proposal_loss": 0.00753492631808762,
+          "train_refined_proposal_loss": 0.015311448822994315
+        }
+      ],
+      "comparison": [
+        {
+          "candidate": "Observation",
+          "mean_error": 2.7396077291899594
+        },
+        {
+          "candidate": "B1 motion",
+          "mean_error": 2.904547660035223
+        },
+        {
+          "candidate": "Raw Search",
+          "mean_error": 2.6496321780075105
+        },
+        {
+          "candidate": "B2-v3 refined",
+          "mean_error": 2.7344412105890674
+        }
+      ],
+      "presence": [
+        {
+          "structural_rows": 116,
+          "positive_rows": 66,
+          "negative_rows": 50,
+          "auc": 0.49727272727272726,
+          "average_precision": 0.5837775971687715,
+          "positive_mean_probability": 0.9363692019903807,
+          "negative_mean_probability": 0.8769627110799775
+        }
+      ],
+      "robustness": [
+        {
+          "comparison": "refined_minus_raw",
+          "mean": 0.08377351596933019,
+          "ci_low": 0.03790700008215809,
+          "ci_high": 0.1323085860587953
+        },
+        {
+          "comparison": "refined_minus_motion",
+          "mean": -0.1700013403102937,
+          "ci_low": -0.2593594456908813,
+          "ci_high": -0.07839131504018515
+        },
+        {
+          "comparison": "raw_minus_observation",
+          "mean": -0.08485137711574788,
+          "ci_low": -0.2034274910458195,
+          "ci_high": 0.06020205686355788
+        },
+        {
+          "comparison": "refined_minus_observation",
+          "mean": -0.001077861146417682,
+          "ci_low": -0.11356028128755458,
+          "ci_high": 0.1279505275800374
+        }
+      ],
+      "changed": [
+        {
+          "valid_foreground_rows": 66,
+          "unchanged_rows": 45,
+          "changed_rows": 21,
+          "changed_harm_rows": 15,
+          "changed_help_rows": 6,
+          "mean_delta_changed": 0.2665426749737888
+        }
+      ],
+      "validation": [
+        {
+          "epoch": 5,
+          "success": 53.48469161987305,
+          "precision": 63.27790069580078,
+          "meaning": "observation-only during refiner fit"
+        },
+        {
+          "epoch": 10,
+          "success": 53.48686981201172,
+          "precision": 63.25820541381836,
+          "meaning": "observation-only during refiner fit"
+        },
+        {
+          "epoch": 15,
+          "success": 53.61159896850586,
+          "precision": 63.567840576171875,
+          "meaning": "observation-only during refiner fit"
+        },
+        {
+          "epoch": 20,
+          "success": 53.38621139526367,
+          "precision": 63.21663284301758,
+          "meaning": "observation-only during refiner fit"
+        }
+      ],
+      "integrity": [
+        {
+          "config": "cfgs/ct_v2/13_b2_v3_refiner.yaml",
+          "seed": 42,
+          "epochs": 20,
+          "optimizer_steps": 25240,
+          "commit": "73d6ce25682c19be6a70fcd95a125874deb306e8",
+          "dirty": false,
+          "b1_tensor_count": 14,
+          "migrated_tensor_count": 33,
+          "missing_frozen_tensor_count": 0,
+          "frozen_bitwise_unchanged": true,
+          "migrated_tensor_changed_count": 33,
+          "last_checkpoint": "output/20260804-1228-13_b2_v3_refiner-b2_v3_refiner_seed42_20ep_bs16/lightning_logs/version_0/checkpoints/last.ckpt"
+        }
+      ],
+      "decisions": [
+        {
+          "check": "run_identity",
+          "criterion": "Formal cfg13 V3 refiner, seed42, epoch20 last",
+          "observed": "cfg13; 25,240 steps; clean commit; strict init",
+          "status": "passed",
+          "interpretation": "The run is valid and complete."
+        },
+        {
+          "check": "refined_vs_motion",
+          "criterion": "Refined error < B1 motion error on valid foreground",
+          "observed": "2.734 vs 2.905 (-0.170)",
+          "status": "passed",
+          "interpretation": "Search evidence improves the B1 candidate."
+        },
+        {
+          "check": "refined_vs_raw",
+          "criterion": "Refined error < raw Search error on valid foreground",
+          "observed": "2.734 vs 2.650 (+0.085); cluster CI [+0.038, +0.132]",
+          "status": "failed",
+          "interpretation": "The fixed B1-centered bound discards raw Search accuracy."
+        },
+        {
+          "check": "presence_generalization",
+          "criterion": "Presence separates foreground-present from foreground-absent structural states",
+          "observed": "AUC 0.497; positive/negative probabilities 0.936/0.877",
+          "status": "failed",
+          "interpretation": "Presence is nearly random under recursive validation states."
+        },
+        {
+          "check": "candidate_promotion",
+          "criterion": "Refined beats both B1 motion and raw Search",
+          "observed": "Beats motion, loses to raw Search",
+          "status": "failed",
+          "interpretation": "Do not promote this checkpoint to final router training."
+        },
+        {
+          "check": "final_tracking_gain",
+          "criterion": "Packaged obs_vs_all beats same-checkpoint obs_only",
+          "observed": "Router and packaged four-mode evaluation not run",
+          "status": "not_run",
+          "interpretation": "Refiner-stage Success/Precision is observation-only."
+        }
+      ],
+      "next_steps": [
+        {
+          "order": 1,
+          "action": "Hold router promotion",
+          "why": "The mandatory refined-vs-raw candidate gate failed.",
+          "gate": "Do not train the final router from this refiner."
+        },
+        {
+          "order": 2,
+          "action": "Run a raw-vs-refined action diagnostic",
+          "why": "Raw Search is the best mean candidate, but the current router cannot execute it.",
+          "gate": "Export raw Search as a diagnostic action and compare H=3 gains."
+        },
+        {
+          "order": 3,
+          "action": "Replace fixed B1 clipping with a learned reliability blend",
+          "why": "Among 21 changed valid-foreground rows, clipping harmed 15 and helped 6.",
+          "gate": "The revised refined candidate must beat both inputs on seed42."
+        },
+        {
+          "order": 4,
+          "action": "Add recursive hard negatives for presence/evidence",
+          "why": "Train structural validity is about 30.6%, validation only 5.8%; validation presence AUC is 0.497.",
+          "gate": "Presence/evidence must separate no-foreground structural states on held-out tracklets."
+        },
+        {
+          "order": 5,
+          "action": "Rerun only the corrected seed42 refiner",
+          "why": "The run and initialization are healthy; repeating the same config cannot fix the objective.",
+          "gate": "Only after candidate gate passes: round0, provisional router, round1, final router, four modes."
+        }
+      ],
+      "candidate_error_long": [
+        {
+          "epoch": 5,
+          "candidate": "B1 motion",
+          "mean_error": 2.873938640323966
+        },
+        {
+          "epoch": 10,
+          "candidate": "B1 motion",
+          "mean_error": 2.8993859375818745
+        },
+        {
+          "epoch": 15,
+          "candidate": "B1 motion",
+          "mean_error": 2.8528535177190295
+        },
+        {
+          "epoch": 20,
+          "candidate": "B1 motion",
+          "mean_error": 2.904547660035223
+        },
+        {
+          "epoch": 5,
+          "candidate": "Raw Search",
+          "mean_error": 2.766542775883431
+        },
+        {
+          "epoch": 10,
+          "candidate": "Raw Search",
+          "mean_error": 2.725224779850175
+        },
+        {
+          "epoch": 15,
+          "candidate": "Raw Search",
+          "mean_error": 2.6149540650689227
+        },
+        {
+          "epoch": 20,
+          "candidate": "Raw Search",
+          "mean_error": 2.6496321780075105
+        },
+        {
+          "epoch": 5,
+          "candidate": "B2-v3 refined",
+          "mean_error": 2.8054761167717372
+        },
+        {
+          "epoch": 10,
+          "candidate": "B2-v3 refined",
+          "mean_error": 2.7859913777955394
+        },
+        {
+          "epoch": 15,
+          "candidate": "B2-v3 refined",
+          "mean_error": 2.6914979608958816
+        },
+        {
+          "epoch": 20,
+          "candidate": "B2-v3 refined",
+          "mean_error": 2.7344412105890674
+        }
+      ],
+      "coverage": [
+        {
+          "population": "Training epoch20",
+          "structural_rate": 0.30576465927099844
+        },
+        {
+          "population": "Validation epoch20",
+          "structural_rate": 0.05788423153692615
+        }
+      ]
+    }
+  },
+  "sources": []
+}

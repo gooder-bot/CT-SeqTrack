@@ -1,0 +1,5 @@
+epoch,success,precision,meaning
+5,53.48469161987305,63.27790069580078,observation-only during refiner fit
+10,53.48686981201172,63.25820541381836,observation-only during refiner fit
+15,53.61159896850586,63.567840576171875,observation-only during refiner fit
+20,53.38621139526367,63.21663284301758,observation-only during refiner fit

@@ -15,7 +15,10 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from models.ct_v2 import ActionConsistentInnovationRouter  # noqa: E402
+from models.ct_v2 import (  # noqa: E402
+    ActionConsistentInnovationRouter,
+    SELECTIVE_V4_ROLLOUT_SCHEMA,
+)
 from models.ct_v2.selective_innovation import (  # noqa: E402
     discounted_tracking_cost,
     stable_tracklet_partition,
@@ -31,6 +34,7 @@ from tools.selective_v3_common import (  # noqa: E402
     write_v3_rollout_artifact,
 )
 from utils.config import load_yaml_config  # noqa: E402
+from utils.replay_cache import b2_candidate_config_sha256  # noqa: E402
 
 
 STEP_RATIOS = (0.25, 0.5, 1.0)
@@ -42,7 +46,10 @@ def parse_args():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument(
         "--config",
-        default=str(ROOT / "cfgs/ct_v2/14_b2_v3_selective.yaml"))
+        default=str(ROOT / "cfgs/ct_v2/18_b1_b2_b3_selective.yaml"))
+    parser.add_argument(
+        "--promotion", required=True,
+        help="passed B2 v2 promotion manifest for this candidate checkpoint")
     parser.add_argument("--output", required=True)
     parser.add_argument("--path")
     parser.add_argument("--split", default="mini_train")
@@ -113,7 +120,7 @@ def rollout_branch(model, sequence, start_frame, history, horizon,
     return predicted_boxes, first_output
 
 
-def rollout_cost(model, sequence, start_frame, boxes, gamma):
+def rollout_metrics(model, sequence, start_frame, boxes, gamma):
     from utils.metrics import estimateAccuracy, estimateOverlap
 
     ious = []
@@ -126,7 +133,10 @@ def rollout_cost(model, sequence, start_frame, boxes, gamma):
         distances.append(estimateAccuracy(
             target_box, predicted_box,
             dim=model.config.IoU_space, up_axis=model.config.up_axis))
-    return discounted_tracking_cost(ious, distances, gamma=gamma)
+    return (
+        discounted_tracking_cost(ious, distances, gamma=gamma),
+        float(np.mean(ious)),
+    )
 
 
 def main():
@@ -145,6 +155,11 @@ def main():
         raise ValueError("round-0 observation policy must not load a router")
     if args.round != (1 if args.state_policy == "router" else 0):
         raise ValueError("round must be 0=observation or 1=router")
+    promotion_path = Path(args.promotion)
+    promotion = json.loads(promotion_path.read_text(encoding="utf-8"))
+    if (promotion.get("schema") != "ct_seqtrack.b2_v3_promotion.v2"
+            or promotion.get("status") != "passed"):
+        raise RuntimeError("B3 rollouts require a passed B2 v2 promotion")
 
     from datasets import get_dataset
     from models import get_model
@@ -153,7 +168,7 @@ def main():
     raw_config.update({
         "seed": args.seed,
         "test_split": args.split,
-        "proposal_inference_mode": "obs_vs_all",
+        "proposal_inference_mode": "selective",
         "use_motion_conditioned_search_v3": True,
         "use_action_consistent_router_v3": True,
         "router_v3_enabled_scale": 1.0,
@@ -162,11 +177,20 @@ def main():
     if args.path:
         raw_config["path"] = args.path
     config = ConfigMap(raw_config)
+    candidate_config_sha = b2_candidate_config_sha256(config)
+    if promotion.get(
+            "candidate_config_sha256") != candidate_config_sha:
+        raise RuntimeError(
+            "B2 promotion belongs to a different candidate config")
     device = resolve_device(args.device)
     dataset = get_dataset(
         config, type="test", split=args.split, protocol_role="test")
     model = get_model(config.net_model)(config)
     load_report = load_matching_v3_model_state(model, args.checkpoint)
+    if promotion.get(
+            "candidate_checkpoint_sha256") != load_report["checkpoint_sha256"]:
+        raise RuntimeError(
+            "B2 promotion belongs to a different candidate checkpoint")
     router_payload = None
     if args.router_sidecar:
         router_payload = load_v3_router_sidecar(
@@ -236,7 +260,7 @@ def main():
                 if context_output is None:
                     history.append(observation_boxes[0])
                     continue
-                observation_cost = rollout_cost(
+                observation_cost, observation_success = rollout_metrics(
                     model, sequence, frame_id, observation_boxes, args.gamma)
                 candidate_valid = context_output[
                     "router_v3_candidate_valid"].detach().cpu().numpy(
@@ -244,6 +268,8 @@ def main():
                 signed_gain = np.zeros((2, 3), dtype=np.float32)
                 candidate_cost = np.full(
                     (2, 3), observation_cost, dtype=np.float32)
+                candidate_success = np.full(
+                    (2, 3), observation_success, dtype=np.float32)
                 for candidate in range(2):
                     if candidate_valid[candidate] <= 0:
                         continue
@@ -252,9 +278,10 @@ def main():
                             model, sequence, frame_id, history, args.horizon,
                             first_policy=candidate,
                             first_step=step_ratio)
-                        cost = rollout_cost(
+                        cost, success = rollout_metrics(
                             model, sequence, frame_id, branch_boxes, args.gamma)
                         candidate_cost[candidate, step_id] = cost
+                        candidate_success[candidate, step_id] = success
                         signed_gain[candidate, step_id] = observation_cost - cost
                 rows.append({
                     "tracklet_id": np.int64(tracklet_id),
@@ -271,6 +298,9 @@ def main():
                     "signed_gain": signed_gain,
                     "candidate_cost": candidate_cost,
                     "observation_cost": np.float32(observation_cost),
+                    "candidate_success": candidate_success,
+                    "observation_success": np.float32(observation_success),
+                    "success_gain": candidate_success - observation_success,
                     "rollout_length": np.int64(args.horizon),
                 })
                 emitted += 1
@@ -288,10 +318,17 @@ def main():
     router_hash = (
         sha256_file(args.router_sidecar) if args.router_sidecar else None)
     manifest = {
+        "schema": SELECTIVE_V4_ROLLOUT_SCHEMA,
         "config_path": str(Path(args.config).resolve()),
         "config_sha256": canonical_sha256(raw_config),
+        "candidate_config_sha256": candidate_config_sha,
         "candidate_checkpoint": str(Path(args.checkpoint).resolve()),
         "candidate_checkpoint_sha256": load_report["checkpoint_sha256"],
+        "promotion_manifest": str(promotion_path.resolve()),
+        "promotion_manifest_sha256": sha256_file(promotion_path),
+        "feature_schema": model.action_consistent_router_v3.feature_schema,
+        "feature_schema_hash": (
+            model.action_consistent_router_v3.feature_schema_hash),
         "matched_tensors": load_report["matched_tensors"],
         "split": args.split,
         "seed": args.seed,

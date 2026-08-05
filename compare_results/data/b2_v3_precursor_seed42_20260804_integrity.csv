@@ -1,0 +1,4 @@
+﻿run_id,config_path,commit,dirty,seed,train_split,val_split,optimizer_steps,validation_points,last_checkpoint_present,init_checkpoint,use_motion_conditioned_search_v3,use_action_consistent_router_v3
+NEW_B1,cfgs/ct_v2/02_ct_motion_v3.yaml,73d6ce25682c19be6a70fcd95a125874deb306e8,False,42,mini_train,mini_val,75720,12,True,,False,False
+NEW_SEARCH,cfgs/ct_v2/08_seqtrack3d_search_v21.yaml,73d6ce25682c19be6a70fcd95a125874deb306e8,False,42,mini_train,mini_val,75720,12,True,,False,False
+NEW_FULL,cfgs/ct_v2/09_ct_motion_search_v21.yaml,73d6ce25682c19be6a70fcd95a125874deb306e8,False,42,mini_train,mini_val,75720,12,True,,False,False

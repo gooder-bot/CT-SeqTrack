@@ -122,25 +122,51 @@ class Seq2SeqFormer(nn.Module):
         'To facilitate the residual connections, \
          the dimensions of all module outputs shall be the same.'
 
-    def forward(self, trg_seq,src_seq,valid_mask):
+    def forward(
+            self, trg_seq, src_seq, valid_mask,
+            return_decoder_state=False):
+        """Run SeqTrack3D's box-sequence decoder.
+
+        ``return_decoder_state`` is deliberately opt-in so every historical
+        caller keeps receiving the exact box tensor.  The exposed state is
+        the per-box representation after ``l1`` and immediately before the
+        unchanged regression layer ``l2``.
+        """
 
         src_seq_=self.proj(src_seq) # Adjust the input features to 128 dimensions
         trg_seq_=self.proj2(trg_seq) # Also adjust Q to 128 dimensions, corresponding to the features of the input box
 
-        enc_output, *_ = self.encoder(src_seq_.reshape(-1,128,self.d_model)) # Locally apply self-attention to every single frame
+        if trg_seq_.shape[1] % 8 != 0:
+            raise ValueError("Transformer target tokens must contain 8 corners per frame")
+        frame_count = trg_seq_.shape[1] // 8
+        if frame_count <= 0 or src_seq_.shape[1] % frame_count != 0:
+            raise ValueError(
+                "Transformer source tokens must divide evenly across target frames")
+        tokens_per_frame = src_seq_.shape[1] // frame_count
+
+        enc_output, *_ = self.encoder(
+            src_seq_.reshape(-1, tokens_per_frame, self.d_model))
 
         enc_others,*_=self.encoder_global(src_seq_, global_feature=True) # Apply attention across frames globally
 
         # Implementing cross-decoder
         # Q: trg_seq_
         # K, V: Concatenate(enc_output, enc_others)
-        enc_output=torch.cat([enc_output.reshape(-1,4*128,self.d_model),enc_others],dim=1) # default 4 frames
+        enc_output=torch.cat([
+            enc_output.reshape(
+                src_seq_.shape[0], frame_count * tokens_per_frame,
+                self.d_model),
+            enc_others,
+        ], dim=1)
         dec_output, dec_attention,*_ = self.decoder(trg_seq_, None, enc_output, None) 
                                                 
 
         # Project to output
-        dec_output=dec_output.view(dec_output.shape[0],4,self.d_model*8)
-        dec_output= self.l1(dec_output)
-        dec_output= self.l2(dec_output)
-        
+        dec_output=dec_output.reshape(
+            dec_output.shape[0], frame_count, self.d_model * 8)
+        decoder_state = self.l1(dec_output)
+        dec_output = self.l2(decoder_state)
+
+        if return_decoder_state:
+            return dec_output, decoder_state
         return dec_output

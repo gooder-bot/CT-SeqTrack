@@ -1,0 +1,30 @@
+_base_: 16_b2_asymmetric_dual_query.yaml
+
+experiment_name: b1_b2_prepass_replay_support
+
+# P4: the online search evidence is the untouched base support union the B1
+# tube.  Fixed residual margins are mandatory until calibration passes.
+use_b1_prepass_support: true
+use_calibrated_motion_uncertainty: true
+require_b1_calibration_artifact: true
+require_b1_calibration_passed: false
+search_v3_use_dynamic_sigma: false
+search_v3_fixed_margin_parallel: 2.0
+search_v3_fixed_margin_perpendicular: 1.0
+search_v3_coverage_scale: 2.448
+search_v3_max_length: 24.0
+search_v3_max_width: 10.0
+
+# Enable from the CLI with --replay-cache after exporting a hash-matched
+# cache.  Keeping the default false makes online attribution runnable without
+# a machine-specific path.
+use_recursive_replay_cache: false
+recursive_replay_require_all: true
+num_candidates: 1
+
+# Geometry stage: point-mu, motion-frame coordinates, clipped Mahalanobis,
+# and the existing source embedding.  This changes the B2 point MLP 9 -> 10.
+# Use runner --geometry-off for the immediately preceding fixed/dynamic
+# support-only ablations; use --dynamic-sigma only after B1 promotion.
+use_uncertainty_geometry: true
+search_v3_mahalanobis_clip: 25.0

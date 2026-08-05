@@ -1,0 +1,17 @@
+_base_: 01_seqtrack3d_baseline.yaml
+
+experiment_name: b4_decoder_alignment_only
+experimental_only: true
+
+use_twc: true
+use_decoder_token_consistency: true
+use_point_feature_tc: false
+use_m3_path_distillation: false
+decoder_tc_invariance_weight: 1.0
+decoder_tc_variance_weight: 0.0
+decoder_tc_covariance_weight: 0.0
+decoder_tc_teacher_momentum: 0.996
+decoder_tc_weight_candidates: [0.001, 0.003, 0.01]
+decoder_tc_gradient_audit_batches: 200
+decoder_tc_target_gradient_ratio: 0.075
+epoch: 5

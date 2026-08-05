@@ -1,0 +1,15 @@
+_base_: 02_ct_motion_v3.yaml
+
+experiment_name: b1_continuous_time_calibrated
+
+use_calibrated_motion_uncertainty: true
+motion_v3_min_direction_speed: 0.2
+motion_v3_nll_weight: 0.1
+motion_v3_aux_nll_weight: 0.1
+
+# Mean/NLL only.  B1 must not alter the observation result during calibration.
+use_motion_v3_legacy_fusion: false
+motion_v3_fused_weight: 0.0
+motion_v3_gate_weight: 0.0
+proposal_inference_mode: observation
+observation_safe_bbox_size: true

@@ -1,191 +1,164 @@
-# CT-SeqTrack v2 论文计划
+# CT-SeqTrack 论文计划
 
-更新时间：2026-08-02
+更新时间：2026-08-04
 
-> 2026-08-02 B2-v2 实证更新：motion + Search Evidence + joint fusion 的
-> seed42 scratch 60-epoch final 为 `54.132/64.755`、late-3 为
-> `54.462/66.013`。相对最强历史 B0，final 为 `+0.772/+0.373`，仅
-> Success 通过预注册门槛；late-3 为 `+1.557/+2.909`。同时，新 SeqTrack
-> control 异常低至 `31.684/31.337` 且缺少 provenance，不能作为唯一 baseline。
-> full 中 Search Evidence candidate 有效率只有 `23.29%`，epoch60 gate
-> argmax 选择率只有 `0.104%`，因此当前状态为
-> `B2V2_NORMAL_SIGNAL_POSITIVE / B2V2_SEARCH_CONTRIBUTION_NOT_ESTABLISHED /
-> HOLD_B2V2_PROMOTION`。论文不能声称 search 已带来增益；先做同 checkpoint
-> 四模式归因与 commit-`a486a36` matched B0。完整复核见
-> [B2-v2 seed42 技术报告](compare_results/reports/b2_search_v2_seed42_20260802.html)。
+> B1–B4 的完成度、代码问题、目标数据流和执行门槛以
+> [B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
+> 为唯一权威来源。正式耦合技术合同见
+> [不确定性感知非对称双查询耦合](docs/ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md)。
+> 本文只维护论文叙事、主表和证据标准。
 
-> 2026-07-28 决策：standard 的 `delta_t` CV 只有 4.59%，真实时间的代码
-> 代价低、因果证据代价高；Random-20% 只保留为 synthetic
-> irregular-observation stress test。ChronoTrack feature consistency、现有
-> M3 endpoint distillation 与 compact memory 不能混为同一模块。完整投入产出、
-> 模块契合审计和执行分叉见
-> [真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
+## 1. 当前论文命题
 
-> 2026-08-01 实证更新：首个 Δt-PFTC seed42 artifact 已完整跑满 60 epoch，
-> final `51.189/60.886`、late-3 `51.398/60.618`，相对 B0 分别下降
-> `2.171/3.496` 与 `1.507/2.487`。同时 canonical yaw 符号错误、feature std
-> 只剩 epoch1 的 16.4%，训练开销为 8.24×。当前状态为
-> `NO-GO_CURRENT_B4_IMPLEMENTATION / PFTC_IDEA_NOT_YET_FAIRLY_TESTED`。
-> 完整诊断见
-> [Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
+CT-SeqTrack 不把“历史框运动”“proposal refinement”“search expansion”或
+“temporal consistency”单独当作创新。候选论文命题是：
 
-> 2026-08-01 B1motion-v3 实证更新：seed42 scratch 60 epoch final 为
-> `52.655/61.835`、late-3 为 `52.050/61.206`，相对历史 B0 分别下降
-> `0.705/2.547` 与 `0.855/1.898`，当前为
-> `NO_GO_B1MOTION_V3_STANDARD_GAIN`。但 v3 相对 v2 final 恢复
-> `+32.037/+42.004`，且 learned prior 在 main/gap2/gap4 相对 CV 的训练
-> RMSE 改善 `7.6%/10.9%/16.0%`；当前瓶颈收窄为 gate calibration 与
-> recursive-history transfer。下一步只做 epoch30/epoch60 same-checkpoint
-> fusion on/off 和 endpoint attribution，不直接新开 motion 长训。完整报告见
-> [B1motion-v3 seed42 技术复核](compare_results/reports/b1motion_v3_seed42_20260801.html)。
-> 相对原始 SeqTrack3D plain 的 `50.986/59.962`，v3 数值为
-> `+1.670/+1.873`；但 current B0 对原始 SeqTrack 为 `+2.374/+4.420`，
-> 因此前者不能作为 motion 模块净贡献。
+> 在 SeqTrack3D 的 order-clock observation 主干之外，使用连续物理时间运动
+> 先验产生均值与校准风险；以 motion pre-pass 构造保留 base 的扩展支持域，
+> 通过独立 `q_obs/q_search` 分离当前观测与运动引导证据；最后以 observation
+> 为安全锚点执行可拒绝、可限步的闭环修正。
 
-> 2026-07-30 motion 更新：alpha0/0.25 两组 scratch 60 epoch 已完成。
-> alpha0.25 相对 alpha0 final 下降 `17.468/20.322`，较小全局修正仍失败；
-> fixed global proposal innovation 正式 No-Go。motion 后续只做已有
-> checkpoint 的推理 on/off 2×2 与 endpoint attribution，不再启动 alpha
-> 长训。完整报告见
-> [Motion fixed-alpha 复核](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)。
-
-## 论文问题
-
-固定帧率假设下，历史框的运动量通常只按序号建模。CT-SeqTrack v2 研究：
-
-> 能否在不改变 SeqTrack3D 主干和 token 预算的前提下，用真实时间生成连续时间运动先验，扩展可能的搜索区域，并仅在观测不确定时做有界 proposal 修正？
-
-### 跨数据集、跨帧率假设（待验证）
-
-真实时间更可能在**同一个共享模型同时面对不同采样频率**时体现价值。SeqTrack3D
-只把历史表示为第 1/2/3 帧；例如 10 Hz 与 2 Hz 数据中的“一步”分别对应
-`0.1 s` 与 `0.5 s`，相同物理速度会表现为不同的逐帧位移。显式 `delta_t` 可以先
-把历史位移归一为 m/s，再按当前 query gap 积分，使运动状态在 KITTI、nuScenes、
-Waymo 或同一数据集的 stride-1/2/4 之间具有一致的物理语义。这里相关的是帧率和
-时间跨度，不是数据集的总帧数。
-
-该假设不等于当前已有正结果。若每个固定帧率数据集分别训练一个模型，平均步长
-可以被模型参数隐式吸收，真实时间的增量可能很小；若各数据集的 `delta_t` 近似
-常数，它还可能退化为 dataset ID。正式证据必须来自一个共享 checkpoint，并在
-每个数据集内部加入多 stride 或 held-out cadence，比较 `true`、全局固定、
-dataset-mean fixed 与 within-dataset shuffled。只有 `true` 在同数据集重采样及
-未见间隔上仍领先，才能把跨数据集收益归因于物理时间，而不是数据域识别。
-
-## 原 v2 候选（已在首筛中否决）
+简化方法链：
 
 ```text
-历史预测框 + real delta_t
-        │
-        ├── Continuous-Time Motion Prior ───────┐
-        │                                       │
-        └── Time-Guided Search Expansion ── 当前点云
-                                                │
-SeqTrack3D observation proposal ────────────────┤
-                                                ▼
-                                  Adaptive Proposal Fusion
-                                                │
-                                           最终目标框
+B0 SeqTrack3D observation
+        +
+B1 continuous-time mean / calibrated risk
+        -> B2 base-preserving support + asymmetric dual-query evidence
+        -> B3 observation-anchored conservative routing
 ```
 
-- SeqTrack3D 的主干仍使用稳定的 order-time token。
-- 真实时间只进入运动先验、搜索几何和融合半径。
-- 搜索扩展不替换原 crop，也不增加点数/Transformer token。
-- 融合是 observation-first 的小幅有界 innovation，不直接相加两个完整位移。
+B4 暂不属于主线。只有修正几何、防坍缩目标与速度后独立涨点，才作为可选模块。
 
-## 已完成的 v2 首筛
+## 2. 当前科学状态
 
-| 实验 | CT Motion | Search | Adaptive Gate |
-| --- | ---: | ---: | ---: |
-| B0 SeqTrack3D |  |  |  |
-| B1 CT Motion | ✓ |  | 固定系数 |
-| B2 CT Motion + Search | ✓ | ✓ | 固定系数 |
-| B3 CT-SeqTrack v2 | ✓ | ✓ | ✓ |
+| 模块 | 当前结论 | 论文状态 |
+| --- | --- | --- |
+| B1 | encoder 与递归接口基本完成；标准增益不稳定，sigma 未受 NLL 监督 | 待补 calibrated uncertainty 与 `dt` 因果证据 |
+| B2 | raw search 优于 motion，但 B1-centered refined 显著差于 raw；验证 foreground-valid 仅 3.29%，presence AUC 0.497 | 第一优先级，不能宣称已完成 |
+| B3 | 工程链基本完成，但 B2 未过 gate，router 未进入正式验证 | 暂停训练与论文结论 |
+| B4 | final `51.189/60.886`，表示收缩明显，约 `8.24×` B0 成本 | 当前实现 No-Go，移出主线 |
 
-四组 mini 已使用 seed42、60 epoch、candidate4、正常数据和 final
-checkpoint 完成。结果为 B0 `53.360/64.382`、B1 `26.021/24.972`、
-B2 `47.973/52.088`、B3 `25.537/24.707`。当前 B3 未晋级；learned
-gate 在 epoch7 已饱和到 0.75，不能再作为“自适应可靠性”模块。
+B2-v3 的关键机制证据是：motion/raw/refined endpoint error 为
+`2.9045/2.6496/2.7344`，`refined - raw = +0.0848`，tracklet 95% CI
+`[+0.0379,+0.1323]`。因此下一步应先解除 B2 对 B1 的错误裁剪连接，而不是调 B3。
 
-后续 Search-only A1 也已完成：final `27.036/25.596`，late-3
-`27.933/26.400`，相对 B0 final 为 `−26.324/−38.786`。因此 B2 对 B1 的
-正增量是交互恢复，不能作为 search 独立收益。A1 与 B0 的训练 loss 接近且
-search 确实启用，当前失败更像训练/递归搜索分布不匹配或强模块交互。
+## 3. 论文贡献成立所需证据
 
-## 当前最小诊断
+### C1：连续物理时间先验
 
-Search 开/关 2×2 继续保留为旧 search 的低成本归因任务，但不再扩展 A2 或
-search 训练树。Motion 同样只保留 alpha0/0.25 checkpoint 的无训练 on/off
-2×2；alpha0.25 的 0.083 m 平均 correction 已足以造成大幅递归退化，不能再
-把失败解释成单纯 alpha0.75 过强。当前 GPU 主线收敛为修复 Δt-PFTC 后的一次
-机制 kill-test：
+只有 shared checkpoint 下 `true dt` 持续超过 dataset-mean fixed 和
+within-dataset shuffled，并在同数据集 stride/gap 与 held-out cadence 上成立，
+才能声称 frame-rate-invariant physical-time benefit。
 
-```text
-修正 canonical R(-yaw) 与交叉单测
-        ↓
-projector + variance floor，增加 B0 feature-std/gradient 对照
-        ↓
-把单卡开销从 8.24× 压到 ≤2× B0
-        ↓
-B0 / PFTC-U / Δt-PFTC 各 5 epoch 机制 gate
-        ↓ 全部通过
-重新预检 λ，并从 scratch 跑 60-epoch 三臂
-```
+最低报告：mean error、NLL、50/80/95% coverage、按 gap/类别分层结果。若真实时间
+因果证据未通过，论文降级为 trajectory prior，不使用“跨帧率不变”强表述。
 
-旧 Δt-PFTC 已完整跑完但正式 No-Go。epoch60 的 `51.189/60.886` 来自错误
-canonical geometry，且 final/late-3 都低于 B0，只能作为失败诊断，不能参与
-论文正向主表。
+### C2：风险控制的双尺度搜索证据
 
-## 晋级规则
+B2 必须输出独立的 `raw_search_box`，而不是只输出围绕 B1 裁剪后的候选。需要
+证明：
 
-1. **正常集涨点**：候选相对同初始化 baseline 的 final Success 和
-   Precision 都为正；mini 的目标门槛仍为至少 `+1.0 / +2.0`，late-3
-   同时不得退化。
-2. **模块可解释**：失败模块直接移除或单独重构，不另加模块掩盖。当前 A1
-   已未通过；A2 保持锁定。
-3. **时间双门槛**：晋级模型的同 checkpoint `true` 相对
-   `fixed/shuffled` 至少不退化；只有置信区间支持正确时间领先，论文才使用
-   强因果表述。
-4. **Random-20% 后置**：正常数据晋级后仅作为鲁棒性补充，不用于选择 checkpoint 或调参。
+- base + endpoint/tube support 提高 GT reachability；
+- final decoder `q_obs` 优于 pre-Transformer coarse query；
+- `q_obs/q_search` 双 query 优于把 observation/motion 混入单 query；
+- forced-invalid/shuffled B1 时 observation 路径保持稳定；
+- recursive replay 缩小训练/部署 structural-valid 差距；
+- presence/utility 能区分 helpful 与 harmful search；
+- raw search 相对 observation 存在 tracklet-level oracle headroom。
 
-## 论文贡献表述
+### C3：动作一致的保守闭环
 
-### 候选主创新：跨帧率不变的双时钟 3D 跟踪
+B3 只有在 B2 通过 candidate gate 后才有研究意义。需要证明训练标签、选择动作、
+执行候选和 step ratio 是同一个动作，并且 recursive rollout 与部署一致。主要对照
+是 no-router、oracle、H1/H3、with/without cooldown，而不是只展示 gate 分布。
 
-若后续证据通过，主创新不应只写成“加入真实时间编码”，而应定义为：
+### C4：可选表征一致性
 
-> 将多帧 3D SOT 从 frame-relative sequence modeling 推进为
-> frame-rate-invariant physical-time state propagation，使同一个共享模型能够
-> 在不同及未见观测 cadence 下保持一致的运动语义。
+B4 必须同时通过正确 canonical geometry、防坍缩、tracking 正收益与 `<2× B0`
+速度门槛。未通过则不进入摘要、方法图和主表。
 
-该贡献由三部分组成：
+## 4. 论文主表顺序
 
-1. **问题与表示**：指出 order-only 的“一步位移”在不同帧率下物理含义不一致；
-   用 dual-clock 保留稳定 order backbone，同时以 `delta_x/delta_t` 表示物理
-   运动状态；
-2. **查询时传播与取证**：按 `delta_t_query` 传播 motion proposal，并在预测轨迹
-   端点查询 observation-conditioned 点云证据，而不是按固定帧步扩大主 crop；
-3. **跨帧率验证**：先在同一数据集内使用多 stride 和 held-out cadence 排除
-   数据域混杂，再扩展到 KITTI、nuScenes、Waymo 的共享模型，使用全局固定、
-   dataset-mean fixed、within-dataset shuffled 和 true time 做成对控制。
+| 行 | 模型 | 隔离的贡献 |
+| --- | --- | --- |
+| A0 | matched SeqTrack3D B0 | same-code baseline |
+| A1 | B0 + B2（CV support + dual query） | 当前帧扩展搜索证据与 task-specific query |
+| A2 | B0 + B1 + B2 | learned physical prior 替代 CV，并控制 support/bias/risk |
+| A3 | A2 + B3 | 闭环选择将候选 headroom 转为最终跟踪收益 |
+| A4 | A3 + redesigned B4（可选） | 独立验证的表征一致性 |
 
-它的最低成立条件是：同代码、同初始化候选先超过 order-only baseline；随后
-`true` 不仅超过全局 fixed，还要在同数据集重采样和未见 gap 上超过
-dataset-mean fixed 与 within-dataset shuffled。若只在跨数据集汇总上超过全局
-fixed，则只能解释为帧率/数据集尺度校准，不能声称连续时间泛化。
+A1 必须先于 A2：若没有 A1，就无法区分涨点来自 Search evidence，还是来自 learned
+motion prior。A4 不是论文完整性的必要条件。
 
-若后续重构模块通过正常集和时间双门槛：
+主表统一报告 final Success/Precision、late-3、per-category、gap/稀疏度分层、
+FPS 和 paired tracklet bootstrap CI。必须补 same-commit matched B0；历史 B0 只作
+guardrail，best checkpoint 只作诊断。
 
-1. 只保留通过独立消融且具备 fail-closed 回退的真实时间模块；
-2. 后续模块必须逐个加入并独立超过前一阶段；
-3. normal + variable-rate 的成对时间干预分析。
+## 5. 内部消融
 
-当前 fixed-global motion innovation、search 和 adaptive proposal gate 均不能
-写成正向论文贡献。更广义的 motion feature/adapter 只保留为待归因历史信号，
-不能用本次 alpha0 control 冒充正贡献。
-只有新模块通过独立消融后，才能加入最终方法描述。
+### B1
 
-当前 PFTC 同样不能写成正向贡献。若修订后的 PFTC-U 涨点而 Δt-PFTC 与之
-相近，论文只能使用“canonical point-feature consistency”；只有 Δt-PFTC 在
-多 seed 且 true/fixed/shuffled 控制中持续领先，才加入真实秒数表述。
+- CV / learned GRU or MLP mean；
+- true / fixed / shuffled `dt`；
+- mean-only / heteroscedastic NLL；
+- sigma 不控制任何模块 / 控制 B2 support / 同时进入 B3；
+- stride/gap 1、2、4 和 held-out cadence。
 
-若只涨点但 true 未领先控制：保留模型和鲁棒性结果，但将表述降为 time-conditioned trajectory prior，不声称正确物理时间具有已验证的因果优势。
+### B2
+
+- hand endpoint / learned B1 pre-pass；
+- base-only / prior-only / base∪prior；
+- pre-Transformer / final `q_obs` / final `q_obs+q_search`；
+- fixed width / calibrated sigma / shuffled sigma；
+- raw candidate / B1-centered clipped candidate；
+- synthetic candidate / frozen B0/B1 recursive replay；
+- random negatives / same-category tracklet hard negatives；
+- availability-only / separated presence + utility。
+
+### B3
+
+- no router / oracle / learned router；
+- H1 / H3；
+- q50 / q10；
+- cooldown off/on；
+- scalar risk features / full embeddings。
+
+### B4（独立附表）
+
+- wrong/correct yaw 只作 bug 复现，不作方法消融；
+- raw SmoothL1 / stop-grad + variance-covariance / cycle；
+- low-level point feature / projector / memory or decoder token；
+- accuracy、feature std/effective rank、step time 同时报告。
+
+## 6. 实验晋级顺序
+
+1. 同 checkpoint 导出 observation、motion、raw search、current clipped refined、
+   oracle(obs/raw)，完成 sigma coverage 和 crop reachability。
+2. 只移除 B2 B1-centered clip，把 raw search 设为官方候选；不训练 router。
+3. 保持当前 support 不变，依次测试 final `q_obs` 和零初始化 `q_obs/q_search`。
+4. dual query 有 headroom 后补 B1 NLL calibration。
+5. 校准后依次接 B1 pre-pass、fixed/calibrated support、geometry bias、recursive
+   replay 和 hard negatives；一次只改一个。
+6. B1–B2 候选稳定后才训练 B3。
+7. B1–B3 主表稳定后，决定是否给 B4 一次 5-epoch 三臂 kill-test。
+
+详细阈值和停止规则见
+[权威重构计划第 5 节](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md#5-执行顺序与晋级门槛)。
+
+## 7. 声明边界
+
+当前不能写入论文结论的表述：
+
+- “B1 已带来稳定涨点”——缺 same-commit matched B0 与多 seed；
+- “B2 search 已有效”——raw 有机制信号，但跟踪收益、覆盖和判别仍未通过；
+- “B3 已完成”——router 尚未获得合格候选；
+- “B4 思路无效”——只能说当前实现 No-Go；
+- “物理时间带来跨帧率泛化”——尚缺 true/fixed/shuffled 和 held-out cadence；
+- “状态已完全对齐”——目前只有 history tensor 对齐，search support 尚未统一。
+
+## 8. 目标投稿形态
+
+最稳妥的最小论文是 B0 + B1 + B2 + B3，三项贡献分别对应 prior、evidence、
+decision，并由 A1/A2/A3 逐级隔离。若 B2 raw/oracle 没有足够 headroom，则及时停止
+B3，缩小论文问题；不要为了凑四个模块保留无法被数据支持的 B4。
