@@ -378,6 +378,12 @@ class JointFullConfigTest(unittest.TestCase):
                 ("21_ct_joint_minus_b3.yaml", "ct_enable_b3")):
             config = load_yaml_config(ROOT / "cfgs/ct_v2" / name)
             self.assertFalse(config[key])
+        b2_only = load_yaml_config(
+            ROOT / "cfgs/ct_v2/21_ct_joint_b2_only.yaml")
+        self.assertFalse(b2_only["ct_enable_b1"])
+        self.assertTrue(b2_only["ct_enable_b2"])
+        self.assertFalse(b2_only["ct_enable_b3"])
+        self.assertTrue(b2_only["ct_online_recursive_training"])
 
 
 if __name__ == "__main__":

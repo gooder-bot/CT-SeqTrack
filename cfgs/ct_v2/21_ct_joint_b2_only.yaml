@@ -1,0 +1,10 @@
+_base_: 21_ct_joint_full.yaml
+
+experiment_name: ct_seqtrack_joint_b2_only
+
+# Online-aligned B2 isolation: learned B1 is replaced by the deterministic
+# kinematic fallback, and disabling B3 forces the bounded Search action only
+# when the non-bypassable evidence mask is valid.
+ct_enable_b1: false
+ct_enable_b2: true
+ct_enable_b3: false
