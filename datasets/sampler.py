@@ -1629,7 +1629,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'motion_main_target_xy': motion_main_target_xy.astype('float32'),
             'motion_main_anchor': coordinate_anchor,
         })
-        data_dict.update(motion_aux_contract)
+        if motion_aux_contract is not None:
+            data_dict.update(motion_aux_contract)
     if prev_frame_ids is not None:
         data_dict['prev_frame_ids'] = np.array(prev_frame_ids, dtype=np.int64)
     if this_frame_id is not None:

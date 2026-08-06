@@ -368,6 +368,7 @@ class JointFullConfigTest(unittest.TestCase):
         self.assertTrue(full["ct_online_recursive_training"])
         self.assertEqual(full["candidate_trajectory_mode"], "shared_se2")
         self.assertEqual(full["ct_search_min_extension_points"], 8)
+        self.assertEqual(full["ct_query_dim"], 64)
         self.assertEqual(full["ct_router_init_probability"], 0.01)
         self.assertNotIn("ct_correction_warmup_epochs", full)
         self.assertEqual(

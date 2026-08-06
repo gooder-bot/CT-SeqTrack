@@ -662,6 +662,7 @@ if not cfg.test:
                 cfg, 'ct_router_shadow_interval', 2)),
             shadow_fraction=float(getattr(
                 cfg, 'ct_router_shadow_fraction', 0.25)),
+            shadow_enabled=bool(getattr(cfg, 'ct_enable_b3', True)),
         )
         train_loader = DataLoader(
             train_data,

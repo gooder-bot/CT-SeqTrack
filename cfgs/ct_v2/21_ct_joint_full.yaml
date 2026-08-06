@@ -60,6 +60,7 @@ trajectory_search_min_displacement: 0.2
 # B1 shared-anchor residual and B2 query reliability gate.
 motion_v3_min_direction_speed: 0.2
 ct_search_feature_dim: 128
+ct_query_dim: 64
 ct_search_max_vote_offset: 4.0
 ct_mahalanobis_clip: 25.0
 ct_query_motion_dropout: 0.1

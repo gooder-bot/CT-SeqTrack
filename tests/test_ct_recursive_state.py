@@ -192,6 +192,20 @@ class OnlineRecursiveBatchSamplerTest(unittest.TestCase):
         self.assertTrue(all(len(batch) == 8 for batch in remaining))
         self.assertEqual(len(sampler), 12)
 
+    def test_b3_disabled_sampler_never_builds_shadow_windows(self):
+        seed = 42
+        keys = [f"track/{index}" for index in range(40)]
+        train_keys = [
+            key for key in keys
+            if stable_tracklet_partition(key, seed) == "train"]
+        base = _FakeSequenceDataset(train_keys[:2], [7, 7])
+        sampler = OnlineRecursiveBatchSampler(
+            _FakeMotionSampler(base), slots=2, candidate_views=4,
+            seed=seed, partition="train", shadow_interval=1,
+            shadow_fraction=0.5, shadow_enabled=False)
+        self.assertTrue(all(
+            not bool(row[6]) for batch in sampler for row in batch))
+
 
 if __name__ == "__main__":
     unittest.main()

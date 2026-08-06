@@ -80,7 +80,7 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
 
     def __init__(self, dataset, slots=4, candidate_views=4, seed=42,
                  partition="train", shadow_interval=2,
-                 shadow_fraction=0.25):
+                 shadow_fraction=0.25, shadow_enabled=True):
         self.dataset = dataset
         self.slots = int(slots)
         self.candidate_views = int(candidate_views)
@@ -88,6 +88,7 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
         self.partition = str(partition)
         self.shadow_interval = max(1, int(shadow_interval))
         self.shadow_fraction = float(shadow_fraction)
+        self.shadow_enabled = bool(shadow_enabled)
         self.epoch = 0
         if self.slots <= 0 or self.candidate_views <= 0:
             raise ValueError("online recursive slots/views must be positive")
@@ -154,7 +155,8 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                     slot for slot, item in enumerate(active)
                     if item is not None]
                 shadow_slot = -1
-                if batch_index % self.shadow_interval == 0:
+                if (self.shadow_enabled
+                        and batch_index % self.shadow_interval == 0):
                     eligible_shadow_slots = []
                     for slot in active_slots:
                         tracklet_id, frame_id = active[slot]

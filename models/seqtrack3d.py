@@ -138,6 +138,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'ct_enable_dynamic_residual_bound', True))
         self.ct_enable_query_reliability_gate = bool(getattr(
             config, 'ct_enable_query_reliability_gate', True))
+        self.ct_query_dim = int(getattr(config, 'ct_query_dim', 64))
+        if self.ct_query_dim <= 0:
+            raise ValueError("ct_query_dim must be positive")
         self.ct_expansion_point_count = int(getattr(
             config, 'ct_expansion_point_count', 256))
         self.ct_endpoint_quota = int(getattr(
@@ -1039,7 +1042,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         point_dim=5,
                         feature_dim=int(getattr(
                             config, 'ct_search_feature_dim', 128)),
-                        query_dim=64,
+                        query_dim=self.ct_query_dim,
                         motion_dim=int(getattr(
                             config, 'motion_v3_hidden_dim', 128)),
                         observation_stats_dim=5,
@@ -2683,7 +2686,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'ct_query_shift_norm': torch.linalg.norm(
                         deployed_query
                         - joint_output['ct_query_observation'], dim=1)
-                    / math.sqrt(self.ct_query_dim),
+                    / math.sqrt(self.ct_joint_search_refiner.query_dim),
                 })
                 output_dict['ct_final_box'] = updated_aux_box
             else:
@@ -5580,8 +5583,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 module.training = was_training
 
     def _attach_h3_shadow_labels(self, batch, output):
-        if not bool(getattr(
-                self.config, 'ct_online_recursive_training', False)):
+        if (not bool(getattr(
+                self.config, 'ct_online_recursive_training', False))
+                or not self.ct_enable_b3):
             return
         if self.device.type == 'cuda':
             torch.cuda.synchronize(self.device)
@@ -5740,16 +5744,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             metric_output = output
 
         # log
+        log_batch_size = int(metric_batch['seg_label'].shape[0])
         seg_acc = self.seg_acc(torch.argmax(metric_output['seg_logits'], dim=1, keepdim=False),
                                metric_batch['seg_label'])
-        self.log('seg_acc_background/train', seg_acc[0], on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log('seg_acc_foreground/train', seg_acc[1], on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log('seg_acc_background/train', seg_acc[0], on_step=True,
+                 on_epoch=True, prog_bar=False, logger=True,
+                 batch_size=log_batch_size)
+        self.log('seg_acc_foreground/train', seg_acc[1], on_step=True,
+                 on_epoch=True, prog_bar=False, logger=True,
+                 batch_size=log_batch_size)
         if self.use_motion_cls:
             motion_acc = self.motion_acc(torch.argmax(metric_output['motion_cls'], dim=1, keepdim=False),
                                          metric_batch['motion_state_label'][:,0]) # 0 represents motion relative to the first historical box
-            self.log('motion_acc_static/train', motion_acc[0], on_step=True, on_epoch=True, prog_bar=False, logger=True)
-            self.log('motion_acc_dynamic/train', motion_acc[1], on_step=True, on_epoch=True, prog_bar=False,
-                     logger=True)
+            self.log('motion_acc_static/train', motion_acc[0], on_step=True,
+                     on_epoch=True, prog_bar=False, logger=True,
+                     batch_size=log_batch_size)
+            self.log('motion_acc_dynamic/train', motion_acc[1], on_step=True,
+                     on_epoch=True, prog_bar=False, logger=True,
+                     batch_size=log_batch_size)
 
         log_dict = {k: v.item() for k, v in loss_dict.items()}
 
