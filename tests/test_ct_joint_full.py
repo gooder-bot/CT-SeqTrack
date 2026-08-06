@@ -386,6 +386,18 @@ class JointFullConfigTest(unittest.TestCase):
         self.assertFalse(b2_only["ct_enable_b3"])
         self.assertTrue(b2_only["ct_online_recursive_training"])
 
+    def test_h3_shadow_bypasses_structural_b1_and_joint_full_paths(self):
+        source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
+        shadow_source = source.split(
+            "    def _shadow_forward(self, batch, seed):", 1)[1].split(
+                "    def _attach_h3_shadow_labels", 1)[0]
+        for assignment in (
+                "self.use_ct_joint_full = False",
+                "self.use_b1motion_v3 = False",
+                "self.use_ct_joint_full = previous_joint_full",
+                "self.use_b1motion_v3 = previous_motion_v3"):
+            self.assertIn(assignment, shadow_source)
+
 
 if __name__ == "__main__":
     unittest.main()

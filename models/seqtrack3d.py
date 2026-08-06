@@ -5555,6 +5555,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def _shadow_forward(self, batch, seed):
         training_flags = {
             module: module.training for module in self.modules()}
+        previous_joint_full = self.use_ct_joint_full
+        previous_motion_v3 = self.use_b1motion_v3
         previous_b2 = self.ct_enable_b2
         previous_b3 = self.ct_enable_b3
         previous_b1 = self.ct_enable_b1
@@ -5566,6 +5568,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         try:
             for module in training_flags:
                 module.training = False
+            # H=3 future steps are deliberately observation-only.  Disabling
+            # the B1/B2/B3 action gates is insufficient because the structural
+            # Joint Full branch still validates and consumes Search tensors.
+            # The shadow sampler intentionally omits those tensors, so bypass
+            # both plugin entry points and execute the exact B0 forward.
+            self.use_ct_joint_full = False
+            self.use_b1motion_v3 = False
             self.ct_enable_b2 = False
             self.ct_enable_b3 = False
             self.ct_enable_b1 = False
@@ -5576,6 +5585,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 with torch.inference_mode():
                     return self(batch)
         finally:
+            self.use_ct_joint_full = previous_joint_full
+            self.use_b1motion_v3 = previous_motion_v3
             self.ct_enable_b2 = previous_b2
             self.ct_enable_b3 = previous_b3
             self.ct_enable_b1 = previous_b1
