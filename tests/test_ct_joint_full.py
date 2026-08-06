@@ -441,6 +441,20 @@ class JointFullConfigTest(unittest.TestCase):
             "                             cfg, 'limit_val_batches', 1.0)",
             source)
 
+    def test_masked_mean_is_available_when_b1_is_disabled(self):
+        source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
+        loss_source = source.split(
+            "    def compute_loss(self, data, output):", 1)[1].split(
+                "    def on_train_epoch_start", 1)[0]
+        helper_offset = loss_source.index(
+            "        def masked_mean(per_sample, valid):")
+        b1_branch_offset = loss_source.index(
+            "        if (self.use_b1motion_v3")
+        joint_branch_offset = loss_source.index(
+            "        if self.use_ct_joint_full and self.ct_enable_b2:")
+        self.assertLess(helper_offset, b1_branch_offset)
+        self.assertLess(helper_offset, joint_branch_offset)
+
 
 if __name__ == "__main__":
     unittest.main()

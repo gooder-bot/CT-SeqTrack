@@ -3781,6 +3781,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         loss_total = 0.0
         loss_dict = {}
+
+        # Shared by B1 diagnostics and Joint B2/B3 diagnostics.  This helper
+        # must not live inside the B1-enabled branch: B2-only deliberately
+        # disables B1 while still logging masked Search metrics.
+        def masked_mean(per_sample, valid):
+            valid = valid.to(
+                device=per_sample.device,
+                dtype=per_sample.dtype,
+            ).reshape(-1)
+            return (
+                per_sample.reshape(-1) * valid
+            ).sum() / torch.clamp(valid.sum(), min=1.0)
+
         final_estimation_boxes = output['aux_estimation_boxes']
         aux_estimation_boxes = output.get(
             'observation_aux_estimation_boxes', final_estimation_boxes)
@@ -3954,15 +3967,6 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if (self.use_b1motion_v3
                 and not (self.use_ct_joint_full
                          and not self.ct_enable_b1)):
-            def masked_mean(per_sample, valid):
-                valid = valid.to(
-                    device=per_sample.device,
-                    dtype=per_sample.dtype,
-                ).reshape(-1)
-                return (
-                    per_sample.reshape(-1) * valid
-                ).sum() / torch.clamp(valid.sum(), min=1.0)
-
             main_target = data['motion_main_target_xy'].to(
                 device=output['motion_prior_xy'].device,
                 dtype=output['motion_prior_xy'].dtype,
