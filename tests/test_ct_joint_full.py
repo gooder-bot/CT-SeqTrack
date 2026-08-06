@@ -321,6 +321,31 @@ class JointRouterTest(unittest.TestCase):
         self.assertTrue(bool((diagnostics[
             "ct_router_evidence_valid"] == 0).all()))
 
+    def test_nonfinite_router_context_abstains_with_finite_outputs(self):
+        router = JointScalarResidualRouter().eval()
+        observation = torch.randn(2, 4)
+        final, diagnostics = router(
+            observation_box=observation,
+            raw_search_xy=torch.randn(2, 2),
+            candidate_valid=torch.tensor([float("nan"), 1.0]),
+            observation_stats=torch.full((2, 5), float("nan")),
+            targetness_mean=torch.full((2,), float("nan")),
+            targetness_max=torch.ones(2),
+            targetness_entropy=torch.full((2,), float("inf")),
+            normalized_ess=torch.ones(2),
+            query_gate=torch.zeros(2),
+            query_delta_t=torch.tensor([float("nan"), float("inf")]),
+            gap_ratio=torch.tensor([float("nan"), float("inf")]),
+            extension_mass_ratio=torch.full((2,), float("nan")),
+            extension_vote_rms=torch.zeros(2),
+            presence_probability=torch.ones(2),
+            enabled=False,
+        )
+        self.assertTrue(bool(torch.isfinite(final).all()))
+        self.assertTrue(bool(torch.isfinite(
+            diagnostics["ct_router_logit"]).all()))
+        self.assertTrue(torch.equal(final, observation))
+
     def test_router_losses_do_not_backpropagate_to_candidate_producers(self):
         router = JointScalarResidualRouter().train()
         observation = torch.zeros(2, 4, requires_grad=True)
@@ -397,6 +422,24 @@ class JointFullConfigTest(unittest.TestCase):
                 "self.use_ct_joint_full = previous_joint_full",
                 "self.use_b1motion_v3 = previous_motion_v3"):
             self.assertIn(assignment, shadow_source)
+
+    def test_joint_diagnostic_export_has_a_schema_specific_aggregator(self):
+        source = (ROOT / "models/base_model.py").read_text(encoding="utf-8")
+        writer_source = source.split(
+            "    def _write_proposal_test_diagnostics(self):", 1)[1].split(
+                "    def _write_b3_test_rollouts", 1)[0]
+        self.assertIn(
+            'if "router_applied_gate" in group[0]:', writer_source)
+        self.assertIn(
+            'if bool(row["router_applied_gate"])', writer_source)
+
+    def test_main_supports_bounded_validation_preflight(self):
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn("'--limit_val_batches'", source)
+        self.assertIn(
+            "limit_val_batches=getattr(\n"
+            "                             cfg, 'limit_val_batches', 1.0)",
+            source)
 
 
 if __name__ == "__main__":

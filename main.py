@@ -374,6 +374,10 @@ def parse_config():
         default=argparse.SUPPRESS,
         help='limit training batches (used by bounded loss preflight runs)')
     parser.add_argument(
+        '--limit_val_batches', type=parse_limit_train_batches,
+        default=argparse.SUPPRESS,
+        help='limit validation batches (used by end-to-end preflight runs)')
+    parser.add_argument(
         '--save_top_k', type=int, default=argparse.SUPPRESS,
         help='save top k checkpoints')
     parser.add_argument(
@@ -701,6 +705,8 @@ if not cfg.test:
                           gradient_clip_val=cfg.gradient_clip_val,
                          limit_train_batches=getattr(
                              cfg, 'limit_train_batches', 1.0),
+                         limit_val_batches=getattr(
+                             cfg, 'limit_val_batches', 1.0),
                          fast_dev_run=False)
     # init model
     train_dataloader_length = len(train_loader) #用于设置OneCycle学习率

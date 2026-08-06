@@ -1,5 +1,6 @@
 import copy
 import unittest
+from pathlib import Path
 
 import numpy as np
 from pyquaternion import Quaternion
@@ -18,6 +19,9 @@ from utils.recursive_state import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class DummyBox:
     def __init__(self, x=0.0):
         self.center = np.asarray([x, 0.0, 0.0], dtype=np.float64)
@@ -26,6 +30,15 @@ class DummyBox:
 
 
 class RecursiveTrackStateTest(unittest.TestCase):
+    def test_legacy_observation_safe_size_uses_first_frame(self):
+        source = (ROOT / "datasets/sampler.py").read_text(encoding="utf-8")
+        legacy_processing = source.split(
+            "def motion_processing(data, config", 1)[1].split(
+                "def motion_processing_mf", 1)[0]
+        self.assertIn(
+            "data['first_frame']['3d_bbox'].wlh", legacy_processing)
+        self.assertNotIn("coordinate_anchor_box", legacy_processing)
+
     def test_history_is_prediction_backed_and_clone_is_independent(self):
         state = RecursiveTrackState(3, "track/3", DummyBox())
         state.append(1, DummyBox(1.25), timestamp=0.5)

@@ -715,6 +715,44 @@ class BaseModelMF(pl.LightningModule):
                     and np.isfinite(float(row[key]))]
                 return float(np.mean(values)) if values else float("nan")
 
+            # Joint Full exports a hard observation/Search action schema,
+            # whereas the legacy v2/v3 diagnostics use soft proposal fields.
+            # Keep both schemas explicit: indexing legacy-only fields here made
+            # an otherwise successful Joint Full test fail at test_epoch_end.
+            if "router_applied_gate" in group[0]:
+                selected = [
+                    row for row in group
+                    if bool(row["router_applied_gate"])]
+                helpful_margin = float(getattr(
+                    self.config, "ct_router_help_margin", 0.05))
+                tracklet_rows.append({
+                    "tracklet_id": tracklet_id,
+                    "endpoint_count": len(group),
+                    "search_valid_rate": finite_mean("search_valid"),
+                    "router_applied_rate": finite_mean(
+                        "router_applied_gate"),
+                    "observation_error_mean": finite_mean(
+                        "observation_error"),
+                    "raw_search_error_mean": finite_mean(
+                        "raw_search_error", "search_valid"),
+                    "final_error_mean": finite_mean("final_error"),
+                    "selected_helpful_precision": (
+                        float(np.mean([
+                            (float(row["observation_error"])
+                             - float(row["final_error"]))
+                            > helpful_margin
+                            for row in selected]))
+                        if selected else float("nan")),
+                    "selected_harm_rate": (
+                        float(np.mean([
+                            (float(row["final_error"])
+                             - float(row["observation_error"]))
+                            > helpful_margin
+                            for row in selected]))
+                        if selected else float("nan")),
+                })
+                continue
+
             selected = [
                 row for row in group if row["search_materially_selected"]]
             tracklet_rows.append({

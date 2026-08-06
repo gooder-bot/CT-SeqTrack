@@ -220,7 +220,7 @@ def motion_processing(data, config, template_transform=None, search_transform=No
         'motion_label': motion_label,
         'motion_state_label': motion_state_label.astype('int'),
         'bbox_size': (
-            coordinate_anchor_box.wlh
+            data['first_frame']['3d_bbox'].wlh
             if bool(getattr(
                 config, 'observation_safe_bbox_size', False))
             else this_box.wlh),

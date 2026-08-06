@@ -643,12 +643,15 @@ class JointScalarResidualRouter(nn.Module):
             extension_vote_rms=None,
             presence_probability=None):
         reference = observation_box
-        candidate_valid = _batch_scalar(
-            candidate_valid, reference).detach().clamp(0.0, 1.0)
-        query_dt = torch.clamp(_batch_scalar(
-            query_delta_t, reference).detach(), min=0.0)
-        gap = torch.clamp(_batch_scalar(
-            gap_ratio, reference).detach(), min=0.0)
+        candidate_valid = torch.nan_to_num(_batch_scalar(
+            candidate_valid, reference).detach(), nan=0.0,
+            posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
+        query_dt = torch.clamp(torch.nan_to_num(_batch_scalar(
+            query_delta_t, reference).detach(), nan=0.0,
+            posinf=0.0, neginf=0.0), min=0.0)
+        gap = torch.clamp(torch.nan_to_num(_batch_scalar(
+            gap_ratio, reference).detach(), nan=0.0,
+            posinf=0.0, neginf=0.0), min=0.0)
         observation_xy = observation_box[:, :2].detach()
         raw_xy = raw_search_xy.detach()
         residual = torch.nan_to_num(
@@ -660,14 +663,16 @@ class JointScalarResidualRouter(nn.Module):
             extension_vote_rms = reference.new_zeros((reference.shape[0],))
         if presence_probability is None:
             presence_probability = reference.new_ones((reference.shape[0],))
-        extension_mass = _batch_scalar(
-            extension_mass_ratio, reference).detach()
+        extension_mass = torch.nan_to_num(_batch_scalar(
+            extension_mass_ratio, reference).detach(), nan=0.0,
+            posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
         vote_rms = _batch_scalar(
             extension_vote_rms, reference).detach()
         vote_rms = torch.nan_to_num(
             vote_rms, nan=1e6, posinf=1e6, neginf=1e6)
-        presence = _batch_scalar(
-            presence_probability, reference).detach().clamp(0.0, 1.0)
+        presence = torch.nan_to_num(_batch_scalar(
+            presence_probability, reference).detach(), nan=0.0,
+            posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
         scalar_features = torch.cat((
             torch.nan_to_num(observation_stats.detach(), nan=0.0,
                              posinf=0.0, neginf=0.0),
@@ -684,6 +689,8 @@ class JointScalarResidualRouter(nn.Module):
             vote_rms.unsqueeze(1),
             presence.unsqueeze(1),
         ), dim=1)
+        scalar_features = torch.nan_to_num(
+            scalar_features, nan=0.0, posinf=0.0, neginf=0.0)
         router_logit = self.gate(scalar_features).squeeze(1)
         learned_probability = torch.sigmoid(router_logit)
         radius = torch.clamp(
