@@ -147,6 +147,7 @@ def estimate_ordered_trajectory(
 
     pair_count = min(len(history_boxes) - 1, len(delta_t) - 1)
     transitions = []
+    constraint_clipped = False
     for index in range(max(pair_count, 0)):
         if valid_mask is not None and not (
                 bool(valid_mask[index]) and bool(valid_mask[index + 1])):
@@ -159,6 +160,7 @@ def estimate_ordered_trajectory(
         velocity = (newer - older) / gap
         planar_speed = float(np.linalg.norm(velocity[:2]))
         if planar_speed > float(max_speed):
+            constraint_clipped = True
             velocity = velocity * (
                 float(max_speed) / max(planar_speed, 1e-9))
         transitions.append((index, gap, velocity))
@@ -177,6 +179,7 @@ def estimate_ordered_trajectory(
         acceleration = (recent_velocity - older_velocity) / acceleration_gap
         acceleration_norm = float(np.linalg.norm(acceleration[:2]))
         if acceleration_norm > float(max_acceleration):
+            constraint_clipped = True
             acceleration *= float(max_acceleration) / max(
                 acceleration_norm, 1e-9)
 
@@ -186,6 +189,7 @@ def estimate_ordered_trajectory(
     )
     planar_norm = float(np.linalg.norm(displacement[:2]))
     if planar_norm > float(max_displacement):
+        constraint_clipped = True
         displacement *= float(max_displacement) / max(planar_norm, 1e-9)
         planar_norm = float(max_displacement)
 
@@ -220,6 +224,7 @@ def estimate_ordered_trajectory(
         "acceleration": acceleration,
         "displacement_vector": displacement,
         "displacement": planar_norm,
+        "constraint_clipped": constraint_clipped,
         "sigma_parallel": sigma_parallel,
         "sigma_perpendicular": sigma_perpendicular,
     }
@@ -959,3 +964,95 @@ def sample_source_aware_endpoint_points(
         "selected_extension_count": selected_extension_count,
         "selected_overlap_count": sample_count - selected_extension_count,
     }
+
+
+def combined_search_support_statistics(
+        point_arrays,
+        valid_masks,
+        support_sources,
+        voxel_size=0.2):
+    """Summarize real endpoint/tube support after sampling.
+
+    ``support_sources`` uses the stable contract 0=already present in the B0
+    crop and 1=expansion-only.  Extension returns are deduplicated jointly
+    across endpoint and tube, so the same LiDAR return cannot make Search look
+    useful twice merely because it was covered by both crops.
+    """
+    if not (len(point_arrays) == len(valid_masks) == len(support_sources)):
+        raise ValueError("search support arrays/masks/sources must align")
+    valid_points = []
+    extension_points = []
+    for points, mask, source in zip(
+            point_arrays, valid_masks, support_sources):
+        points = np.asarray(points)
+        mask = np.asarray(mask).reshape(-1) > 0
+        source = np.asarray(source).reshape(-1)
+        if points.ndim != 2 or len(points) != len(mask):
+            raise ValueError("search support points must have shape [N,C]")
+        if len(source) != len(mask):
+            raise ValueError("search support source must match points")
+        finite = np.isfinite(points[:, :min(3, points.shape[1])]).all(axis=1)
+        selected = mask & finite
+        if selected.any():
+            valid_points.append(points[selected, :3])
+        extension = selected & (source == 1)
+        if extension.any():
+            extension_points.append(points[extension, :3])
+
+    valid = (
+        np.concatenate(valid_points, axis=0)
+        if valid_points else np.empty((0, 3), dtype=np.float32))
+    extension = (
+        np.concatenate(extension_points, axis=0)
+        if extension_points else np.empty((0, 3), dtype=np.float32))
+    if len(valid):
+        valid_keys = np.rint(valid / 1e-6).astype(np.int64)
+        total_count = int(np.unique(valid_keys, axis=0).shape[0])
+    else:
+        total_count = 0
+    if len(extension):
+        exact_keys = np.rint(extension / 1e-6).astype(np.int64)
+        extension_count = int(np.unique(exact_keys, axis=0).shape[0])
+        safe_voxel = max(float(voxel_size), 1e-6)
+        voxel_keys = np.floor(extension / safe_voxel).astype(np.int64)
+        extension_voxels = int(np.unique(voxel_keys, axis=0).shape[0])
+    else:
+        extension_count = 0
+        extension_voxels = 0
+    return {
+        "total_count": total_count,
+        "extension_count": extension_count,
+        "extension_voxels": extension_voxels,
+    }
+
+
+def useful_search_coverage_need(
+        query_delta_t,
+        gap_ratio,
+        endpoint_xy,
+        reference_wlh,
+        baseline_point_count,
+        min_delta_t=0.75,
+        min_gap_ratio=1.5,
+        min_endpoint_ratio=0.6,
+        sparse_base_points=64,
+        bb_scale=1.0,
+        bb_offset=0.0):
+    """Test whether a second crop can cover evidence missing from B0."""
+    endpoint = np.asarray(endpoint_xy, dtype=np.float64).reshape(2)
+    size = np.asarray(reference_wlh, dtype=np.float64).reshape(-1)
+    if size.size < 2 or not np.isfinite(endpoint).all():
+        return False, 0.0
+    # nuScenes Box.wlh is width/length/height.  The local x/y axes use the
+    # corresponding half extents after the ordinary B0 crop expansion.
+    half_extent = np.maximum(
+        0.5 * size[:2] * float(bb_scale) + float(bb_offset), 1e-3)
+    endpoint_ratio = float(np.max(np.abs(endpoint) / half_extent))
+    irregular = (
+        float(query_delta_t) >= float(min_delta_t)
+        or float(gap_ratio) >= float(min_gap_ratio))
+    needed = (
+        irregular
+        or endpoint_ratio >= float(min_endpoint_ratio)
+        or int(baseline_point_count) < int(sparse_base_points))
+    return bool(needed), endpoint_ratio

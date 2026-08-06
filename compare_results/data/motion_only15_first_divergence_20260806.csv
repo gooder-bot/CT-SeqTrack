@@ -1,0 +1,6 @@
+metric,motion_vs_b0_first_step,motion_value,b0_value,motion_vs_prior_minus_b2_first_step,interpretation
+loss_center,0,0.346111476,0.601473331,6,B0 training path differs from the first logged batch
+loss_center_aux,0,1.744181037,1.342998028,5,B0 observation loss differs from the first logged batch
+loss_center_ref,0,2.063393831,2.258792162,5,Reference update loss differs from the first logged batch
+loss_seg,0,0.713196933,0.706329882,3,Point segmentation loss differs from the first logged batch
+loss_angle_aux,0,0.276952028,0.238159746,5,Observation angle loss differs from the first logged batch

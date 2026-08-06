@@ -1,0 +1,91 @@
+{
+  "artifacts": {
+    "losses": "compare_results\\data\\joint_full_baseline15_b0_losses_20260806.csv",
+    "provenance": "compare_results\\data\\joint_full_baseline15_provenance_20260806.csv",
+    "validation": "compare_results\\data\\joint_full_baseline15_validation_20260806.csv"
+  },
+  "deltas": {
+    "current_vs_full": {
+      "precision": 26.98686408996582,
+      "success": 20.378551483154297
+    },
+    "current_vs_historical": {
+      "precision": -6.764774322509766,
+      "success": -2.9824981689453125
+    },
+    "current_vs_minus_b2": {
+      "precision": 21.542667388916016,
+      "success": 16.768051147460938
+    }
+  },
+  "epoch15": {
+    "-B1-60": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 32.701316833496094,
+      "run": "-B1-60",
+      "success": 31.64442253112793
+    },
+    "-B2-60": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 32.108314514160156,
+      "run": "-B2-60",
+      "success": 29.987964630126953
+    },
+    "-B3-60": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 26.3249454498291,
+      "run": "-B3-60",
+      "success": 26.60503387451172
+    },
+    "Current B0-15": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 53.65098190307617,
+      "run": "Current B0-15",
+      "success": 46.75601577758789
+    },
+    "Full-60": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 26.66411781311035,
+      "run": "Full-60",
+      "success": 26.377464294433594
+    },
+    "Historical B0-60": {
+      "epoch": 15,
+      "global_step": 18929,
+      "precision": 60.41575622558594,
+      "run": "Historical B0-60",
+      "success": 49.7385139465332
+    }
+  },
+  "lr": {
+    "-B1-60": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    },
+    "-B2-60": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    },
+    "-B3-60": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    },
+    "Current B0-15": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    },
+    "Full-60": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    },
+    "Historical B0-60": {
+      "first15_maximum": 9.999999747378752e-05,
+      "first15_minimum": 9.999999747378752e-05
+    }
+  }
+}

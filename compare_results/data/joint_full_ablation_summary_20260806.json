@@ -1,0 +1,182 @@
+{
+  "artifacts": {
+    "provenance": "compare_results\\data\\joint_full_run_provenance_20260806.csv",
+    "training_diagnostics": "compare_results\\data\\joint_full_training_diagnostics_20260806.csv",
+    "validation": "compare_results\\data\\joint_full_validation_curves_20260806.csv"
+  },
+  "deltas": {
+    "-B1": {
+      "vs_minus_b2_precision": -1.5787792205810547,
+      "vs_minus_b2_success": -1.3982505798339844,
+      "vs_seqtrack_precision": -35.03391647338867,
+      "vs_seqtrack_success": -24.247264862060547
+    },
+    "-B2": {
+      "vs_minus_b2_precision": 0.0,
+      "vs_minus_b2_success": 0.0,
+      "vs_seqtrack_precision": -33.45513725280762,
+      "vs_seqtrack_success": -22.849014282226562
+    },
+    "-B3": {
+      "vs_minus_b2_precision": -5.94529914855957,
+      "vs_minus_b2_success": -4.457330703735352,
+      "vs_seqtrack_precision": -39.40043640136719,
+      "vs_seqtrack_success": -27.306344985961914
+    },
+    "Full": {
+      "vs_minus_b2_precision": -1.6017532348632812,
+      "vs_minus_b2_success": -1.0853404998779297,
+      "vs_seqtrack_precision": -35.0568904876709,
+      "vs_seqtrack_success": -23.934354782104492
+    }
+  },
+  "final": {
+    "-B1": {
+      "epoch": 60,
+      "global_step": 75719,
+      "precision": 29.347919464111328,
+      "run": "-B1",
+      "success": 29.112689971923828
+    },
+    "-B2": {
+      "epoch": 60,
+      "global_step": 75719,
+      "precision": 30.926698684692383,
+      "run": "-B2",
+      "success": 30.510940551757812
+    },
+    "-B3": {
+      "epoch": 60,
+      "global_step": 75719,
+      "precision": 24.981399536132812,
+      "run": "-B3",
+      "success": 26.05360984802246
+    },
+    "Full": {
+      "epoch": 60,
+      "global_step": 75719,
+      "precision": 29.3249454498291,
+      "run": "Full",
+      "success": 29.425600051879883
+    },
+    "SeqTrack": {
+      "epoch": 60,
+      "global_step": 75719,
+      "precision": 64.3818359375,
+      "run": "SeqTrack",
+      "success": 53.359954833984375
+    }
+  },
+  "runs": [
+    {
+      "batch_size": 16,
+      "category": "Car",
+      "commit": "835f9111cc218245281e858a8efa9f87a1f26830",
+      "ct_enable_b1": true,
+      "ct_enable_b2": true,
+      "ct_enable_b3": true,
+      "dirty_any": false,
+      "dirty_tracked": false,
+      "epochs": 60,
+      "path": "output\\20260805-2337-21_ct_joint_full-joint-full-mini-car-60ep-bs16-s42\\run_provenance.json",
+      "run": "Full",
+      "seed": 42,
+      "train_frames": 5051,
+      "train_selection_sha256": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+      "train_split": "mini_train",
+      "val_frames": 2285,
+      "val_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+      "val_split": "mini_val",
+      "version": "v1.0-mini",
+      "workers": 4
+    },
+    {
+      "batch_size": 16,
+      "category": "Car",
+      "commit": "835f9111cc218245281e858a8efa9f87a1f26830",
+      "ct_enable_b1": false,
+      "ct_enable_b2": true,
+      "ct_enable_b3": true,
+      "dirty_any": false,
+      "dirty_tracked": false,
+      "epochs": 60,
+      "path": "output\\20260805-2337-21_ct_joint_minus_b1-joint-minus-b1-mini-car-60ep-bs16-s42\\run_provenance.json",
+      "run": "-B1",
+      "seed": 42,
+      "train_frames": 5051,
+      "train_selection_sha256": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+      "train_split": "mini_train",
+      "val_frames": 2285,
+      "val_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+      "val_split": "mini_val",
+      "version": "v1.0-mini",
+      "workers": 4
+    },
+    {
+      "batch_size": 16,
+      "category": "Car",
+      "commit": "835f9111cc218245281e858a8efa9f87a1f26830",
+      "ct_enable_b1": true,
+      "ct_enable_b2": false,
+      "ct_enable_b3": true,
+      "dirty_any": false,
+      "dirty_tracked": false,
+      "epochs": 60,
+      "path": "output\\20260805-2337-21_ct_joint_minus_b2-joint-minus-b2-mini-car-60ep-bs16-s42\\run_provenance.json",
+      "run": "-B2",
+      "seed": 42,
+      "train_frames": 5051,
+      "train_selection_sha256": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+      "train_split": "mini_train",
+      "val_frames": 2285,
+      "val_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+      "val_split": "mini_val",
+      "version": "v1.0-mini",
+      "workers": 4
+    },
+    {
+      "batch_size": 16,
+      "category": "Car",
+      "commit": "835f9111cc218245281e858a8efa9f87a1f26830",
+      "ct_enable_b1": true,
+      "ct_enable_b2": true,
+      "ct_enable_b3": false,
+      "dirty_any": false,
+      "dirty_tracked": false,
+      "epochs": 60,
+      "path": "output\\20260805-2338-21_ct_joint_minus_b3-joint-minus-b3-mini-car-60ep-bs16-s42\\run_provenance.json",
+      "run": "-B3",
+      "seed": 42,
+      "train_frames": 5051,
+      "train_selection_sha256": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+      "train_split": "mini_train",
+      "val_frames": 2285,
+      "val_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+      "val_split": "mini_val",
+      "version": "v1.0-mini",
+      "workers": 4
+    },
+    {
+      "batch_size": 16,
+      "category": "Car",
+      "commit": "d86990ce5304258822c1748d17f997f6ec003e9c",
+      "ct_enable_b1": null,
+      "ct_enable_b2": null,
+      "ct_enable_b3": null,
+      "dirty_any": false,
+      "dirty_tracked": false,
+      "epochs": 60,
+      "path": "output\\20260725-2326-01_seqtrack3d_baseline-ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16\\run_provenance.json",
+      "run": "SeqTrack",
+      "seed": 42,
+      "train_frames": 5051,
+      "train_selection_sha256": "7b4e9cca2038e7cb6c9483943b627af18e433c16e13b52bcd1478b14a6a25100",
+      "train_split": "mini_train",
+      "val_frames": 2285,
+      "val_selection_sha256": "35498888d322fdcbef06d1621aa3376d32a9417138a1f8126dc2589088d58826",
+      "val_split": "mini_val",
+      "version": "v1.0-mini",
+      "workers": 4
+    }
+  ]
+}

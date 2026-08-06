@@ -28,6 +28,7 @@ from models.ct_v2.decoder_token_consistency import (
     GradientRatioWeightSelector,
 )
 from models.ct_v2.joint_full import (
+    calibrate_joint_router_threshold,
     JointFullSearchRefiner,
     JointScalarResidualRouter,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "PointFeatureTemporalConsistencyLoss",
     "DecoderTokenConsistencyLoss",
     "GradientRatioWeightSelector",
+    "calibrate_joint_router_threshold",
     "JointFullSearchRefiner",
     "JointScalarResidualRouter",
     "canonicalize_points",

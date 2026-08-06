@@ -8,6 +8,8 @@ import argparse
 
 # import pytorch_lightning.utilities.distributed
 import torch
+import numpy as np
+import random
 from easydict import EasyDict
 import os
 import json
@@ -21,6 +23,11 @@ from pytorch_lightning import seed_everything
 
 
 from datasets import get_dataset
+from datasets.sampler import (
+    OnlineRecursiveBatchSampler,
+    PartitionedTestTrackingSampler,
+    online_recursive_collate,
+)
 from models import get_model
 from utils.run_provenance import write_run_provenance
 from utils.replay_cache import (
@@ -321,6 +328,39 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
     return report
 
 
+def validate_online_resume_checkpoint(checkpoint_path, config):
+    """Reject cross-experiment resumes for causal online training."""
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    hyper_parameters = checkpoint.get('hyper_parameters', {})
+    saved_config = hyper_parameters.get('config', hyper_parameters)
+
+    def saved_value(key, default=None):
+        if isinstance(saved_config, dict):
+            return saved_config.get(key, default)
+        return getattr(saved_config, key, default)
+
+    expected = {
+        'experiment_name': str(config.experiment_name),
+        'seed': int(config.seed or 42),
+        'use_ct_joint_full': True,
+        'ct_online_recursive_training': True,
+    }
+    observed = {
+        'experiment_name': saved_value('experiment_name'),
+        'seed': saved_value('seed'),
+        'use_ct_joint_full': saved_value('use_ct_joint_full'),
+        'ct_online_recursive_training': saved_value(
+            'ct_online_recursive_training'),
+    }
+    if (str(observed['experiment_name']) != expected['experiment_name']
+            or int(observed['seed'] or -1) != expected['seed']
+            or observed['use_ct_joint_full'] is not True
+            or observed['ct_online_recursive_training'] is not True):
+        raise ValueError(
+            "online recursive training may resume only the same Joint Full "
+            f"experiment/seed; expected {expected}, observed {observed}")
+
+
 def parse_config():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -554,6 +594,14 @@ if cfg.checkpoint is not None and cfg.init_checkpoint is not None:
     raise ValueError("--checkpoint (resume/test) and --init_checkpoint are mutually exclusive")
 if cfg.test and cfg.init_checkpoint is not None:
     raise ValueError("--init_checkpoint is training-only; use --checkpoint for evaluation")
+if (bool(getattr(cfg, 'ct_online_recursive_training', False))
+        and not cfg.test):
+    if cfg.init_checkpoint is not None:
+        raise ValueError(
+            "online recursive Joint Full must train from scratch; "
+            "--init_checkpoint is forbidden")
+    if cfg.checkpoint is not None:
+        validate_online_resume_checkpoint(cfg.checkpoint, cfg)
 if cfg.seed is not None:
     seed_everything(cfg.seed)
     
@@ -578,10 +626,58 @@ if not cfg.test:
     # dataset and dataloader
     train_data = get_dataset(
         cfg, type=cfg.train_type, split=cfg.train_split, protocol_role='train')
-    val_data = get_dataset(
-        cfg, type='test', split=cfg.val_split, protocol_role='val')
-    train_loader = DataLoader(train_data, batch_size=cfg.batch_size, num_workers=cfg.workers, shuffle=True,drop_last=True,
-                              pin_memory=True)
+    if bool(getattr(cfg, 'ct_online_recursive_training', False)):
+        # Keep mini_val untouched.  Joint checkpoint selection uses only the
+        # atomic dev partition of mini_train.
+        val_data = PartitionedTestTrackingSampler(
+            train_data.dataset, config=cfg, partition='dev')
+    else:
+        val_data = get_dataset(
+            cfg, type='test', split=cfg.val_split, protocol_role='val')
+    loader_seed = int(cfg.seed or 42)
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(loader_seed + 31001)
+
+    def seed_loader_worker(worker_id):
+        worker_seed = int(torch.initial_seed() % (2 ** 32))
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    if bool(getattr(cfg, 'ct_online_recursive_training', False)):
+        if int(getattr(cfg, 'ct_router_horizon', 3)) != 3:
+            raise ValueError("online Joint Full currently requires H=3")
+        if int(cfg.batch_size) != (
+                int(getattr(cfg, 'ct_recursive_tracklet_slots', 4))
+                * int(getattr(cfg, 'ct_recursive_candidate_views', 4))):
+            raise ValueError(
+                "online recursive batch_size must equal slots*candidate_views")
+        online_batch_sampler = OnlineRecursiveBatchSampler(
+            train_data,
+            slots=int(getattr(cfg, 'ct_recursive_tracklet_slots', 4)),
+            candidate_views=int(getattr(
+                cfg, 'ct_recursive_candidate_views', 4)),
+            seed=loader_seed,
+            partition=str(getattr(cfg, 'ct_router_partition', 'train')),
+            shadow_interval=int(getattr(
+                cfg, 'ct_router_shadow_interval', 2)),
+            shadow_fraction=float(getattr(
+                cfg, 'ct_router_shadow_fraction', 0.25)),
+        )
+        train_loader = DataLoader(
+            train_data,
+            batch_sampler=online_batch_sampler,
+            num_workers=cfg.workers,
+            collate_fn=online_recursive_collate,
+            pin_memory=False,
+            worker_init_fn=seed_loader_worker,
+            generator=loader_generator,
+        )
+    else:
+        train_loader = DataLoader(
+            train_data, batch_size=cfg.batch_size,
+            num_workers=cfg.workers, shuffle=True, drop_last=True,
+            pin_memory=True, worker_init_fn=seed_loader_worker,
+            generator=loader_generator)
     val_loader = DataLoader(val_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
     write_run_provenance(
         run_root_dir, cfg, {"train": train_data, "val": val_data},
@@ -591,7 +687,12 @@ if not cfg.test:
     learningrate_callback = LearningRateMonitor(logging_interval="step")
 
     # init trainer
-    trainer = pl.Trainer(devices=-1, accelerator='auto', max_epochs=cfg.epoch,
+    # RecursiveTrackState is intentionally process-local.  Until an explicit
+    # cross-rank state coordinator exists, multi-device DDP would duplicate
+    # tracklets and let the canonical histories silently diverge.
+    trainer_devices = (
+        1 if bool(getattr(cfg, 'ct_online_recursive_training', False)) else -1)
+    trainer = pl.Trainer(devices=trainer_devices, accelerator='auto', max_epochs=cfg.epoch,
                          callbacks=[checkpoint_callback,learningrate_callback],
                          default_root_dir=run_root_dir,
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,

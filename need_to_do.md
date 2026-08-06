@@ -569,3 +569,194 @@ Result / decision:
 ```
 
 所有实验必须能回答一个明确问题；无法填写“single changed variable”的任务不进入正式队列。
+
+## 14. 2026-08-06 Joint Full 四组实验与 15 轮 B0 诊断新增问题
+
+### 14.1 当前实验事实
+
+#### 15 轮结果
+
+| 实验 | Success | Precision |
+|---|---:|---:|
+| 当前提交纯 B0，epoch 5 | 29.3950 | 34.7330 |
+| 当前提交纯 B0，epoch 10 | 41.7932 | 55.6608 |
+| 当前提交纯 B0，epoch 15 | 46.7560 | 53.6510 |
+| 历史 B0，epoch 15 | 49.7385 | 60.4158 |
+| Full，epoch 15 | 26.3775 | 26.6641 |
+| `-B1`，epoch 15 | 31.6444 | 32.7013 |
+| `-B2`，epoch 15 | 29.9880 | 32.1083 |
+| `-B3`，epoch 15 | 26.6050 | 26.3250 |
+
+#### 60 轮结果
+
+| 实验 | Success | Precision |
+|---|---:|---:|
+| Full | 29.4256 | 29.3249 |
+| `-B1` | 29.1127 | 29.3479 |
+| `-B2` | 30.5109 | 30.9267 |
+| `-B3` | 26.0536 | 24.9814 |
+| 历史 SeqTrack/B0 | 53.3600 | 64.3818 |
+
+当前纯 B0 与四组 Joint 实验使用同一当前提交 `835f911`、相同 seed、数据选择、batch 规模和全局训练步数。工作区仅有未跟踪日志，`dirty_tracked=false`，因此不能把 Joint 的下降简单归因于代码版本不同。
+
+当前纯 B0 在 epoch 15 比 Full 高 `20.38/26.99`，比 `-B2` 高 `16.77/21.54`。这足以排除“当前 B0 从训练开始就整体崩坏”，但当前 B0 仍比历史 B0 低 `2.98/6.76`，正式主表前仍需补齐当前提交的 60 轮 matched B0。
+
+Joint 与纯 B0 的关键分叉出现在 epoch 5 到 epoch 10：epoch 5 时差距尚不极端，随后纯 B0 快速上升，而所有 Joint 变体下降或停滞。需要定位第一个发生分叉的 batch、tensor 或递归帧，不能继续仅依赖最终指标猜测原因。
+
+### 14.2 已确认的问题
+
+#### P0：Joint 公共路径破坏了 B0 的递归跟踪能力
+
+- `-B2` 已严格输出 observation，但结果仍只有 `30.51/30.93`，远低于纯 B0。这说明主要问题发生在 B2/B3 最终校正之前，或发生在 Joint 公共训练/推理路径中。
+- `-B1` 仍然严重下降，因此 B1 learned residual 不是唯一根因。
+- 四组实验共同启用了 `use_ct_joint_full=True`，共同经过 Joint 数据构造、额外模块前向、随机数消耗、decoder state 返回以及递归历史更新路径。公共路径是当前最高优先级嫌疑对象。
+- epoch 15 的 B0 observation center loss 非常接近：当前纯 B0 `0.04577`、历史 B0 `0.04534`、Full `0.04389`、`-B2` `0.04268`。训练期 teacher-forced 单步损失正常，而递归验证崩坏，说明训练 loss 不能代表实际闭环跟踪状态。
+
+待排查的具体链路：
+
+- Joint 与 baseline 是否构造了完全相同的 `points/ref_boxs/delta_T/valid_mask`；
+- observation box 的坐标系、反归一化和 box transform 是否一致；
+- Joint 是否改变了 B0 Transformer/dropout 的随机数流；
+- CT loss 是否意外向 B0 参数传递梯度；
+- decoder state、历史框和上一帧预测在递归推理中是否被不同地写回；
+- 训练阶段使用的历史框与验证阶段递归历史之间是否存在严重分布差异。
+
+#### P1：B1 内部有效，但尚未转化为最终涨点
+
+- 运动学锚点 RMSE 约为 `0.313`，B1 prior RMSE 约为 `0.291`，内部改善约 `7.1%`。
+- B1 残差饱和率约 `0.19%`，目前没有证据表明 dynamic bound 长期卡边界。
+- B1 将 raw Search RMSE 从 `-B1` 的约 `0.583` 改善到 Full 的约 `0.546`。
+- 但是 Full 相对 `-B1` 只有约 `+0.31 Success/-0.02 Precision`，不能宣称 B1 已经给最终跟踪带来稳定正收益。
+
+结论：B1 的运动建模方向可以保留，但必须在修复 Joint 公共路径后通过真正的 `B1-only` 和 `B1+B2` 实验重新证明其贡献。
+
+#### P1：B2 raw Search 当前为净负作用
+
+- raw Search RMSE 约 `0.546`，observation RMSE 约 `0.248`，前者约为后者的 `2.21` 倍。
+- expansion candidate valid 约 `83.72%`，低于计划的 `95%` 验收线。
+- 实际 expansion 点数平均约 `33.96`，远低于配置目标 256，需确认这是候选不足、采样统计口径还是有效点过滤导致。
+- Search 实际被使用约 `25.86%`，但 Full 仍比 `-B2` 低 `1.09 Success/1.60 Precision`。
+
+结论：在修复公共路径前不能判断 B2 架构最终无效；修复后如果 matched `B2-only` 仍低于 B0，应优先简化或删除 B2，而不是继续增加补丁 head。
+
+#### P1：B3 只能减少 B2 伤害，尚未产生净增益
+
+- Full 比 `-B3` 高约 `3.37 Success/4.34 Precision`，说明 router 相比“始终应用完整 raw residual”具有安全保护作用。
+- 但 Full 仍比 `-B2` 低约 `1.09/1.60`，说明 B3 没有把 B2 校正变成相对 observation 的净收益。
+- sigmoid gate 即使较小也不等于严格 no-op，递归序列中小偏移可能累积成漂移。
+- B3 依赖 B2 candidate，不存在有意义的 `B3-only`；应比较 `B2-only` 与 `B2+B3`。
+
+#### P1：query reliability gate 尚未学到有效可靠性
+
+- `alpha_q` 均值约 `0.424`，query-gate BCE 约 `0.691`，接近随机二分类的 `log(2)=0.693`。
+- 当前软标签由 `sigmoid((kin_error-learned_error)/0.25)` 构成，而 B1 平均只改善约 `0.02m`，标签大量集中在 0.5 附近，门控容易退化为近常数。
+- 需要检查 `alpha_q` 与 B1 相对增益、`delta_t`、历史有效性和最终 Search 改善之间的相关性；若无相关性，应重定义为带 dead-zone 的排序/置信监督，或先取消监督门仅保留保守规则门。
+
+#### P0：`alpha_q=0` 时 `q_search=q_obs` 的契约没有严格成立
+
+当前路径近似为：
+
+```text
+q0       = LN(stopgrad(q_obs))
+q_search = LN(q0 + alpha_q * r)
+```
+
+第二个可学习 LayerNorm 使 `alpha_q=0` 时也不能数学保证 `q_search=q_obs`。实测 `-B1` 仍存在约 `0.110` 的 query shift norm。
+
+虽然当前匹配 logits 使用 `obs_score + alpha_q * residual_score`，这未必是整体崩坏的唯一原因，但它违反消融和安全回退定义，必须修正并增加 exact equality 测试。
+
+#### P1：candidate valid 的语义过弱
+
+当前 candidate valid 更接近“至少存在有限点/可以计算”，却同时用于 router 和 correction loss。它没有表达“raw Search 比 observation 可靠”。必须拆分：
+
+- `structural_valid`：输入和数值可计算；
+- `evidence_valid` 或 `trustworthy`：点数、targetness、vote 一致性、候选置信度达到校正要求；
+- 不可信时 B3 必须严格输出 observation，而不是保留非零软残差。
+
+### 14.3 不能直接从当前消融得出的结论
+
+- 当前 `-B1/-B2/-B3` 是已经崩坏的 Joint 公共路径内的减法消融，不等同于各模块的干净 standalone 实验。
+- 历史 `motion_v3/search_v21` 是旧版独立实现，不是当前共享运动锚点和双参考系几何下的新 B1/B2，不能作为新模块的正式论文证据。
+- 历史结果显示旧 B1-only 约 `53.318/62.573`，说明运动模块可以独立运行，但没有稳定超过历史 B0 `53.360/64.382`；旧 Search-only 约 `51.307/59.816`，可以运行但为负收益；旧 Motion+Search 约 `26.754/26.876`，进一步支持“耦合/传输链路可能导致崩坏”的判断。
+- 15 轮当前 B0 可以用于诊断“是否从一开始全局崩坏”，不能替代正式 60 轮 baseline，也不能据此声称最终涨点。
+
+### 14.4 下一步必须先完成的 P0 定位实验
+
+#### A. 同一 B0 checkpoint 的跨路径递归推理
+
+加载完全相同的 B0 权重，仅切换推理代码路径：
+
+1. baseline path；
+2. Joint `-B2` path，强制最终框严格等于 observation。
+
+逐帧比较输入、observation 和写回历史：
+
+- 第一帧就不同：优先检查输入构造、forward 分支、坐标变换或 decoder state；
+- 前几帧相同、随后分叉：优先检查历史框写回和递归状态；
+- 两条路径完全相同但都低：优先检查训练轨迹、随机数流或 checkpoint 本身；
+- baseline 高、Joint `-B2` 低：可以直接确认数据传输/递归推理链路有问题。
+
+验收标准：同一 checkpoint、相同输入和关闭全部 CT 校正时，两条路径的 observation 与最终框应在约定数值容差内逐帧一致。
+
+#### B. baseline 与 Joint `-B2` 的首 batch 和前 100 step 等价性审计
+
+使用同一初始化、同一 batch 顺序和同一数据，逐项记录并比较：
+
+- `points/ref_boxs/delta_T/valid_mask`；
+- B0 中间 feature、query 和 observation；
+- 各项 B0 loss；
+- 每个 B0 参数的梯度；
+- optimizer step 后的 B0 参数；
+- CPU/CUDA RNG state。
+
+目标是找到第一个不一致的 tensor 和第一个不一致的 step，禁止只比较 epoch 平均 loss。
+
+#### C. 梯度隔离审计
+
+- 对所有 CT-only loss 分别反向，验证所有 B0 参数梯度严格为零或 `None`；
+- 对 `L_B0` 反向，验证 B0 梯度与 baseline 在同一输入上数值一致；
+- 验证 B1 feature、均值和不确定性仍能按设计接收 B2 梯度；
+- 验证 B3 candidate detach 不会把 router loss 反向扭曲 B0/B2 坐标。
+
+#### D. 随机数流隔离
+
+辅助分支中的 dropout、采样和点选择不能改变 B0 的随机数序列。需要比较 baseline 与关闭 CT 模块后的 B0 dropout mask/输出；必要时为辅助模块使用独立 generator 或在 B0 完成后再执行随机操作。
+
+#### E. 模块关闭语义修复
+
+- B1 off：`delta_B1=0`、`alpha_q=0`，实际匹配严格等于 observation matching；
+- B2 off：不构造会产生训练或 RNG 副作用的 Search 分支，最终严格等于 observation；
+- B3 off 需要拆成两个明确实验：router no-op（输出 observation）与 always-raw（完整应用有界 residual），不能用同一个 `-B3` 名称混合两种含义；
+- 历史失效、非有限数和证据不足时全部严格 no-op。
+
+### 14.5 公共路径修复后的最小模块矩阵
+
+只运行以下六组，避免无意义或重复实验：
+
+| 编码 | B1 | B2 | B3 | 目的 |
+|---|---:|---:|---:|---|
+| `000` | 关 | 关 | 关 | matched B0 |
+| `100` | 开 | 关 | 关 | B1-only，验证运动分支自身是否改善可用输出或明确内部指标 |
+| `010` | 关 | 开 | 关 | B2-only，验证确定性 anchor/tube 的 raw Search |
+| `011` | 关 | 开 | 开 | B2+B3，测量 router 对 Search 的净作用 |
+| `110` | 开 | 开 | 关 | B1+B2，验证共享锚点与 query/geometry 耦合 |
+| `111` | 开 | 开 | 开 | Full |
+
+不存在 `001` 的 B3-only，因为没有 B2 candidate 时 B3 没有独立功能。
+
+每组必须使用相同初始化、manifest、数据顺序、训练预算和 checkpoint 选择规则。先跑 1 batch、100 step、5 epoch 和 15 epoch 诊断，通过后再跑 60 epoch。
+
+### 14.6 暂停条件与继续训练门槛
+
+在以下条件满足前，暂停新的 60 轮 Full、其他类别、`gap1124/random20/burst_drop` 和大规模 seed 实验：
+
+- baseline 与 Joint 全关闭路径通过逐帧/逐 step 等价性测试；
+- CT-only loss 对 B0 的梯度隔离符合设计；
+- B1 off 时 `alpha_q=0` 且匹配严格回退；
+- B2 off 时 Joint 递归结果与 matched B0 一致；
+- candidate availability 达到或合理接近 95%，并解释实际 expansion 点数不足的原因；
+- raw Search 在有效样本上的平均误差低于 observation，或至少存在预先定义且可复现的可靠子集；
+- B3 在该可靠子集上使 `B2+B3` 同时不低于 B0 的 Success 和 Precision；
+- `alpha_q` 与 B1 的真实相对增益存在可解释相关性，而不是近常数输出。
+
+如果公共路径修复后 B1-only、B2-only 或 B2+B3 仍不能产生正收益，应删除或进一步简化对应模块，不再通过增加新 head 或新损失掩盖问题。

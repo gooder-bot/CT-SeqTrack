@@ -30,6 +30,8 @@ from utils.twc_utils import (
     point_sampling_seeds_for_frame_ids,
     sample_candidate_offset,
     sample_point_sampling_seed,
+    deterministic_candidate_offset,
+    deterministic_point_seed,
 )
 from utils.candidate_utils import (
     anchor_relative_trajectory_targets,
@@ -46,13 +48,19 @@ from utils.candidate_utils import (
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    combined_search_support_statistics,
     resolve_b1_search_support,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
+    useful_search_coverage_need,
 )
 from utils.replay_cache import RecursiveReplayCache, replay_config_sha256
+from utils.recursive_state import (
+    OnlineRecursiveBatchSampler,
+    stable_tracklet_partition,
+)
 
 
 def no_processing(data, *args):
@@ -245,9 +253,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     this_frame = data['this_frame']
     candidate_id = data['candidate_id']
     recursive_replay = data.get('recursive_replay')
+    online_recursive_state = data.get('online_recursive_state')
+    if recursive_replay is not None and online_recursive_state is not None:
+        raise ValueError(
+            "recursive replay and online recursive state are mutually exclusive")
     valid_mask = (
         list(recursive_replay['history_valid_mask'])
-        if recursive_replay is not None else data['valid_mask'])
+        if recursive_replay is not None else
+        list(online_recursive_state['history_valid_mask'])
+        if online_recursive_state is not None else data['valid_mask'])
     num_hist = len(valid_mask)
     empty_counter = 0
 
@@ -259,8 +273,29 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     # intentionally rebound to candidate-coordinate boxes.
     canonical_prev_boxs = list(prev_boxs)
     canonical_this_box = this_box
+    if online_recursive_state is not None:
+        state_rows = np.asarray(
+            online_recursive_state['history_boxes_world'], dtype=np.float64)
+        if state_rows.shape != (num_hist, 7):
+            raise ValueError(
+                f"online recursive history must have shape {(num_hist, 7)}")
+        online_boxs = []
+        for source_box, row in zip(prev_boxs, state_rows):
+            state_box = copy.deepcopy(source_box)
+            state_box.center = row[:3].copy()
+            state_box.wlh = row[3:6].copy()
+            state_box.orientation = Quaternion(
+                axis=[0, 0, 1], radians=float(row[6]))
+            online_boxs.append(state_box)
+        # Every input branch starts from the same deployed recursive state.
+        # Current-frame GT remains available only for labels below.
+        prev_boxs = online_boxs
+        canonical_prev_boxs = list(online_boxs)
     sorted_prev_keys = sorted(prev_frames, key=lambda k: abs(int(k)))
-    prev_timestamps = [prev_frames[key].get('timestamp') for key in sorted_prev_keys]
+    prev_timestamps = (
+        list(online_recursive_state['history_timestamps'])
+        if online_recursive_state is not None
+        else [prev_frames[key].get('timestamp') for key in sorted_prev_keys])
     current_timestamp = this_frame.get('timestamp')
     default_time_step = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.1))
     pseudo_time_step = getattr(config, 'pseudo_time_step', 0.1)
@@ -279,7 +314,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 "shared_se2 consumes one candidate_shared_transform, not per-frame "
                 "candidate_offsets")
         if candidate_shared_transform is None:
-            candidate_shared_transform = sample_candidate_offset(candidate_id, config)
+            candidate_shared_transform = (
+                deterministic_candidate_offset(
+                    candidate_id, config,
+                    data.get('tracklet_key', data.get('tracklet_id', 'unknown')),
+                    data.get('this_frame_id', data.get('sample_index', 0)),
+                    'online_recovery_view')
+                if online_recursive_state is not None
+                else sample_candidate_offset(candidate_id, config))
         candidate_shared_transform = validate_shared_se2_transform(
             candidate_shared_transform).astype(np.float32)
         if int(candidate_id) == 0 and not np.array_equal(
@@ -298,6 +340,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             if not np.isfinite(candidate_offsets).all():
                 raise ValueError("candidate_offsets contains non-finite values.")
         else:
+            if online_recursive_state is not None:
+                raise ValueError(
+                    "online recursive training requires candidate_trajectory_mode=shared_se2")
             candidate_offsets = np.stack(
                 [sample_candidate_offset(candidate_id, config) for _ in range(num_hist)],
                 axis=0,
@@ -311,10 +356,27 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 f"got {point_sampling_seeds.shape}.")
         prev_sampling_seeds = [int(seed) for seed in point_sampling_seeds]
     else:
-        prev_sampling_seeds = [None] * num_hist
+        if online_recursive_state is not None:
+            tracklet_seed_key = data.get(
+                'tracklet_key', data.get('tracklet_id', 'unknown'))
+            current_seed_frame = data.get(
+                'this_frame_id', data.get('sample_index', 0))
+            prev_sampling_seeds = [
+                deterministic_point_seed(
+                    config, tracklet_seed_key, current_seed_frame,
+                    int(candidate_id), 'history', index)
+                for index in range(num_hist)]
+        else:
+            prev_sampling_seeds = [None] * num_hist
     current_sampling_seed = data.get('current_sampling_seed')
     if current_sampling_seed is not None:
         current_sampling_seed = int(current_sampling_seed)
+    elif online_recursive_state is not None:
+        current_sampling_seed = deterministic_point_seed(
+            config,
+            data.get('tracklet_key', data.get('tracklet_id', 'unknown')),
+            data.get('this_frame_id', data.get('sample_index', 0)),
+            int(candidate_id), 'current')
     sample_index = int(data.get(
         'sample_index', this_frame_id if this_frame_id is not None else 0))
 
@@ -323,7 +385,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
         if num_points_in_prev_box < config.limit_num_points_in_prev_box:
             empty_counter += 1
-    assert empty_counter < config.empty_box_limit, 'not enough valid box' 
+    if online_recursive_state is None:
+        assert empty_counter < config.empty_box_limit, 'not enough valid box'
 
     if candidate_trajectory_mode == 'shared_se2':
         ref_boxs = apply_shared_se2_to_boxes(
@@ -365,9 +428,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
     use_ct_joint_full = bool(getattr(config, 'use_ct_joint_full', False))
+    observation_only = bool(data.get('ct_observation_only', False))
     use_search_evidence_v3 = (
         bool(getattr(config, 'use_motion_conditioned_search_v3', False))
-        or use_ct_joint_full)
+        or use_ct_joint_full) and not observation_only
     if use_search_evidence_v3 and not bool(getattr(
             config, 'use_b1motion_v3', False)):
         raise ValueError("B2-v3 requires B1motion-v3 shared history")
@@ -400,6 +464,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         # The cache already contains the causal frozen-B0 rollout.  Applying
         # another synthetic perturbation here would recreate the train/test
         # mismatch that the replay path is designed to remove.
+        ct_motion_history_boxs = ref_boxs
+        ct_search_history_boxs = ref_boxs
+    if online_recursive_state is not None:
+        # Candidate recovery views are coherent transformations of the full
+        # deployed state.  Do not synthesize a second, independently perturbed
+        # motion or Search history.
         ct_motion_history_boxs = ref_boxs
         ct_search_history_boxs = ref_boxs
     canonical_ref_boxs = boxes_to_anchor_parameters(
@@ -502,7 +572,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         effective_local_timestamps = np.asarray(
             effective_relative_timestamps + [0.0], dtype=np.float32)
     motion_aux_contract = None
-    if use_motion_v3:
+    if use_motion_v3 and not observation_only:
         motion_aux_prev_frames = data.get('motion_aux_prev_frames')
         if motion_aux_prev_frames is None:
             raise KeyError(
@@ -515,6 +585,25 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         ]
         motion_aux_valid_mask = list(data['motion_aux_valid_mask'])
         motion_aux_frame_ids = list(data['motion_aux_frame_ids'])
+        online_motion_aux_state = data.get('online_motion_aux_state')
+        if online_motion_aux_state is not None:
+            aux_rows = np.asarray(
+                online_motion_aux_state['history_boxes_world'],
+                dtype=np.float64)
+            if aux_rows.shape != (num_hist, 7):
+                raise ValueError(
+                    f"online auxiliary history must have shape "
+                    f"{(num_hist, 7)}")
+            online_aux_boxs = []
+            for source_box, row in zip(
+                    motion_aux_canonical_boxs, aux_rows):
+                state_box = copy.deepcopy(source_box)
+                state_box.center = row[:3].copy()
+                state_box.wlh = row[3:6].copy()
+                state_box.orientation = Quaternion(
+                    axis=[0, 0, 1], radians=float(row[6]))
+                online_aux_boxs.append(state_box)
+            motion_aux_canonical_boxs = online_aux_boxs
         if candidate_trajectory_mode == 'shared_se2':
             motion_aux_candidate_boxs = apply_shared_se2_to_boxes(
                 motion_aux_canonical_boxs,
@@ -553,6 +642,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             recursive_error_scale=1.0,
             degrees=config.degrees,
         )
+        if online_motion_aux_state is not None:
+            # Auxiliary gaps obey the same causal state contract as the main
+            # B1 history; no independently synthesized history is allowed.
+            motion_aux_history_boxs = motion_aux_candidate_boxs
         motion_aux_anchor = motion_aux_candidate_boxs[0]
         motion_aux_ref_boxs = boxes_to_anchor_parameters(
             motion_aux_history_boxs,
@@ -563,10 +656,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 motion_aux_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
             raise ValueError(
                 "B1motion-v3 newest auxiliary history must equal its anchor")
-        motion_aux_prev_timestamps = [
-            motion_aux_prev_frames[key].get('timestamp')
-            for key in motion_aux_keys
-        ]
+        motion_aux_prev_timestamps = (
+            list(online_motion_aux_state['history_timestamps'])
+            if online_motion_aux_state is not None
+            else [motion_aux_prev_frames[key].get('timestamp')
+                  for key in motion_aux_keys])
         motion_aux_real_time_fields = build_time_fields(
             motion_aux_prev_timestamps,
             current_timestamp,
@@ -653,7 +747,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     )
     use_trajectory_search = (
         bool(getattr(config, 'use_trajectory_search', False))
-        or use_ct_joint_full)
+        or use_ct_joint_full) and not observation_only
     if bool(getattr(config, 'use_time_guided_search', False)) and use_trajectory_search:
         raise ValueError(
             "legacy time-guided search and ordered trajectory search are "
@@ -949,6 +1043,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     }
     trajectory_search_point_valid_mask = np.zeros(
         (trajectory_search_points.shape[0],), dtype=np.float32)
+    trajectory_search_point_source = np.zeros(
+        (trajectory_search_points.shape[0],), dtype=np.int64)
     if use_trajectory_search:
         # Keep every baseline token exactly as in B0.  The extension is encoded
         # by a separate lightweight branch instead of stealing a fixed quota.
@@ -960,9 +1056,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         if use_ct_joint_full:
             (trajectory_search_points,
              trajectory_search_point_valid_mask,
-             _, trajectory_search_sampling) = (
+             trajectory_search_point_source,
+             trajectory_search_sampling) = (
                 sample_source_aware_endpoint_points(
-                    baseline_search_points[:0],
+                    baseline_search_points,
                     expanded_search_points,
                     sample_size=int(getattr(config, 'ct_tube_quota', 128)),
                     extension_quota=int(getattr(
@@ -1061,32 +1158,54 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     'min_points', 3)),
                 seed=search_v2_seed,
             )
-    if use_ct_joint_full and not search_v2_sampling['active']:
-        # Invalid/stationary histories retain a usable B2 fallback without
-        # exposing the current GT: reuse only the ordinary B0 current crop.
-        independent_seed_base = (
-            current_sampling_seed
-            if current_sampling_seed is not None else sample_index)
-        search_v2_seed = (
-            int(independent_seed_base) * 1664525 + 1013904223
-        ) & 0xFFFFFFFF
-        (search_v2_points,
-         search_v2_point_valid_mask,
-         search_v2_point_source,
-         search_v2_sampling) = sample_source_aware_endpoint_points(
-            baseline_search_points,
-            baseline_search_points,
-            sample_size=search_v2_point_count,
-            extension_quota=0,
-            min_points=int(search_config_value('min_points', 3)),
-            seed=search_v2_seed,
-        )
-        search_v2_diagnostics.update({
-            'prior_source': 'base_only',
-            'source_id': 0,
-            'endpoint_center': np.asarray(
-                search_history_boxes[0].center, dtype=np.float64),
-        })
+    joint_support = combined_search_support_statistics(
+        (search_v2_points, trajectory_search_points),
+        (search_v2_point_valid_mask,
+         trajectory_search_point_valid_mask),
+        (search_v2_point_source, trajectory_search_point_source),
+        voxel_size=float(getattr(
+            config, 'ct_search_extension_voxel_size', 0.2)),
+    )
+    coverage_need, endpoint_ratio = useful_search_coverage_need(
+        search_v2_diagnostics.get(
+            'query_delta_t', effective_delta_t_list[0]),
+        search_v2_diagnostics.get('gap_ratio', 1.0),
+        search_v2_endpoint_xy,
+        coordinate_anchor_box.wlh,
+        len(baseline_search_points),
+        min_delta_t=float(getattr(
+            config, 'trajectory_search_min_delta_t', 0.75)),
+        min_gap_ratio=float(getattr(
+            config, 'trajectory_search_min_gap_ratio', 1.5)),
+        min_endpoint_ratio=float(getattr(
+            config, 'ct_search_endpoint_ratio', 0.6)),
+        sparse_base_points=int(getattr(
+            config, 'ct_search_sparse_base_points', 64)),
+        bb_scale=float(config.bb_scale),
+        bb_offset=float(config.bb_offset),
+    )
+    recent_history_valid = bool(
+        len(valid_mask) >= 2 and int(valid_mask[0]) and int(valid_mask[1]))
+    query_dt_value = float(search_v2_diagnostics.get(
+        'query_delta_t', effective_delta_t_list[0]))
+    time_valid = bool(np.isfinite(query_dt_value) and query_dt_value > 0.0)
+    proposal_valid = bool(
+        search_v2_diagnostics.get('valid', False)
+        and not search_v2_diagnostics.get('constraint_clipped', False)
+        and np.isfinite(search_v2_endpoint_xy).all()
+        and float(search_v2_diagnostics.get('displacement', 0.0))
+        >= float(getattr(
+            config, 'trajectory_search_min_displacement', 0.2)))
+    point_support_valid = bool(
+        joint_support['total_count'] >= int(getattr(
+            config, 'ct_search_min_total_points', 16))
+        and joint_support['extension_count'] >= int(getattr(
+            config, 'ct_search_min_extension_points', 8))
+        and joint_support['extension_voxels'] >= int(getattr(
+            config, 'ct_search_min_extension_voxels', 4)))
+    search_support_valid = bool(
+        recent_history_valid and time_valid and proposal_valid
+        and coverage_need and point_support_valid)
     ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
     num_points_in_search = int(len(baseline_search_points))
     if ct_search_active:
@@ -1247,7 +1366,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'box_label_prev': np.stack(box_label_prev_list, axis=0),
         'motion_label': np.stack(motion_label_list, axis=0),
         'motion_state_label': np.stack(motion_state_label_list, axis=0).astype('int'),
-        'bbox_size': this_box.wlh, 
+        'bbox_size': (
+            np.asarray(data['first_frame']['3d_bbox'].wlh, dtype=np.float32)
+            if use_ct_joint_full or bool(getattr(
+                config, 'observation_safe_bbox_size', False))
+            else this_box.wlh),
         'seg_label': stack_seg_label.astype('int'), 
         'valid_mask': np.array(valid_mask).astype('int'), 
         'timestamps': main_timestamps,
@@ -1268,7 +1391,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             {'true': 0, 'fixed': 1, 'shuffled': 2}[dynamics_time_mode]),
         'num_points_in_search': np.float32(num_points_in_search),
         'search_has_usable_points': np.float32(search_has_usable_points),
-        'ct_search_used': np.float32(ct_search_active),
+        'ct_search_used': np.float32(
+            search_support_valid if use_ct_joint_full else ct_search_active),
         'ct_search_expansion_ratio': np.float32(
             ct_search_sampling['expansion_sample_count']
             / float(config.point_sample_size)),
@@ -1280,6 +1404,21 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 'query_delta_t', effective_delta_t_list[0])),
         'ct_search_predicted_displacement': np.float32(
             ct_search_diagnostics.get('displacement', 0.0)),
+        'ct_search_support_valid': np.float32(search_support_valid),
+        # Temporary compatibility alias; new code must use the explicit name.
+        'candidate_valid': np.float32(search_support_valid),
+        'ct_search_history_valid': np.float32(recent_history_valid),
+        'ct_search_time_valid': np.float32(time_valid),
+        'ct_search_proposal_valid': np.float32(proposal_valid),
+        'ct_search_point_support_valid': np.float32(point_support_valid),
+        'ct_search_coverage_need': np.float32(coverage_need),
+        'ct_search_endpoint_ratio': np.float32(endpoint_ratio),
+        'ct_search_total_point_count': np.float32(
+            joint_support['total_count']),
+        'ct_search_extension_count': np.float32(
+            joint_support['extension_count']),
+        'ct_search_extension_voxels': np.float32(
+            joint_support['extension_voxels']),
         'velocity_label': velocity_label,
         'dynamics_displacement_label': dynamics_displacement_label,
         'canonical_ref_boxs': canonical_ref_boxs,
@@ -1306,8 +1445,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 trajectory_search_point_labels.astype('float32'),
             'trajectory_search_point_valid_mask':
                 trajectory_search_point_valid_mask.astype('float32'),
+            'trajectory_search_point_source':
+                trajectory_search_point_source.astype('int64'),
+            # Stable branch contract: 0=baseline, 1=endpoint, 2=tube.
+            'trajectory_search_branch_source': np.full(
+                trajectory_search_point_valid_mask.shape, 2, dtype=np.int64),
             'trajectory_search_valid': np.float32(
-                trajectory_search_sampling['active']),
+                search_support_valid if use_ct_joint_full
+                else trajectory_search_sampling['active']),
             'trajectory_search_gap_ratio': np.float32(
                 ct_search_diagnostics.get('gap_ratio', 1.0)),
             'trajectory_search_sigma_parallel': np.float32(
@@ -1408,10 +1553,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 search_v2_point_valid_mask.astype('float32'),
             'search_v3_point_source':
                 search_v2_point_source.astype('int64'),
+            'search_v3_branch_source': np.ones(
+                search_v2_point_valid_mask.shape, dtype=np.int64),
             'search_v3_point_labels':
                 search_v2_point_labels.astype('float32'),
             'search_v3_geometry_valid': np.float32(
-                search_v2_sampling['active']),
+                search_support_valid),
+            'search_v3_support_valid': np.float32(search_support_valid),
+            'search_v3_total_point_count': np.float32(
+                joint_support['total_count']),
+            'search_v3_joint_extension_count': np.float32(
+                joint_support['extension_count']),
+            'search_v3_extension_voxels': np.float32(
+                joint_support['extension_voxels']),
+            'search_v3_endpoint_ratio': np.float32(endpoint_ratio),
             'search_v3_support_anchor_xy':
                 search_v2_endpoint_xy.astype('float32'),
             'search_v3_query_delta_t': v3_query_delta_t,
@@ -1592,6 +1747,39 @@ class TestTrackingSampler(torch.utils.data.Dataset):
         return self.dataset.get_frames(index, frame_ids)
 
 
+class PartitionedTestTrackingSampler(TestTrackingSampler):
+    """Evaluation view over one atomic tracklet hash partition."""
+
+    def __init__(self, dataset, config=None, partition='dev', **kwargs):
+        super().__init__(dataset, config=config, **kwargs)
+        self.partition = str(partition)
+        seed = int(getattr(self.config, 'seed', 42) or 42)
+        self.tracklet_indices = []
+        for tracklet_id in range(dataset.get_num_tracklets()):
+            key = (
+                dataset.get_tracklet_key(tracklet_id)
+                if hasattr(dataset, 'get_tracklet_key') else str(tracklet_id))
+            if stable_tracklet_partition(key, seed) == self.partition:
+                self.tracklet_indices.append(tracklet_id)
+        if not self.tracklet_indices:
+            raise ValueError(
+                f"tracklet partition {self.partition!r} is empty")
+
+    def __len__(self):
+        return len(self.tracklet_indices)
+
+    def __getitem__(self, index):
+        tracklet_id = self.tracklet_indices[index]
+        frame_count = self.dataset.get_num_frames_tracklet(tracklet_id)
+        return self.dataset.get_frames(
+            tracklet_id, list(range(frame_count)))
+
+
+def online_recursive_collate(items):
+    """Keep raw point-cloud objects out of PyTorch's tensor collator."""
+    return items
+
+
 class MotionTrackingSampler(PointTrackingSampler):
     def __init__(self, dataset, config=None, **kwargs):
         super().__init__(dataset, random_sample=False, config=config, **kwargs)
@@ -1635,6 +1823,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.config, 'use_b1motion_v3', False))
         self.use_recursive_replay_cache = bool(getattr(
             self.config, 'use_recursive_replay_cache', False))
+        self.online_recursive_training = bool(getattr(
+            self.config, 'ct_online_recursive_training', False))
         self.recursive_replay_cache = None
         if self.use_recursive_replay_cache:
             cache_dir = getattr(
@@ -1656,6 +1846,17 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.config, 'recursive_replay_require_all', True))
         self.candidate_trajectory_mode = normalize_candidate_trajectory_mode(
             getattr(self.config, 'candidate_trajectory_mode', 'independent'))
+        if self.online_recursive_training:
+            if self.use_recursive_replay_cache or self.use_paired_history:
+                raise ValueError(
+                    "online recursive training is incompatible with replay/paired views")
+            if self.candidate_trajectory_mode != 'shared_se2':
+                raise ValueError(
+                    "online recursive training requires shared_se2 candidates")
+            if int(self.num_candidates) != int(getattr(
+                    self.config, 'ct_recursive_candidate_views', 4)):
+                raise ValueError(
+                    "num_candidates must match ct_recursive_candidate_views")
         self.trajectory_training_irregular_probability = float(getattr(
             self.config, 'trajectory_training_irregular_probability', 0.0))
         self.trajectory_training_query_gaps = [
@@ -1836,7 +2037,77 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                template_transform=self.transform,
                                search_transform=self.transform)
 
+    def _online_raw_view(
+            self, epoch, batch_index, slot, tracklet_id, this_frame_id,
+            candidate_id, build_shadow=False):
+        offsets = list(range(1, self.dataset.hist_num + 1))
+        prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
+            this_frame_id, self.dataset.hist_num, offsets=offsets)
+        first_frame, this_frame = self.dataset.get_frames(
+            tracklet_id, frame_ids=(0, this_frame_id))
+        prev_frames = self.dataset.get_frames(
+            tracklet_id, frame_ids=prev_frame_ids)
+        tracklet_key = (
+            self.dataset.get_tracklet_key(tracklet_id)
+            if hasattr(self.dataset, 'get_tracklet_key') else str(tracklet_id))
+        seed_parts = (tracklet_key, int(this_frame_id), int(candidate_id))
+        raw = {
+            'online_recursive_raw': True,
+            'online_epoch': int(epoch),
+            'online_batch_index': int(batch_index),
+            'online_slot': int(slot),
+            'first_frame': first_frame,
+            'prev_frames': create_history_frame_dict(prev_frames),
+            'this_frame': this_frame,
+            'candidate_id': int(candidate_id),
+            'valid_mask': list(valid_mask),
+            'prev_frame_ids': list(prev_frame_ids),
+            'this_frame_id': int(this_frame_id),
+            'history_offsets': offsets,
+            'sample_index': int(this_frame_id),
+            'tracklet_id': int(tracklet_id),
+            'tracklet_key': tracklet_key,
+            'candidate_shared_transform': deterministic_candidate_offset(
+                candidate_id, self.config, *seed_parts,
+                'coherent_recursive_view'),
+            'point_sampling_seeds': np.asarray([
+                deterministic_point_seed(
+                    self.config, *seed_parts, 'history', frame_id)
+                for frame_id in prev_frame_ids], dtype=np.int64),
+            'current_sampling_seed': deterministic_point_seed(
+                self.config, *seed_parts, 'current'),
+            'shadow_future': [],
+        }
+        if self.use_b1motion_v3:
+            motion_aux_offsets = self._motion_v3_aux_offsets(this_frame_id)
+            motion_aux_frame_ids, motion_aux_valid_mask = (
+                get_history_frame_ids_and_masks(
+                    this_frame_id, self.dataset.hist_num,
+                    offsets=motion_aux_offsets))
+            motion_aux_frames = self.dataset.get_frames(
+                tracklet_id, frame_ids=motion_aux_frame_ids)
+            raw.update({
+                'motion_aux_prev_frames': create_history_frame_dict(
+                    motion_aux_frames),
+                'motion_aux_valid_mask': list(motion_aux_valid_mask),
+                'motion_aux_frame_ids': list(motion_aux_frame_ids),
+                'motion_aux_offsets': list(motion_aux_offsets),
+            })
+        if build_shadow:
+            for future_id in (this_frame_id + 1, this_frame_id + 2):
+                future_raw = self._online_raw_view(
+                    epoch, batch_index, slot, tracklet_id, future_id,
+                    candidate_id=0, build_shadow=False)
+                future_raw['ct_observation_only'] = True
+                raw['shadow_future'].append(future_raw)
+        return raw
+
     def __getitem__(self, index):
+        if self.online_recursive_training:
+            if not isinstance(index, tuple) or len(index) != 7:
+                raise TypeError(
+                    "online recursive sampler requires structured batch indices")
+            return self._online_raw_view(*index)
         anno_id = self.get_anno_index(index)
         candidate_id = self.get_candidate_index(index) 
         try:

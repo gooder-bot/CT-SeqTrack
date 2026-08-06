@@ -5,13 +5,18 @@ from models.attn.Models import Seq2SeqFormer
 
 import copy
 import hashlib
+import math
 import numpy as np
 import subprocess
+import time
 from pathlib import Path
 
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.data._utils.collate import default_collate
+
+from datasets.sampler import motion_processing_mf
 
 from torchmetrics import Accuracy
 
@@ -82,6 +87,12 @@ from utils.replay_cache import (
     validate_b1_calibration_state,
     validate_replay_cache_manifest,
 )
+from utils.recursive_state import (
+    build_recursive_input_contract,
+    commit_canonical_prediction,
+    RecursiveTrackState,
+)
+from utils.twc_utils import stable_uint32_seed
 
 # import vis_tool as vt
 
@@ -646,16 +657,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.ct_vote_weight = float(getattr(config, 'ct_vote_weight', 1.0))
         self.ct_raw_search_weight = float(getattr(
             config, 'ct_raw_search_weight', 1.0))
+        self.ct_presence_weight = float(getattr(
+            config, 'ct_presence_weight', 0.2))
         self.ct_router_weight = float(getattr(
             config, 'ct_router_weight', 0.2))
         self.ct_correction_weight = float(getattr(
             config, 'ct_correction_weight', 1.0))
-        self.ct_correction_warmup_epochs = int(getattr(
-            config, 'ct_correction_warmup_epochs', 5))
-        self.ct_correction_ramp_epochs = int(getattr(
-            config, 'ct_correction_ramp_epochs', 10))
         self.ct_router_help_margin = float(getattr(
             config, 'ct_router_help_margin', 0.05))
+        self.ct_router_h3_margin = float(getattr(
+            config, 'ct_router_h3_margin', 0.15))
         self.ct_focal_alpha = float(getattr(
             config, 'ct_focal_alpha', 0.75))
         self.ct_focal_gamma = float(getattr(
@@ -782,16 +793,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.ct_targetness_weight,
                 self.ct_vote_weight,
                 self.ct_raw_search_weight,
+                self.ct_presence_weight,
                 self.ct_router_weight,
                 self.ct_correction_weight,
                 self.ct_router_help_margin,
+                self.ct_router_h3_margin,
                 self.ct_focal_gamma) < 0:
             raise ValueError("CT joint Full loss settings must be non-negative")
         if not 0.0 <= self.ct_focal_alpha <= 1.0:
             raise ValueError("ct_focal_alpha must be in [0,1]")
-        if (self.ct_correction_warmup_epochs < 0
-                or self.ct_correction_ramp_epochs < 0):
-            raise ValueError("CT correction schedule must be non-negative")
         default_time_scale = getattr(config, 'default_time_step', getattr(config, 'time_step', 0.5))
         self.time_encoder = TimeEncoding(
             mode=getattr(config, 'time_encoding', 'raw'),
@@ -1037,8 +1047,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             config, 'ct_search_max_vote_offset', 4.0)),
                         motion_dropout=float(getattr(
                             config, 'ct_query_motion_dropout', 0.1)),
-                        gate_init_probability=float(getattr(
-                            config, 'ct_query_gate_init_probability', 0.05)),
+                gate_init_probability=float(getattr(
+                    config, 'ct_query_gate_init_probability', 0.05)),
+                query_gate_scale=float(getattr(
+                    config, 'ct_query_gate_scale', 1.0)),
+                presence_init_probability=float(getattr(
+                            config, 'ct_search_presence_init_probability', 0.1)),
+                        presence_threshold=float(getattr(
+                            config, 'ct_search_presence_threshold', 0.5)),
                         mahalanobis_clip=float(getattr(
                             config, 'ct_mahalanobis_clip', 25.0)),
                         use_reliability_gate=(
@@ -1049,8 +1065,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         hidden_dim=int(getattr(
                             config, 'ct_router_hidden_dim', 64)),
                         init_probability=float(getattr(
-                            config, 'ct_router_init_probability', 0.05)),
-                        radius_base=float(getattr(
+                            config, 'ct_router_init_probability', 0.01)),
+                        decision_threshold=float(getattr(
+                            config, 'ct_router_threshold', 0.5)),
+                extension_mass_threshold=float(getattr(
+                    config, 'ct_router_extension_mass_threshold', 0.25)),
+                presence_threshold=float(getattr(
+                    config, 'ct_search_presence_threshold', 0.5)),
+                radius_base=float(getattr(
                             config, 'ct_router_radius_base', 0.5)),
                         radius_per_second=float(getattr(
                             config, 'ct_router_radius_per_second', 0.5)),
@@ -2268,12 +2290,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if bool(getattr(self.config, 'shuffle_b1_signal', False)):
                 motion_main_ref_boxs = torch.flip(
                     motion_main_ref_boxs, dims=(1,))
-            main_motion = self.physical_motion_encoder(
-                motion_main_ref_boxs,
-                input_dict['motion_main_delta_t'],
-                input_dict['motion_main_valid_mask'],
-                input_dict['motion_main_current_delta_t'],
-            )
+            if self.use_ct_joint_full and not self.ct_enable_b1:
+                main_motion = self.physical_motion_encoder.kinematic_fallback(
+                    motion_main_ref_boxs,
+                    input_dict['motion_main_delta_t'],
+                    input_dict['motion_main_valid_mask'],
+                    input_dict['motion_main_current_delta_t'],
+                )
+            else:
+                main_motion = self.physical_motion_encoder(
+                    motion_main_ref_boxs,
+                    input_dict['motion_main_delta_t'],
+                    input_dict['motion_main_valid_mask'],
+                    input_dict['motion_main_current_delta_t'],
+                )
             if 'replay_b1_contract_present' in input_dict:
                 present = input_dict['replay_b1_contract_present'].to(
                     device=main_motion['mu_xy'].device).reshape(-1) > 0.5
@@ -2305,22 +2335,6 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 main_motion['valid'] = torch.zeros_like(main_motion['valid'])
                 main_motion['source_id'] = torch.zeros_like(
                     main_motion['source_id'])
-            if self.use_ct_joint_full and not self.ct_enable_b1:
-                # The deterministic anchor/search support remains available in
-                # -B1.  Only learned residual, uncertainty and query context
-                # are removed, giving an exact architecture-level ablation.
-                main_motion = dict(main_motion)
-                zeros_xy = torch.zeros_like(main_motion['prior_xy'])
-                main_motion['prior_xy'] = main_motion['kinematic_prior_xy']
-                main_motion['mu_xy'] = main_motion['kinematic_prior_xy']
-                main_motion['residual_xy'] = zeros_xy
-                main_motion['residual_unit_parallel_perp'] = zeros_xy
-                main_motion['feature'] = torch.zeros_like(
-                    main_motion['feature'])
-                deterministic_sigma = torch.clamp(
-                    main_motion['envelope_parallel_perp'], min=0.1)
-                main_motion['log_sigma_parallel_perp'] = torch.log(
-                    deterministic_sigma)
             # Both training and recursive inference define the newest history
             # box as the crop anchor.  Keep its (normally exact-zero) origin as
             # a diagnostic, but never add a GT-derived anchor correction to
@@ -2533,9 +2547,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.use_ct_joint_full:
             required_joint_keys = (
                 'search_v3_points', 'search_v3_point_valid_mask',
+                'search_v3_point_source', 'search_v3_branch_source',
                 'trajectory_search_points',
                 'trajectory_search_point_valid_mask',
+                'trajectory_search_point_source',
+                'trajectory_search_branch_source',
                 'trajectory_search_valid',
+                'search_v3_support_valid',
                 'search_v3_query_delta_t', 'search_v3_gap_ratio',
             )
             missing_joint = [
@@ -2574,11 +2592,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         B, self.ct_tube_quota)
                 joint_mask = torch.cat((endpoint_mask, tube_mask), dim=1)
                 joint_source = torch.cat((
-                    torch.zeros(
-                        (B, self.ct_endpoint_quota),
+                    input_dict['search_v3_point_source'].to(
                         device=point_feature.device, dtype=torch.long),
-                    torch.ones(
-                        (B, self.ct_tube_quota),
+                    input_dict['trajectory_search_point_source'].to(
+                        device=point_feature.device, dtype=torch.long),
+                ), dim=1)
+                joint_branch_source = torch.cat((
+                    input_dict['search_v3_branch_source'].to(
+                        device=point_feature.device, dtype=torch.long),
+                    input_dict['trajectory_search_branch_source'].to(
                         device=point_feature.device, dtype=torch.long),
                 ), dim=1)
                 learned_motion_valid = main_motion['valid'] * float(
@@ -2590,23 +2612,40 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     joint_source,
                     observation_query,
                     obs_stats,
-                    main_motion['feature'],
-                    main_motion['kinematic_prior_xy'],
-                    main_motion['prior_xy'],
-                    main_motion['residual_unit_parallel_perp'],
+                    main_motion['feature'].detach(),
+                    main_motion['kinematic_prior_xy'].detach(),
+                    main_motion['prior_xy'].detach(),
+                    main_motion['residual_unit_parallel_perp'].detach(),
                     torch.exp(main_motion[
-                        'log_sigma_parallel_perp']),
-                    main_motion['envelope_parallel_perp'],
-                    main_motion['motion_direction_xy'],
+                        'log_sigma_parallel_perp']).detach(),
+                    main_motion['envelope_parallel_perp'].detach(),
+                    main_motion['motion_direction_xy'].detach(),
                     learned_motion_valid,
                     input_dict['search_v3_query_delta_t'],
                     input_dict['search_v3_gap_ratio'],
                     history_valid_ratio,
+                    point_branch_source=joint_branch_source,
+                    search_support_valid=input_dict[
+                        'search_v3_support_valid'],
                 )
+                support_mask = input_dict['search_v3_support_valid'].to(
+                    device=point_feature.device).reshape(B) > 0
+                observation_xy = observation_aux_box[:, :2].detach()
+                unmasked_raw_search_xy = joint_output[
+                    'ct_search_raw_xy']
+                joint_output['ct_search_unmasked_raw_xy'] = (
+                    unmasked_raw_search_xy)
+                effective_mask = joint_output[
+                    'ct_search_effective'].reshape(B) > 0
+                joint_output['ct_search_raw_xy'] = torch.where(
+                    (support_mask & effective_mask).unsqueeze(1),
+                    unmasked_raw_search_xy, observation_xy)
                 output_dict.update(joint_output)
+                output_dict['candidate_valid'] = joint_output[
+                    'ct_search_support_valid']
                 updated_aux_box, router_output = self.ct_joint_router(
                     observation_aux_box,
-                    joint_output['ct_search_raw_xy'],
+                    unmasked_raw_search_xy,
                     joint_output['ct_search_candidate_valid'],
                     obs_stats,
                     joint_output['ct_search_targetness_mean'],
@@ -2617,12 +2656,47 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     input_dict['search_v3_query_delta_t'],
                     input_dict['search_v3_gap_ratio'],
                     enabled=self.ct_enable_b3,
+                    extension_mass_ratio=joint_output[
+                        'ct_search_extension_mass_ratio'],
+                    extension_vote_rms=joint_output[
+                        'ct_search_extension_vote_rms'],
+                    presence_probability=joint_output[
+                        'ct_search_presence_probability'],
                 )
                 output_dict.update(router_output)
+                applied_mask = router_output[
+                    'ct_router_applied_gate'].reshape(B) > 0
+                deployed_raw = torch.where(
+                    applied_mask.unsqueeze(1),
+                    unmasked_raw_search_xy, observation_xy)
+                deployed_query = torch.where(
+                    applied_mask.unsqueeze(1),
+                    joint_output['ct_query_search_internal'],
+                    joint_output['ct_query_observation'])
+                deployed_query_gate = (
+                    joint_output['ct_query_gate_internal']
+                    * applied_mask.to(point_feature.dtype))
+                output_dict.update({
+                    'ct_search_raw_xy': deployed_raw,
+                    'ct_query_search': deployed_query,
+                    'ct_query_gate': deployed_query_gate,
+                    'ct_query_shift_norm': torch.linalg.norm(
+                        deployed_query
+                        - joint_output['ct_query_observation'], dim=1)
+                    / math.sqrt(self.ct_query_dim),
+                })
                 output_dict['ct_final_box'] = updated_aux_box
             else:
                 updated_aux_box = observation_aux_box
+                support_valid = input_dict[
+                    'search_v3_support_valid'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype).reshape(B)
                 output_dict.update({
+                    # Compatibility alias is structural support, not a B2
+                    # candidate-quality claim, even in the -B2 ablation.
+                    'candidate_valid': support_valid,
+                    'ct_search_support_valid': support_valid,
                     'ct_search_candidate_valid': point_feature.new_zeros((B,)),
                     'ct_query_gate': point_feature.new_zeros((B,)),
                     'ct_router_gate': point_feature.new_zeros((B,)),
@@ -4172,6 +4246,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             target_xy = center_label[:, :2].to(
                 device=output['ct_search_raw_xy'].device,
                 dtype=output['ct_search_raw_xy'].dtype)
+            observation_xy_all = aux_estimation_boxes[:, :2].detach()
+            raw_xy_all = output['ct_search_unmasked_raw_xy'].detach()
+            bounded_xy_all = (
+                observation_xy_all
+                + output['ct_router_bounded_residual_xy'].detach())
+            final_xy_all = output['ct_final_box'][:, :2].detach()
+            observation_error_all = torch.linalg.norm(
+                observation_xy_all - target_xy, dim=1)
+            raw_error_all = torch.linalg.norm(
+                raw_xy_all - target_xy, dim=1)
+            bounded_error_all = torch.linalg.norm(
+                bounded_xy_all - target_xy, dim=1)
+            final_error_all = torch.linalg.norm(
+                final_xy_all - target_xy, dim=1)
             endpoint_labels = data['search_v3_point_labels'].to(
                 device=target_xy.device, dtype=target_xy.dtype)
             tube_labels = data['trajectory_search_point_labels'].to(
@@ -4183,6 +4271,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 device=target_xy.device, dtype=target_xy.dtype).reshape(
                     -1, self.ct_tube_quota)
             point_valid = torch.cat((endpoint_valid, tube_valid), dim=1)
+            endpoint_source = data['search_v3_point_source'].to(
+                device=target_xy.device, dtype=target_xy.dtype)
+            tube_source = data['trajectory_search_point_source'].to(
+                device=target_xy.device, dtype=target_xy.dtype).reshape(
+                    -1, self.ct_tube_quota)
+            expansion_source = torch.cat((
+                endpoint_source, tube_source), dim=1)
+            search_support_valid = output[
+                'ct_search_support_valid'].detach().to(target_xy.dtype)
+            point_valid = point_valid * search_support_valid.unsqueeze(1)
             point_labels = point_labels * point_valid
 
             targetness_logits = output['ct_search_targetness_logits']
@@ -4202,6 +4300,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
             foreground = point_labels * point_valid
             foreground_count = foreground.sum(dim=1)
+            extension_foreground_count = (
+                foreground * (expansion_source > 0).to(
+                    target_xy.dtype)).sum(dim=1)
+            presence_target = (
+                extension_foreground_count >= 1).to(target_xy.dtype)
+            presence_error = F.binary_cross_entropy_with_logits(
+                output['ct_search_presence_logit'], presence_target,
+                reduction='none')
+            loss_ct_presence = (
+                presence_error * search_support_valid).sum() / torch.clamp(
+                    search_support_valid.sum(), min=1.0)
             vote_error = F.smooth_l1_loss(
                 output['ct_search_point_votes'],
                 target_xy.unsqueeze(1).expand_as(
@@ -4214,60 +4323,106 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 (foreground_count >= 1).to(target_xy.dtype)
                 * output['ct_search_candidate_valid'].detach())
             raw_per_sample = F.smooth_l1_loss(
-                output['ct_search_raw_xy'], target_xy,
+                output['ct_search_unmasked_raw_xy'], target_xy,
                 reduction='none').mean(dim=1)
             loss_ct_raw_search = (
                 raw_per_sample * proposal_valid).sum() / torch.clamp(
                     proposal_valid.sum(), min=1.0)
 
             loss_ct_query_gate = target_xy.new_zeros(())
+            query_target = target_xy.new_zeros((target_xy.shape[0],))
+            query_valid = target_xy.new_zeros((target_xy.shape[0],))
+            query_auroc = target_xy.new_tensor(0.5)
             if (self.ct_enable_b1
                     and self.ct_enable_query_reliability_gate):
-                kinematic_error = torch.linalg.norm(
-                    output['motion_prior_kinematic_xy'].detach() - target_xy,
+                observation_error = torch.linalg.norm(
+                    aux_estimation_boxes[:, :2].detach() - target_xy,
                     dim=1)
-                learned_error = torch.linalg.norm(
-                    output['motion_prior_xy'].detach() - target_xy, dim=1)
-                query_target = torch.sigmoid(
-                    (kinematic_error - learned_error) / 0.25)
+                raw_query_error = torch.linalg.norm(
+                    output['ct_search_unmasked_raw_xy'].detach() - target_xy,
+                    dim=1)
+                query_target = (
+                    raw_query_error < observation_error).to(target_xy.dtype)
                 query_gate_error = F.binary_cross_entropy_with_logits(
                     output['ct_query_gate_logit'], query_target,
                     reduction='none')
-                query_valid = output['motion_prior_valid'].detach()
+                query_valid = (
+                    output['motion_prior_valid'].detach()
+                    * search_support_valid
+                    * output['ct_search_candidate_valid'].detach())
                 loss_ct_query_gate = (
                     query_gate_error * query_valid).sum() / torch.clamp(
                         query_valid.sum(), min=1.0)
+                positive_gate = output['ct_query_gate_internal'][
+                    (query_valid > 0) & (query_target > 0)].detach()
+                negative_gate = output['ct_query_gate_internal'][
+                    (query_valid > 0) & (query_target <= 0)].detach()
+                if positive_gate.numel() and negative_gate.numel():
+                    comparisons = (
+                        positive_gate.unsqueeze(1)
+                        - negative_gate.unsqueeze(0))
+                    query_auroc = (
+                        (comparisons > 0).to(target_xy.dtype)
+                        + 0.5 * (comparisons == 0).to(target_xy.dtype)
+                    ).mean()
 
             loss_ct_router = target_xy.new_zeros(())
             loss_ct_correction = target_xy.new_zeros(())
-            correction_ramp = 0.0
+            h1_gain = target_xy.new_zeros((target_xy.shape[0],))
+            h1_target = target_xy.new_zeros((target_xy.shape[0],))
+            h3_gain = target_xy.new_zeros((target_xy.shape[0],))
+            h3_target = target_xy.new_zeros((target_xy.shape[0],))
+            h3_valid = target_xy.new_zeros((target_xy.shape[0],))
             if self.ct_enable_b3:
                 observation_xy = aux_estimation_boxes[:, :2].detach()
                 observation_error = torch.linalg.norm(
                     observation_xy - target_xy, dim=1)
-                raw_error = torch.linalg.norm(
-                    output['ct_search_raw_xy'].detach() - target_xy, dim=1)
-                router_target = (
-                    raw_error + self.ct_router_help_margin
-                    < observation_error).to(target_xy.dtype)
-                router_error = F.binary_cross_entropy_with_logits(
-                    output['ct_router_logit'], router_target,
+                bounded_search_xy = (
+                    observation_xy
+                    + output['ct_router_bounded_residual_xy'].detach())
+                bounded_search_error = torch.linalg.norm(
+                    bounded_search_xy - target_xy, dim=1)
+                h1_gain = observation_error - bounded_search_error
+                h1_target = (
+                    h1_gain > self.ct_router_help_margin).to(target_xy.dtype)
+                h1_error = F.binary_cross_entropy_with_logits(
+                    output['ct_router_logit'], h1_target,
                     reduction='none')
                 router_valid = output[
                     'ct_search_candidate_valid'].detach()
+                if 'ct_h3_gain' in data and 'ct_h3_valid' in data:
+                    h3_gain = data['ct_h3_gain'].to(
+                        device=target_xy.device,
+                        dtype=target_xy.dtype).reshape(-1).detach()
+                    h3_valid = data['ct_h3_valid'].to(
+                        device=target_xy.device,
+                        dtype=target_xy.dtype).reshape(-1).detach()
+                    h3_valid = h3_valid * router_valid
+                    h3_target = (
+                        h3_gain > self.ct_router_h3_margin).to(
+                            target_xy.dtype)
+                    h3_error = F.binary_cross_entropy_with_logits(
+                        output['ct_router_logit'], h3_target,
+                        reduction='none')
+                    router_error = torch.where(
+                        h3_valid > 0,
+                        0.25 * h1_error + 0.75 * h3_error,
+                        h1_error)
+                else:
+                    router_error = h1_error
                 loss_ct_router = (
                     router_error * router_valid).sum() / torch.clamp(
                         router_valid.sum(), min=1.0)
-                epoch = int(getattr(self, 'current_epoch', 0))
-                if epoch >= self.ct_correction_warmup_epochs:
-                    correction_ramp = (
-                        1.0 if self.ct_correction_ramp_epochs <= 0
-                        else min(
-                            1.0,
-                            (epoch - self.ct_correction_warmup_epochs + 1)
-                            / float(self.ct_correction_ramp_epochs)))
+                correction_target = torch.where(
+                    (h3_valid > 0).unsqueeze(1),
+                    h3_target.unsqueeze(1), h1_target.unsqueeze(1))
+                target_action_xy = (
+                    observation_xy
+                    + correction_target
+                    * output['ct_router_bounded_residual_xy'].detach())
                 correction_per_sample = F.smooth_l1_loss(
-                    output['ct_final_box'][:, :2], target_xy,
+                    output['ct_router_soft_box'][:, :2],
+                    target_action_xy.detach(),
                     reduction='none').mean(dim=1)
                 loss_ct_correction = (
                     correction_per_sample * router_valid).sum(
@@ -4277,38 +4432,167 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.ct_targetness_weight * loss_ct_targetness
                 + self.ct_vote_weight * loss_ct_vote
                 + self.ct_raw_search_weight * loss_ct_raw_search
+                + self.ct_presence_weight * loss_ct_presence
                 + self.ct_query_gate_weight * loss_ct_query_gate
                 + self.ct_router_weight * loss_ct_router
-                + correction_ramp * self.ct_correction_weight
-                * loss_ct_correction)
+                + self.ct_correction_weight * loss_ct_correction)
             loss_dict.update({
                 'loss_total': loss_total,
                 'loss_ct_targetness': loss_ct_targetness,
                 'loss_ct_vote': loss_ct_vote,
                 'loss_ct_raw_search': loss_ct_raw_search,
+                'loss_ct_presence': loss_ct_presence,
                 'loss_ct_query_gate': loss_ct_query_gate,
                 'loss_ct_router': loss_ct_router,
                 'loss_ct_correction': loss_ct_correction,
-                'ct_correction_ramp': target_xy.new_tensor(correction_ramp),
+                'ct_correction_ramp': target_xy.new_tensor(1.0),
                 'ct_foreground_points': foreground_count.mean(),
                 'ct_candidate_valid_rate': output[
                     'ct_search_candidate_valid'].float().mean(),
-                'ct_query_gate_mean': output['ct_query_gate'].mean(),
+                'ct_structural_valid_rate': output[
+                    'ct_search_structural_valid'].float().mean(),
+                'ct_new_support_valid_rate': output[
+                    'ct_search_new_support_valid'].float().mean(),
+                'ct_search_effective_rate': output[
+                    'ct_search_effective'].float().mean(),
+                'ct_evidence_valid_rate': output[
+                    'ct_router_evidence_valid'].float().mean(),
+                'ct_extension_targetness_mass_ratio': output[
+                    'ct_search_extension_mass_ratio'].mean(),
+                'ct_extension_vote_rms': torch.nan_to_num(output[
+                    'ct_search_extension_vote_rms'].detach(),
+                    nan=0.0, posinf=0.0, neginf=0.0).mean(),
+                'ct_search_presence_probability': output[
+                    'ct_search_presence_probability'].mean(),
+                'ct_search_support_valid_rate': search_support_valid.mean(),
+                'ct_search_used_rate': output[
+                    'ct_router_applied_gate'].mean(),
+                'ct_search_inactive_reason/history': (
+                    1.0 - data['ct_search_history_valid'].float()).mean(),
+                'ct_search_inactive_reason/time': (
+                    1.0 - data['ct_search_time_valid'].float()).mean(),
+                'ct_search_inactive_reason/proposal': (
+                    1.0 - data['ct_search_proposal_valid'].float()).mean(),
+                'ct_search_inactive_reason/coverage': (
+                    1.0 - data['ct_search_coverage_need'].float()).mean(),
+                'ct_search_inactive_reason/point_support': (
+                    1.0 - data[
+                        'ct_search_point_support_valid'].float()).mean(),
+                'ct_search_extension_count': data[
+                    'ct_search_extension_count'].float().mean(),
+                'ct_search_extension_voxels': data[
+                    'ct_search_extension_voxels'].float().mean(),
+                'ct_raw_vs_obs_error_gain': masked_mean(
+                    observation_error_all - raw_error_all,
+                    output['ct_search_effective'].detach()),
+                'ct_raw_better_than_observation_rate': masked_mean(
+                    (raw_error_all < observation_error_all).to(
+                        target_xy.dtype),
+                    output['ct_search_effective'].detach()),
+                'ct_query_gate_mean': output[
+                    'ct_query_gate_internal'].mean(),
+                'ct_query_gate_std': output['ct_query_gate_internal'].std(
+                    unbiased=False),
+                'ct_query_gate_auroc': query_auroc,
+                'ct_query_gate_positive_mean': masked_mean(
+                    output['ct_query_gate_internal'],
+                    query_valid * query_target),
+                'ct_query_gate_negative_mean': masked_mean(
+                    output['ct_query_gate_internal'],
+                    query_valid * (1.0 - query_target)),
+                'ct_alpha_positive_mean': masked_mean(
+                    output['ct_query_gate_internal'],
+                    query_valid * query_target),
+                'ct_alpha_negative_mean': masked_mean(
+                    output['ct_query_gate_internal'],
+                    query_valid * (1.0 - query_target)),
                 'ct_query_shift_norm': output[
                     'ct_query_shift_norm'].mean(),
                 'ct_motion_residual_saturation': output[
                     'ct_motion_residual_saturation'].mean(),
                 'ct_router_gate_mean': output['ct_router_gate'].mean(),
-                'ct_raw_search_rmse': torch.linalg.norm(
-                    output['ct_search_raw_xy'].detach() - target_xy,
-                    dim=1).mean(),
-                'ct_observation_rmse': torch.linalg.norm(
-                    aux_estimation_boxes[:, :2].detach() - target_xy,
-                    dim=1).mean(),
-                'ct_final_rmse': torch.linalg.norm(
-                    output['ct_final_box'][:, :2].detach() - target_xy,
-                    dim=1).mean(),
+                'ct_router_positive_rate': (
+                    ((output['ct_router_gate'] >= 0.5).to(target_xy.dtype)
+                     * output['ct_search_candidate_valid'].detach()).sum()
+                    / torch.clamp(output[
+                        'ct_search_candidate_valid'].detach().sum(), min=1.0)),
+                'ct_search_applied_rate': output[
+                    'ct_router_applied_gate'].mean(),
+                'ct_h1_helpful_rate': (
+                    (h1_gain > self.ct_router_help_margin).to(
+                        target_xy.dtype)
+                    * output['ct_search_candidate_valid'].detach()).sum()
+                    / torch.clamp(output[
+                        'ct_search_candidate_valid'].detach().sum(), min=1.0),
+                'ct_h1_harmful_rate': (
+                    (h1_gain < -self.ct_router_help_margin).to(
+                        target_xy.dtype)
+                    * output['ct_search_candidate_valid'].detach()).sum()
+                    / torch.clamp(output[
+                        'ct_search_candidate_valid'].detach().sum(), min=1.0),
+                'ct_h3_helpful_rate': (
+                    (h3_gain > self.ct_router_h3_margin).to(target_xy.dtype)
+                    * h3_valid).sum() / torch.clamp(h3_valid.sum(), min=1.0),
+                'ct_h3_harmful_rate': (
+                    (h3_gain < -self.ct_router_h3_margin).to(target_xy.dtype)
+                    * h3_valid).sum() / torch.clamp(h3_valid.sum(), min=1.0),
+                'ct_h1_h3_conflict_rate': (
+                    (h1_target != h3_target).to(target_xy.dtype)
+                    * h3_valid).sum() / torch.clamp(h3_valid.sum(), min=1.0),
+                'ct_h1_positive_h3_negative_rate': (
+                    ((h1_target > 0) & (h3_target <= 0)).to(target_xy.dtype)
+                    * h3_valid).sum() / torch.clamp(h3_valid.sum(), min=1.0),
+                'ct_h1_negative_h3_positive_rate': (
+                    ((h1_target <= 0) & (h3_target > 0)).to(target_xy.dtype)
+                    * h3_valid).sum() / torch.clamp(h3_valid.sum(), min=1.0),
+                'ct_h3_gain_when_applied': masked_mean(
+                    h3_gain, h3_valid * output[
+                        'ct_router_applied_gate'].detach()),
+                'ct_observation_error': masked_mean(
+                    observation_error_all,
+                    output['ct_search_candidate_valid'].detach()),
+                'ct_raw_error': masked_mean(
+                    raw_error_all,
+                    output['ct_search_candidate_valid'].detach()),
+                'ct_bounded_error': masked_mean(
+                    bounded_error_all,
+                    output['ct_search_candidate_valid'].detach()),
+                'ct_final_error': final_error_all.mean(),
+                'ct_raw_search_rmse': raw_error_all.mean(),
+                'ct_observation_rmse': observation_error_all.mean(),
+                'ct_final_rmse': final_error_all.mean(),
             })
+            for bin_index in range(5):
+                lower = bin_index / 5.0
+                upper = (bin_index + 1) / 5.0
+                in_bin = (
+                    (query_valid > 0)
+                    & (output['ct_query_gate_internal'].detach() >= lower)
+                    & (output['ct_query_gate_internal'].detach() < upper
+                       if bin_index < 4
+                       else output[
+                           'ct_query_gate_internal'].detach() <= upper))
+                bin_mask = in_bin.to(target_xy.dtype)
+                loss_dict[
+                    f'ct_query_reliability_bin{bin_index}_count'] = (
+                        bin_mask.sum())
+                loss_dict[
+                    f'ct_query_reliability_bin{bin_index}_confidence'] = (
+                        masked_mean(
+                            output['ct_query_gate_internal'], bin_mask))
+                loss_dict[
+                    f'ct_query_reliability_bin{bin_index}_helpful_rate'] = (
+                        masked_mean(query_target, bin_mask))
+            for key in (
+                    'ct_shadow_forward_count', 'ct_shadow_time_ms',
+                    'ct_shadow_peak_memory_mb'):
+                if key in data:
+                    loss_dict[key] = data[key].float().mean()
+            for key in (
+                    'ct_recursive_state_age',
+                    'ct_candidate_state_consistency'):
+                if key in data:
+                    loss_dict[key] = data[key].float().mean()
 
         if self.use_search_evidence_v2:
             target_xy = center_label[:, :2].to(
@@ -5134,6 +5418,282 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         return loss_dict
 
+    def on_train_epoch_start(self):
+        if bool(getattr(
+                self.config, 'ct_online_recursive_training', False)):
+            self._ct_recursive_states = {}
+            self._ct_online_batch_context = []
+
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        if (isinstance(batch, list) and batch
+                and isinstance(batch[0], dict)
+                and batch[0].get('online_recursive_raw', False)):
+            # Raw nuScenes PointCloud/Box objects must remain on CPU until the
+            # state-aware crop is built inside training_step.
+            return batch
+        return super().transfer_batch_to_device(
+            batch, device, dataloader_idx)
+
+    @staticmethod
+    def _move_batch_to_device(value, device):
+        if torch.is_tensor(value):
+            return value.to(device=device, non_blocking=True)
+        if isinstance(value, dict):
+            return {
+                key: SEQTRACK3D._move_batch_to_device(item, device)
+                for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return type(value)(
+                SEQTRACK3D._move_batch_to_device(item, device)
+                for item in value)
+        return value
+
+    def _recursive_state_for_raw(self, raw):
+        if not hasattr(self, '_ct_recursive_states'):
+            self._ct_recursive_states = {}
+        key = (int(raw['online_epoch']), str(raw['tracklet_key']))
+        state = self._ct_recursive_states.get(key)
+        if state is None:
+            state = RecursiveTrackState(
+                tracklet_id=int(raw['tracklet_id']),
+                tracklet_key=str(raw['tracklet_key']),
+                first_box=raw['first_frame']['3d_bbox'],
+                timestamps={0: raw['first_frame'].get('timestamp')},
+            )
+            self._ct_recursive_states[key] = state
+        return state
+
+    def _process_online_raw(self, raw, state):
+        payload = {
+            key: value for key, value in raw.items()
+            if key not in (
+                'online_recursive_raw', 'online_epoch',
+                'online_batch_index', 'online_slot', 'shadow_future')
+        }
+        contract = build_recursive_input_contract(
+            state, raw['this_frame_id'], len(raw['prev_frame_ids']),
+            self.config, candidate_id=raw['candidate_id'],
+            offsets=raw['history_offsets'])
+        if (contract['history_frame_ids'] != list(raw['prev_frame_ids'])
+                or contract['history_valid_mask'].tolist()
+                != list(raw['valid_mask'])):
+            raise RuntimeError("raw/state recursive history contract mismatch")
+        payload['online_recursive_state'] = contract
+        payload['candidate_shared_transform'] = contract[
+            'candidate_shared_transform']
+        payload['point_sampling_seeds'] = contract['point_sampling_seeds']
+        payload['current_sampling_seed'] = contract[
+            'current_sampling_seed']
+        if 'motion_aux_frame_ids' in raw:
+            aux_contract = build_recursive_input_contract(
+                state, raw['this_frame_id'],
+                len(raw['motion_aux_frame_ids']), self.config,
+                candidate_id=raw['candidate_id'],
+                offsets=raw['motion_aux_offsets'])
+            if (aux_contract['history_frame_ids']
+                    != list(raw['motion_aux_frame_ids'])
+                    or aux_contract['history_valid_mask'].tolist()
+                    != list(raw['motion_aux_valid_mask'])):
+                raise RuntimeError(
+                    "raw/state auxiliary history contract mismatch")
+            payload['online_motion_aux_state'] = aux_contract
+        processed = motion_processing_mf(payload, self.config)
+        search_history = processed.get(
+            'b2_v3_history_ref_boxs', processed['motion_main_ref_boxs'])
+        candidate_consistent = bool(
+            np.array_equal(
+                processed['motion_main_ref_boxs'],
+                search_history)
+            and np.allclose(
+                processed['bbox_size'].astype(np.float64),
+                contract['target_size'].astype(np.float64),
+                rtol=0.0, atol=1e-6))
+        if not candidate_consistent:
+            raise RuntimeError(
+                "candidate crop/history/Search state contract diverged")
+        processed.update({
+            'ct_online_tracklet_id': np.int64(raw['tracklet_id']),
+            'ct_online_frame_id': np.int64(raw['this_frame_id']),
+            'ct_online_slot': np.int64(raw['online_slot']),
+            'ct_online_epoch': np.int64(raw['online_epoch']),
+            'ct_recursive_state_age': np.float32(
+                int(raw['this_frame_id']) - max(state.predictions)),
+            'ct_candidate_state_consistency': np.float32(
+                candidate_consistent),
+        })
+        return processed
+
+    def _prepare_online_recursive_batch(self, raw_items):
+        processed = []
+        context = []
+        for raw in raw_items:
+            if not raw.get('online_recursive_raw', False):
+                raise ValueError("mixed online/non-online training batch")
+            state = self._recursive_state_for_raw(raw)
+            processed.append(self._process_online_raw(raw, state))
+            context.append({'raw': raw, 'state': state})
+        batch = default_collate(processed)
+        batch_size = len(raw_items)
+        batch['ct_h3_gain'] = torch.zeros(batch_size, dtype=torch.float32)
+        batch['ct_h3_valid'] = torch.zeros(batch_size, dtype=torch.float32)
+        batch['ct_shadow_forward_count'] = torch.tensor(0.0)
+        batch['ct_shadow_time_ms'] = torch.tensor(0.0)
+        batch['ct_shadow_peak_memory_mb'] = torch.tensor(0.0)
+        self._ct_online_batch_context = context
+        return self._move_batch_to_device(batch, self.device)
+
+    def _local_prediction_to_world(self, local_box, anchor_box):
+        values = local_box.detach().cpu().numpy().reshape(-1)[:4]
+        return points_utils.getOffsetBB(
+            anchor_box, values, degrees=self.config.degrees,
+            use_z=self.config.use_z,
+            limit_box=self.config.limit_box)
+
+    def _shadow_forward(self, batch, seed):
+        training_flags = {
+            module: module.training for module in self.modules()}
+        previous_b2 = self.ct_enable_b2
+        previous_b3 = self.ct_enable_b3
+        previous_b1 = self.ct_enable_b1
+        cuda_devices = (
+            [self.device.index
+             if self.device.index is not None
+             else torch.cuda.current_device()]
+            if self.device.type == 'cuda' else [])
+        try:
+            for module in training_flags:
+                module.training = False
+            self.ct_enable_b2 = False
+            self.ct_enable_b3 = False
+            self.ct_enable_b1 = False
+            with torch.random.fork_rng(devices=cuda_devices):
+                torch.manual_seed(int(seed))
+                if self.device.type == 'cuda':
+                    torch.cuda.manual_seed_all(int(seed))
+                with torch.inference_mode():
+                    return self(batch)
+        finally:
+            self.ct_enable_b2 = previous_b2
+            self.ct_enable_b3 = previous_b3
+            self.ct_enable_b1 = previous_b1
+            for module, was_training in training_flags.items():
+                module.training = was_training
+
+    def _attach_h3_shadow_labels(self, batch, output):
+        if not bool(getattr(
+                self.config, 'ct_online_recursive_training', False)):
+            return
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize(self.device)
+        start = time.perf_counter()
+        memory_before = (
+            torch.cuda.memory_allocated(self.device)
+            if self.device.type == 'cuda' else 0)
+        if self.device.type == 'cuda':
+            torch.cuda.reset_peak_memory_stats(self.device)
+        shadow_forward_count = 0
+        for index, item in enumerate(self._ct_online_batch_context):
+            raw = item['raw']
+            if not raw.get('shadow_future'):
+                continue
+            if int(raw['candidate_id']) != 0:
+                raise RuntimeError("H=3 shadow is candidate0-only")
+            if float(output['ct_search_candidate_valid'][index].detach()) <= 0:
+                continue
+            state_before = item['state'].clone()
+            anchor = state_before.history_boxes(
+                [raw['prev_frame_ids'][0]], [1])[0]
+            observation_local = output[
+                'observation_aux_estimation_boxes'][index].detach().clone()
+            search_local = observation_local.clone()
+            search_local[:2] = (
+                observation_local[:2]
+                + output['ct_router_bounded_residual_xy'][index].detach())
+            observation_box = self._local_prediction_to_world(
+                observation_local, anchor)
+            search_box = self._local_prediction_to_world(search_local, anchor)
+            state_o = state_before.clone()
+            state_s = state_before.clone()
+            timestamp = raw['this_frame'].get('timestamp')
+            state_o.append(raw['this_frame_id'], observation_box, timestamp)
+            state_s.append(raw['this_frame_id'], search_box, timestamp)
+            target = np.asarray(
+                raw['this_frame']['3d_bbox'].center[:2], dtype=np.float64)
+            cost_o = float(np.linalg.norm(observation_box.center[:2] - target))
+            cost_s = float(np.linalg.norm(search_box.center[:2] - target))
+
+            for future_raw in raw['shadow_future']:
+                shadow_processed = [
+                    self._process_online_raw(future_raw, state_o),
+                    self._process_online_raw(future_raw, state_s),
+                ]
+                shadow_batch = self._move_batch_to_device(
+                    default_collate(shadow_processed), self.device)
+                shadow_seed = stable_uint32_seed(
+                    int(getattr(self.config, 'seed', 42) or 42),
+                    raw['tracklet_key'], raw['this_frame_id'],
+                    future_raw['this_frame_id'], 'h3_shadow_observation')
+                shadow_output = self._shadow_forward(
+                    shadow_batch, shadow_seed)
+                shadow_forward_count += 2
+                future_boxes = []
+                for branch_index, branch_state in enumerate((state_o, state_s)):
+                    branch_anchor = branch_state.history_boxes(
+                        [future_raw['prev_frame_ids'][0]], [1])[0]
+                    local_observation = shadow_output[
+                        'observation_aux_estimation_boxes'][branch_index]
+                    world_box = self._local_prediction_to_world(
+                        local_observation, branch_anchor)
+                    branch_state.append(
+                        future_raw['this_frame_id'], world_box,
+                        future_raw['this_frame'].get('timestamp'))
+                    future_boxes.append(world_box)
+                future_target = np.asarray(
+                    future_raw['this_frame']['3d_bbox'].center[:2],
+                    dtype=np.float64)
+                cost_o += float(np.linalg.norm(
+                    future_boxes[0].center[:2] - future_target))
+                cost_s += float(np.linalg.norm(
+                    future_boxes[1].center[:2] - future_target))
+            batch['ct_h3_gain'][index] = float(cost_o - cost_s)
+            batch['ct_h3_valid'][index] = 1.0
+
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize(self.device)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        memory_after = (
+            torch.cuda.max_memory_allocated(self.device)
+            if self.device.type == 'cuda' else memory_before)
+        batch['ct_shadow_forward_count'] = batch[
+            'ct_shadow_forward_count'].new_tensor(float(shadow_forward_count))
+        batch['ct_shadow_time_ms'] = batch[
+            'ct_shadow_time_ms'].new_tensor(elapsed_ms)
+        batch['ct_shadow_peak_memory_mb'] = batch[
+            'ct_shadow_peak_memory_mb'].new_tensor(
+                max(0, memory_after - memory_before) / (1024.0 ** 2))
+
+    def _commit_online_recursive_predictions(self, output):
+        if not bool(getattr(
+                self.config, 'ct_online_recursive_training', False)):
+            return
+        seen_slots = set()
+        for index, item in enumerate(self._ct_online_batch_context):
+            raw = item['raw']
+            slot = int(raw['online_slot'])
+            if int(raw['candidate_id']) != 0:
+                continue
+            if slot in seen_slots:
+                raise RuntimeError("online batch contains duplicate canonical slot")
+            seen_slots.add(slot)
+            state = item['state']
+            anchor = state.history_boxes(
+                [raw['prev_frame_ids'][0]], [1])[0]
+            final_box = self._local_prediction_to_world(
+                output['aux_estimation_boxes'][index], anchor)
+            commit_canonical_prediction(
+                state, raw['candidate_id'], raw['this_frame_id'], final_box,
+                raw['this_frame'].get('timestamp'))
+
     def training_step(self, batch, batch_idx):
         """
         Args:
@@ -5146,9 +5706,31 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         Returns:
 
         """
+        online_batch = (
+            isinstance(batch, list) and batch
+            and isinstance(batch[0], dict)
+            and batch[0].get('online_recursive_raw', False))
+        if online_batch and self.device.type == 'cuda':
+            torch.cuda.synchronize(self.device)
+        online_step_start = time.perf_counter() if online_batch else None
+        if online_batch:
+            batch = self._prepare_online_recursive_batch(batch)
         output = self(batch)
+        if online_batch:
+            self._attach_h3_shadow_labels(batch, output)
         loss_dict = self.compute_loss(batch, output)
         loss = loss_dict['loss_total']
+        if online_batch:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            online_step_ms = max(
+                (time.perf_counter() - online_step_start) * 1000.0, 1e-6)
+            shadow_ms = batch['ct_shadow_time_ms'].detach().to(
+                device=loss.device, dtype=loss.dtype)
+            loss_dict['ct_online_step_time_ms'] = loss.new_tensor(
+                online_step_ms)
+            loss_dict['ct_shadow_step_latency_ratio'] = (
+                shadow_ms / online_step_ms)
 
         if self.is_paired_batch(batch):
             metric_batch = batch["view_a"]
@@ -5173,5 +5755,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         self.logger.experiment.add_scalars('loss', log_dict,
                                            global_step=self.global_step)
+        if (online_batch and 'ct_router_gate' in output
+                and hasattr(self.logger.experiment, 'add_histogram')):
+            self.logger.experiment.add_histogram(
+                'ct/router_probability_histogram',
+                output['ct_router_gate'].detach(),
+                global_step=self.global_step)
+
+        if online_batch:
+            self._commit_online_recursive_predictions(output)
 
         return loss

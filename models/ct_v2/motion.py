@@ -460,6 +460,129 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             posinf=self.time_scale, neginf=self.time_scale)
         return torch.clamp(value, min=self.eps), finite
 
+    def kinematic_fallback(
+            self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
+        """Parameter-free fallback used by the strict ``-B1`` ablation."""
+        if ref_boxs.dim() != 3 or ref_boxs.shape[-1] != 4:
+            raise ValueError("motion ref_boxs must have shape [B,H,4]")
+        batch_size, history_length, _ = ref_boxs.shape
+        if history_length < 2:
+            raise ValueError("kinematic fallback requires at least two boxes")
+        if delta_t.dim() == 1:
+            delta_t = delta_t.unsqueeze(0)
+        delta_t = delta_t.to(device=ref_boxs.device, dtype=ref_boxs.dtype)
+        valid_mask = valid_mask.to(
+            device=ref_boxs.device, dtype=ref_boxs.dtype)
+        if valid_mask.dim() == 1:
+            valid_mask = valid_mask.unsqueeze(0)
+        if valid_mask.shape != ref_boxs.shape[:2]:
+            raise ValueError("motion valid_mask must have shape [B,H]")
+        query_gap, query_finite = self._format_query_gap(
+            current_delta_t, batch_size, ref_boxs)
+        safe_boxs = torch.nan_to_num(
+            ref_boxs, nan=0.0, posinf=0.0, neginf=0.0)
+        safe_delta_t = torch.nan_to_num(
+            delta_t, nan=self.time_scale,
+            posinf=self.time_scale, neginf=self.time_scale)
+        if safe_delta_t.shape[1] < history_length:
+            safe_delta_t = torch.cat((
+                safe_delta_t,
+                safe_delta_t[:, -1:].expand(
+                    -1, history_length - safe_delta_t.shape[1])), dim=1)
+        pair_gap = torch.clamp(
+            safe_delta_t[:, 1:history_length], min=self.eps)
+        pair_valid = (
+            (valid_mask[:, :-1] > 0) & (valid_mask[:, 1:] > 0))
+        finite_row = (
+            torch.isfinite(ref_boxs).flatten(1).all(dim=1)
+            & torch.isfinite(delta_t).all(dim=1)
+            & query_finite)
+        valid = (pair_valid[:, 0] & finite_row).to(ref_boxs.dtype)
+        velocity_xy = (
+            safe_boxs[:, :-1, :2] - safe_boxs[:, 1:, :2]
+        ) / pair_gap.unsqueeze(2)
+        base_velocity = velocity_xy[:, 0] * valid.unsqueeze(1)
+        pair_valid_f = pair_valid.to(ref_boxs.dtype)
+        transition_count = pair_valid_f.sum(dim=1)
+        nominal_gap = (
+            (pair_gap * pair_valid_f).sum(dim=1)
+            / torch.clamp(transition_count, min=1.0))
+        gap_ratio_raw = query_gap / torch.clamp(nominal_gap, min=self.eps)
+
+        older_pair_valid = (
+            pair_valid[:, 1] if pair_valid.shape[1] > 1
+            else torch.zeros_like(pair_valid[:, 0]))
+        older_velocity = (
+            velocity_xy[:, 1] if velocity_xy.shape[1] > 1
+            else torch.zeros_like(base_velocity))
+        acceleration_gap = torch.clamp(
+            0.5 * (pair_gap[:, 0] + (
+                pair_gap[:, 1] if pair_gap.shape[1] > 1
+                else pair_gap[:, 0])), min=self.eps)
+        acceleration = (
+            (base_velocity - older_velocity)
+            / acceleration_gap.unsqueeze(1))
+        acceleration = acceleration * older_pair_valid.to(
+            ref_boxs.dtype).unsqueeze(1)
+        acceleration_norm = torch.linalg.norm(
+            acceleration, dim=1, keepdim=True)
+        acceleration = acceleration * torch.clamp(
+            self.max_acceleration / torch.clamp(
+                acceleration_norm, min=self.eps), max=1.0)
+        kinematic_xy = (
+            base_velocity * query_gap.unsqueeze(1)
+            + self.acceleration_weight * 0.5 * acceleration
+            * query_gap.pow(2).unsqueeze(1))
+        displacement_norm = torch.linalg.norm(
+            kinematic_xy, dim=1, keepdim=True)
+        kinematic_xy = kinematic_xy * torch.clamp(
+            self.max_displacement / torch.clamp(
+                displacement_norm, min=self.eps), max=1.0
+        ) * valid.unsqueeze(1)
+
+        velocity_spread = torch.linalg.norm(
+            base_velocity - older_velocity, dim=1)
+        velocity_spread = velocity_spread * older_pair_valid.to(
+            ref_boxs.dtype)
+        envelope = torch.stack((
+            torch.clamp(
+                0.25 + 0.25 * query_gap
+                + 0.5 * velocity_spread * query_gap, max=4.0),
+            torch.clamp(
+                0.20 + 0.15 * query_gap
+                + 0.25 * velocity_spread * query_gap, max=3.0),
+        ), dim=1)
+        direction, _, _ = motion_aligned_axes(
+            kinematic_xy,
+            min_speed=self.min_direction_speed,
+            eps=self.eps)
+        log_sigma = torch.log(torch.clamp(envelope, min=0.1))
+        uncertainty = motion_aligned_covariance(
+            base_velocity, log_sigma,
+            min_speed=self.min_direction_speed,
+            eps=self.eps, direction_xy=direction)
+        zeros_xy = torch.zeros_like(kinematic_xy)
+        gap_ratio = torch.where(
+            valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw))
+        return {
+            "feature": ref_boxs.new_zeros((batch_size, self.hidden_dim)),
+            "velocity_xy": kinematic_xy / torch.clamp(
+                query_gap.unsqueeze(1), min=self.eps),
+            "basis_velocity_xy": base_velocity,
+            "prior_xy": kinematic_xy,
+            "mu_xy": kinematic_xy,
+            "kinematic_prior_xy": kinematic_xy,
+            "residual_unit_parallel_perp": zeros_xy,
+            "residual_xy": zeros_xy,
+            "envelope_parallel_perp": envelope,
+            **uncertainty,
+            "direction_xy": uncertainty["motion_direction_xy"],
+            "valid": valid,
+            "gap_ratio": gap_ratio,
+            "source_id": torch.zeros(
+                batch_size, device=ref_boxs.device, dtype=torch.long),
+        }
+
     def forward(
             self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
         if ref_boxs.dim() != 3 or ref_boxs.shape[-1] != 4:

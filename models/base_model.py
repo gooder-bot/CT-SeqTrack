@@ -39,13 +39,19 @@ from models.state_filter import (
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    combined_search_support_statistics,
     resolve_b1_search_support,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
+    useful_search_coverage_need,
 )
 from utils.replay_cache import b2_candidate_config_sha256
+from utils.recursive_state import (
+    build_recursive_input_contract,
+    RecursiveTrackState,
+)
 
 import time
 
@@ -597,7 +603,7 @@ class BaseModelMF(pl.LightningModule):
         observation = xy("observation_aux_estimation_boxes", (0.0, 0.0))
         kinematic = xy("motion_prior_kinematic_xy", observation)
         learned = xy("motion_prior_xy", kinematic)
-        raw_search = xy("ct_search_raw_xy", observation)
+        raw_search = xy("ct_search_unmasked_raw_xy", observation)
         final = xy("aux_estimation_boxes", observation)
 
         def foreground_count(points_key, mask_key):
@@ -647,7 +653,7 @@ class BaseModelMF(pl.LightningModule):
                 raw_search - target_xy)),
             "final_error": float(np.linalg.norm(final - target_xy)),
             "query_gate": self._proposal_scalar(
-                output, "ct_query_gate"),
+                output, "ct_query_gate_internal"),
             "query_shift_norm": self._proposal_scalar(
                 output, "ct_query_shift_norm"),
             "router_gate": self._proposal_scalar(
@@ -811,12 +817,20 @@ class BaseModelMF(pl.LightningModule):
         m4_diagnostics = []
         proposal_diagnostics = []
         b3_rollouts = []
+        recursive_state = None
         for frame_id in range(len(sequence)):  # tracklet
             if frame_id == 0:
                 # the first frame
                 this_bb = sequence[frame_id]["3d_bbox"]
                 prev_bb = sequence[frame_id]["3d_bbox"]
                 results_bbs.append(this_bb)
+                recursive_state = RecursiveTrackState(
+                    tracklet_id=0,
+                    tracklet_key=str(sequence[0].get(
+                        'tracklet_key', sequence[0].get('tracklet_id', 'eval'))),
+                    first_box=this_bb,
+                    timestamps={0: sequence[0].get('timestamp')},
+                )
                 new_refboxs = [prev_bb] # Update in special cases
                 if m4_filter is not None:
                     initial_timestamp = self._m4_timestamp(sequence, frame_id)
@@ -858,7 +872,9 @@ class BaseModelMF(pl.LightningModule):
                 if motion_prediction is not None:
                     build_kwargs["motion_prediction"] = motion_prediction
                 data_dict, ref_bb = self.build_input_dict(
-                    sequence, frame_id, results_bbs, **build_kwargs)
+                    sequence, frame_id, recursive_state.results_bbs,
+                    recursive_state=recursive_state,
+                    **build_kwargs)
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
                     if (m4_filter_enabled
@@ -1004,6 +1020,10 @@ class BaseModelMF(pl.LightningModule):
                         self, "_m4_last_input_diagnostics", {}))
 
             
+            if frame_id > 0:
+                recursive_state.append(
+                    frame_id, results_bbs[-1],
+                    sequence[frame_id].get('timestamp'))
             this_overlap = estimateOverlap(this_bb, results_bbs[-1], dim=self.config.IoU_space,
                                            up_axis=self.config.up_axis)
 
@@ -1261,16 +1281,55 @@ class MotionBaseModelMF(BaseModelMF):
             kwargs["motion_prediction"] = predictor(
                 sequence, frame_id, results_bbs)
 
-        prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(frame_id,self.hist_num)
+        recursive_state = kwargs.get('recursive_state')
+        use_recursive_contract = bool(getattr(
+            self.config, 'use_ct_joint_full', False)) or bool(getattr(
+                self.config, 'observation_safe_bbox_size', False))
+        if use_recursive_contract and recursive_state is not None:
+            recursive_contract = build_recursive_input_contract(
+                recursive_state, frame_id, self.hist_num, self.config,
+                candidate_id=0)
+            prev_frame_ids = recursive_contract['history_frame_ids']
+            valid_mask = recursive_contract['history_valid_mask'].tolist()
+            ref_boxs = recursive_state.history_boxes(
+                prev_frame_ids, valid_mask)
+            prev_sampling_seeds = recursive_contract[
+                'point_sampling_seeds'].tolist()
+            current_sampling_seed = int(
+                recursive_contract['current_sampling_seed'])
+        elif use_recursive_contract:
+            prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
+                frame_id, self.hist_num)
+            ref_boxs = get_last_n_bounding_boxes(results_bbs, valid_mask)
+            fallback_state = RecursiveTrackState(
+                tracklet_id=0,
+                tracklet_key=str(sequence[0].get(
+                    'tracklet_key', sequence[0].get(
+                        'tracklet_id', 'eval'))),
+                first_box=results_bbs[0])
+            for prediction_id, prediction in enumerate(results_bbs[1:], 1):
+                fallback_state.append(prediction_id, prediction)
+            recursive_contract = build_recursive_input_contract(
+                fallback_state, frame_id, self.hist_num, self.config,
+                candidate_id=0)
+            prev_sampling_seeds = recursive_contract[
+                'point_sampling_seeds'].tolist()
+            current_sampling_seed = int(
+                recursive_contract['current_sampling_seed'])
+        else:
+            prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
+                frame_id, self.hist_num)
+            ref_boxs = get_last_n_bounding_boxes(results_bbs, valid_mask)
+            prev_sampling_seeds = [None] * len(prev_frame_ids)
+            current_sampling_seed = 1
+            recursive_contract = None
         prev_frames = [sequence[id] for id in prev_frame_ids]
         this_frame = sequence[frame_id]
         this_pc = this_frame['pc']
         prev_pcs = [frame['pc'] for frame in prev_frames]
-        ref_boxs = get_last_n_bounding_boxes(results_bbs,valid_mask)
         bbox_size = (
-            ref_boxs[0].wlh
-            if bool(getattr(
-                self.config, 'observation_safe_bbox_size', False))
+            recursive_contract['target_size']
+            if use_recursive_contract
             else this_frame['3d_bbox'].wlh)
         num_hist = len(valid_mask)
         default_time_step = getattr(
@@ -1639,7 +1698,13 @@ class MotionBaseModelMF(BaseModelMF):
             points_utils.transform_box(ref_box, ref_boxs[0]) for ref_box in ref_boxs
         ]
 
-        prev_points_list = [points_utils.regularize_pc(prev_frame_pc.points.T, self.config.point_sample_size)[0] for prev_frame_pc in prev_frame_pcs] #采样到特定数量,这里的策略是在已有的点里面重复随机选，直到达到特定数量
+        prev_points_list = [
+            points_utils.regularize_pc(
+                prev_frame_pc.points.T, self.config.point_sample_size,
+                seed=seed)[0]
+            for prev_frame_pc, seed in zip(
+                prev_frame_pcs, prev_sampling_seeds)
+        ]
 
         trajectory_search_points = np.zeros(
             (int(getattr(self.config, "ct_tube_quota", 128)
@@ -1655,18 +1720,21 @@ class MotionBaseModelMF(BaseModelMF):
         }
         trajectory_search_point_valid_mask = np.zeros(
             (trajectory_search_points.shape[0],), dtype=np.float32)
+        trajectory_search_point_source = np.zeros(
+            (trajectory_search_points.shape[0],), dtype=np.int64)
         if use_trajectory_search:
             this_points, idx_this = points_utils.regularize_pc(
                 baseline_search_points,
                 self.config.point_sample_size,
-                seed=1,
+                seed=current_sampling_seed,
             )
             if use_ct_joint_full:
                 (trajectory_search_points,
                  trajectory_search_point_valid_mask,
-                 _, trajectory_search_sampling) = (
+                 trajectory_search_point_source,
+                 trajectory_search_sampling) = (
                     sample_source_aware_endpoint_points(
-                        baseline_search_points[:0],
+                        baseline_search_points,
                         expanded_search_points,
                         sample_size=int(getattr(
                             self.config, "ct_tube_quota", 128)),
@@ -1674,7 +1742,7 @@ class MotionBaseModelMF(BaseModelMF):
                             self.config, "ct_tube_quota", 128)),
                         min_points=int(getattr(
                             self.config, "ct_search_min_points", 3)),
-                        seed=1,
+                        seed=current_sampling_seed,
                     ))
             else:
                 trajectory_search_points, trajectory_search_sampling = (
@@ -1685,7 +1753,7 @@ class MotionBaseModelMF(BaseModelMF):
                             self.config, "trajectory_search_point_count", 128)),
                         min_expansion_points=int(getattr(
                             self.config, "trajectory_search_min_points", 16)),
-                        seed=1,
+                        seed=current_sampling_seed,
                     ))
                 trajectory_search_point_valid_mask.fill(
                     float(trajectory_search_sampling["active"]))
@@ -1710,7 +1778,7 @@ class MotionBaseModelMF(BaseModelMF):
                     self.config, "ct_search_baseline_ratio", 0.75)),
                 min_expansion_points=int(getattr(
                     self.config, "ct_search_min_expansion_points", 32)),
-                seed=1,
+                seed=current_sampling_seed,
             )
             ct_search_active = (
                 ct_search_sampling["expansion_sample_count"] > 0)
@@ -1722,7 +1790,7 @@ class MotionBaseModelMF(BaseModelMF):
             this_points, idx_this = points_utils.regularize_pc(
                 this_frame_pc.points.T,
                 self.config.point_sample_size,
-                seed=1)
+                seed=current_sampling_seed)
             ct_search_sampling = {
                 "baseline_sample_count": int(self.config.point_sample_size),
                 "expansion_sample_count": 0,
@@ -1747,7 +1815,7 @@ class MotionBaseModelMF(BaseModelMF):
         }
         if use_endpoint_search_evidence and search_v2_box is not None:
             search_v2_seed = (
-                int(frame_id) * 1664525 + 1013904223
+                int(current_sampling_seed) * 1664525 + 1013904223
             ) & 0xFFFFFFFF
             if (use_search_evidence_v21 or use_search_evidence_v22
                     or use_search_evidence_v3):
@@ -1774,25 +1842,55 @@ class MotionBaseModelMF(BaseModelMF):
                         'min_points', 3)),
                     seed=search_v2_seed,
                 )
-        if use_ct_joint_full and not search_v2_sampling["active"]:
-            search_v2_seed = (
-                int(frame_id) * 1664525 + 1013904223
-            ) & 0xFFFFFFFF
-            (search_v2_points,
-             search_v2_point_valid_mask,
-             search_v2_point_source,
-             search_v2_sampling) = sample_source_aware_endpoint_points(
-                baseline_search_points,
-                baseline_search_points,
-                sample_size=search_v2_point_count,
-                extension_quota=0,
-                min_points=int(search_config_value('min_points', 3)),
-                seed=search_v2_seed,
-            )
-            search_v2_diagnostics.update({
-                "prior_source": "base_only",
-                "source_id": 0,
-            })
+        joint_support = combined_search_support_statistics(
+            (search_v2_points, trajectory_search_points),
+            (search_v2_point_valid_mask,
+             trajectory_search_point_valid_mask),
+            (search_v2_point_source, trajectory_search_point_source),
+            voxel_size=float(getattr(
+                self.config, 'ct_search_extension_voxel_size', 0.2)),
+        )
+        coverage_need, endpoint_ratio = useful_search_coverage_need(
+            search_v2_diagnostics.get(
+                'query_delta_t', effective_delta_t_list[0]),
+            search_v2_diagnostics.get('gap_ratio', 1.0),
+            search_v2_endpoint_xy,
+            coordinate_anchor_box.wlh,
+            len(baseline_search_points),
+            min_delta_t=float(getattr(
+                self.config, 'trajectory_search_min_delta_t', 0.75)),
+            min_gap_ratio=float(getattr(
+                self.config, 'trajectory_search_min_gap_ratio', 1.5)),
+            min_endpoint_ratio=float(getattr(
+                self.config, 'ct_search_endpoint_ratio', 0.6)),
+            sparse_base_points=int(getattr(
+                self.config, 'ct_search_sparse_base_points', 64)),
+            bb_scale=float(self.config.bb_scale),
+            bb_offset=float(self.config.bb_offset),
+        )
+        recent_history_valid = bool(
+            len(valid_mask) >= 2 and int(valid_mask[0]) and int(valid_mask[1]))
+        query_dt_value = float(search_v2_diagnostics.get(
+            'query_delta_t', effective_delta_t_list[0]))
+        time_valid = bool(np.isfinite(query_dt_value) and query_dt_value > 0.0)
+        proposal_valid = bool(
+            search_v2_diagnostics.get('valid', False)
+            and not search_v2_diagnostics.get(
+                'constraint_clipped', False)
+            and np.isfinite(search_v2_endpoint_xy).all()
+            and float(search_v2_diagnostics.get('displacement', 0.0))
+            >= float(getattr(
+                self.config, 'trajectory_search_min_displacement', 0.2)))
+        point_support_valid = bool(
+            joint_support['total_count'] >= int(getattr(
+                self.config, 'ct_search_min_total_points', 16))
+            and joint_support['extension_count'] >= int(getattr(
+                self.config, 'ct_search_min_extension_points', 8))
+            and joint_support['extension_voxels'] >= int(getattr(
+                self.config, 'ct_search_min_extension_voxels', 4)))
+        search_support_valid = bool(
+            recent_history_valid and time_valid and proposal_valid
+            and coverage_need and point_support_valid)
         search_has_usable_points = num_points_in_search > 2
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
@@ -1895,7 +1993,8 @@ class MotionBaseModelMF(BaseModelMF):
                          [search_has_usable_points],
                          device=self.device, dtype=torch.float32),
                      "ct_search_used": torch.tensor(
-                         [ct_search_active],
+                         [search_support_valid
+                          if use_ct_joint_full else ct_search_active],
                          device=self.device, dtype=torch.float32),
                      "ct_search_expansion_ratio": torch.tensor(
                          [ct_search_sampling["expansion_sample_count"]
@@ -1914,6 +2013,39 @@ class MotionBaseModelMF(BaseModelMF):
                       "ct_search_predicted_displacement": torch.tensor(
                           [ct_search_diagnostics.get("displacement", 0.0)],
                           device=self.device, dtype=torch.float32),
+                      "ct_search_support_valid": torch.tensor(
+                          [search_support_valid], device=self.device,
+                          dtype=torch.float32),
+                      "candidate_valid": torch.tensor(
+                          [search_support_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_history_valid": torch.tensor(
+                          [recent_history_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_time_valid": torch.tensor(
+                          [time_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_proposal_valid": torch.tensor(
+                          [proposal_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_point_support_valid": torch.tensor(
+                          [point_support_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_coverage_need": torch.tensor(
+                          [coverage_need], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_endpoint_ratio": torch.tensor(
+                          [endpoint_ratio], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_total_point_count": torch.tensor(
+                          [joint_support['total_count']], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_extension_count": torch.tensor(
+                          [joint_support['extension_count']], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_extension_voxels": torch.tensor(
+                          [joint_support['extension_voxels']], device=self.device,
+                          dtype=torch.float32),
                       }
         if bool(getattr(self.config, "use_b1motion_v3", False)):
             # Online history is already recursive and expressed in the latest
@@ -1951,8 +2083,16 @@ class MotionBaseModelMF(BaseModelMF):
                 "trajectory_search_point_valid_mask": torch.tensor(
                     trajectory_search_point_valid_mask[None, :],
                     device=self.device, dtype=torch.float32),
+                "trajectory_search_point_source": torch.tensor(
+                    trajectory_search_point_source[None, :],
+                    device=self.device, dtype=torch.long),
+                # Stable branch contract: 0=baseline, 1=endpoint, 2=tube.
+                "trajectory_search_branch_source": torch.full(
+                    (1, trajectory_search_points.shape[0]), 2,
+                    device=self.device, dtype=torch.long),
                 "trajectory_search_valid": torch.tensor(
-                    [trajectory_search_sampling["active"]],
+                    [search_support_valid if use_ct_joint_full
+                     else trajectory_search_sampling["active"]],
                     device=self.device, dtype=torch.float32),
                 "trajectory_search_gap_ratio": torch.tensor(
                     [ct_search_diagnostics.get("gap_ratio", 1.0)],
@@ -2089,9 +2229,27 @@ class MotionBaseModelMF(BaseModelMF):
                 "search_v3_point_source": torch.tensor(
                     search_v2_point_source[None, :],
                     device=self.device, dtype=torch.long),
+                "search_v3_branch_source": torch.ones(
+                    (1, search_v2_points.shape[0]),
+                    device=self.device, dtype=torch.long),
                 "search_v3_geometry_valid": torch.tensor(
-                    [search_v2_sampling["active"]],
+                    [search_support_valid],
                     device=self.device, dtype=torch.float32),
+                "search_v3_support_valid": torch.tensor(
+                    [search_support_valid],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_total_point_count": torch.tensor(
+                    [joint_support['total_count']],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_joint_extension_count": torch.tensor(
+                    [joint_support['extension_count']],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_extension_voxels": torch.tensor(
+                    [joint_support['extension_voxels']],
+                    device=self.device, dtype=torch.float32),
+                "search_v3_endpoint_ratio": torch.tensor(
+                    [endpoint_ratio], device=self.device,
+                    dtype=torch.float32),
                 "search_v3_support_anchor_xy": torch.tensor(
                     search_v2_endpoint_xy[None, :],
                     device=self.device, dtype=torch.float32),
