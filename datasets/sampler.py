@@ -37,6 +37,7 @@ from utils.candidate_utils import (
     anchor_relative_trajectory_targets,
     apply_shared_se2_to_boxes,
     boxes_to_anchor_parameters,
+    build_b1_physical_contract,
     build_ct_training_histories,
     canonical_dynamics_targets,
     equivalent_local_offsets,
@@ -50,6 +51,7 @@ from utils.ct_search import (
     build_time_guided_search_box,
     combined_search_support_statistics,
     resolve_b1_search_support,
+    resolve_joint_search_geometry,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
@@ -268,10 +270,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     prev_pcs  = [prev_frames[key]['pc'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     prev_boxs = [prev_frames[key]['3d_bbox'] for key in sorted(prev_frames,key=lambda k: abs(int(k)))] # Ordered point clouds, -1, -2, -3
     this_pc, this_box = this_frame['pc'], this_frame['3d_bbox']
+    joint_contract_v2 = bool(
+        getattr(config, 'ct_joint_contract_version', 1) >= 2)
     # Keep the untouched GT trajectory for M1 labels and invariance audits.
     # ``transform_box`` is non-mutating, but the local variables below are
     # intentionally rebound to candidate-coordinate boxes.
-    canonical_prev_boxs = list(prev_boxs)
+    ground_truth_history = list(prev_boxs)
+    recursive_history = list(prev_boxs)
+    candidate_history = None
+    # Contract-v1-only compatibility alias.  Contract v2 never uses this
+    # name to stand for GT, recursive state, and candidate state at once.
+    legacy_canonical_prev_boxs = list(prev_boxs)
     canonical_this_box = this_box
     if online_recursive_state is not None:
         state_rows = np.asarray(
@@ -290,7 +299,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         # Every input branch starts from the same deployed recursive state.
         # Current-frame GT remains available only for labels below.
         prev_boxs = online_boxs
-        canonical_prev_boxs = list(online_boxs)
+        legacy_canonical_prev_boxs = list(online_boxs)
+        recursive_history = list(online_boxs)
+    motion_anchor_box = recursive_history[0]
     sorted_prev_keys = sorted(prev_frames, key=lambda k: abs(int(k)))
     prev_timestamps = (
         list(online_recursive_state['history_timestamps'])
@@ -404,6 +415,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             ref_boxs.append(ref_box)
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
+    candidate_history = list(ref_boxs)
 
     if recursive_replay is not None:
         if int(candidate_id) != 0:
@@ -415,7 +427,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             raise ValueError(
                 f"recursive replay history must have shape {(num_hist, 7)}")
         ref_boxs = []
-        for source_box, row in zip(canonical_prev_boxs, replay_rows):
+        for source_box, row in zip(
+                legacy_canonical_prev_boxs, replay_rows):
             replay_box = copy.deepcopy(source_box)
             replay_box.center = row[:3].copy()
             replay_box.wlh = row[3:6].copy()
@@ -423,7 +436,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 axis=[0, 0, 1], radians=float(row[6]))
             ref_boxs.append(replay_box)
         candidate_offsets = equivalent_local_offsets(
-            canonical_prev_boxs, ref_boxs, degrees=config.degrees)
+            legacy_canonical_prev_boxs, ref_boxs, degrees=config.degrees)
         candidate_shared_transform = np.zeros(3, dtype=np.float32)
         candidate_shared_world_translation = np.zeros(3, dtype=np.float32)
 
@@ -445,8 +458,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 candidate_id,
                 seed=int(getattr(config, 'seed', 42)),
             ))
+    history_base_boxs = (
+        recursive_history if joint_contract_v2
+        else legacy_canonical_prev_boxs)
     ct_motion_history_boxs, ct_search_history_boxs = build_ct_training_histories(
-        canonical_prev_boxs,
+        history_base_boxs,
         ref_boxs,
         candidate_offsets,
         candidate_id,
@@ -470,10 +486,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         # Candidate recovery views are coherent transformations of the full
         # deployed state.  Do not synthesize a second, independently perturbed
         # motion or Search history.
-        ct_motion_history_boxs = ref_boxs
-        ct_search_history_boxs = ref_boxs
+        ct_motion_history_boxs = candidate_history
+        ct_search_history_boxs = candidate_history
+    canonical_label_boxs = (
+        ground_truth_history if joint_contract_v2
+        else legacy_canonical_prev_boxs)
     canonical_ref_boxs = boxes_to_anchor_parameters(
-        canonical_prev_boxs, canonical_prev_boxs[0], degrees=config.degrees)
+        canonical_label_boxs, canonical_label_boxs[0],
+        degrees=config.degrees)
     use_ordered_trajectory = bool(getattr(
         config, 'use_ordered_trajectory_encoder', False))
     if use_ordered_trajectory:
@@ -485,7 +505,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     else:
         # Frozen legacy B1 checkpoints keep their original GT-anchor contract.
         ordered_motion_history_boxs = ct_motion_history_boxs
-        ordered_motion_anchor = canonical_prev_boxs[0]
+        ordered_motion_anchor = legacy_canonical_prev_boxs[0]
     ct_motion_ref_boxs = boxes_to_anchor_parameters(
         ordered_motion_history_boxs,
         ordered_motion_anchor,
@@ -499,21 +519,32 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         # older estimated-box errors evolve smoothly.  Using the clean newest
         # GT box here would expose candidate anchor error that is unavailable
         # online and recreate the v2 identifiability bug.
-        motion_main_ref_boxs = boxes_to_anchor_parameters(
-            ct_search_history_boxs,
-            ref_boxs[0],
-            degrees=config.degrees,
-        )
+        if joint_contract_v2:
+            # B1 is candidate-view invariant.  Recovery views alter the B0
+            # crop and Search anchor, not the physical history signal.
+            motion_main_ref_boxs = boxes_to_anchor_parameters(
+                recursive_history,
+                motion_anchor_box,
+                degrees=config.degrees,
+            )
+        else:
+            motion_main_ref_boxs = boxes_to_anchor_parameters(
+                ct_search_history_boxs,
+                ref_boxs[0],
+                degrees=config.degrees,
+            )
         if not np.allclose(
                 motion_main_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
             raise ValueError(
                 "B1motion-v3 newest main history must equal the crop anchor")
         if use_search_evidence_v3:
-            shared_search_ref_boxs = boxes_to_anchor_parameters(
-                ct_search_history_boxs,
-                ref_boxs[0],
-                degrees=config.degrees,
-            )
+            shared_search_ref_boxs = (
+                motion_main_ref_boxs.copy()
+                if joint_contract_v2 else boxes_to_anchor_parameters(
+                    ct_search_history_boxs,
+                    ref_boxs[0],
+                    degrees=config.degrees,
+                ))
             if not np.array_equal(
                     motion_main_ref_boxs, shared_search_ref_boxs):
                 raise RuntimeError(
@@ -579,10 +610,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 "B1motion-v3 training requires motion_aux_prev_frames")
         motion_aux_keys = sorted(
             motion_aux_prev_frames, key=lambda key: abs(int(key)))
-        motion_aux_canonical_boxs = [
+        motion_aux_ground_truth_boxs = [
             motion_aux_prev_frames[key]['3d_bbox']
             for key in motion_aux_keys
         ]
+        motion_aux_canonical_boxs = list(motion_aux_ground_truth_boxs)
         motion_aux_valid_mask = list(data['motion_aux_valid_mask'])
         motion_aux_frame_ids = list(data['motion_aux_frame_ids'])
         online_motion_aux_state = data.get('online_motion_aux_state')
@@ -646,12 +678,20 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             # Auxiliary gaps obey the same causal state contract as the main
             # B1 history; no independently synthesized history is allowed.
             motion_aux_history_boxs = motion_aux_candidate_boxs
-        motion_aux_anchor = motion_aux_candidate_boxs[0]
-        motion_aux_ref_boxs = boxes_to_anchor_parameters(
-            motion_aux_history_boxs,
-            motion_aux_anchor,
-            degrees=config.degrees,
-        )
+        if joint_contract_v2:
+            motion_aux_anchor = motion_aux_canonical_boxs[0]
+            motion_aux_ref_boxs = boxes_to_anchor_parameters(
+                motion_aux_canonical_boxs,
+                motion_aux_anchor,
+                degrees=config.degrees,
+            )
+        else:
+            motion_aux_anchor = motion_aux_candidate_boxs[0]
+            motion_aux_ref_boxs = boxes_to_anchor_parameters(
+                motion_aux_history_boxs,
+                motion_aux_anchor,
+                degrees=config.degrees,
+            )
         if not np.allclose(
                 motion_aux_ref_boxs[0], 0.0, rtol=0.0, atol=1e-5):
             raise ValueError(
@@ -694,14 +734,30 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             motion_aux_delta_t_effective[0]
             if motion_aux_delta_t_effective else float(getattr(
                 config, 'dynamics_fixed_delta_t', default_time_step)))
-        motion_aux_target_xy, _ = physical_motion_targets(
-            canonical_this_box,
-            motion_aux_canonical_boxs[0],
-            motion_aux_anchor,
-            motion_aux_current_delta_t_real,
-            degrees=config.degrees,
-            eps=1e-3,
-        )
+        if joint_contract_v2:
+            motion_aux_physical = build_b1_physical_contract(
+                canonical_this_box,
+                motion_aux_ground_truth_boxs,
+                motion_aux_canonical_boxs,
+                motion_aux_current_delta_t_real,
+                degrees=config.degrees,
+                eps=1e-3,
+            )
+            if not np.array_equal(
+                    motion_aux_ref_boxs,
+                    motion_aux_physical['ref_boxs']):
+                raise RuntimeError(
+                    "B1 auxiliary input and physical-label axes diverged")
+            motion_aux_target_xy = motion_aux_physical['target_xy']
+        else:
+            motion_aux_target_xy, _ = physical_motion_targets(
+                canonical_this_box,
+                motion_aux_canonical_boxs[0],
+                motion_aux_anchor,
+                motion_aux_current_delta_t_real,
+                degrees=config.degrees,
+                eps=1e-3,
+            )
         motion_aux_contract = {
             'motion_aux_ref_boxs': motion_aux_ref_boxs.astype('float32'),
             'motion_aux_delta_t': np.asarray(
@@ -764,7 +820,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 "ct_search_training_history must be canonical, candidate, "
                 "or correlated_candidate")
         if search_history_mode == 'canonical':
-            search_history_boxes = canonical_prev_boxs
+            search_history_boxes = (
+                recursive_history if joint_contract_v2
+                else legacy_canonical_prev_boxs)
         elif search_history_mode == 'candidate':
             search_history_boxes = ref_boxs
         else:
@@ -913,7 +971,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if use_endpoint_search_evidence:
         if use_search_evidence_v3:
             search_v2_history_mode = b2_v3_history_mode
-            search_v2_history_boxes = ct_search_history_boxs
+            search_v2_history_boxes = (
+                recursive_history if joint_contract_v2
+                else ct_search_history_boxs)
         elif int(candidate_id) == 0:
             search_v2_history_mode = 'canonical'
         elif sample_index % 2 == 0:
@@ -922,7 +982,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             search_v2_history_mode = 'recursive_candidate'
         if not use_search_evidence_v3:
             _, search_v2_history_boxes = build_ct_training_histories(
-                canonical_prev_boxs,
+                history_base_boxs,
                 ref_boxs,
                 candidate_offsets,
                 candidate_id,
@@ -937,17 +997,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             recursive_replay.get('b1')
             if recursive_replay is not None else None)
         use_prepass_support = (
-            False if use_ct_joint_full else bool(getattr(
-                config, 'use_b1_prepass_support', False)))
-        support_prediction = replay_b1
+            bool(getattr(config, 'use_b1_prepass_support', False))
+            if (not use_ct_joint_full or joint_contract_v2)
+            else False)
+        support_prediction = data.get('motion_prediction', replay_b1)
         if isinstance(replay_b1, dict) and recursive_replay is not None:
             support_prediction = dict(replay_b1)
             support_prediction.setdefault(
                 'current_delta_t', recursive_replay['current_delta_t'])
-        search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
-            search_v2_history_boxes,
-            effective_delta_t_list,
-            valid_mask,
+        support_kwargs = dict(
             prediction=support_prediction,
             use_b1_prepass=use_prepass_support,
             use_dynamic_sigma=bool(getattr(
@@ -974,9 +1032,33 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             fallback_max_yaw_rate=float(search_config_value(
                 'max_yaw_rate', np.pi / 2.0)),
             fallback_min_displacement=float(search_config_value(
-                'min_displacement', 0.2)),
+                'min_displacement', 0.2))
+            if not (use_ct_joint_full and joint_contract_v2) else 0.0,
             fallback_require_recent_transition=use_ct_joint_full,
         )
+        if use_ct_joint_full and joint_contract_v2:
+            (search_v2_box,
+             ct_search_box,
+             search_v2_diagnostics) = resolve_joint_search_geometry(
+                search_v2_history_boxes,
+                effective_delta_t_list,
+                valid_mask,
+                **support_kwargs,
+            )
+            if ct_search_box is not None:
+                ct_search_diagnostics = dict(search_v2_diagnostics)
+                expanded_search_pc = (
+                    points_utils.generate_subwindow_with_aroundboxs(
+                        this_pc, ct_search_box, ref_boxs[0],
+                        scale=1.0, offset=0.0))
+                expanded_search_points = expanded_search_pc.points.T
+        else:
+            search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
+                search_v2_history_boxes,
+                effective_delta_t_list,
+                valid_mask,
+                **support_kwargs,
+            )
         if search_v2_box is not None:
             learned_prior_support = (
                 search_v2_diagnostics.get('prior_source') == 'b1')
@@ -1017,6 +1099,13 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     )
     coordinate_anchor = np.append(
         coordinate_anchor_box.center, coordinate_anchor_theta).astype('float32')
+    motion_anchor_theta = (
+        motion_anchor_box.orientation.degrees
+        * motion_anchor_box.orientation.axis[-1]
+        if config.degrees else motion_anchor_box.orientation.radians
+        * motion_anchor_box.orientation.axis[-1])
+    motion_anchor = np.append(
+        motion_anchor_box.center, motion_anchor_theta).astype('float32')
 
     this_box    = points_utils.transform_box(this_box, ref_boxs[0]) 
     prev_boxs   = [points_utils.transform_box(prev_box, ref_boxs[0]) for prev_box in prev_boxs] 
@@ -1203,9 +1292,23 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             config, 'ct_search_min_extension_points', 8))
         and joint_support['extension_voxels'] >= int(getattr(
             config, 'ct_search_min_extension_voxels', 4)))
-    search_support_valid = bool(
-        recent_history_valid and time_valid and proposal_valid
-        and coverage_need and point_support_valid)
+    geometry_valid = bool(
+        recent_history_valid and time_valid
+        and search_v2_box is not None and ct_search_box is not None
+        and search_v2_diagnostics.get('valid', False)
+        and np.isfinite(search_v2_endpoint_xy).all())
+    structural_point_valid = bool(joint_support['total_count'] >= 3)
+    new_support_valid = bool(
+        joint_support['extension_count'] >= 1
+        and joint_support['extension_voxels'] >= 1)
+    if use_ct_joint_full and joint_contract_v2 and bool(getattr(
+            config, 'ct_search_relaxed_validity', True)):
+        search_support_valid = bool(
+            geometry_valid and structural_point_valid and new_support_valid)
+    else:
+        search_support_valid = bool(
+            recent_history_valid and time_valid and proposal_valid
+            and coverage_need and point_support_valid)
     ct_search_active = ct_search_sampling['expansion_sample_count'] > 0
     num_points_in_search = int(len(baseline_search_points))
     if ct_search_active:
@@ -1334,7 +1437,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     # Supervision is always defined in physical time. A fixed/shuffled negative
     # control may alter only the time consumed by DynamicsEncoder.
     dynamics_displacement_label, velocity_label = canonical_dynamics_targets(
-        canonical_prev_boxs,
+        canonical_label_boxs,
         canonical_this_box,
         current_delta_t_real,
         degrees=config.degrees,
@@ -1350,14 +1453,30 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         ))
     motion_main_target_xy = None
     if use_motion_v3:
-        motion_main_target_xy, _ = physical_motion_targets(
-            canonical_this_box,
-            canonical_prev_boxs[0],
-            coordinate_anchor_box,
-            current_delta_t_real,
-            degrees=config.degrees,
-            eps=1e-3,
-        )
+        if joint_contract_v2:
+            motion_main_physical = build_b1_physical_contract(
+                canonical_this_box,
+                ground_truth_history,
+                recursive_history,
+                current_delta_t_real,
+                degrees=config.degrees,
+                eps=1e-3,
+            )
+            if not np.array_equal(
+                    motion_main_ref_boxs,
+                    motion_main_physical['ref_boxs']):
+                raise RuntimeError(
+                    "B1 main input and physical-label axes diverged")
+            motion_main_target_xy = motion_main_physical['target_xy']
+        else:
+            motion_main_target_xy, _ = physical_motion_targets(
+                canonical_this_box,
+                legacy_canonical_prev_boxs[0],
+                coordinate_anchor_box,
+                current_delta_t_real,
+                degrees=config.degrees,
+                eps=1e-3,
+            )
 
     data_dict = {
         'points': stack_points.astype('float32'), # Historical first, then current
@@ -1405,6 +1524,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'ct_search_predicted_displacement': np.float32(
             ct_search_diagnostics.get('displacement', 0.0)),
         'ct_search_support_valid': np.float32(search_support_valid),
+        'ct_search_geometry_valid': np.float32(geometry_valid),
+        'ct_search_structural_point_valid': np.float32(
+            structural_point_valid),
+        'ct_search_new_support_valid': np.float32(new_support_valid),
+        'ct_search_quality_valid': np.float32(point_support_valid),
         # Temporary compatibility alias; new code must use the explicit name.
         'candidate_valid': np.float32(search_support_valid),
         'ct_search_history_valid': np.float32(recent_history_valid),
@@ -1558,7 +1682,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'search_v3_point_labels':
                 search_v2_point_labels.astype('float32'),
             'search_v3_geometry_valid': np.float32(
-                search_support_valid),
+                geometry_valid if joint_contract_v2 else search_support_valid),
             'search_v3_support_valid': np.float32(search_support_valid),
             'search_v3_total_point_count': np.float32(
                 joint_support['total_count']),
@@ -1602,7 +1726,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 np.asarray(effective_delta_t_list, dtype=np.float32),
             'b2_v3_history_mode_id': np.int64(
                 b2_v3_history_mode_id(b2_v3_history_mode)),
-            'b2_v3_history_anchor': coordinate_anchor,
+            'b2_v3_history_anchor': (
+                motion_anchor if joint_contract_v2 else coordinate_anchor),
         })
         if replay_b1 is not None:
             data_dict.update({
@@ -1627,7 +1752,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 current_delta_t_effective),
             'motion_main_valid_mask': np.asarray(valid_mask, dtype=np.int64),
             'motion_main_target_xy': motion_main_target_xy.astype('float32'),
-            'motion_main_anchor': coordinate_anchor,
+            'motion_main_anchor': (
+                motion_anchor if joint_contract_v2 else coordinate_anchor),
         })
         if motion_aux_contract is not None:
             data_dict.update(motion_aux_contract)
@@ -1754,7 +1880,9 @@ class PartitionedTestTrackingSampler(TestTrackingSampler):
     def __init__(self, dataset, config=None, partition='dev', **kwargs):
         super().__init__(dataset, config=config, **kwargs)
         self.partition = str(partition)
-        seed = int(getattr(self.config, 'seed', 42) or 42)
+        seed = int(getattr(
+            self.config, 'ct_partition_seed',
+            getattr(self.config, 'seed', 42)) or 42)
         self.tracklet_indices = []
         for tracklet_id in range(dataset.get_num_tracklets()):
             key = (
@@ -1774,6 +1902,12 @@ class PartitionedTestTrackingSampler(TestTrackingSampler):
         frame_count = self.dataset.get_num_frames_tracklet(tracklet_id)
         return self.dataset.get_frames(
             tracklet_id, list(range(frame_count)))
+
+    def get_tracklet_key(self, index):
+        tracklet_id = self.tracklet_indices[index]
+        if hasattr(self.dataset, 'get_tracklet_key'):
+            return self.dataset.get_tracklet_key(tracklet_id)
+        return str(tracklet_id)
 
 
 def online_recursive_collate(items):

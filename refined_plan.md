@@ -1,6 +1,11 @@
 # CT-SeqTrack 论文计划
 
-更新时间：2026-08-04
+更新时间：2026-08-08
+
+> 当前 Joint Full 在线递归版本的直接修复顺序、失败机制和 mini-val
+> 评估协议以
+> [在线递归训练与有效 Search 修复计划](docs/CT_JOINT_ONLINE_RECURSIVE_FIX_PLAN_20260808.md)
+> 为准。该补充计划不改变“所有模块从第一个 epoch 共同更新”的约束。
 
 > B1–B4 的完成度、代码问题、目标数据流和执行门槛以
 > [B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)

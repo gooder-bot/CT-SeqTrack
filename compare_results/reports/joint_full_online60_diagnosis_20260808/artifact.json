@@ -1,0 +1,346 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack 在线递归 Full / -B3 / B2-only 60轮诊断",
+    "description": "nuScenes mini Car seed42：验证口径、Search失活、递归状态自污染与下一步修改优先级。",
+    "generatedAt": "2026-08-08T18:30:00+08:00",
+    "sources": [
+      {
+        "id": "validation_source",
+        "label": "三组开发集验证曲线",
+        "path": "compare_results/data/joint_full_online60_validation_20260808.csv",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT run, epoch, success, precision FROM snapshot.validation_curve ORDER BY run, epoch",
+          "description": "从三组TensorBoard事件流提取的每5轮验证指标。",
+          "tables_used": ["snapshot.validation_curve"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      },
+      {
+        "id": "diagnostic_source",
+        "label": "训练与Search诊断摘要",
+        "path": "compare_results/data/joint_full_online60_diagnostic_summary_20260808.csv",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT * FROM snapshot.gating_summary",
+          "description": "按全程和最后10轮聚合的Search、B1、B3诊断。",
+          "tables_used": ["snapshot.gating_summary"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      },
+      {
+        "id": "support_source",
+        "label": "Search支持条件分段趋势",
+        "path": "compare_results/data/joint_full_online60_support_bins_20260808.csv",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT * FROM snapshot.support_bins ORDER BY run, epoch_bin",
+          "description": "按10轮分段聚合的proposal、位移和新增点证据。",
+          "tables_used": ["snapshot.support_bins"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      },
+      {
+        "id": "provenance_source",
+        "label": "运行来源与数据划分",
+        "path": "compare_results/data/joint_full_online60_provenance_20260808.csv",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT * FROM snapshot.provenance",
+          "description": "由run_provenance、配置和checkpoint目录核验。",
+          "tables_used": ["snapshot.provenance"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      },
+      {"id": "main_code", "label": "训练/验证数据装配", "path": "main.py"},
+      {"id": "model_code", "label": "在线状态写回、损失和H3实现", "path": "models/seqtrack3d.py"},
+      {"id": "sampler_code", "label": "crop、history和Search输入构造", "path": "datasets/sampler.py"},
+      {"id": "joint_code", "label": "B2 presence、query gate与候选实现", "path": "models/ct_v2/joint_full.py"},
+      {
+        "id": "code_findings_source",
+        "label": "代码审计发现",
+        "path": "compare_results/reports/joint_full_online60_diagnosis_20260808/artifact.json",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT priority, file, lines, finding, confidence FROM snapshot.code_findings",
+          "description": "由实际控制流审计形成的代码证据表。",
+          "tables_used": ["snapshot.code_findings"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      },
+      {
+        "id": "recommendation_source",
+        "label": "修改建议与验收门槛",
+        "path": "compare_results/reports/joint_full_online60_diagnosis_20260808/artifact.json",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT priority, change, why, acceptance FROM snapshot.recommendations",
+          "description": "由实验诊断映射得到的优先级和smoke-test门槛。",
+          "tables_used": ["snapshot.recommendations"],
+          "executed_at": "2026-08-08T18:00:00+08:00"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "success_curve",
+        "title": "开发集 Success 曲线",
+        "subtitle": "mini_train稳定hash的15% dev tracklets；不是mini_val。",
+        "type": "line",
+        "dataset": "validation_curve",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+          "y": {"field": "success", "type": "quantitative", "label": "Success (%)"},
+          "color": {"field": "run", "type": "nominal", "label": "Run"},
+          "tooltip": [
+            {"field": "run", "type": "nominal", "label": "Run"},
+            {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+            {"field": "success", "type": "quantitative", "label": "Success (%)"}
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Success (%)"
+      },
+      {
+        "id": "precision_curve",
+        "title": "开发集 Precision 曲线",
+        "subtitle": "Full在epoch 30达到64.06，随后回落至55.98。",
+        "type": "line",
+        "dataset": "validation_curve",
+        "sourceId": "validation_source",
+        "encodings": {
+          "x": {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+          "y": {"field": "precision", "type": "quantitative", "label": "Precision (%)"},
+          "color": {"field": "run", "type": "nominal", "label": "Run"},
+          "tooltip": [
+            {"field": "run", "type": "nominal", "label": "Run"},
+            {"field": "epoch", "type": "quantitative", "label": "Epoch"},
+            {"field": "precision", "type": "quantitative", "label": "Precision (%)"}
+          ]
+        },
+        "xAxisTitle": "Epoch",
+        "yAxisTitle": "Precision (%)"
+      }
+    ],
+    "tables": [
+      {
+        "id": "run_summary_table",
+        "title": "开发集结果摘要",
+        "subtitle": "final为epoch 60；best分别按单项指标选择。",
+        "dataset": "run_summary",
+        "sourceId": "diagnostic_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "final_success", "label": "E60 Success", "type": "number", "format": "number"},
+          {"field": "final_precision", "label": "E60 Precision", "type": "number", "format": "number"},
+          {"field": "best_success", "label": "Best Success", "type": "number", "format": "number"},
+          {"field": "best_success_epoch", "label": "Success epoch", "type": "number", "format": "number"},
+          {"field": "best_precision", "label": "Best Precision", "type": "number", "format": "number"},
+          {"field": "best_precision_epoch", "label": "Precision epoch", "type": "number", "format": "number"},
+          {"field": "last3_success_mean", "label": "Last-3 Success", "type": "number", "format": "number"},
+          {"field": "last3_precision_mean", "label": "Last-3 Precision", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "provenance_table",
+        "title": "运行与数据口径",
+        "dataset": "provenance",
+        "sourceId": "provenance_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "commit", "label": "Commit", "type": "text"},
+          {"field": "config", "label": "Config", "type": "text"},
+          {"field": "train_partition", "label": "Gradient train", "type": "text"},
+          {"field": "checkpoint_dev", "label": "Checkpoint dev", "type": "text"},
+          {"field": "test_split", "label": "Final test split", "type": "text"},
+          {"field": "steps_per_epoch", "label": "Steps/epoch", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "gating_table",
+        "title": "Search / Gate 失活证据",
+        "dataset": "gating_summary",
+        "sourceId": "diagnostic_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "support_all_pct", "label": "Support all (%)", "type": "number", "format": "number"},
+          {"field": "support_tail_pct", "label": "Support E51-60 (%)", "type": "number", "format": "number"},
+          {"field": "presence_max", "label": "Presence max", "type": "number", "format": "number"},
+          {"field": "effective_pct", "label": "Effective (%)", "type": "number", "format": "number"},
+          {"field": "evidence_pct", "label": "Evidence (%)", "type": "number", "format": "number"},
+          {"field": "applied_pct", "label": "Applied (%)", "type": "number", "format": "number"},
+          {"field": "proposal_invalid_tail_pct", "label": "Proposal invalid tail (%)", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "support_table",
+        "title": "Search支持条件随训练坍缩",
+        "dataset": "support_bins",
+        "sourceId": "support_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "epoch_bin", "label": "Epoch bin", "type": "text"},
+          {"field": "search_support_pct", "label": "Support valid (%)", "type": "number", "format": "number"},
+          {"field": "proposal_invalid_pct", "label": "Proposal invalid (%)", "type": "number", "format": "number"},
+          {"field": "predicted_displacement_m", "label": "Predicted displacement (m)", "type": "number", "format": "number"},
+          {"field": "extension_points", "label": "Extension points", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "b1_table",
+        "title": "B1在不同训练状态分布下的RMSE",
+        "dataset": "b1_comparison",
+        "sourceId": "diagnostic_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "state_distribution", "label": "State distribution", "type": "text"},
+          {"field": "kinematic_rmse_m", "label": "Kinematic RMSE (m)", "type": "number", "format": "number"},
+          {"field": "prior_rmse_m", "label": "B1 prior RMSE (m)", "type": "number", "format": "number"},
+          {"field": "interpretation", "label": "Interpretation", "type": "text"}
+        ]
+      },
+      {
+        "id": "code_table",
+        "title": "代码链路定位",
+        "dataset": "code_findings",
+        "sourceId": "code_findings_source",
+        "columns": [
+          {"field": "priority", "label": "Priority", "type": "text"},
+          {"field": "file", "label": "File", "type": "text"},
+          {"field": "lines", "label": "Lines", "type": "text"},
+          {"field": "finding", "label": "Finding", "type": "text"},
+          {"field": "confidence", "label": "Confidence", "type": "text"}
+        ]
+      },
+      {
+        "id": "recommendation_table",
+        "title": "下一步修改优先级",
+        "dataset": "recommendations",
+        "sourceId": "recommendation_source",
+        "columns": [
+          {"field": "priority", "label": "Priority", "type": "text"},
+          {"field": "change", "label": "Change", "type": "text"},
+          {"field": "why", "label": "Why now", "type": "text"},
+          {"field": "acceptance", "label": "Smoke-test gate", "type": "text"}
+        ]
+      },
+      {
+        "id": "checkpoint_table",
+        "title": "应先做mini_val终评的checkpoint",
+        "dataset": "evaluation_checkpoints",
+        "sourceId": "provenance_source",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "selection", "label": "Selection", "type": "text"},
+          {"field": "checkpoint", "label": "Checkpoint", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# CT-SeqTrack 在线递归 Full / −B3 / B2-only 60轮诊断\n\nnuScenes v1.0-mini · Car · seed42 · batch 16 · 2026-08-08"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "sourceId": "diagnostic_source",
+        "body": "## 结论：这一版摆脱了29分级崩塌，但目前不能认定涨点\n\n三组开发集最终为：Full **48.30/55.98**、−B3 **48.72/62.66**、B2-only **51.12/62.72**（Success/Precision）。数值明显好于旧Joint Full约29分，但这些验证只覆盖mini_train的15% dev tracklets（444个非首帧），不是历史B0和motion-only所用的完整mini_val（2,285帧），因此不能直接宣称相对基线涨点。\n\n更关键的是，三组训练的 `search_effective`、`evidence_valid` 和 `search_applied` **全程均为0**。Full、−B3和B2-only从部署动作看都退化成observation-only；这三组并未真正检验Search或B3是否有效。当前最合理结论是：**递归数据链路已对齐，但有效Search没有被训练出来，且纯on-policy冷启动引入了新的闭环自污染。**"
+      },
+      {"id": "scope", "type": "markdown", "body": "## 范围、数据与指标口径\n\n三组均训练60轮、seed42、batch size16、workers4，梯度训练只使用mini_train按完整tracklet稳定hash得到的70% train分区；checkpoint选择使用同一mini_train的15% dev分区。开发集每次验证记录444个非首帧。`Success`为3D IoU成功率曲线聚合，`Precision`为中心距离精度曲线聚合。配置中的最终 `test_split` 仍是mini_val，但本轮训练日志尚没有这三个选定checkpoint的mini_val终评。Full和−B3来自bb3a04d；B2-only来自只修复日志局部变量报错的a9d7d1d，模型语义未变。"},
+      {"id": "provenance", "type": "table", "tableId": "provenance_table"},
+      {"id": "results_finding", "type": "markdown", "body": "## 同一dev口径下：B2-only最好，B3没有提供可观察收益\n\nEpoch 60时B2-only比Full高 **2.82 Success / 6.74 Precision**；−B3比Full高 **0.42 / 6.68**。Full最佳Precision出现在epoch30（64.06），到epoch60下降8.07点；说明最后一轮不是可靠选择点，必须使用开发集选择的checkpoint。由于三组 `search_applied=0`，这些差值主要来自单seed下的训练轨迹差异和模块存在造成的优化/RNG敏感性，不能解释为B3的因果贡献。"},
+      {"id": "summary_table_block", "type": "table", "tableId": "run_summary_table"},
+      {"id": "success_chart_block", "type": "chart", "chartId": "success_curve"},
+      {"id": "precision_chart_block", "type": "chart", "chartId": "precision_curve"},
+      {"id": "search_finding", "type": "markdown", "body": "## Search不是效果差，而是根本没有通过动作链路\n\nFull全程 `search_support_valid` 平均仅1.96%，最后10轮1.06%；−B3和B2-only进一步降到0.30%和0.05%。即使通过结构条件，presence概率的全程最大值也只有0.108、0.091和0.099，远低于硬阈值0.5，因此 `search_effective=0`。随后evidence和router动作掩码也必为0，最终框逐元素等于observation。\n\n这意味着B3的H=3也几乎没有样本：Full实测平均仅0.0376个shadow sample-forward/step，而设计名义值约2个/step。当前Full vs −B3不是有效的B3消融。"},
+      {"id": "gating_table_block", "type": "table", "tableId": "gating_table"},
+      {"id": "support_finding", "type": "markdown", "body": "## Search支持在训练过程中被递归状态坍缩拖死\n\nFull的预测位移从前10轮0.461m降到最后10轮0.098m；−B3和B2-only分别降到0.081m和0.068m。代码要求proposal位移至少0.2m，因而最后10轮proposal invalid达到90.7%、96.9%和99.5%。新增点同时从约17–19个降到2.70、1.01和0.09个。降低presence阈值或放宽点数阈值都不能单独修复，因为上游递归运动本身已失真。"},
+      {"id": "support_table_block", "type": "table", "tableId": "support_table"},
+      {"id": "coupling_finding", "type": "markdown", "body": "## 数据耦合发生了变化：状态源对齐了，但变成强因果反馈\n\n好的一面是，candidate 0写回、candidate 1–3不写回，同一状态生成crop/history/Search的契约已经落地；`ct_candidate_state_consistency`三组全程100%，`ct_recursive_state_age=1`。这基本解决了原先candidate、history和Search来自不同状态源的问题。\n\n坏的一面是，训练从独立teacher-forced样本变成了从随机初始化开始的完整tracklet纯on-policy rollout。candidate 0的预测每帧无条件detach写回，下一帧B0 crop也以这个预测为锚。冷启动预测漂移后，crop中可能没有目标，但监督仍要求模型从局部输入回归到几十米外的GT；随后B1 history、Search endpoint和未来crop一起沿错误状态递归。它不是“不对齐”，而是**内部一致地对齐到不可恢复的错误状态**。"},
+      {"id": "b1_finding", "type": "markdown", "body": "## 原本良好的B1也被错误状态分布摧毁\n\n此前teacher-forced motion-only在epoch15的kinematic/B1 prior RMSE约0.311/0.288m，B1有7.55%改善。本轮Full和−B3中两者都约38.7m，B1几乎没有改善，NLL约一万量级。这不是OrderedPhysicalMotionEncoder结构本身突然失效，而是它收到的历史锚和当前监督已经相隔数十米。应继续保留B1结构和mean prior，优先修复递归状态训练分布。"},
+      {"id": "b1_table_block", "type": "table", "tableId": "b1_table"},
+      {"id": "code_finding", "type": "markdown", "body": "## 代码级的五个关键问题\n\n1. 训练时每个完整tracklet从头纯on-policy推进，预测无条件写回，没有固定比例的expert-state或有限窗口重置。\n2. presence head从0.1初始化，输入是全点汇聚特征，正样本稀少却使用未加权BCE；实测概率始终贴近0.1，0.5硬阈值成为绝对阻断。\n3. query gate标签用“当前已被gate影响的raw Search”与observation比较，标签与被监督变量自指，并把B2点证据质量混入motion query有效性；AUROC约0.5，正负均值几乎相同。\n4. Joint Full显式禁用B1 prepass，Search几何始终使用kinematic fallback；B1只影响detached query，不真正决定endpoint/tube。\n5. H3只在candidate valid后生成；候选坍缩后，B3几乎收不到H3监督。"},
+      {"id": "code_table_block", "type": "table", "tableId": "code_table"},
+      {"id": "recommendation_finding", "type": "markdown", "body": "## 推荐修改：先修训练状态分布，再修Search判别\n\n最高优先级不是继续调router阈值，而是让所有模块从epoch1共同更新的同时，避免随机初始化模型把完整tracklet永久带离目标。推荐采用**固定且跨epoch不变**的DAgger式expert/learner状态混合，或H=3–5截断on-policy窗口后从上一帧GT加确定性SE(2)噪声重置。每个view内部仍必须统一变换crop/history/Search/label，不恢复按时期冻结模块。\n\n为了不让GT泄漏到推理输入，重置只作为训练状态干预：先完成上一帧预测并记录失败，再在下一输入前选择expert锚；推理仍完全on-policy。先用1–3轮smoke验证状态可见性和Search支持，再决定是否跑60轮。"},
+      {"id": "recommendation_table_block", "type": "table", "tableId": "recommendation_table"},
+      {"id": "evaluation_finding", "type": "markdown", "body": "## 在改代码前，先完成一次真正的mini_val终评\n\n按当前checkpoint monitor（`precision/test`）选择：Full epoch29、−B3 epoch29、B2-only epoch19。只对这三个checkpoint各跑一次mini_val，才能回答“是否相对历史B0/motion-only涨点”。若想做严格因果消融，还需在同一在线70/15/15训练协议下补一个B0；旧B0训练步数、训练分区和验证集都不同，不能作为严格对照。"},
+      {"id": "checkpoint_table_block", "type": "table", "tableId": "checkpoint_table"},
+      {"id": "method", "type": "markdown", "body": "## 方法与验证\n\n验证曲线直接读取每组主TensorBoard事件流的 `success/test` 与 `precision/test`，每组12个点；训练诊断按51,300个optimizer step聚合，并分别计算全程、最后10轮和10轮分桶统计。运行来源由 `run_provenance.json`、resolved config、git commit和checkpoint目录交叉核对。代码判断基于当前工作树实际控制流，不依据计划文档。"},
+      {"id": "limitations", "type": "markdown", "body": "## 局限与稳健性\n\n当前只有seed42，且三组的Search动作都为0，所以不能估计模块增益的方差，也不能把Full/−B3差异归因于B3。开发集只有444个非首帧，曲线波动较大。`ct_raw_vs_obs_error_gain`按 `search_effective` 掩码记录，而该掩码全为0，所以日志中的0不是“raw与obs相等”，而是诊断失明；下一版应同时记录structural/support/presence各条件下的无掩码反事实误差。B2-only提交只包含日志报错修复，仍建议最终比较时把提交差异注明。"},
+      {"id": "questions", "type": "markdown", "body": "## 后续需要回答的问题\n\n- 固定expert/learner混合或短窗口重置后，target-in-crop率能否稳定，B1 RMSE能否回到亚米级？\n- presence正样本率、AUROC/AUPRC和正负概率是否足以支持经dev校准的阈值？\n- 用真正的q_obs/q_motion双前向反事实标签后，alpha gate AUROC能否达到0.65且均值差达到0.1？\n- B1 learned prior用于endpoint/tube后，Search有效子集的raw优于observation比例能否超过60%？\n- mini_val上Full是否同时不低于匹配协议的B0与motion-only，并在3个seed上保持正收益？"}
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-08T18:30:00+08:00",
+    "datasets": {
+      "validation_curve": [
+        {"run":"Full","epoch":5,"success":24.8438,"precision":43.8554},{"run":"Full","epoch":10,"success":28.9062,"precision":52.8161},{"run":"Full","epoch":15,"success":36.7769,"precision":52.1621},{"run":"Full","epoch":20,"success":47.7507,"precision":60.7849},{"run":"Full","epoch":25,"success":49.3496,"precision":62.5727},{"run":"Full","epoch":30,"success":50.5414,"precision":64.0552},{"run":"Full","epoch":35,"success":52.1475,"precision":61.3663},{"run":"Full","epoch":40,"success":50.9775,"precision":61.2246},{"run":"Full","epoch":45,"success":47.5400,"precision":58.5465},{"run":"Full","epoch":50,"success":42.7435,"precision":54.7420},{"run":"Full","epoch":55,"success":49.0371,"precision":58.9099},{"run":"Full","epoch":60,"success":48.3031,"precision":55.9811},
+        {"run":"-B3","epoch":5,"success":19.2188,"precision":29.8801},{"run":"-B3","epoch":10,"success":30.5196,"precision":51.0792},{"run":"-B3","epoch":15,"success":23.1432,"precision":33.3285},{"run":"-B3","epoch":20,"success":40.2217,"precision":58.1904},{"run":"-B3","epoch":25,"success":45.7958,"precision":61.6206},{"run":"-B3","epoch":30,"success":45.9193,"precision":63.3139},{"run":"-B3","epoch":35,"success":48.0560,"precision":61.8314},{"run":"-B3","epoch":40,"success":45.8685,"precision":61.6642},{"run":"-B3","epoch":45,"success":47.8452,"precision":61.6424},{"run":"-B3","epoch":50,"success":45.0836,"precision":60.1817},{"run":"-B3","epoch":55,"success":50.1708,"precision":62.4491},{"run":"-B3","epoch":60,"success":48.7246,"precision":62.6599},
+        {"run":"B2-only","epoch":5,"success":21.9513,"precision":39.3459},{"run":"B2-only","epoch":10,"success":33.4993,"precision":61.1301},{"run":"B2-only","epoch":15,"success":29.8147,"precision":41.3881},{"run":"B2-only","epoch":20,"success":49.4222,"precision":65.0363},{"run":"B2-only","epoch":25,"success":40.6432,"precision":54.7166},{"run":"B2-only","epoch":30,"success":47.0676,"precision":61.2355},{"run":"B2-only","epoch":35,"success":49.6039,"precision":62.8924},{"run":"B2-only","epoch":40,"success":46.2246,"precision":60.4942},{"run":"B2-only","epoch":45,"success":50.8394,"precision":61.8241},{"run":"B2-only","epoch":50,"success":44.4222,"precision":59.4622},{"run":"B2-only","epoch":55,"success":51.6824,"precision":63.0160},{"run":"B2-only","epoch":60,"success":51.1228,"precision":62.7180}
+      ],
+      "run_summary": [
+        {"run":"Full","final_success":48.3031,"final_precision":55.9811,"best_success":52.1475,"best_success_epoch":35,"best_precision":64.0552,"best_precision_epoch":30,"last3_success_mean":46.6946,"last3_precision_mean":56.5443},
+        {"run":"-B3","final_success":48.7246,"final_precision":62.6599,"best_success":50.1708,"best_success_epoch":55,"best_precision":63.3139,"best_precision_epoch":30,"last3_success_mean":47.9930,"last3_precision_mean":61.7636},
+        {"run":"B2-only","final_success":51.1228,"final_precision":62.7180,"best_success":51.6824,"best_success_epoch":55,"best_precision":65.0363,"best_precision_epoch":20,"last3_success_mean":49.0758,"last3_precision_mean":61.7321}
+      ],
+      "provenance": [
+        {"run":"Full","commit":"bb3a04d","config":"21_ct_joint_full.yaml","train_partition":"70% mini_train tracklets","checkpoint_dev":"15% mini_train / 444 frames","test_split":"mini_val","steps_per_epoch":855},
+        {"run":"-B3","commit":"bb3a04d","config":"21_ct_joint_minus_b3.yaml","train_partition":"70% mini_train tracklets","checkpoint_dev":"15% mini_train / 444 frames","test_split":"mini_val","steps_per_epoch":855},
+        {"run":"B2-only","commit":"a9d7d1d","config":"21_ct_joint_b2_only.yaml","train_partition":"70% mini_train tracklets","checkpoint_dev":"15% mini_train / 444 frames","test_split":"mini_val","steps_per_epoch":855}
+      ],
+      "gating_summary": [
+        {"run":"Full","support_all_pct":1.9610,"support_tail_pct":1.0570,"presence_max":0.1082,"effective_pct":0,"evidence_pct":0,"applied_pct":0,"proposal_invalid_tail_pct":90.7310},
+        {"run":"-B3","support_all_pct":1.5556,"support_tail_pct":0.2953,"presence_max":0.0912,"effective_pct":0,"evidence_pct":0,"applied_pct":0,"proposal_invalid_tail_pct":96.9269},
+        {"run":"B2-only","support_all_pct":1.3745,"support_tail_pct":0.0534,"presence_max":0.0990,"effective_pct":0,"evidence_pct":0,"applied_pct":0,"proposal_invalid_tail_pct":99.4971}
+      ],
+      "support_bins": [
+        {"run":"Full","epoch_bin":"1-10","search_support_pct":6.6813,"proposal_invalid_pct":25.0,"predicted_displacement_m":0.461,"extension_points":18.83},{"run":"Full","epoch_bin":"11-20","search_support_pct":2.6499,"proposal_invalid_pct":67.9,"predicted_displacement_m":0.165,"extension_points":8.66},{"run":"Full","epoch_bin":"21-30","search_support_pct":0.2719,"proposal_invalid_pct":96.8,"predicted_displacement_m":0.085,"extension_points":1.18},{"run":"Full","epoch_bin":"31-40","search_support_pct":0.3136,"proposal_invalid_pct":97.0,"predicted_displacement_m":0.083,"extension_points":0.86},{"run":"Full","epoch_bin":"41-50","search_support_pct":0.7924,"proposal_invalid_pct":93.0,"predicted_displacement_m":0.091,"extension_points":1.92},{"run":"Full","epoch_bin":"51-60","search_support_pct":1.0570,"proposal_invalid_pct":90.7,"predicted_displacement_m":0.098,"extension_points":2.70},
+        {"run":"-B3","epoch_bin":"1-10","search_support_pct":6.2478,"proposal_invalid_pct":27.9,"predicted_displacement_m":0.426,"extension_points":17.31},{"run":"-B3","epoch_bin":"11-20","search_support_pct":2.0746,"proposal_invalid_pct":75.8,"predicted_displacement_m":0.144,"extension_points":6.82},{"run":"-B3","epoch_bin":"21-30","search_support_pct":0.1813,"proposal_invalid_pct":98.0,"predicted_displacement_m":0.078,"extension_points":0.73},{"run":"-B3","epoch_bin":"31-40","search_support_pct":0.2420,"proposal_invalid_pct":97.5,"predicted_displacement_m":0.081,"extension_points":0.88},{"run":"-B3","epoch_bin":"41-50","search_support_pct":0.2924,"proposal_invalid_pct":97.2,"predicted_displacement_m":0.082,"extension_points":1.07},{"run":"-B3","epoch_bin":"51-60","search_support_pct":0.2953,"proposal_invalid_pct":96.9,"predicted_displacement_m":0.081,"extension_points":1.01},
+        {"run":"B2-only","epoch_bin":"1-10","search_support_pct":6.2178,"proposal_invalid_pct":28.1,"predicted_displacement_m":0.424,"extension_points":17.16},{"run":"B2-only","epoch_bin":"11-20","search_support_pct":1.7208,"proposal_invalid_pct":79.4,"predicted_displacement_m":0.131,"extension_points":5.91},{"run":"B2-only","epoch_bin":"21-30","search_support_pct":0.1023,"proposal_invalid_pct":98.9,"predicted_displacement_m":0.073,"extension_points":0.39},{"run":"B2-only","epoch_bin":"31-40","search_support_pct":0.0768,"proposal_invalid_pct":99.2,"predicted_displacement_m":0.071,"extension_points":0.27},{"run":"B2-only","epoch_bin":"41-50","search_support_pct":0.0760,"proposal_invalid_pct":99.2,"predicted_displacement_m":0.070,"extension_points":0.25},{"run":"B2-only","epoch_bin":"51-60","search_support_pct":0.0534,"proposal_invalid_pct":99.5,"predicted_displacement_m":0.068,"extension_points":0.09}
+      ],
+      "b1_comparison": [
+        {"run":"Prior motion-only E15","state_distribution":"teacher-forced/correlated candidate","kinematic_rmse_m":0.311368,"prior_rmse_m":0.287871,"interpretation":"B1 improves 7.55%; architecture is useful"},
+        {"run":"Current Full","state_distribution":"pure online recursive rollout","kinematic_rmse_m":38.711,"prior_rmse_m":38.707,"interpretation":"State/label separation dominates; B1 cannot recover"},
+        {"run":"Current -B3","state_distribution":"pure online recursive rollout","kinematic_rmse_m":38.706,"prior_rmse_m":38.710,"interpretation":"Same failure without B3"}
+      ],
+      "code_findings": [
+        {"priority":"P0","file":"models/seqtrack3d.py","lines":"5694-5714","finding":"Candidate0 final prediction is unconditionally detached and committed every frame; no expert-state intervention or bounded rollout.","confidence":"high"},
+        {"priority":"P0","file":"datasets/sampler.py","lines":"1351-1359","finding":"Motion target is current GT relative to recursive predicted history; after drift the regression target becomes tens of metres while the crop may contain no target.","confidence":"high"},
+        {"priority":"P1","file":"models/ct_v2/joint_full.py","lines":"529-542","finding":"Presence uses all-point pooled evidence and a hard 0.5 threshold; observed probabilities never exceed 0.108.","confidence":"high"},
+        {"priority":"P1","file":"models/seqtrack3d.py","lines":"4313-4320","finding":"Rare extension-foreground presence target is trained with unweighted BCE and no positive-rate/AUPRC diagnostics.","confidence":"high"},
+        {"priority":"P2","file":"models/seqtrack3d.py","lines":"4345-4359","finding":"Query gate label compares observation with a raw candidate already changed by the same gate, creating endogenous supervision.","confidence":"high"},
+        {"priority":"P2","file":"datasets/sampler.py","lines":"936-979","finding":"Joint Full forces B1 prepass off; Search endpoint/tube use kinematic fallback even when B1 is enabled.","confidence":"high"},
+        {"priority":"P3","file":"models/seqtrack3d.py","lines":"5620-5621","finding":"H3 shadow labels are skipped unless candidate_valid; collapsed support leaves B3 nearly unsupervised.","confidence":"high"},
+        {"priority":"scope","file":"main.py","lines":"633-637","finding":"Training-time checkpoint validation is 15% dev of mini_train, not mini_val; legacy scores are not directly comparable.","confidence":"high"}
+      ],
+      "recommendations": [
+        {"priority":"P0","change":"Use a fixed epoch-independent expert/learner state mixture, or H=3-5 truncated on-policy windows with deterministic noisy-GT reset.","why":"Stops cold-start compounding drift while all modules still update from epoch1.","acceptance":"Target-in-crop stable; local center error does not grow with rollout age; B1 RMSE <0.5m."},
+        {"priority":"P0","change":"Log target-in-B0-crop, target-in-B0∪Search, rollout-age error, intervention rate and local target displacement quantiles.","why":"Current logs prove drift only indirectly and raw-vs-obs gain is masked blind.","acceptance":"Every failure predicate has a non-masked conditional rate and quantile."},
+        {"priority":"P1","change":"Make presence extension-specific; add pos_weight/focal balance, positive rate, AUROC/AUPRC and dev-calibrated threshold.","why":"0.5 hard threshold blocks every candidate.","acceptance":"Presence positives nonzero; positive/negative probabilities separate; effective rate nonzero."},
+        {"priority":"P2","change":"Compute detached q_obs-versus-q_motion B2 counterfactual candidates and supervise alpha from their error difference.","why":"Current label is self-referential and AUROC is ~0.5.","acceptance":"Gate AUROC >=0.65 and positive-negative mean gap >=0.1."},
+        {"priority":"P2","change":"Use a cheap detached B1 prepass to define endpoint/tube when B1 is valid; fallback only for B1-off/invalid.","why":"Current learned motion prior does not control Search geometry.","acceptance":"B1-on geometry differs from fallback only when valid and train/infer constructors match."},
+        {"priority":"P3","change":"Re-enable H3/router claims only after candidate/effective support is frequent enough.","why":"Observed shadow workload is ~1.9% of design, so B3 has insufficient labels.","acceptance":"Search applied 5-25%; H3 helpful precision >=75%; harm <=5%."}
+      ],
+      "evaluation_checkpoints": [
+        {"run":"Full","selection":"best dev precision, epoch 30","checkpoint":"output/20260807-0332-21_ct_joint_full-ct_joint_full_60ep_bs16_s42_bb3a04d/lightning_logs/version_0/checkpoints/epoch=29-step=25650.ckpt"},
+        {"run":"-B3","selection":"best dev precision, epoch 30","checkpoint":"output/20260807-0333-21_ct_joint_minus_b3-ct_joint_minus_b3_60ep_bs16_s42_bb3a04d/lightning_logs/version_0/checkpoints/epoch=29-step=25650.ckpt"},
+        {"run":"B2-only","selection":"best dev precision, epoch 20","checkpoint":"output/20260807-0340-21_ct_joint_b2_only-ct_joint_b2_only_60ep_bs16_s42_a9d7d1d/lightning_logs/version_0/checkpoints/epoch=19-step=17100.ckpt"}
+      ]
+    }
+  },
+  "sources": []
+}

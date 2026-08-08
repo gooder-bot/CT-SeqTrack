@@ -48,6 +48,7 @@ from models.ct_v2 import (
     AdvantageGatedProposalFusion,
     ClosedLoopRiskAwareProposalRouter,
     ContinuousTimeMotionEncoder,
+    counterfactual_query_targets,
     DecoderTokenConsistencyLoss,
     GradientRatioWeightSelector,
     JointProposalFusion,
@@ -91,6 +92,7 @@ from utils.recursive_state import (
     build_recursive_input_contract,
     commit_canonical_prediction,
     RecursiveTrackState,
+    rotating_rollout_horizon,
 )
 from utils.twc_utils import stable_uint32_seed
 
@@ -129,6 +131,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.use_ct_v2 = bool(getattr(config, 'use_ct_v2', False))
         self.use_ct_joint_full = bool(getattr(
             config, 'use_ct_joint_full', False))
+        self.ct_joint_contract_version = int(getattr(
+            config, 'ct_joint_contract_version', 1))
+        if self.ct_joint_contract_version not in (1, 2):
+            raise ValueError("ct_joint_contract_version must be 1 or 2")
         self.ct_enable_b1 = bool(getattr(config, 'ct_enable_b1', True))
         self.ct_enable_b2 = bool(getattr(config, 'ct_enable_b2', True))
         self.ct_enable_b3 = bool(getattr(config, 'ct_enable_b3', True))
@@ -195,6 +201,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'use_raw_search_candidate', False))
         self.use_b1_prepass_support = bool(getattr(
             config, 'use_b1_prepass_support', False))
+        if (self.use_ct_joint_full
+                and self.ct_joint_contract_version >= 2
+                and not self.ct_enable_b1
+                and self.use_b1_prepass_support):
+            raise ValueError(
+                "-B1/B0 must disable B1 prepass support so Search geometry "
+                "uses the deterministic kinematic fallback")
         self.use_recursive_replay_cache = bool(getattr(
             config, 'use_recursive_replay_cache', False))
         self.use_uncertainty_geometry = bool(getattr(
@@ -205,7 +218,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.use_motion_conditioned_search_v22,
                 self.use_motion_conditioned_search_v3,
                 bool(getattr(config, 'use_action_consistent_router_v3', False)),
-                self.use_b1_prepass_support,
+                (self.use_b1_prepass_support
+                 and self.ct_joint_contract_version < 2),
                 self.use_recursive_replay_cache)):
             raise ValueError(
                 "CT joint Full is isolated from legacy B2/B3/prepass/replay paths")
@@ -213,7 +227,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
              or self.use_raw_search_candidate
              or self.use_b1_prepass_support
              or self.use_uncertainty_geometry)
-                and not self.use_motion_conditioned_search_v3):
+                and not self.use_motion_conditioned_search_v3
+                and not (self.use_ct_joint_full
+                         and self.ct_joint_contract_version >= 2)):
             raise ValueError(
                 "new B1/B2 coupling requires motion-conditioned search v3")
         self.use_action_consistent_router_v3 = bool(getattr(
@@ -655,6 +671,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'search_v3_focal_gamma', 2.0))
         self.ct_query_gate_weight = float(getattr(
             config, 'ct_query_gate_weight', 0.05))
+        self.ct_query_counterfactual_supervision = bool(getattr(
+            config, 'ct_query_counterfactual_supervision', False))
+        self.ct_query_counterfactual_margin = float(getattr(
+            config, 'ct_query_counterfactual_margin', 0.05))
+        self.ct_presence_balanced_loss = bool(getattr(
+            config, 'ct_presence_balanced_loss', False))
         self.ct_targetness_weight = float(getattr(
             config, 'ct_targetness_weight', 0.2))
         self.ct_vote_weight = float(getattr(config, 'ct_vote_weight', 1.0))
@@ -801,7 +823,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.ct_correction_weight,
                 self.ct_router_help_margin,
                 self.ct_router_h3_margin,
-                self.ct_focal_gamma) < 0:
+                self.ct_focal_gamma,
+                self.ct_query_counterfactual_margin) < 0:
             raise ValueError("CT joint Full loss settings must be non-negative")
         if not 0.0 <= self.ct_focal_alpha <= 1.0:
             raise ValueError("ct_focal_alpha must be in [0,1]")
@@ -1062,6 +1085,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             config, 'ct_mahalanobis_clip', 25.0)),
                         use_reliability_gate=(
                             self.ct_enable_query_reliability_gate),
+                        contract_version=self.ct_joint_contract_version,
+                        presence_hard_gate=bool(getattr(
+                            config, 'ct_presence_hard_gate', True)),
                     )
                     self.ct_joint_router = JointScalarResidualRouter(
                         observation_stats_dim=5,
@@ -1081,6 +1107,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             config, 'ct_router_radius_per_second', 0.5)),
                         radius_max=float(getattr(
                             config, 'ct_router_radius_max', 2.0)),
+                        contract_version=self.ct_joint_contract_version,
+                        presence_hard_gate=bool(getattr(
+                            config, 'ct_presence_hard_gate', True)),
                     )
 
         if self.use_search_evidence_v2:
@@ -1629,6 +1658,172 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def on_train_epoch_end(self):
         if self.b2_v3_freeze_candidate_producers:
             self._verify_b2_v3_frozen_hashes()
+        rows = getattr(self, '_ct_epoch_binary_rows', {})
+        if not (self.ct_joint_contract_version >= 2 and rows):
+            return
+        epoch_metrics = {}
+        for name in ('presence', 'alpha'):
+            entries = rows.get(name, [])
+            if not entries:
+                continue
+            scores = np.concatenate([entry[0] for entry in entries])
+            targets = np.concatenate([entry[1] for entry in entries])
+            metrics = self._binary_curve_metrics_numpy(scores, targets)
+            epoch_metrics.update({
+                f'{name}_auroc': metrics['auroc'],
+                f'{name}_auprc': metrics['auprc'],
+                f'{name}_positive_mean': metrics['positive_mean'],
+                f'{name}_negative_mean': metrics['negative_mean'],
+                f'{name}_positive_count': metrics['positive_count'],
+                f'{name}_negative_count': metrics['negative_count'],
+            })
+            for bin_index, calibration in enumerate(metrics['calibration']):
+                epoch_metrics.update({
+                    f'{name}_calibration_bin{bin_index}_count':
+                        calibration['count'],
+                    f'{name}_calibration_bin{bin_index}_confidence':
+                        calibration['confidence'],
+                    f'{name}_calibration_bin{bin_index}_positive_rate':
+                        calibration['positive_rate'],
+                })
+        alpha_uplift = rows.get('alpha_uplift', [])
+        if alpha_uplift:
+            epoch_metrics['alpha_counterfactual_uplift'] = float(np.mean(
+                np.concatenate(alpha_uplift)))
+        if epoch_metrics:
+            self.logger.experiment.add_scalars(
+                'ct_epoch_calibration', epoch_metrics,
+                global_step=self.global_step)
+
+    @staticmethod
+    def _binary_curve_metrics_numpy(scores, targets):
+        """Exact epoch-level rank metrics plus five-bin calibration."""
+        scores = np.asarray(scores, dtype=np.float64).reshape(-1)
+        targets = np.asarray(targets, dtype=np.float64).reshape(-1)
+        finite = np.isfinite(scores) & np.isfinite(targets)
+        scores = np.clip(scores[finite], 0.0, 1.0)
+        targets = targets[finite] > 0.5
+        positive_count = int(targets.sum())
+        negative_count = int((~targets).sum())
+        auroc = 0.5
+        if positive_count and negative_count:
+            order = np.argsort(scores, kind='mergesort')
+            sorted_scores = scores[order]
+            ranks = np.arange(1, len(scores) + 1, dtype=np.float64)
+            starts = np.r_[0, np.flatnonzero(
+                sorted_scores[1:] != sorted_scores[:-1]) + 1]
+            ends = np.r_[starts[1:], len(scores)]
+            for start, end in zip(starts, ends):
+                ranks[start:end] = 0.5 * (start + 1 + end)
+            inverse = np.empty_like(order)
+            inverse[order] = np.arange(len(order))
+            positive_rank_sum = ranks[inverse][targets].sum()
+            auroc = float((
+                positive_rank_sum
+                - positive_count * (positive_count + 1) / 2.0
+            ) / (positive_count * negative_count))
+        auprc = 0.0
+        if positive_count:
+            order = np.argsort(-scores, kind='mergesort')
+            sorted_scores = scores[order]
+            sorted_targets = targets[order].astype(np.float64)
+            true_positive = np.cumsum(sorted_targets)
+            threshold_ends = np.r_[np.flatnonzero(
+                sorted_scores[1:] != sorted_scores[:-1]),
+                len(sorted_scores) - 1]
+            true_positive = true_positive[threshold_ends]
+            predicted_positive = threshold_ends.astype(np.float64) + 1.0
+            precision = true_positive / predicted_positive
+            recall = true_positive / positive_count
+            auprc = float(np.sum(
+                np.diff(np.r_[0.0, recall]) * precision))
+        calibration = []
+        for bin_index in range(5):
+            lower = bin_index / 5.0
+            upper = (bin_index + 1) / 5.0
+            selected = (
+                (scores >= lower)
+                & (scores < upper if bin_index < 4 else scores <= upper))
+            calibration.append({
+                'count': int(selected.sum()),
+                'confidence': float(scores[selected].mean())
+                if selected.any() else 0.0,
+                'positive_rate': float(targets[selected].mean())
+                if selected.any() else 0.0,
+            })
+        return {
+            'auroc': auroc,
+            'auprc': auprc,
+            'positive_mean': float(scores[targets].mean())
+            if positive_count else 0.0,
+            'negative_mean': float(scores[~targets].mean())
+            if negative_count else 0.0,
+            'positive_count': positive_count,
+            'negative_count': negative_count,
+            'calibration': calibration,
+        }
+
+    def _accumulate_joint_binary_rows(self, data, output):
+        if not (self.training and self.ct_joint_contract_version >= 2
+                and self.use_ct_joint_full and self.ct_enable_b2):
+            return
+        if not hasattr(self, '_ct_epoch_binary_rows'):
+            self._ct_epoch_binary_rows = {
+                'presence': [], 'alpha': [], 'alpha_uplift': []}
+        endpoint_labels = data['search_v3_point_labels'].detach()
+        tube_labels = data['trajectory_search_point_labels'].detach().reshape(
+            -1, self.ct_tube_quota)
+        labels = torch.cat((endpoint_labels, tube_labels), dim=1)
+        endpoint_source = data['search_v3_point_source'].detach()
+        tube_source = data[
+            'trajectory_search_point_source'].detach().reshape(
+                -1, self.ct_tube_quota)
+        sources = torch.cat((endpoint_source, tube_source), dim=1)
+        endpoint_valid = data['search_v3_point_valid_mask'].detach()
+        tube_valid = data[
+            'trajectory_search_point_valid_mask'].detach().reshape(
+                -1, self.ct_tube_quota)
+        point_valid = torch.cat((endpoint_valid, tube_valid), dim=1)
+        support_valid = output['ct_search_support_valid'].detach().reshape(-1)
+        extension_foreground = (
+            labels * point_valid * (sources > 0).to(labels.dtype)).sum(dim=1)
+        presence_target = extension_foreground >= 1
+        presence_select = support_valid > 0
+        if bool(presence_select.any()):
+            self._ct_epoch_binary_rows['presence'].append((
+                output['ct_search_presence_probability'].detach()[
+                    presence_select].float().cpu().numpy(),
+                presence_target[presence_select].float().cpu().numpy(),
+            ))
+        if not (self.ct_enable_b1
+                and self.ct_enable_query_reliability_gate
+                and self.ct_query_counterfactual_supervision):
+            return
+        target_xy = data['box_label'][:, :2].to(
+            device=output['ct_search_raw_obs_xy'].device,
+            dtype=output['ct_search_raw_obs_xy'].dtype)
+        counterfactual = counterfactual_query_targets(
+            output['ct_search_raw_obs_xy'],
+            output['ct_search_raw_motion_xy'], target_xy,
+            margin=self.ct_query_counterfactual_margin)
+        obs_error = counterfactual['obs_error']
+        motion_error = counterfactual['motion_error']
+        helpful = counterfactual['helpful']
+        harmful = counterfactual['harmful']
+        alpha_valid = (
+            (output['motion_prior_valid'].detach() > 0)
+            & (support_valid > 0)
+            & (output['ct_search_candidate_valid'].detach() > 0)
+            & (counterfactual['valid'] > 0))
+        if bool(alpha_valid.any()):
+            self._ct_epoch_binary_rows['alpha'].append((
+                torch.sigmoid(output['ct_query_gate_logit'].detach())[
+                    alpha_valid].float().cpu().numpy(),
+                helpful[alpha_valid].float().cpu().numpy(),
+            ))
+            self._ct_epoch_binary_rows['alpha_uplift'].append(
+                counterfactual['uplift'][
+                    alpha_valid].float().cpu().numpy())
 
     def encode_point_time(self, points):
         encoded_time = self.time_encoder(points[..., 3:4])
@@ -1809,61 +2004,39 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "feature", "valid", "gap_ratio", "source_id")
         }
 
-    @torch.no_grad()
-    def predict_motion_prepass(self, sequence, frame_id, results_bbs):
-        """Build and execute B1 before the current point cloud is cropped.
-
-        Only recursive boxes and physical timestamps are read.  In
-        particular, the current ``3d_bbox`` annotation is outside this data
-        path, preventing online ground-truth leakage.
-        """
-        if frame_id <= 0:
+    def _build_motion_prepass_inputs_contract(
+            self, history_boxes, history_ids, valid_mask,
+            history_timestamps, current_timestamp,
+            effective_history_timestamps, effective_current_timestamp,
+            dynamics_time_mode_value, current_frame_id):
+        """Build the shared causal box/time-only B1 tensor primitives."""
+        if int(current_frame_id) <= 0:
             raise ValueError("motion pre-pass is only defined after frame 0")
-        history_ids, valid_mask = get_history_frame_ids_and_masks(
-            frame_id, self.hist_num)
-        history_boxes = get_last_n_bounding_boxes(results_bbs, valid_mask)
         if len(history_boxes) != self.hist_num:
-            return {
-                "mu_xy": np.zeros(2, dtype=np.float32),
-                "log_sigma_parallel_perp": np.zeros(2, dtype=np.float32),
-                "covariance_xy": np.eye(2, dtype=np.float32),
-                "basis_velocity_xy": np.zeros(2, dtype=np.float32),
-                "direction_xy": np.asarray((1.0, 0.0), dtype=np.float32),
-                "velocity_xy": np.zeros(2, dtype=np.float32),
-                "feature": np.zeros(128, dtype=np.float32),
-                "valid": False,
-                "gap_ratio": 1.0,
-                "source_id": 0,
-            }
-
-        previous_frames = [sequence[index] for index in history_ids]
+            return None
         default_step = float(getattr(
             self.config, "default_time_step",
             getattr(self.config, "time_step", 0.1)))
         pseudo_step = float(getattr(
             self.config, "pseudo_time_step", 0.1))
         real_fields = build_time_fields(
-            [frame.get("timestamp") for frame in previous_frames],
-            sequence[frame_id].get("timestamp"),
+            history_timestamps,
+            current_timestamp,
             frame_ids=history_ids,
-            current_frame_id=frame_id,
+            current_frame_id=current_frame_id,
             use_real_time=bool(getattr(
                 self.config, "use_real_time", True)),
             default_step=default_step,
             pseudo_step=pseudo_step,
         )
-        time_mode = normalize_dynamics_time_mode(sequence[frame_id].get(
-            "_ct_dynamics_time_mode",
-            getattr(self.config, "dynamics_time_mode", "true")))
+        time_mode = normalize_dynamics_time_mode(dynamics_time_mode_value)
         effective_fields = build_effective_time_fields(
             time_mode,
             real_fields,
-            effective_frame_timestamps=[frame.get(
-                "_ct_effective_timestamp") for frame in previous_frames],
-            effective_current_timestamp=sequence[frame_id].get(
-                "_ct_effective_timestamp"),
+            effective_frame_timestamps=effective_history_timestamps,
+            effective_current_timestamp=effective_current_timestamp,
             frame_ids=history_ids,
-            current_frame_id=frame_id,
+            current_frame_id=current_frame_id,
             default_step=float(getattr(
                 self.config, "dynamics_fixed_delta_t", default_step)),
             pseudo_step=pseudo_step,
@@ -1881,24 +2054,100 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 * local_box.orientation.axis[-1])
             local_rows.append(np.append(
                 local_box.center, yaw).astype(np.float32))
-        tensor_prediction = self.predict_motion_from_history(
-            np.stack(local_rows, axis=0),
-            np.asarray(effective_delta_t, dtype=np.float32),
-            np.asarray(valid_mask, dtype=np.float32),
-            np.float32(effective_delta_t[0]),
+        return {
+            "ref_boxs": np.stack(local_rows, axis=0),
+            "delta_t": np.asarray(effective_delta_t, dtype=np.float32),
+            "valid_mask": np.asarray(valid_mask, dtype=np.float32),
+            "current_delta_t": np.float32(effective_delta_t[0]),
+        }
+
+    def _empty_motion_prepass_prediction(self):
+        feature_dim = int(getattr(
+            self.config, "motion_v3_hidden_dim", 128))
+        return {
+            "mu_xy": np.zeros(2, dtype=np.float32),
+            "log_sigma_parallel_perp": np.zeros(2, dtype=np.float32),
+            "covariance_xy": np.eye(2, dtype=np.float32),
+            "basis_velocity_xy": np.zeros(2, dtype=np.float32),
+            "direction_xy": np.asarray((1.0, 0.0), dtype=np.float32),
+            "velocity_xy": np.zeros(2, dtype=np.float32),
+            "feature": np.zeros(feature_dim, dtype=np.float32),
+            "valid": False,
+            "gap_ratio": 1.0,
+            "source_id": 0,
+            "current_delta_t": float(getattr(
+                self.config, "default_time_step", 0.5)),
+        }
+
+    @staticmethod
+    def _unbatch_motion_prepass_predictions(
+            tensor_prediction, current_delta_t):
+        results = []
+        for row in range(len(current_delta_t)):
+            result = {}
+            for key, value in tensor_prediction.items():
+                item = value[row].detach().cpu()
+                if key == "valid":
+                    result[key] = bool(item.item() > 0)
+                elif key == "source_id":
+                    result[key] = int(item.item())
+                elif key == "gap_ratio":
+                    result[key] = float(item.item())
+                else:
+                    result[key] = item.numpy()
+            result["current_delta_t"] = float(current_delta_t[row])
+            results.append(result)
+        return results
+
+    @torch.no_grad()
+    def _predict_motion_prepass_contract(
+            self, history_boxes, history_ids, valid_mask,
+            history_timestamps, current_timestamp,
+            effective_history_timestamps, effective_current_timestamp,
+            dynamics_time_mode_value, current_frame_id):
+        """Execute one row through the shared box/time-only B1 contract."""
+        inputs = self._build_motion_prepass_inputs_contract(
+            history_boxes, history_ids, valid_mask,
+            history_timestamps, current_timestamp,
+            effective_history_timestamps, effective_current_timestamp,
+            dynamics_time_mode_value, current_frame_id)
+        if inputs is None:
+            return self._empty_motion_prepass_prediction()
+        prediction = self.predict_motion_from_history(
+            inputs["ref_boxs"], inputs["delta_t"], inputs["valid_mask"],
+            inputs["current_delta_t"])
+        return self._unbatch_motion_prepass_predictions(
+            prediction, [inputs["current_delta_t"]])[0]
+
+    @torch.no_grad()
+    def predict_motion_prepass(self, sequence, frame_id, results_bbs):
+        """Build and execute B1 before the current point cloud is cropped.
+
+        Only recursive boxes and physical timestamps are read.  In
+        particular, the current ``3d_bbox`` annotation is outside this data
+        path, preventing online ground-truth leakage.
+        """
+        if frame_id <= 0:
+            raise ValueError("motion pre-pass is only defined after frame 0")
+        history_ids, valid_mask = get_history_frame_ids_and_masks(
+            frame_id, self.hist_num)
+        history_boxes = get_last_n_bounding_boxes(results_bbs, valid_mask)
+        previous_frames = [sequence[index] for index in history_ids]
+        current_frame = sequence[frame_id]
+        return self._predict_motion_prepass_contract(
+            history_boxes,
+            history_ids,
+            valid_mask,
+            [frame.get("timestamp") for frame in previous_frames],
+            current_frame.get("timestamp"),
+            [frame.get("_ct_effective_timestamp")
+             for frame in previous_frames],
+            current_frame.get("_ct_effective_timestamp"),
+            current_frame.get(
+                "_ct_dynamics_time_mode",
+                getattr(self.config, "dynamics_time_mode", "true")),
+            frame_id,
         )
-        result = {}
-        for key, value in tensor_prediction.items():
-            item = value[0].detach().cpu()
-            if key == "valid":
-                result[key] = bool(item.item() > 0)
-            elif key == "source_id":
-                result[key] = int(item.item())
-            elif key == "gap_ratio":
-                result[key] = float(item.item())
-            else:
-                result[key] = item.numpy()
-        return result
 
 
     def forward(self, input_dict):
@@ -2635,7 +2884,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     device=point_feature.device).reshape(B) > 0
                 observation_xy = observation_aux_box[:, :2].detach()
                 unmasked_raw_search_xy = joint_output[
-                    'ct_search_raw_xy']
+                    'ct_search_raw_alpha_xy'
+                    if self.ct_joint_contract_version >= 2
+                    else 'ct_search_raw_xy']
                 joint_output['ct_search_unmasked_raw_xy'] = (
                     unmasked_raw_search_xy)
                 effective_mask = joint_output[
@@ -2644,6 +2895,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     (support_mask & effective_mask).unsqueeze(1),
                     unmasked_raw_search_xy, observation_xy)
                 output_dict.update(joint_output)
+                output_dict['ct_search_geometry_valid'] = input_dict[
+                    'ct_search_geometry_valid'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype).reshape(B)
+                output_dict['ct_b1_geometry_source_id'] = input_dict[
+                    'search_v3_prior_source_id'].to(
+                        device=point_feature.device,
+                        dtype=point_feature.dtype).reshape(B)
                 output_dict['candidate_valid'] = joint_output[
                     'ct_search_support_valid']
                 updated_aux_box, router_output = self.ct_joint_router(
@@ -2665,6 +2924,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         'ct_search_extension_vote_rms'],
                     presence_probability=joint_output[
                         'ct_search_presence_probability'],
+                    total_point_count=input_dict.get(
+                        'ct_search_total_point_count'),
+                    extension_point_count=input_dict.get(
+                        'ct_search_extension_count'),
+                    extension_voxels=input_dict.get(
+                        'ct_search_extension_voxels'),
+                    coverage_need=input_dict.get(
+                        'ct_search_coverage_need'),
+                    quality_valid=input_dict.get(
+                        'ct_search_quality_valid'),
+                    proposal_valid=input_dict.get(
+                        'ct_search_proposal_valid'),
+                    predicted_displacement=input_dict.get(
+                        'ct_search_predicted_displacement'),
                 )
                 output_dict.update(router_output)
                 applied_mask = router_output[
@@ -3794,6 +4067,60 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 per_sample.reshape(-1) * valid
             ).sum() / torch.clamp(valid.sum(), min=1.0)
 
+        def balanced_binary_loss(logits, targets, valid):
+            """Average each observed class independently.
+
+            Returning the mean of the present class means prevents abundant
+            negative Search windows from collapsing Presence or alpha.
+            """
+            errors = F.binary_cross_entropy_with_logits(
+                logits, targets, reduction='none')
+            valid = valid.to(errors.dtype).reshape(-1)
+            targets = targets.to(errors.dtype).reshape(-1)
+            positive = valid * (targets > 0.5).to(errors.dtype)
+            negative = valid * (targets <= 0.5).to(errors.dtype)
+            positive_present = (positive.sum() > 0).to(errors.dtype)
+            negative_present = (negative.sum() > 0).to(errors.dtype)
+            positive_loss = masked_mean(errors, positive)
+            negative_loss = masked_mean(errors, negative)
+            return (
+                positive_loss * positive_present
+                + negative_loss * negative_present
+            ) / torch.clamp(
+                positive_present + negative_present, min=1.0)
+
+        def binary_rank_metrics(scores, targets, valid):
+            """Return exact mini-batch AUROC and average precision."""
+            select = valid.detach().reshape(-1) > 0
+            selected_scores = scores.detach().reshape(-1)[select]
+            selected_targets = targets.detach().reshape(-1)[select] > 0.5
+            default_auroc = scores.new_tensor(0.5)
+            default_auprc = scores.new_tensor(0.0)
+            positive_scores = selected_scores[selected_targets]
+            negative_scores = selected_scores[~selected_targets]
+            if positive_scores.numel() and negative_scores.numel():
+                comparisons = (
+                    positive_scores.unsqueeze(1)
+                    - negative_scores.unsqueeze(0))
+                auroc = (
+                    (comparisons > 0).to(scores.dtype)
+                    + 0.5 * (comparisons == 0).to(scores.dtype)
+                ).mean()
+            else:
+                auroc = default_auroc
+            if positive_scores.numel():
+                order = torch.argsort(selected_scores, descending=True)
+                sorted_targets = selected_targets[order].to(scores.dtype)
+                precision = torch.cumsum(sorted_targets, dim=0) / torch.arange(
+                    1, sorted_targets.numel() + 1,
+                    device=scores.device, dtype=scores.dtype)
+                auprc = (
+                    precision * sorted_targets).sum() / torch.clamp(
+                        sorted_targets.sum(), min=1.0)
+            else:
+                auprc = default_auprc
+            return auroc, auprc
+
         final_estimation_boxes = output['aux_estimation_boxes']
         aux_estimation_boxes = output.get(
             'observation_aux_estimation_boxes', final_estimation_boxes)
@@ -4290,20 +4617,40 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             point_valid = point_valid * search_support_valid.unsqueeze(1)
             point_labels = point_labels * point_valid
 
-            targetness_logits = output['ct_search_targetness_logits']
-            bce = F.binary_cross_entropy_with_logits(
-                targetness_logits, point_labels, reduction='none')
-            probability = torch.sigmoid(targetness_logits)
-            p_t = (
-                point_labels * probability
-                + (1.0 - point_labels) * (1.0 - probability))
-            alpha_t = (
-                point_labels * self.ct_focal_alpha
-                + (1.0 - point_labels) * (1.0 - self.ct_focal_alpha))
-            focal = alpha_t * (1.0 - p_t).pow(self.ct_focal_gamma) * bce
-            loss_ct_targetness = (
-                focal * point_valid).sum() / torch.clamp(
-                    point_valid.sum(), min=1.0)
+            def targetness_focal_loss(logits):
+                bce = F.binary_cross_entropy_with_logits(
+                    logits, point_labels, reduction='none')
+                probability = torch.sigmoid(logits)
+                p_t = (
+                    point_labels * probability
+                    + (1.0 - point_labels) * (1.0 - probability))
+                alpha_t = (
+                    point_labels * self.ct_focal_alpha
+                    + (1.0 - point_labels) * (1.0 - self.ct_focal_alpha))
+                focal = (
+                    alpha_t * (1.0 - p_t).pow(self.ct_focal_gamma) * bce)
+                return (
+                    focal * point_valid).sum() / torch.clamp(
+                        point_valid.sum(), min=1.0)
+
+            counterfactual_arms_enabled = bool(
+                self.ct_joint_contract_version >= 2
+                and self.ct_query_counterfactual_supervision
+                and self.ct_enable_b1)
+            if counterfactual_arms_enabled:
+                # Equal auxiliary supervision prevents either counterfactual
+                # arm from becoming a permanently untrained baseline.
+                loss_ct_targetness_obs = targetness_focal_loss(
+                    output['ct_search_targetness_logits_obs'])
+                loss_ct_targetness_motion = targetness_focal_loss(
+                    output['ct_search_targetness_logits_motion'])
+                loss_ct_targetness = 0.5 * (
+                    loss_ct_targetness_obs + loss_ct_targetness_motion)
+            else:
+                loss_ct_targetness_obs = targetness_focal_loss(
+                    output['ct_search_targetness_logits'])
+                loss_ct_targetness_motion = loss_ct_targetness_obs
+                loss_ct_targetness = loss_ct_targetness_obs
 
             foreground = point_labels * point_valid
             foreground_count = foreground.sum(dim=1)
@@ -4312,12 +4659,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     target_xy.dtype)).sum(dim=1)
             presence_target = (
                 extension_foreground_count >= 1).to(target_xy.dtype)
-            presence_error = F.binary_cross_entropy_with_logits(
-                output['ct_search_presence_logit'], presence_target,
-                reduction='none')
-            loss_ct_presence = (
-                presence_error * search_support_valid).sum() / torch.clamp(
+            if (self.ct_joint_contract_version >= 2
+                    and self.ct_presence_balanced_loss):
+                loss_ct_presence = balanced_binary_loss(
+                    output['ct_search_presence_logit'], presence_target,
+                    search_support_valid)
+            else:
+                presence_error = F.binary_cross_entropy_with_logits(
+                    output['ct_search_presence_logit'], presence_target,
+                    reduction='none')
+                loss_ct_presence = (
+                    presence_error * search_support_valid).sum()
+                loss_ct_presence = loss_ct_presence / torch.clamp(
                     search_support_valid.sum(), min=1.0)
+            presence_auroc, presence_auprc = binary_rank_metrics(
+                output['ct_search_presence_probability'], presence_target,
+                search_support_valid)
             vote_error = F.smooth_l1_loss(
                 output['ct_search_point_votes'],
                 target_xy.unsqueeze(1).expand_as(
@@ -4329,9 +4686,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             proposal_valid = (
                 (foreground_count >= 1).to(target_xy.dtype)
                 * output['ct_search_candidate_valid'].detach())
-            raw_per_sample = F.smooth_l1_loss(
-                output['ct_search_unmasked_raw_xy'], target_xy,
-                reduction='none').mean(dim=1)
+            if counterfactual_arms_enabled:
+                raw_obs_per_sample = F.smooth_l1_loss(
+                    output['ct_search_raw_obs_xy'], target_xy,
+                    reduction='none').mean(dim=1)
+                raw_motion_per_sample = F.smooth_l1_loss(
+                    output['ct_search_raw_motion_xy'], target_xy,
+                    reduction='none').mean(dim=1)
+                raw_per_sample = 0.5 * (
+                    raw_obs_per_sample + raw_motion_per_sample)
+            else:
+                raw_obs_per_sample = F.smooth_l1_loss(
+                    output['ct_search_unmasked_raw_xy'], target_xy,
+                    reduction='none').mean(dim=1)
+                raw_motion_per_sample = raw_obs_per_sample
+                raw_per_sample = raw_obs_per_sample
             loss_ct_raw_search = (
                 raw_per_sample * proposal_valid).sum() / torch.clamp(
                     proposal_valid.sum(), min=1.0)
@@ -4340,16 +4709,45 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             query_target = target_xy.new_zeros((target_xy.shape[0],))
             query_valid = target_xy.new_zeros((target_xy.shape[0],))
             query_auroc = target_xy.new_tensor(0.5)
+            query_auprc = target_xy.new_tensor(0.0)
+            counterfactual_obs_error = target_xy.new_zeros(
+                (target_xy.shape[0],))
+            counterfactual_motion_error = target_xy.new_zeros(
+                (target_xy.shape[0],))
+            counterfactual_helpful = torch.zeros(
+                target_xy.shape[0], dtype=torch.bool,
+                device=target_xy.device)
+            counterfactual_harmful = torch.zeros_like(
+                counterfactual_helpful)
+            counterfactual_ambiguous = torch.zeros_like(
+                counterfactual_helpful)
+            counterfactual_base_valid = target_xy.new_zeros(
+                (target_xy.shape[0],))
             if (self.ct_enable_b1
                     and self.ct_enable_query_reliability_gate):
-                observation_error = torch.linalg.norm(
-                    aux_estimation_boxes[:, :2].detach() - target_xy,
-                    dim=1)
-                raw_query_error = torch.linalg.norm(
-                    output['ct_search_unmasked_raw_xy'].detach() - target_xy,
-                    dim=1)
-                query_target = (
-                    raw_query_error < observation_error).to(target_xy.dtype)
+                if (self.ct_joint_contract_version >= 2
+                        and self.ct_query_counterfactual_supervision):
+                    counterfactual = counterfactual_query_targets(
+                        output['ct_search_raw_obs_xy'],
+                        output['ct_search_raw_motion_xy'], target_xy,
+                        margin=self.ct_query_counterfactual_margin)
+                    counterfactual_obs_error = counterfactual['obs_error']
+                    counterfactual_motion_error = counterfactual[
+                        'motion_error']
+                    counterfactual_helpful = counterfactual['helpful']
+                    counterfactual_harmful = counterfactual['harmful']
+                    counterfactual_ambiguous = counterfactual['ambiguous']
+                    query_target = counterfactual['target']
+                else:
+                    observation_error = torch.linalg.norm(
+                        aux_estimation_boxes[:, :2].detach() - target_xy,
+                        dim=1)
+                    raw_query_error = torch.linalg.norm(
+                        output['ct_search_unmasked_raw_xy'].detach()
+                        - target_xy, dim=1)
+                    query_target = (
+                        raw_query_error < observation_error).to(
+                            target_xy.dtype)
                 query_gate_error = F.binary_cross_entropy_with_logits(
                     output['ct_query_gate_logit'], query_target,
                     reduction='none')
@@ -4357,21 +4755,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     output['motion_prior_valid'].detach()
                     * search_support_valid
                     * output['ct_search_candidate_valid'].detach())
-                loss_ct_query_gate = (
-                    query_gate_error * query_valid).sum() / torch.clamp(
-                        query_valid.sum(), min=1.0)
-                positive_gate = output['ct_query_gate_internal'][
-                    (query_valid > 0) & (query_target > 0)].detach()
-                negative_gate = output['ct_query_gate_internal'][
-                    (query_valid > 0) & (query_target <= 0)].detach()
-                if positive_gate.numel() and negative_gate.numel():
-                    comparisons = (
-                        positive_gate.unsqueeze(1)
-                        - negative_gate.unsqueeze(0))
-                    query_auroc = (
-                        (comparisons > 0).to(target_xy.dtype)
-                        + 0.5 * (comparisons == 0).to(target_xy.dtype)
-                    ).mean()
+                if (self.ct_joint_contract_version >= 2
+                        and self.ct_query_counterfactual_supervision):
+                    counterfactual_base_valid = query_valid
+                    query_valid = query_valid * counterfactual['valid']
+                    loss_ct_query_gate = balanced_binary_loss(
+                        output['ct_query_gate_logit'], query_target,
+                        query_valid)
+                else:
+                    loss_ct_query_gate = (
+                        query_gate_error * query_valid).sum() / torch.clamp(
+                            query_valid.sum(), min=1.0)
+                query_auroc, query_auprc = binary_rank_metrics(
+                    output['ct_query_gate_probability'], query_target,
+                    query_valid)
 
             loss_ct_router = target_xy.new_zeros(())
             loss_ct_correction = target_xy.new_zeros(())
@@ -4446,6 +4843,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_dict.update({
                 'loss_total': loss_total,
                 'loss_ct_targetness': loss_ct_targetness,
+                'loss_ct_targetness_obs': loss_ct_targetness_obs,
+                'loss_ct_targetness_motion': loss_ct_targetness_motion,
                 'loss_ct_vote': loss_ct_vote,
                 'loss_ct_raw_search': loss_ct_raw_search,
                 'loss_ct_presence': loss_ct_presence,
@@ -4471,7 +4870,29 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     nan=0.0, posinf=0.0, neginf=0.0).mean(),
                 'ct_search_presence_probability': output[
                     'ct_search_presence_probability'].mean(),
+                'ct_presence_positive_count': (
+                    search_support_valid * presence_target).sum(),
+                'ct_presence_negative_count': (
+                    search_support_valid * (1.0 - presence_target)).sum(),
+                'ct_presence_positive_mean': masked_mean(
+                    output['ct_search_presence_probability'],
+                    search_support_valid * presence_target),
+                'ct_presence_negative_mean': masked_mean(
+                    output['ct_search_presence_probability'],
+                    search_support_valid * (1.0 - presence_target)),
+                'ct_presence_auroc': presence_auroc,
+                'ct_presence_auprc': presence_auprc,
                 'ct_search_support_valid_rate': search_support_valid.mean(),
+                'ct_search_geometry_valid_rate': output[
+                    'ct_search_geometry_valid'].float().mean(),
+                'ct_b1_geometry_source_rate': masked_mean(
+                    (output['ct_b1_geometry_source_id'] == 1).to(
+                        target_xy.dtype),
+                    data['ct_search_history_valid'].float()),
+                'ct_fallback_geometry_source_rate': masked_mean(
+                    (output['ct_b1_geometry_source_id'] == 2).to(
+                        target_xy.dtype),
+                    data['ct_search_history_valid'].float()),
                 'ct_search_used_rate': output[
                     'ct_router_applied_gate'].mean(),
                 'ct_search_inactive_reason/history': (
@@ -4497,22 +4918,44 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         target_xy.dtype),
                     output['ct_search_effective'].detach()),
                 'ct_query_gate_mean': output[
-                    'ct_query_gate_internal'].mean(),
-                'ct_query_gate_std': output['ct_query_gate_internal'].std(
+                    'ct_query_gate_probability'].mean(),
+                'ct_query_gate_std': output['ct_query_gate_probability'].std(
                     unbiased=False),
+                'ct_query_gate_applied_mean': output[
+                    'ct_query_gate_internal'].mean(),
                 'ct_query_gate_auroc': query_auroc,
+                'ct_query_gate_auprc': query_auprc,
                 'ct_query_gate_positive_mean': masked_mean(
-                    output['ct_query_gate_internal'],
+                    output['ct_query_gate_probability'],
                     query_valid * query_target),
                 'ct_query_gate_negative_mean': masked_mean(
-                    output['ct_query_gate_internal'],
+                    output['ct_query_gate_probability'],
                     query_valid * (1.0 - query_target)),
                 'ct_alpha_positive_mean': masked_mean(
-                    output['ct_query_gate_internal'],
+                    output['ct_query_gate_probability'],
                     query_valid * query_target),
                 'ct_alpha_negative_mean': masked_mean(
-                    output['ct_query_gate_internal'],
+                    output['ct_query_gate_probability'],
                     query_valid * (1.0 - query_target)),
+                'ct_alpha_counterfactual_helpful_rate': masked_mean(
+                    counterfactual_helpful.to(target_xy.dtype),
+                    counterfactual_base_valid),
+                'ct_alpha_counterfactual_harmful_rate': masked_mean(
+                    counterfactual_harmful.to(target_xy.dtype),
+                    counterfactual_base_valid),
+                'ct_alpha_counterfactual_ambiguous_rate': masked_mean(
+                    counterfactual_ambiguous.to(target_xy.dtype),
+                    counterfactual_base_valid),
+                'ct_alpha_counterfactual_valid_rate': query_valid.mean(),
+                'ct_alpha_raw_obs_error': masked_mean(
+                    counterfactual_obs_error,
+                    counterfactual_base_valid),
+                'ct_alpha_raw_motion_error': masked_mean(
+                    counterfactual_motion_error,
+                    counterfactual_base_valid),
+                'ct_alpha_counterfactual_uplift': masked_mean(
+                    counterfactual_obs_error - counterfactual_motion_error,
+                    counterfactual_base_valid),
                 'ct_query_shift_norm': output[
                     'ct_query_shift_norm'].mean(),
                 'ct_motion_residual_saturation': output[
@@ -4572,13 +5015,38 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             for bin_index in range(5):
                 lower = bin_index / 5.0
                 upper = (bin_index + 1) / 5.0
-                in_bin = (
-                    (query_valid > 0)
-                    & (output['ct_query_gate_internal'].detach() >= lower)
-                    & (output['ct_query_gate_internal'].detach() < upper
+                presence_in_bin = (
+                    (search_support_valid > 0)
+                    & (output[
+                        'ct_search_presence_probability'].detach() >= lower)
+                    & (output[
+                        'ct_search_presence_probability'].detach() < upper
                        if bin_index < 4
                        else output[
-                           'ct_query_gate_internal'].detach() <= upper))
+                           'ct_search_presence_probability'].detach()
+                           <= upper))
+                presence_bin_mask = presence_in_bin.to(target_xy.dtype)
+                loss_dict[
+                    f'ct_presence_bin{bin_index}_count'] = (
+                        presence_bin_mask.sum())
+                loss_dict[
+                    f'ct_presence_bin{bin_index}_confidence'] = masked_mean(
+                        output['ct_search_presence_probability'],
+                        presence_bin_mask)
+                loss_dict[
+                    f'ct_presence_bin{bin_index}_positive_rate'] = masked_mean(
+                        presence_target, presence_bin_mask)
+
+            for bin_index in range(5):
+                lower = bin_index / 5.0
+                upper = (bin_index + 1) / 5.0
+                in_bin = (
+                    (query_valid > 0)
+                    & (output['ct_query_gate_probability'].detach() >= lower)
+                    & (output['ct_query_gate_probability'].detach() < upper
+                       if bin_index < 4
+                       else output[
+                           'ct_query_gate_probability'].detach() <= upper))
                 bin_mask = in_bin.to(target_xy.dtype)
                 loss_dict[
                     f'ct_query_reliability_bin{bin_index}_count'] = (
@@ -4586,7 +5054,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 loss_dict[
                     f'ct_query_reliability_bin{bin_index}_confidence'] = (
                         masked_mean(
-                            output['ct_query_gate_internal'], bin_mask))
+                            output['ct_query_gate_probability'], bin_mask))
                 loss_dict[
                     f'ct_query_reliability_bin{bin_index}_helpful_rate'] = (
                         masked_mean(query_target, bin_mask))
@@ -4597,6 +5065,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     loss_dict[key] = data[key].float().mean()
             for key in (
                     'ct_recursive_state_age',
+                    'ct_recursive_rollout_horizon',
+                    'ct_recursive_reset_boundary',
+                    'ct_recursive_state_source',
+                    'ct_recursive_pre_reset_anchor_error',
+                    'ct_recursive_anchor_error',
+                    'ct_crop_target_points',
                     'ct_candidate_state_consistency'):
                 if key in data:
                     loss_dict[key] = data[key].float().mean()
@@ -5426,6 +5900,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         return loss_dict
 
     def on_train_epoch_start(self):
+        self._ct_epoch_binary_rows = {
+            'presence': [], 'alpha': [], 'alpha_uplift': []}
         if bool(getattr(
                 self.config, 'ct_online_recursive_training', False)):
             self._ct_recursive_states = {}
@@ -5470,7 +5946,112 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._ct_recursive_states[key] = state
         return state
 
-    def _process_online_raw(self, raw, state):
+    @staticmethod
+    def _ordered_online_history_frames(raw):
+        return [
+            raw['prev_frames'][key]
+            for key in sorted(
+                raw['prev_frames'], key=lambda value: abs(int(value)))
+        ]
+
+    def _online_rollout_horizon(self, raw):
+        return rotating_rollout_horizon(
+            getattr(
+                self.config, 'ct_recursive_rollout_horizons', [1, 2, 4, 8]),
+            raw['online_slot'], raw['online_epoch'],
+            getattr(self.config, 'ct_recursive_tracklet_slots', 4))
+
+    def _prepare_online_state_group(self, raw, state):
+        """Apply one causal expert boundary before all candidate views."""
+        horizon = self._online_rollout_horizon(raw)
+        frame_id = int(raw['this_frame_id'])
+        history_frames = self._ordered_online_history_frames(raw)
+        history_ids = [int(value) for value in raw['prev_frame_ids']]
+        pre_reset_anchor = state.history_boxes(
+            [history_ids[0]], [1])[0]
+        gt_anchor = history_frames[0]['3d_bbox']
+        pre_reset_error = float(np.linalg.norm(
+            np.asarray(pre_reset_anchor.center[:2], dtype=np.float64)
+            - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
+        reseed_enabled = bool(getattr(
+            self.config, 'ct_recursive_reseed_enabled', True))
+        reset_boundary = bool(
+            reseed_enabled and (frame_id - 1) % horizon == 0)
+        if reset_boundary and frame_id > 1:
+            state.reseed_history(
+                history_ids,
+                [frame['3d_bbox'] for frame in history_frames],
+                [frame.get('timestamp') for frame in history_frames],
+                before_frame_id=frame_id,
+                rollout_horizon=horizon,
+            )
+        elif frame_id == 1:
+            state.rollout_horizon = horizon
+            state.last_reseed_before_frame = 1
+        post_reset_anchor = state.history_boxes(
+            [history_ids[0]], [1])[0]
+        post_reset_error = float(np.linalg.norm(
+            np.asarray(post_reset_anchor.center[:2], dtype=np.float64)
+            - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
+        return {
+            'rollout_horizon': horizon,
+            'rollout_age': state.rollout_age(frame_id),
+            'reset_boundary': reset_boundary,
+            'pre_reset_anchor_error': pre_reset_error,
+            'post_reset_anchor_error': post_reset_error,
+        }
+
+    def _online_motion_prepass(self, raw, state):
+        return self._online_motion_prepass_batch([(raw, state)])[0]
+
+    @torch.no_grad()
+    def _online_motion_prepass_batch(self, raw_state_pairs):
+        """Run one B1 forward for all causal slots, never per candidate."""
+        if not (self.ct_joint_contract_version >= 2
+                and self.use_b1_prepass_support and self.ct_enable_b1):
+            return [None] * len(raw_state_pairs)
+        prepass_inputs = []
+        for raw, state in raw_state_pairs:
+            contract = build_recursive_input_contract(
+                state, raw['this_frame_id'], len(raw['prev_frame_ids']),
+                self.config, candidate_id=0, offsets=raw['history_offsets'])
+            history_boxes = state.history_boxes(
+                contract['history_frame_ids'],
+                contract['history_valid_mask'].tolist())
+            history_frames = self._ordered_online_history_frames(raw)
+            current_frame = raw['this_frame']
+            inputs = self._build_motion_prepass_inputs_contract(
+                history_boxes,
+                contract['history_frame_ids'],
+                contract['history_valid_mask'].tolist(),
+                list(contract['history_timestamps']),
+                current_frame.get('timestamp'),
+                [frame.get('_ct_effective_timestamp')
+                 for frame in history_frames],
+                current_frame.get('_ct_effective_timestamp'),
+                current_frame.get(
+                    '_ct_dynamics_time_mode',
+                    getattr(self.config, 'dynamics_time_mode', 'true')),
+                int(raw['this_frame_id']),
+            )
+            if inputs is None:
+                raise RuntimeError(
+                    "online B1 prepass history length does not match hist_num")
+            prepass_inputs.append(inputs)
+        prediction = self.predict_motion_from_history(
+            np.stack([item['ref_boxs'] for item in prepass_inputs]),
+            np.stack([item['delta_t'] for item in prepass_inputs]),
+            np.stack([item['valid_mask'] for item in prepass_inputs]),
+            np.asarray([
+                item['current_delta_t'] for item in prepass_inputs],
+                dtype=np.float32),
+        )
+        return self._unbatch_motion_prepass_predictions(
+            prediction,
+            [item['current_delta_t'] for item in prepass_inputs])
+
+    def _process_online_raw(
+            self, raw, state, motion_prediction=None, state_diagnostics=None):
         payload = {
             key: value for key, value in raw.items()
             if key not in (
@@ -5491,6 +6072,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         payload['point_sampling_seeds'] = contract['point_sampling_seeds']
         payload['current_sampling_seed'] = contract[
             'current_sampling_seed']
+        if motion_prediction is not None:
+            payload['motion_prediction'] = motion_prediction
         if 'motion_aux_frame_ids' in raw:
             aux_contract = build_recursive_input_contract(
                 state, raw['this_frame_id'],
@@ -5518,13 +6101,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if not candidate_consistent:
             raise RuntimeError(
                 "candidate crop/history/Search state contract diverged")
+        state_diagnostics = state_diagnostics or {}
+        current_labels = processed['seg_label'][
+            -int(getattr(self.config, 'point_sample_size', 1024)):]
         processed.update({
             'ct_online_tracklet_id': np.int64(raw['tracklet_id']),
             'ct_online_frame_id': np.int64(raw['this_frame_id']),
             'ct_online_slot': np.int64(raw['online_slot']),
             'ct_online_epoch': np.int64(raw['online_epoch']),
             'ct_recursive_state_age': np.float32(
-                int(raw['this_frame_id']) - max(state.predictions)),
+                state_diagnostics.get(
+                    'rollout_age',
+                    int(raw['this_frame_id']) - max(state.predictions))),
+            'ct_recursive_rollout_horizon': np.float32(
+                state_diagnostics.get('rollout_horizon', 0)),
+            'ct_recursive_reset_boundary': np.float32(
+                bool(state_diagnostics.get('reset_boundary', False))),
+            'ct_recursive_state_source': np.float32(
+                1.0 if state_diagnostics.get('rollout_age', 0) > 0
+                else 0.0),
+            'ct_recursive_pre_reset_anchor_error': np.float32(
+                state_diagnostics.get('pre_reset_anchor_error', 0.0)),
+            'ct_recursive_anchor_error': np.float32(
+                state_diagnostics.get('post_reset_anchor_error', 0.0)),
+            'ct_crop_target_points': np.float32(np.sum(current_labels > 0)),
             'ct_candidate_state_consistency': np.float32(
                 candidate_consistent),
         })
@@ -5533,11 +6133,42 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def _prepare_online_recursive_batch(self, raw_items):
         processed = []
         context = []
+        group_context = {}
         for raw in raw_items:
             if not raw.get('online_recursive_raw', False):
                 raise ValueError("mixed online/non-online training batch")
+            group_key = (
+                int(raw['online_slot']), str(raw['tracklet_key']),
+                int(raw['this_frame_id']))
+            if group_key in group_context:
+                continue
             state = self._recursive_state_for_raw(raw)
-            processed.append(self._process_online_raw(raw, state))
+            if self.ct_joint_contract_version >= 2:
+                diagnostics = self._prepare_online_state_group(raw, state)
+            else:
+                diagnostics = {}
+            group_context[group_key] = {
+                'raw': raw,
+                'state': state,
+                'diagnostics': diagnostics,
+                'motion_prediction': None,
+            }
+        group_keys = list(group_context)
+        prepass_predictions = self._online_motion_prepass_batch([
+            (group_context[key]['raw'], group_context[key]['state'])
+            for key in group_keys])
+        for key, prediction in zip(group_keys, prepass_predictions):
+            group_context[key]['motion_prediction'] = prediction
+        for raw in raw_items:
+            group_key = (
+                int(raw['online_slot']), str(raw['tracklet_key']),
+                int(raw['this_frame_id']))
+            group = group_context[group_key]
+            state = group['state']
+            processed.append(self._process_online_raw(
+                raw, state,
+                motion_prediction=group['motion_prediction'],
+                state_diagnostics=group['diagnostics']))
             context.append({'raw': raw, 'state': state})
         batch = default_collate(processed)
         batch_size = len(raw_items)
@@ -5738,6 +6369,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if online_batch:
             self._attach_h3_shadow_labels(batch, output)
         loss_dict = self.compute_loss(batch, output)
+        self._accumulate_joint_binary_rows(batch, output)
         loss = loss_dict['loss_total']
         if online_batch:
             if self.device.type == 'cuda':

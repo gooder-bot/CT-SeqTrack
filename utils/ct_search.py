@@ -653,6 +653,84 @@ def resolve_b1_search_support(
     return support, diagnostics
 
 
+def resolve_joint_search_geometry(
+        history_boxes,
+        delta_t,
+        valid_mask,
+        **kwargs):
+    """Return endpoint and swept-tube supports from one causal prior.
+
+    B1-valid rows use its learned mean for both geometries.  Invalid B1 rows
+    reuse the same constrained kinematic estimate for endpoint and tube.  No
+    current-frame annotation is accepted by this interface.
+    """
+    endpoint_or_tube, diagnostics = resolve_b1_search_support(
+        history_boxes, delta_t, valid_mask, **kwargs)
+    if endpoint_or_tube is None:
+        return None, None, diagnostics
+    latest = history_boxes[0]
+    prior_source = diagnostics.get("prior_source")
+    fixed_margins = np.asarray(
+        kwargs.get("fixed_margins", (2.0, 1.0)), dtype=np.float64).reshape(-1)
+    if fixed_margins.size != 2 or not np.isfinite(fixed_margins).all():
+        raise ValueError("joint fixed margins must contain two finite values")
+
+    if prior_source == "b1":
+        tube = endpoint_or_tube
+        endpoint = copy.deepcopy(latest)
+        endpoint.center = np.asarray(
+            diagnostics["endpoint_center"], dtype=np.float64).copy()
+        endpoint.orientation = copy.deepcopy(tube.orientation)
+        endpoint.wlh = np.asarray(latest.wlh, dtype=np.float64).copy()
+        endpoint.wlh[0] = min(
+            float(kwargs.get("max_width", 10.0)),
+            float(endpoint.wlh[0]) + 2.0 * float(fixed_margins[1]))
+        endpoint.wlh[1] = min(
+            float(kwargs.get("max_length", 24.0)),
+            float(endpoint.wlh[1]) + 2.0 * float(fixed_margins[0]))
+    else:
+        endpoint = endpoint_or_tube
+        displacement_world = (
+            np.asarray(endpoint.center, dtype=np.float64)
+            - np.asarray(latest.center, dtype=np.float64))
+        rotation_inv = np.asarray(
+            latest.rotation_matrix, dtype=np.float64).T
+        local_mu = (rotation_inv @ displacement_world)[:2]
+        query_dt = max(float(diagnostics.get("query_delta_t", 0.0)), 1e-3)
+        local_velocity = local_mu / query_dt
+        scale = max(float(kwargs.get("coverage_scale", 2.448)), 1e-6)
+        tube, tube_diagnostics = build_uncertainty_prior_tube(
+            latest,
+            local_mu,
+            np.maximum(fixed_margins, 1e-3) / scale,
+            local_velocity,
+            valid=True,
+            coverage_scale=scale,
+            min_direction_speed=float(kwargs.get(
+                "min_direction_speed", 0.2)),
+            max_length=float(kwargs.get("max_length", 24.0)),
+            max_width=float(kwargs.get("max_width", 10.0)),
+            source_id=int(diagnostics.get("source_id", 2)),
+            direction_xy=local_velocity,
+        )
+        if tube is None:
+            return endpoint, None, {
+                **diagnostics,
+                "valid": False,
+                "reason": tube_diagnostics.get(
+                    "reason", "invalid_fallback_tube"),
+            }
+        diagnostics = {**tube_diagnostics, **diagnostics}
+    diagnostics.update({
+        "valid": True,
+        "endpoint_support_center": np.asarray(
+            endpoint.center, dtype=np.float64).copy(),
+        "tube_support_center": np.asarray(
+            tube.center, dtype=np.float64).copy(),
+    })
+    return endpoint, tube, diagnostics
+
+
 def _sample_rows(points, sample_size, rng):
     points = np.asarray(points)
     if sample_size <= 0:

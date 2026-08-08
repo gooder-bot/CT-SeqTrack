@@ -1,0 +1,12 @@
+_base_: 22_ct_joint_repaired.yaml
+
+experiment_name: ct_seqtrack_joint_repaired_full_nuscenes
+path: /home/lishengjie/data/nuscenes
+version: v1.0-trainval
+train_split: train_track
+val_split: val
+test_split: val
+batch_size: 16
+workers: 12
+epoch: 60
+

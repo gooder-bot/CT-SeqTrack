@@ -25,7 +25,7 @@ from tools.b3_crpa_common import sha256_file, torch_load
 from utils.recursive_state import stable_tracklet_partition
 
 
-def load_calibration_records(path, seed):
+def load_calibration_records(path, partition_seed):
     with np.load(path, allow_pickle=False) as records:
         required = {
             "router_probability", "h3_gain", "evidence_valid",
@@ -45,7 +45,7 @@ def load_calibration_records(path, seed):
         raise ValueError("all calibration record arrays must have equal length")
     leaked = sorted({
         key for key in tracklet_keys
-        if stable_tracklet_partition(key, seed) != "calibration"
+        if stable_tracklet_partition(key, partition_seed) != "calibration"
     })
     if leaked:
         preview = ", ".join(leaked[:5])
@@ -84,6 +84,7 @@ def parse_args():
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--partition_seed", type=int, default=42)
     parser.add_argument("--report", type=Path)
     return parser.parse_args()
 
@@ -96,7 +97,7 @@ def main():
     if report_path.exists():
         raise FileExistsError(f"calibration report already exists: {report_path}")
     probabilities, gains, valid, tracklet_keys = load_calibration_records(
-        args.records, args.seed)
+        args.records, args.partition_seed)
     result = calibrate_joint_router_threshold(
         probabilities, gains, valid,
         minimum_threshold=0.5,
@@ -111,6 +112,7 @@ def main():
     report = {
         **result,
         "seed": int(args.seed),
+        "partition_seed": int(args.partition_seed),
         "row_count": int(len(probabilities)),
         "valid_row_count": int(valid.sum()),
         "tracklet_count": int(len(set(tracklet_keys.tolist()))),

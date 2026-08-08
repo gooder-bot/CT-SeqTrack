@@ -8,13 +8,19 @@ from pyquaternion import Quaternion
 from utils.ct_search import (
     combined_search_support_statistics,
     estimate_ordered_trajectory,
+    resolve_joint_search_geometry,
     useful_search_coverage_need,
+)
+from utils.candidate_utils import (
+    build_b1_physical_contract,
+    physical_motion_targets,
 )
 from utils.recursive_state import (
     build_recursive_input_contract,
     commit_canonical_prediction,
     OnlineRecursiveBatchSampler,
     RecursiveTrackState,
+    rotating_rollout_horizon,
     stable_tracklet_partition,
 )
 
@@ -28,8 +34,22 @@ class DummyBox:
         self.wlh = np.asarray([2.0, 4.0, 1.5], dtype=np.float64)
         self.orientation = Quaternion(axis=[0, 0, 1], radians=0.0)
 
+    @property
+    def rotation_matrix(self):
+        return self.orientation.rotation_matrix
+
 
 class RecursiveTrackStateTest(unittest.TestCase):
+    def test_rollout_horizons_rotate_across_all_four_slots(self):
+        first = [
+            rotating_rollout_horizon([1, 2, 4, 8], slot, 0, 4)
+            for slot in range(4)]
+        second = [
+            rotating_rollout_horizon([1, 2, 4, 8], slot, 1, 4)
+            for slot in range(4)]
+        self.assertEqual(first, [1, 2, 4, 8])
+        self.assertEqual(second, [2, 4, 8, 1])
+
     def test_legacy_observation_safe_size_uses_first_frame(self):
         source = (ROOT / "datasets/sampler.py").read_text(encoding="utf-8")
         legacy_processing = source.split(
@@ -38,6 +58,21 @@ class RecursiveTrackStateTest(unittest.TestCase):
         self.assertIn(
             "data['first_frame']['3d_bbox'].wlh", legacy_processing)
         self.assertNotIn("coordinate_anchor_box", legacy_processing)
+
+    def test_v2_names_gt_recursive_and_candidate_histories_separately(self):
+        source = (ROOT / "datasets/sampler.py").read_text(encoding="utf-8")
+        processing = source.split(
+            "def motion_processing_mf", 1)[1].split(
+                "class PartitionedTestTrackingSampler", 1)[0]
+        for name in (
+                "ground_truth_history",
+                "recursive_history",
+                "candidate_history"):
+            self.assertIn(name, processing)
+        self.assertIn(
+            "search_v2_history_boxes = (\n"
+            "                recursive_history if joint_contract_v2",
+            processing)
 
     def test_history_is_prediction_backed_and_clone_is_independent(self):
         state = RecursiveTrackState(3, "track/3", DummyBox())
@@ -77,8 +112,117 @@ class RecursiveTrackStateTest(unittest.TestCase):
             state, 0, 1, DummyBox(1.0)))
         self.assertEqual(sorted(state.predictions), [0, 1])
 
+    def test_training_reseed_rewrites_only_observed_history(self):
+        state = RecursiveTrackState(3, "track/3", DummyBox())
+        state.append(1, DummyBox(8.0), timestamp=0.5)
+        state.append(2, DummyBox(9.0), timestamp=1.0)
+        state.reseed_history(
+            [2, 1, 0], [DummyBox(2.0), DummyBox(1.0), DummyBox(0.0)],
+            [1.0, 0.5, 0.0], before_frame_id=3, rollout_horizon=4)
+        self.assertEqual(state.rollout_horizon, 4)
+        self.assertEqual(state.reseed_count, 1)
+        self.assertEqual(state.rollout_age(3), 0)
+        self.assertAlmostEqual(state.predictions[2].center[0], 2.0)
+        with self.assertRaises(ValueError):
+            state.reseed_history(
+                [3], [DummyBox(3.0)], [1.5],
+                before_frame_id=3, rollout_horizon=4)
+
+    def test_b1_physical_target_uses_gt_origin_and_recursive_axes(self):
+        current_gt = DummyBox(4.0)
+        previous_gt = DummyBox(1.0)
+        recursive_anchor = DummyBox(100.0)
+        first, _ = physical_motion_targets(
+            current_gt, previous_gt, recursive_anchor, 0.5)
+        translated_anchor = DummyBox(-100.0)
+        second, _ = physical_motion_targets(
+            current_gt, previous_gt, translated_anchor, 0.5)
+        np.testing.assert_array_equal(first, np.asarray([3.0, 0.0]))
+        np.testing.assert_array_equal(first, second)
+
+    def test_four_recovery_views_share_byte_identical_b1_contract(self):
+        ground_truth = [DummyBox(2.0), DummyBox(1.0), DummyBox(0.0)]
+        recursive = [DummyBox(20.0), DummyBox(18.0), DummyBox(16.0)]
+        contracts = [
+            build_b1_physical_contract(
+                DummyBox(4.0), ground_truth, recursive, 0.5)
+            for _candidate_id in range(4)]
+        for contract in contracts[1:]:
+            np.testing.assert_array_equal(
+                contract["ref_boxs"], contracts[0]["ref_boxs"])
+            np.testing.assert_array_equal(
+                contract["target_xy"], contracts[0]["target_xy"])
+
+    def test_training_and_inference_prepass_share_the_pure_contract(self):
+        source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
+        training = source.split(
+            "    def _online_motion_prepass_batch", 1)[1].split(
+                "    def _process_online_raw", 1)[0]
+        inference = source.split(
+            "    def _predict_motion_prepass_contract", 1)[1].split(
+                "    @torch.no_grad()\n"
+                "    def predict_motion_prepass", 1)[0]
+        public_inference = source.split(
+            "    def predict_motion_prepass", 1)[1].split(
+                "    def forward", 1)[0]
+        self.assertIn(
+            "self._build_motion_prepass_inputs_contract(", training)
+        self.assertIn(
+            "self._build_motion_prepass_inputs_contract(", inference)
+        self.assertIn(
+            "self._predict_motion_prepass_contract(", public_inference)
+        self.assertIn("np.stack([item['ref_boxs']", training)
+        self.assertNotIn("['3d_bbox']", training)
+
 
 class SearchSupportStatisticsTest(unittest.TestCase):
+    def test_joint_geometry_uses_b1_for_endpoint_and_tube(self):
+        history = [DummyBox(2.0), DummyBox(1.0), DummyBox(0.0)]
+        prediction = {
+            "valid": True,
+            "mu_xy": np.asarray([3.0, 0.0], dtype=np.float32),
+            "velocity_xy": np.asarray([3.0, 0.0], dtype=np.float32),
+            "direction_xy": np.asarray([1.0, 0.0], dtype=np.float32),
+            "log_sigma_parallel_perp": np.log(
+                np.asarray([0.5, 0.5], dtype=np.float32)),
+            "current_delta_t": 1.0,
+            "gap_ratio": 1.0,
+            "source_id": 1,
+        }
+        endpoint, tube, diagnostics = resolve_joint_search_geometry(
+            history, [1.0, 1.0, 1.0], [1, 1, 1],
+            prediction=prediction, use_b1_prepass=True,
+            use_dynamic_sigma=False, fixed_margins=(2.0, 1.0))
+        self.assertEqual(diagnostics["prior_source"], "b1")
+        self.assertIsNotNone(endpoint)
+        self.assertIsNotNone(tube)
+        self.assertAlmostEqual(endpoint.center[0], 5.0)
+        np.testing.assert_array_equal(
+            diagnostics["endpoint_support_center"], endpoint.center)
+        np.testing.assert_array_equal(
+            diagnostics["tube_support_center"], tube.center)
+
+    def test_joint_geometry_falls_back_only_when_b1_is_invalid(self):
+        history = [DummyBox(2.0), DummyBox(1.0), DummyBox(0.0)]
+        endpoint, tube, diagnostics = resolve_joint_search_geometry(
+            history, [1.0, 1.0, 1.0], [1, 1, 1],
+            prediction={"valid": False}, use_b1_prepass=True,
+            fallback_min_displacement=0.0)
+        self.assertEqual(diagnostics["prior_source"], "fallback_cv")
+        self.assertIsNotNone(endpoint)
+        self.assertIsNotNone(tube)
+
+    def test_zero_displacement_is_geometry_not_an_availability_veto(self):
+        history = [DummyBox(0.0), DummyBox(0.0), DummyBox(0.0)]
+        endpoint, tube, diagnostics = resolve_joint_search_geometry(
+            history, [1.0, 1.0, 1.0], [1, 1, 1],
+            prediction={"valid": False}, use_b1_prepass=True,
+            fallback_min_displacement=0.0)
+        self.assertTrue(diagnostics["valid"])
+        self.assertEqual(diagnostics["displacement"], 0.0)
+        self.assertIsNotNone(endpoint)
+        self.assertIsNotNone(tube)
+
     def test_extension_is_deduplicated_across_endpoint_and_tube(self):
         endpoint = np.asarray([
             [0.0, 0.0, 0.0],
@@ -169,6 +313,21 @@ class _FakeMotionSampler:
 
 
 class OnlineRecursiveBatchSamplerTest(unittest.TestCase):
+    def test_training_seed_does_not_change_fixed_tracklet_partition(self):
+        keys = [f"track/{index}" for index in range(80)]
+        base = _FakeSequenceDataset(keys, [5] * len(keys))
+        dataset = _FakeMotionSampler(base)
+        first = OnlineRecursiveBatchSampler(
+            dataset, slots=2, candidate_views=4, seed=42,
+            partition_seed=42, partition="train",
+            shadow_fraction=0.5)
+        second = OnlineRecursiveBatchSampler(
+            dataset, slots=2, candidate_views=4, seed=44,
+            partition_seed=42, partition="train",
+            shadow_fraction=0.5)
+        self.assertEqual(first.tracklet_ids, second.tracklet_ids)
+        self.assertNotEqual(first.seed, second.seed)
+
     def test_batches_group_candidates_and_advance_tracklets_causally(self):
         seed = 42
         keys = [f"track/{index}" for index in range(40)]

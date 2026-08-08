@@ -1,0 +1,5 @@
+_base_: 22_ct_joint_repaired.yaml
+
+experiment_name: ct_seqtrack_joint_repaired_fault_old_recursive
+ct_recursive_reseed_enabled: false
+

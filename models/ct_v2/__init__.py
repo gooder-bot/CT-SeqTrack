@@ -29,6 +29,7 @@ from models.ct_v2.decoder_token_consistency import (
 )
 from models.ct_v2.joint_full import (
     calibrate_joint_router_threshold,
+    counterfactual_query_targets,
     JointFullSearchRefiner,
     JointScalarResidualRouter,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "DecoderTokenConsistencyLoss",
     "GradientRatioWeightSelector",
     "calibrate_joint_router_threshold",
+    "counterfactual_query_targets",
     "JointFullSearchRefiner",
     "JointScalarResidualRouter",
     "canonicalize_points",

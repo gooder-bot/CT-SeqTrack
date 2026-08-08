@@ -190,6 +190,35 @@ def boxes_to_anchor_parameters(boxes, anchor_box, degrees=False):
     return np.asarray(parameters, dtype=np.float32)
 
 
+def build_b1_physical_contract(
+        current_box, ground_truth_history, recursive_history,
+        current_delta_t, degrees=False, eps=1e-3):
+    """Build the candidate-invariant B1 input/label pair.
+
+    Recursive boxes define the input and coordinate axes.  The newest GT
+    history box defines only the physical displacement origin.  Candidate
+    recovery boxes are intentionally absent from this interface.
+    """
+    ground_truth_history = list(ground_truth_history)
+    recursive_history = list(recursive_history)
+    if not ground_truth_history or not recursive_history:
+        raise ValueError("B1 physical contract requires non-empty histories")
+    if len(ground_truth_history) != len(recursive_history):
+        raise ValueError("GT and recursive B1 histories must align")
+    anchor = recursive_history[0]
+    ref_boxs = boxes_to_anchor_parameters(
+        recursive_history, anchor, degrees=degrees)
+    target_xy, velocity_xy = physical_motion_targets(
+        current_box, ground_truth_history[0], anchor, current_delta_t,
+        degrees=degrees, eps=eps)
+    return {
+        "ref_boxs": ref_boxs,
+        "target_xy": target_xy,
+        "velocity_xy": velocity_xy,
+        "anchor": anchor,
+    }
+
+
 def equivalent_local_offsets(boxes, transformed_boxes, degrees=False):
     """Return per-box local offsets equivalent to an already applied transform.
 

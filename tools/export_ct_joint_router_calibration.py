@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--config", type=Path,
-        default=ROOT / "cfgs/ct_v2/21_ct_joint_full.yaml")
+        default=ROOT / "cfgs/ct_v2/22_ct_joint_repaired.yaml")
     parser.add_argument("--path", help="override dataset root")
     parser.add_argument("--split", default="mini_train")
     parser.add_argument("--seed", type=int, default=42)
@@ -115,6 +115,11 @@ def main():
         "seed": int(args.seed),
         "ct_online_recursive_training": True,
         "ct_router_partition": "calibration",
+        # Calibration must match deployment: initialize from frame 0 once,
+        # then let the selected policy write the complete recursive history.
+        # Training-only multi-horizon expert reseeds would make the frozen B3
+        # threshold optimistic and distribution-mismatched on mini_val.
+        "ct_recursive_reseed_enabled": False,
         "preloading": bool(args.preloading),
     })
     if args.path:
@@ -124,6 +129,7 @@ def main():
         raise ValueError("calibration exporter requires use_ct_joint_full=true")
     if int(config.get("ct_router_horizon", 3)) != 3:
         raise ValueError("calibration exporter requires ct_router_horizon=3")
+    partition_seed = int(config.get("ct_partition_seed", 42))
 
     dataset = get_dataset(
         config, type=config.train_type, split=args.split,
@@ -134,7 +140,8 @@ def main():
     batch_sampler = OnlineRecursiveBatchSampler(
         dataset, slots=1,
         candidate_views=int(config.ct_recursive_candidate_views),
-        seed=args.seed, partition="calibration", shadow_interval=1,
+        seed=args.seed, partition_seed=partition_seed,
+        partition="calibration", shadow_interval=1,
         shadow_fraction=1.0)
     generator = torch.Generator()
     generator.manual_seed(int(args.seed) + 41001)
@@ -169,7 +176,8 @@ def main():
                 if int(raw["candidate_id"]) != 0:
                     continue
                 key = str(raw["tracklet_key"])
-                if stable_tracklet_partition(key, args.seed) != "calibration":
+                if (stable_tracklet_partition(key, partition_seed)
+                        != "calibration"):
                     raise RuntimeError(
                         f"non-calibration tracklet leaked into export: {key}")
                 h3_valid = bool(float(batch["ct_h3_valid"][row]))
@@ -203,6 +211,8 @@ def main():
         "split": str(args.split),
         "partition": "calibration",
         "seed": int(args.seed),
+        "partition_seed": partition_seed,
+        "recursive_state_policy": "deployment_no_reseed",
         "row_count": len(probabilities),
         "valid_row_count": int(np.sum(evidence_valid)),
         "tracklet_count": len(set(tracklet_keys)),

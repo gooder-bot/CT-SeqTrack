@@ -19,6 +19,32 @@ def _batch_scalar(value, reference):
     return value.reshape(reference.shape[0])
 
 
+def counterfactual_query_targets(
+        raw_obs_xy, raw_motion_xy, target_xy, margin=0.05):
+    """Label whether the alpha=1 arm beats alpha=0 outside a dead zone."""
+    margin = float(margin)
+    if not math.isfinite(margin) or margin < 0.0:
+        raise ValueError("counterfactual query margin must be non-negative")
+    raw_obs_xy = raw_obs_xy.detach()
+    raw_motion_xy = raw_motion_xy.detach()
+    target_xy = target_xy.detach()
+    obs_error = torch.linalg.norm(raw_obs_xy - target_xy, dim=1)
+    motion_error = torch.linalg.norm(raw_motion_xy - target_xy, dim=1)
+    helpful = motion_error + margin < obs_error
+    harmful = obs_error + margin < motion_error
+    ambiguous = ~(helpful | harmful)
+    return {
+        "obs_error": obs_error,
+        "motion_error": motion_error,
+        "helpful": helpful,
+        "harmful": harmful,
+        "ambiguous": ambiguous,
+        "target": helpful.to(target_xy.dtype),
+        "valid": (helpful | harmful).to(target_xy.dtype),
+        "uplift": obs_error - motion_error,
+    }
+
+
 def calibrate_joint_router_threshold(
         probabilities,
         h3_gain,
@@ -88,7 +114,9 @@ class JointFullSearchRefiner(nn.Module):
             presence_init_probability=0.1,
             presence_threshold=0.5,
             mahalanobis_clip=25.0,
-            use_reliability_gate=True):
+            use_reliability_gate=True,
+            contract_version=1,
+            presence_hard_gate=True):
         super().__init__()
         self.point_dim = int(point_dim)
         self.feature_dim = int(feature_dim)
@@ -101,6 +129,10 @@ class JointFullSearchRefiner(nn.Module):
         self.query_gate_scale = float(query_gate_scale)
         self.presence_threshold = float(presence_threshold)
         self.use_reliability_gate = bool(use_reliability_gate)
+        self.contract_version = int(contract_version)
+        self.presence_hard_gate = bool(presence_hard_gate)
+        if self.contract_version not in (1, 2):
+            raise ValueError("joint search contract version must be 1 or 2")
         if min(self.point_dim, self.feature_dim, self.query_dim,
                self.motion_dim) <= 0:
             raise ValueError("joint Full feature dimensions must be positive")
@@ -139,7 +171,10 @@ class JointFullSearchRefiner(nn.Module):
         # q_search stays in q_obs space; there is deliberately no Search-only
         # normalization after adding the residual.
         # dt, gap, history, residual(2), sigma/M(2), observation stats
-        gate_dim = 7 + self.observation_stats_dim
+        gate_dim = (
+            11 + self.observation_stats_dim
+            if self.contract_version >= 2
+            else 7 + self.observation_stats_dim)
         self.query_gate = nn.Sequential(
             nn.Linear(gate_dim, 64),
             nn.ReLU(inplace=True),
@@ -164,10 +199,19 @@ class JointFullSearchRefiner(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(64, 2),
         )
-        self.presence_head = nn.Linear(self.feature_dim + 4, 1)
-        nn.init.zeros_(self.presence_head.weight)
+        if self.contract_version >= 2:
+            self.presence_head = nn.Sequential(
+                nn.Linear(2 * self.feature_dim + 3, self.feature_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.feature_dim, 1),
+            )
+            presence_output = self.presence_head[-1]
+        else:
+            self.presence_head = nn.Linear(self.feature_dim + 4, 1)
+            presence_output = self.presence_head
+        nn.init.zeros_(presence_output.weight)
         nn.init.constant_(
-            self.presence_head.bias,
+            presence_output.bias,
             math.log(presence_init_probability / (
                 1.0 - presence_init_probability)),
         )
@@ -224,18 +268,28 @@ class JointFullSearchRefiner(nn.Module):
             "ct_query_search_internal": q_observation,
             "ct_query_search": q_observation,
             "ct_query_gate_logit": reference.new_zeros((batch_size,)),
+            "ct_query_gate_probability": reference.new_full(
+                (batch_size,), 0.5),
             "ct_query_gate_internal": reference.new_zeros((batch_size,)),
             "ct_query_gate": reference.new_zeros((batch_size,)),
             "ct_query_shift_norm": reference.new_zeros((batch_size,)),
             "ct_search_targetness_logits": reference.new_full(
                 (batch_size, point_count), -20.0),
+            "ct_search_targetness_logits_obs": reference.new_full(
+                (batch_size, point_count), -20.0),
+            "ct_search_targetness_logits_motion": reference.new_full(
+                (batch_size, point_count), -20.0),
             "ct_search_point_votes": torch.nan_to_num(
                 point_xy, nan=0.0, posinf=0.0, neginf=0.0),
             "ct_search_raw_xy": reference.new_zeros((batch_size, 2)),
+            "ct_search_raw_obs_xy": reference.new_zeros((batch_size, 2)),
+            "ct_search_raw_motion_xy": reference.new_zeros((batch_size, 2)),
+            "ct_search_raw_alpha_xy": reference.new_zeros((batch_size, 2)),
             "ct_search_candidate_valid": reference.new_zeros((batch_size,)),
             "ct_search_structural_valid": reference.new_zeros((batch_size,)),
             "ct_search_new_support_valid": reference.new_zeros((batch_size,)),
             "ct_search_support_valid": support_mask.to(reference.dtype),
+            "ct_search_available": reference.new_zeros((batch_size,)),
             "ct_search_effective": reference.new_zeros((batch_size,)),
             "ct_search_evidence": reference.new_zeros(
                 (batch_size, self.feature_dim)),
@@ -245,6 +299,14 @@ class JointFullSearchRefiner(nn.Module):
             "ct_search_normalized_ess": reference.new_zeros((batch_size,)),
             "ct_search_finite_point_count": reference.new_zeros((batch_size,)),
             "ct_search_extension_selected_count": reference.new_zeros(
+                (batch_size,)),
+            "ct_search_extension_feature_mean": reference.new_zeros(
+                (batch_size, self.feature_dim)),
+            "ct_search_extension_feature_max": reference.new_zeros(
+                (batch_size, self.feature_dim)),
+            "ct_search_extension_local_mean": reference.new_zeros(
+                (batch_size,)),
+            "ct_search_extension_local_max": reference.new_zeros(
                 (batch_size,)),
             "ct_search_extension_mass_ratio": reference.new_zeros(
                 (batch_size,)),
@@ -430,20 +492,80 @@ class JointFullSearchRefiner(nn.Module):
             torch.log(torch.clamp(sigma, min=0.1))), dim=1)
         query_residual = self.motion_query_norm(
             self.motion_query_projection(query_motion_input))
+
+        key = self.point_key(point_feature)
+        observation_score = (
+            key * q0.unsqueeze(1)).sum(dim=2) / math.sqrt(self.query_dim)
+        residual_score = (
+            key * query_residual.unsqueeze(1)).sum(dim=2) / math.sqrt(
+                self.query_dim)
+        local_score = self.local_targetness(point_feature).squeeze(2)
+
+        extension_bool = point_mask & (support_source == 1)
+        extension_mask = extension_bool.to(reference.dtype)
+        extension_count = extension_mask.sum(dim=1)
+        extension_denominator = torch.clamp(
+            extension_count.unsqueeze(1), min=1.0)
+        extension_feature_mean = (
+            point_feature * extension_mask.unsqueeze(2)).sum(dim=1)
+        extension_feature_mean = (
+            extension_feature_mean / extension_denominator)
+        extension_feature_max = point_feature.masked_fill(
+            ~extension_bool.unsqueeze(2), float('-inf')).max(dim=1)[0]
+        extension_feature_max = torch.where(
+            (extension_count > 0).unsqueeze(1), extension_feature_max,
+            torch.zeros_like(extension_feature_max))
+        extension_local_mean = (
+            local_score * extension_mask).sum(dim=1) / torch.clamp(
+                extension_count, min=1.0)
+        extension_local_max = local_score.masked_fill(
+            ~extension_bool, float('-inf')).max(dim=1)[0]
+        extension_local_max = torch.where(
+            extension_count > 0, extension_local_max,
+            torch.zeros_like(extension_local_max))
+
+        if self.contract_version >= 2:
+            # Presence observes extension-only, query-independent evidence.
+            # It cannot be dominated by overlapping B0 points and cannot
+            # inherit the predicted alpha query it is later used to explain.
+            presence_input = torch.cat((
+                extension_feature_mean,
+                extension_feature_max,
+                torch.log1p(extension_count).unsqueeze(1),
+                extension_local_mean.unsqueeze(1),
+                extension_local_max.unsqueeze(1),
+            ), dim=1)
+            presence_logit = self.presence_head(presence_input).squeeze(1)
+            presence_probability = torch.sigmoid(presence_logit)
+        else:
+            # The legacy presence input is formed below after the alpha arm
+            # aggregation, preserving contract-v1 behavior exactly.
+            presence_logit = None
+            presence_probability = None
+
         safe_obs_stats = torch.nan_to_num(
             observation_stats.detach().to(reference.dtype),
             nan=0.0, posinf=0.0, neginf=0.0)
-        gate_input = torch.cat((
+        gate_parts = [
             torch.log1p(query_dt).unsqueeze(1),
             torch.log1p(gap).unsqueeze(1),
             history.unsqueeze(1),
             safe_residual,
             sigma_ratio,
             safe_obs_stats,
-        ), dim=1)
+        ]
+        if self.contract_version >= 2:
+            gate_parts.extend((
+                presence_probability.detach().unsqueeze(1),
+                torch.log1p(extension_count).detach().unsqueeze(1),
+                extension_local_mean.detach().unsqueeze(1),
+                extension_local_max.detach().unsqueeze(1),
+            ))
+        gate_input = torch.cat(gate_parts, dim=1)
         query_gate_logit = self.query_gate(gate_input).squeeze(1)
+        query_gate_probability = torch.sigmoid(query_gate_logit)
         query_gate = (
-            torch.sigmoid(query_gate_logit) * motion_valid
+            query_gate_probability * motion_valid
             * support_valid.to(reference.dtype)
             if self.use_reliability_gate
             else motion_valid * support_valid.to(reference.dtype))
@@ -455,52 +577,58 @@ class JointFullSearchRefiner(nn.Module):
             query_gate = query_gate * keep
         q_search = q0 + query_gate.unsqueeze(1) * query_residual
 
-        key = self.point_key(point_feature)
-        observation_score = (
-            key * q0.unsqueeze(1)).sum(dim=2) / math.sqrt(self.query_dim)
-        residual_score = (
-            key * query_residual.unsqueeze(1)).sum(dim=2) / math.sqrt(
-                self.query_dim)
-        local_score = self.local_targetness(point_feature).squeeze(2)
-        targetness_logits = (
-            local_score + observation_score
-            + query_gate.unsqueeze(1) * residual_score)
-        targetness_logits = torch.where(
-            point_mask, targetness_logits,
-            targetness_logits.new_full(targetness_logits.shape, -20.0))
+        base_logits = local_score + observation_score
+        obs_logits = base_logits
+        motion_logits = base_logits + residual_score
+        alpha_logits = base_logits + query_gate.unsqueeze(1) * residual_score
+        invalid_logits = alpha_logits.new_full(alpha_logits.shape, -20.0)
+        obs_logits = torch.where(point_mask, obs_logits, invalid_logits)
+        motion_logits = torch.where(point_mask, motion_logits, invalid_logits)
+        alpha_logits = torch.where(point_mask, alpha_logits, invalid_logits)
 
         vote_offset = self.max_vote_offset * torch.tanh(
             self.vote_head(point_feature))
         point_votes = safe_xy + vote_offset
-        targetness = torch.sigmoid(targetness_logits) * mask_f
-        weight_sum = targetness.sum(dim=1, keepdim=True)
-        raw_search_xy = (
-            targetness.unsqueeze(2) * point_votes).sum(dim=1) / torch.clamp(
-                weight_sum, min=1e-6)
         finite_count = mask_f.sum(dim=1)
+
+        def aggregate(logits):
+            scores = torch.sigmoid(logits) * mask_f
+            score_sum = scores.sum(dim=1, keepdim=True)
+            raw_xy = (
+                scores.unsqueeze(2) * point_votes).sum(dim=1) / torch.clamp(
+                    score_sum, min=1e-6)
+            evidence_value = (
+                scores.unsqueeze(2) * point_feature).sum(dim=1)
+            evidence_value = evidence_value / torch.clamp(
+                score_sum, min=1e-6)
+            probability = scores / torch.clamp(score_sum, min=1e-6)
+            entropy_value = -(
+                probability * torch.log(torch.clamp(probability, min=1e-8))
+            ).sum(dim=1)
+            ess_value = 1.0 / torch.clamp(
+                probability.pow(2).sum(dim=1)
+                * torch.clamp(finite_count, min=1.0), min=1e-6)
+            mean_value = scores.sum(dim=1) / torch.clamp(
+                finite_count, min=1.0)
+            max_value = scores.max(dim=1)[0]
+            return (scores, score_sum, raw_xy, evidence_value,
+                    entropy_value, ess_value, mean_value, max_value)
+
+        (_, _, raw_obs_xy, _, _, _, _, _) = aggregate(obs_logits)
+        (_, _, raw_motion_xy, _, _, _, _, _) = aggregate(motion_logits)
+        (targetness, weight_sum, raw_alpha_xy, evidence, entropy,
+         normalized_ess, targetness_mean, targetness_max) = aggregate(
+             alpha_logits)
         structural_valid = (
             (finite_count >= 3)
-            & torch.isfinite(raw_search_xy).all(dim=1))
-        raw_search_xy = torch.nan_to_num(
-            raw_search_xy, nan=0.0, posinf=0.0, neginf=0.0)
+            & torch.isfinite(raw_alpha_xy).all(dim=1))
+        raw_obs_xy = torch.nan_to_num(
+            raw_obs_xy, nan=0.0, posinf=0.0, neginf=0.0)
+        raw_motion_xy = torch.nan_to_num(
+            raw_motion_xy, nan=0.0, posinf=0.0, neginf=0.0)
+        raw_alpha_xy = torch.nan_to_num(
+            raw_alpha_xy, nan=0.0, posinf=0.0, neginf=0.0)
 
-        evidence = (
-            targetness.unsqueeze(2) * point_feature).sum(dim=1) / torch.clamp(
-                weight_sum, min=1e-6)
-        probability = targetness / torch.clamp(weight_sum, min=1e-6)
-        entropy = -(
-            probability * torch.log(torch.clamp(probability, min=1e-8))
-        ).sum(dim=1)
-        normalized_ess = 1.0 / torch.clamp(
-            probability.pow(2).sum(dim=1) * torch.clamp(finite_count, min=1.0),
-            min=1e-6)
-        valid_denominator = torch.clamp(finite_count, min=1.0)
-        targetness_mean = targetness.sum(dim=1) / valid_denominator
-        targetness_max = targetness.max(dim=1)[0]
-
-        extension_mask = (
-            point_mask & (support_source == 1)).to(reference.dtype)
-        extension_count = extension_mask.sum(dim=1)
         extension_mass = (targetness * extension_mask).sum(dim=1)
         extension_mass_ratio = extension_mass / torch.clamp(
             weight_sum.squeeze(1), min=1e-6)
@@ -521,25 +649,29 @@ class JointFullSearchRefiner(nn.Module):
             extension_weight_sum.squeeze(1) > 0,
             extension_vote_rms,
             torch.full_like(extension_vote_rms, float('inf')))
-        new_support_valid = (
-            (extension_count > 0) & support_valid)
+        new_support_valid = (extension_count > 0) & support_valid
         candidate_valid = (
             structural_valid & new_support_valid).to(reference.dtype)
 
-        presence_input = torch.cat((
-            evidence,
-            targetness_mean.unsqueeze(1),
-            targetness_max.unsqueeze(1),
-            entropy.unsqueeze(1),
-            normalized_ess.unsqueeze(1),
-        ), dim=1)
-        presence_logit = self.presence_head(presence_input).squeeze(1)
-        presence_probability = torch.sigmoid(presence_logit)
+        if self.contract_version < 2:
+            presence_input = torch.cat((
+                evidence,
+                targetness_mean.unsqueeze(1),
+                targetness_max.unsqueeze(1),
+                entropy.unsqueeze(1),
+                normalized_ess.unsqueeze(1),
+            ), dim=1)
+            presence_logit = self.presence_head(presence_input).squeeze(1)
+            presence_probability = torch.sigmoid(presence_logit)
         presence_probability = (
             presence_probability * support_valid.to(reference.dtype))
-        search_effective = (
-            candidate_valid > 0
-        ) & (presence_probability >= self.presence_threshold)
+        search_available = candidate_valid > 0
+        if self.presence_hard_gate:
+            search_effective = (
+                search_available
+                & (presence_probability >= self.presence_threshold))
+        else:
+            search_effective = search_available
         effective_query_gate = query_gate * search_effective.to(
             reference.dtype)
         deployed_query = torch.where(
@@ -551,19 +683,26 @@ class JointFullSearchRefiner(nn.Module):
             "ct_query_search_internal": q_search,
             "ct_query_search": deployed_query,
             "ct_query_gate_logit": query_gate_logit,
+            "ct_query_gate_probability": query_gate_probability,
             "ct_query_gate_internal": query_gate,
             "ct_query_gate": effective_query_gate,
             "ct_query_shift_norm": torch.linalg.norm(
                 deployed_query - q0, dim=1) / math.sqrt(self.query_dim),
-            "ct_search_targetness_logits": targetness_logits,
+            "ct_search_targetness_logits": alpha_logits,
+            "ct_search_targetness_logits_obs": obs_logits,
+            "ct_search_targetness_logits_motion": motion_logits,
             "ct_search_point_votes": point_votes,
-            "ct_search_raw_xy": raw_search_xy,
+            "ct_search_raw_xy": raw_alpha_xy,
+            "ct_search_raw_obs_xy": raw_obs_xy,
+            "ct_search_raw_motion_xy": raw_motion_xy,
+            "ct_search_raw_alpha_xy": raw_alpha_xy,
             "ct_search_candidate_valid": candidate_valid,
             "ct_search_structural_valid": structural_valid.to(
                 reference.dtype),
             "ct_search_new_support_valid": new_support_valid.to(
                 reference.dtype),
             "ct_search_support_valid": support_valid.to(reference.dtype),
+            "ct_search_available": search_available.to(reference.dtype),
             "ct_search_effective": search_effective.to(reference.dtype),
             "ct_search_evidence": evidence,
             "ct_search_targetness_mean": targetness_mean,
@@ -572,6 +711,10 @@ class JointFullSearchRefiner(nn.Module):
             "ct_search_normalized_ess": normalized_ess,
             "ct_search_finite_point_count": finite_count,
             "ct_search_extension_selected_count": extension_count,
+            "ct_search_extension_feature_mean": extension_feature_mean,
+            "ct_search_extension_feature_max": extension_feature_max,
+            "ct_search_extension_local_mean": extension_local_mean,
+            "ct_search_extension_local_max": extension_local_max,
             "ct_search_extension_mass_ratio": extension_mass_ratio,
             "ct_search_extension_vote_rms": extension_vote_rms,
             "ct_search_presence_logit": presence_logit,
@@ -594,9 +737,15 @@ class JointScalarResidualRouter(nn.Module):
             presence_threshold=0.5,
             radius_base=0.5,
             radius_per_second=0.5,
-            radius_max=2.0):
+            radius_max=2.0,
+            contract_version=1,
+            presence_hard_gate=True):
         super().__init__()
         self.observation_stats_dim = int(observation_stats_dim)
+        self.contract_version = int(contract_version)
+        self.presence_hard_gate = bool(presence_hard_gate)
+        if self.contract_version not in (1, 2):
+            raise ValueError("joint router contract version must be 1 or 2")
         self.radius_base = float(radius_base)
         self.radius_per_second = float(radius_per_second)
         self.radius_max = float(radius_max)
@@ -605,7 +754,8 @@ class JointScalarResidualRouter(nn.Module):
         self.register_buffer(
             "decision_threshold",
             torch.tensor(float(decision_threshold), dtype=torch.float32))
-        scalar_dim = self.observation_stats_dim + 12
+        scalar_dim = self.observation_stats_dim + (
+            19 if self.contract_version >= 2 else 12)
         self.gate = nn.Sequential(
             nn.Linear(scalar_dim, int(hidden_dim)),
             nn.ReLU(inplace=True),
@@ -641,7 +791,14 @@ class JointScalarResidualRouter(nn.Module):
             enabled=True,
             extension_mass_ratio=None,
             extension_vote_rms=None,
-            presence_probability=None):
+            presence_probability=None,
+            total_point_count=None,
+            extension_point_count=None,
+            extension_voxels=None,
+            coverage_need=None,
+            quality_valid=None,
+            proposal_valid=None,
+            predicted_displacement=None):
         reference = observation_box
         candidate_valid = torch.nan_to_num(_batch_scalar(
             candidate_valid, reference).detach(), nan=0.0,
@@ -673,7 +830,7 @@ class JointScalarResidualRouter(nn.Module):
         presence = torch.nan_to_num(_batch_scalar(
             presence_probability, reference).detach(), nan=0.0,
             posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
-        scalar_features = torch.cat((
+        feature_parts = [
             torch.nan_to_num(observation_stats.detach(), nan=0.0,
                              posinf=0.0, neginf=0.0),
             _batch_scalar(targetness_mean, reference).detach().unsqueeze(1),
@@ -688,7 +845,32 @@ class JointScalarResidualRouter(nn.Module):
             extension_mass.unsqueeze(1),
             vote_rms.unsqueeze(1),
             presence.unsqueeze(1),
-        ), dim=1)
+        ]
+        if self.contract_version >= 2:
+            def diagnostic_feature(value, default=0.0, log_scale=False):
+                if value is None:
+                    result = reference.new_full(
+                        (reference.shape[0],), float(default))
+                else:
+                    result = torch.nan_to_num(_batch_scalar(
+                        value, reference).detach(), nan=float(default),
+                        posinf=float(default), neginf=float(default))
+                if log_scale:
+                    result = torch.log1p(torch.clamp(result, min=0.0))
+                return result.unsqueeze(1)
+
+            # These quantities inform the learned router but never veto a
+            # structurally valid Search candidate under contract v2.
+            feature_parts.extend((
+                diagnostic_feature(total_point_count, log_scale=True),
+                diagnostic_feature(extension_point_count, log_scale=True),
+                diagnostic_feature(extension_voxels, log_scale=True),
+                diagnostic_feature(coverage_need),
+                diagnostic_feature(quality_valid),
+                diagnostic_feature(proposal_valid),
+                diagnostic_feature(predicted_displacement, log_scale=True),
+            ))
+        scalar_features = torch.cat(feature_parts, dim=1)
         scalar_features = torch.nan_to_num(
             scalar_features, nan=0.0, posinf=0.0, neginf=0.0)
         router_logit = self.gate(scalar_features).squeeze(1)
@@ -700,11 +882,17 @@ class JointScalarResidualRouter(nn.Module):
             radius / torch.clamp(residual_norm, min=1e-6), max=1.0)
         bounded_residual = residual * residual_scale.unsqueeze(1)
         evidence_valid = (
-            (candidate_valid > 0)
-            & torch.isfinite(raw_xy).all(dim=1)
-            & (presence >= self.presence_threshold)
-            & (extension_mass >= self.extension_mass_threshold)
-            & (vote_rms <= radius))
+            (candidate_valid > 0) & torch.isfinite(raw_xy).all(dim=1))
+        if self.contract_version < 2:
+            evidence_valid = (
+                evidence_valid
+                & (presence >= self.presence_threshold)
+                & (extension_mass >= self.extension_mass_threshold)
+                & (vote_rms <= radius))
+        elif self.presence_hard_gate:
+            evidence_valid = (
+                evidence_valid
+                & (presence >= self.presence_threshold))
         if bool(enabled):
             applied_action = (
                 evidence_valid

@@ -39,6 +39,21 @@ def stable_tracklet_partition(tracklet_key, seed=42):
     return "calibration"
 
 
+def rotating_rollout_horizon(horizons, slot, epoch, slots):
+    """Assign every fixed horizon to one slot and rotate each epoch."""
+    horizons = [int(value) for value in horizons]
+    slots = int(slots)
+    slot = int(slot)
+    epoch = int(epoch)
+    if (slots <= 0 or len(horizons) != slots
+            or any(value <= 0 for value in horizons)):
+        raise ValueError(
+            "rollout horizons must contain one positive value per slot")
+    if not 0 <= slot < slots or epoch < 0:
+        raise ValueError("rollout slot/epoch is out of range")
+    return horizons[(slot + epoch) % len(horizons)]
+
+
 def build_recursive_input_contract(
         state, frame_id, hist_num, config, candidate_id=0, offsets=None):
     """Pure state-derived input contract shared by training and inference."""
@@ -79,12 +94,15 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
     """Yield ordered tracklet slots with coherent candidate groups."""
 
     def __init__(self, dataset, slots=4, candidate_views=4, seed=42,
+                 partition_seed=None,
                  partition="train", shadow_interval=2,
                  shadow_fraction=0.25, shadow_enabled=True):
         self.dataset = dataset
         self.slots = int(slots)
         self.candidate_views = int(candidate_views)
         self.seed = int(seed)
+        self.partition_seed = int(
+            self.seed if partition_seed is None else partition_seed)
         self.partition = str(partition)
         self.shadow_interval = max(1, int(shadow_interval))
         self.shadow_fraction = float(shadow_fraction)
@@ -110,7 +128,8 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
             key = (
                 base.get_tracklet_key(tracklet_id)
                 if hasattr(base, "get_tracklet_key") else str(tracklet_id))
-            if stable_tracklet_partition(key, self.seed) != self.partition:
+            if (stable_tracklet_partition(key, self.partition_seed)
+                    != self.partition):
                 continue
             frame_count = int(base.get_num_frames_tracklet(tracklet_id))
             if frame_count > 1:
@@ -212,6 +231,11 @@ class RecursiveTrackState:
     first_box: object
     timestamps: dict[int, float | None] = field(default_factory=dict)
     predictions: dict[int, object] = field(default_factory=dict)
+    # Training-only rollout metadata.  Inference never calls ``reseed_history``
+    # and therefore keeps the original append-only state transition contract.
+    rollout_horizon: int | None = None
+    last_reseed_before_frame: int = 1
+    reseed_count: int = 0
 
     def __post_init__(self):
         self.first_box = copy.deepcopy(self.first_box)
@@ -234,6 +258,53 @@ class RecursiveTrackState:
                 f"recursive state expected frame {expected}, got {frame_id}")
         self.predictions[frame_id] = copy.deepcopy(box)
         self.timestamps[frame_id] = timestamp
+
+    def reseed_history(
+            self, frame_ids, boxes, timestamps=None, *, before_frame_id,
+            rollout_horizon):
+        """Replace past input state at a deterministic training boundary.
+
+        The method may only rewrite frames that have already been observed.
+        It cannot append the current frame or inspect future frames, which
+        keeps expert intervention separate from current-frame supervision.
+        Repeated padded frame ids (for example ``[0, 0, 0]``) are allowed.
+        """
+        frame_ids = [int(value) for value in frame_ids]
+        boxes = list(boxes)
+        before_frame_id = int(before_frame_id)
+        rollout_horizon = int(rollout_horizon)
+        if len(frame_ids) != len(boxes):
+            raise ValueError("reseed frame ids and boxes must align")
+        if timestamps is None:
+            timestamps = [None] * len(frame_ids)
+        else:
+            timestamps = list(timestamps)
+        if len(timestamps) != len(frame_ids):
+            raise ValueError("reseed timestamps and frame ids must align")
+        if before_frame_id <= 0 or rollout_horizon <= 0:
+            raise ValueError("reseed boundary and horizon must be positive")
+        if any(frame_id < 0 or frame_id >= before_frame_id
+               for frame_id in frame_ids):
+            raise ValueError("reseed may only use frames before the query")
+        if max(self.predictions) != before_frame_id - 1:
+            raise ValueError(
+                "reseed requires a causally complete state up to t-1")
+        for frame_id, box, timestamp in zip(frame_ids, boxes, timestamps):
+            if frame_id not in self.predictions:
+                raise KeyError(
+                    f"reseed cannot introduce unseen frame {frame_id}")
+            self.predictions[frame_id] = copy.deepcopy(box)
+            self.timestamps[frame_id] = timestamp
+        self.rollout_horizon = rollout_horizon
+        self.last_reseed_before_frame = before_frame_id
+        self.reseed_count += 1
+
+    def rollout_age(self, frame_id):
+        """Number of learner-written transitions consumed by this query."""
+        frame_id = int(frame_id)
+        if frame_id <= 0:
+            return 0
+        return max(0, frame_id - int(self.last_reseed_before_frame))
 
     def history_boxes(self, frame_ids, valid_mask):
         if len(frame_ids) != len(valid_mask):

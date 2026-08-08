@@ -6,11 +6,16 @@ import torch
 
 from models.ct_v2 import (
     calibrate_joint_router_threshold,
+    counterfactual_query_targets,
     JointFullSearchRefiner,
     JointScalarResidualRouter,
     OrderedPhysicalMotionEncoder,
 )
 from utils.config import load_yaml_config
+from tools.bootstrap_ct_joint_results import (
+    paired_bootstrap,
+    paired_bootstrap_multiseed,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -233,6 +238,86 @@ class JointSearchCouplingTest(unittest.TestCase):
         self.assertTrue(bool((output[
             "ct_query_gate_internal"] > 0).all()))
 
+    def test_v2_low_presence_is_continuous_evidence_not_a_hard_veto(self):
+        module = JointFullSearchRefiner(
+            motion_dim=16, motion_dropout=0.0,
+            contract_version=2, presence_hard_gate=False,
+            presence_init_probability=0.01,
+            presence_threshold=0.5).eval()
+        output = module(**self.inputs())
+        self.assertTrue(bool((output[
+            "ct_search_presence_probability"] < 0.5).all()))
+        self.assertTrue(bool((output["ct_search_available"] == 1).all()))
+        self.assertTrue(bool((output["ct_search_effective"] == 1).all()))
+
+    def test_v2_counterfactual_arms_do_not_read_predicted_alpha(self):
+        module = JointFullSearchRefiner(
+            motion_dim=16, motion_dropout=0.0,
+            contract_version=2, presence_hard_gate=False).eval()
+        with torch.no_grad():
+            module.motion_query_projection.weight.normal_(0.0, 0.1)
+            module.query_gate[-1].bias.fill_(-4.0)
+        low_alpha = module(**self.inputs())
+        with torch.no_grad():
+            module.query_gate[-1].bias.fill_(4.0)
+        high_alpha = module(**self.inputs())
+        self.assertTrue(torch.equal(
+            low_alpha["ct_search_raw_obs_xy"],
+            high_alpha["ct_search_raw_obs_xy"]))
+        self.assertTrue(torch.equal(
+            low_alpha["ct_search_raw_motion_xy"],
+            high_alpha["ct_search_raw_motion_xy"]))
+        self.assertFalse(torch.equal(
+            low_alpha["ct_search_raw_alpha_xy"],
+            high_alpha["ct_search_raw_alpha_xy"]))
+        torch.testing.assert_close(
+            low_alpha["ct_search_presence_probability"],
+            high_alpha["ct_search_presence_probability"])
+
+    def test_alpha_probability_is_pre_dropout_calibration_score(self):
+        module = JointFullSearchRefiner(
+            motion_dim=16, motion_dropout=0.5,
+            contract_version=2, presence_hard_gate=False).train()
+        torch.manual_seed(3)
+        output = module(**self.inputs())
+        torch.testing.assert_close(
+            output["ct_query_gate_probability"],
+            torch.sigmoid(output["ct_query_gate_logit"]))
+        self.assertTrue(bool((output[
+            "ct_query_gate_probability"] > 0).all()))
+
+    def test_v2_motion_counterfactual_arm_trains_query_projection(self):
+        module = JointFullSearchRefiner(
+            motion_dim=16, motion_dropout=0.0,
+            contract_version=2, presence_hard_gate=False).train()
+        output = module(**self.inputs())
+        loss = (
+            output["ct_search_targetness_logits_obs"].mean()
+            + output["ct_search_targetness_logits_motion"].mean()
+            + output["ct_search_raw_obs_xy"].mean()
+            + output["ct_search_raw_motion_xy"].mean())
+        loss.backward()
+        gradient = module.motion_query_projection.weight.grad
+        self.assertIsNotNone(gradient)
+        self.assertGreater(float(gradient.abs().sum()), 0.0)
+
+    def test_counterfactual_labels_depend_only_on_two_detached_arms(self):
+        raw_obs = torch.tensor(
+            [[1.0, 0.0], [0.0, 0.0], [0.10, 0.0]],
+            requires_grad=True)
+        raw_motion = torch.tensor(
+            [[0.0, 0.0], [1.0, 0.0], [0.12, 0.0]],
+            requires_grad=True)
+        target = torch.zeros(3, 2)
+        labels = counterfactual_query_targets(
+            raw_obs, raw_motion, target, margin=0.05)
+        torch.testing.assert_close(
+            labels["target"], torch.tensor([1.0, 0.0, 0.0]))
+        torch.testing.assert_close(
+            labels["valid"], torch.tensor([1.0, 1.0, 0.0]))
+        self.assertFalse(labels["obs_error"].requires_grad)
+        self.assertFalse(labels["motion_error"].requires_grad)
+
     def test_joint_backward_detaches_motion_but_reaches_point_heads(self):
         module = JointFullSearchRefiner(
             motion_dim=16, motion_dropout=0.0).train()
@@ -320,6 +405,38 @@ class JointRouterTest(unittest.TestCase):
         self.assertTrue(torch.equal(final, observation))
         self.assertTrue(bool((diagnostics[
             "ct_router_evidence_valid"] == 0).all()))
+
+    def test_v2_quality_and_presence_diagnostics_cannot_veto_minus_b3(self):
+        router = JointScalarResidualRouter(
+            contract_version=2, presence_hard_gate=False).eval()
+        observation = torch.zeros(2, 4)
+        final, diagnostics = router(
+            observation_box=observation,
+            raw_search_xy=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+            candidate_valid=torch.ones(2),
+            observation_stats=torch.zeros(2, 5),
+            targetness_mean=torch.zeros(2),
+            targetness_max=torch.zeros(2),
+            targetness_entropy=torch.zeros(2),
+            normalized_ess=torch.zeros(2),
+            query_gate=torch.zeros(2),
+            query_delta_t=torch.ones(2),
+            gap_ratio=torch.ones(2),
+            extension_mass_ratio=torch.zeros(2),
+            extension_vote_rms=torch.full((2,), float('inf')),
+            presence_probability=torch.full((2,), 0.01),
+            total_point_count=torch.tensor([3.0, 3.0]),
+            extension_point_count=torch.ones(2),
+            extension_voxels=torch.ones(2),
+            coverage_need=torch.zeros(2),
+            quality_valid=torch.zeros(2),
+            enabled=False,
+        )
+        torch.testing.assert_close(
+            diagnostics["ct_router_evidence_valid"], torch.ones(2))
+        torch.testing.assert_close(
+            diagnostics["ct_router_applied_gate"], torch.ones(2))
+        self.assertFalse(torch.equal(final, observation))
 
     def test_nonfinite_router_context_abstains_with_finite_outputs(self):
         router = JointScalarResidualRouter().eval()
@@ -411,6 +528,44 @@ class JointFullConfigTest(unittest.TestCase):
         self.assertFalse(b2_only["ct_enable_b3"])
         self.assertTrue(b2_only["ct_online_recursive_training"])
 
+    def test_repaired_config_is_versioned_without_mutating_v1(self):
+        legacy = load_yaml_config(
+            ROOT / "cfgs/ct_v2/21_ct_joint_full.yaml")
+        repaired = load_yaml_config(
+            ROOT / "cfgs/ct_v2/22_ct_joint_repaired.yaml")
+        self.assertNotIn("ct_joint_contract_version", legacy)
+        self.assertEqual(repaired["ct_joint_contract_version"], 2)
+        self.assertEqual(
+            repaired["ct_recursive_rollout_horizons"], [1, 2, 4, 8])
+        self.assertTrue(repaired["use_b1_prepass_support"])
+        self.assertFalse(repaired["ct_presence_hard_gate"])
+        self.assertTrue(repaired["ct_recursive_reseed_enabled"])
+        self.assertEqual(repaired["ct_partition_seed"], 42)
+        for name in (
+                "22_ct_joint_repaired_b0.yaml",
+                "22_ct_joint_repaired_minus_b1.yaml",
+                "22_ct_joint_repaired_minus_b2.yaml",
+                "22_ct_joint_repaired_minus_b3.yaml",
+                "22_ct_joint_repaired_fault_old_recursive.yaml",
+                "22_ct_joint_repaired_fault_presence_hard.yaml",
+                "22_ct_joint_repaired_fault_alpha_self.yaml",
+                "22_ct_joint_repaired_fault_kinematic_search.yaml",
+                "22_ct_joint_repaired_full.yaml",
+                "22_ct_joint_repaired_b0_full.yaml",
+                "22_ct_joint_repaired_minus_b1_full.yaml",
+                "22_ct_joint_repaired_minus_b2_full.yaml",
+                "22_ct_joint_repaired_minus_b3_full.yaml"):
+            config = load_yaml_config(ROOT / "cfgs/ct_v2" / name)
+            self.assertEqual(config["ct_joint_contract_version"], 2)
+        for name in (
+                "22_ct_joint_repaired_b0.yaml",
+                "22_ct_joint_repaired_minus_b1.yaml",
+                "22_ct_joint_repaired_b0_full.yaml",
+                "22_ct_joint_repaired_minus_b1_full.yaml"):
+            config = load_yaml_config(ROOT / "cfgs/ct_v2" / name)
+            self.assertFalse(config["ct_enable_b1"])
+            self.assertFalse(config["use_b1_prepass_support"])
+
     def test_h3_shadow_bypasses_structural_b1_and_joint_full_paths(self):
         source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
         shadow_source = source.split(
@@ -425,6 +580,17 @@ class JointFullConfigTest(unittest.TestCase):
 
     def test_joint_diagnostic_export_has_a_schema_specific_aggregator(self):
         source = (ROOT / "models/base_model.py").read_text(encoding="utf-8")
+        row_source = source.split(
+            "    def _build_ct_joint_diagnostic_row", 1)[1].split(
+                "    @staticmethod\n    def _write_csv_rows", 1)[0]
+        for field in (
+                '"search_geometry_source_id"',
+                '"raw_obs_error"',
+                '"raw_motion_error"',
+                '"alpha_counterfactual_uplift"',
+                '"presence_probability"',
+                '"presence_target"'):
+            self.assertIn(field, row_source)
         writer_source = source.split(
             "    def _write_proposal_test_diagnostics(self):", 1)[1].split(
                 "    def _write_b3_test_rollouts", 1)[0]
@@ -441,6 +607,13 @@ class JointFullConfigTest(unittest.TestCase):
             "                             cfg, 'limit_val_batches', 1.0)",
             source)
 
+    def test_router_calibration_uses_deployment_recursive_state(self):
+        source = (ROOT / "tools/export_ct_joint_router_calibration.py").read_text(
+            encoding="utf-8")
+        self.assertIn('"ct_recursive_reseed_enabled": False', source)
+        self.assertIn(
+            '"recursive_state_policy": "deployment_no_reseed"', source)
+
     def test_masked_mean_is_available_when_b1_is_disabled(self):
         source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
         loss_source = source.split(
@@ -454,6 +627,85 @@ class JointFullConfigTest(unittest.TestCase):
             "        if self.use_ct_joint_full and self.ct_enable_b2:")
         self.assertLess(helper_offset, b1_branch_offset)
         self.assertLess(helper_offset, joint_branch_offset)
+
+    def test_minus_b1_does_not_train_the_motion_counterfactual_arm(self):
+        source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
+        loss_source = source.split(
+            "    def compute_loss(self, data, output):", 1)[1].split(
+            "    def on_train_epoch_start", 1)[0]
+        self.assertIn(
+            "counterfactual_arms_enabled = bool(\n"
+            "                self.ct_joint_contract_version >= 2\n"
+            "                and self.ct_query_counterfactual_supervision\n"
+            "                and self.ct_enable_b1)",
+            loss_source)
+
+    def test_inference_prepass_obeys_b1_ablation_gate(self):
+        source = (ROOT / "models/base_model.py").read_text(encoding="utf-8")
+        sequence_source = source.split(
+            "    def evaluate_one_sequence(self, sequence):", 1)[1].split(
+            "    def _m4_timestamp", 1)[0]
+        self.assertIn('"use_b1_prepass_support", False', sequence_source)
+        self.assertIn('"ct_enable_b1", True', sequence_source)
+
+    def test_tracklet_paired_bootstrap_uses_exact_endpoint_keys(self):
+        baseline = {
+            ("a", 1): (0.2, 1.0),
+            ("a", 2): (0.4, 0.8),
+            ("b", 1): (0.3, 1.2),
+        }
+        repaired = {
+            key: (iou + 0.2, max(0.0, distance - 0.3))
+            for key, (iou, distance) in baseline.items()}
+        result = paired_bootstrap(
+            baseline, repaired, draws=100, seed=7)
+        self.assertGreater(
+            result["delta"]["success"]["point_estimate"], 0.0)
+        self.assertGreater(
+            result["delta"]["precision"]["point_estimate"], 0.0)
+        with self.assertRaises(ValueError):
+            paired_bootstrap(
+                baseline, {("a", 1): repaired[("a", 1)]}, draws=2)
+
+    def test_bootstrap_does_not_duplicate_an_exported_initial_frame(self):
+        baseline = {
+            ("a", 0): (1.0, 0.0),
+            ("a", 1): (0.2, 1.0),
+        }
+        repaired = {
+            ("a", 0): (1.0, 0.0),
+            ("a", 1): (0.4, 0.7),
+        }
+        result = paired_bootstrap(
+            baseline, repaired, draws=10, seed=9)
+        self.assertEqual(result["endpoint_count_including_initial"], 2)
+
+    def test_multiseed_bootstrap_reports_mean_across_identical_endpoints(self):
+        baseline = {
+            ("a", 0): (1.0, 0.0),
+            ("a", 1): (0.2, 1.0),
+            ("b", 0): (1.0, 0.0),
+            ("b", 1): (0.3, 1.2),
+        }
+        repaired_a = {
+            key: (iou + (0.0 if key[1] == 0 else 0.2), distance)
+            for key, (iou, distance) in baseline.items()}
+        repaired_b = {
+            key: (iou + (0.0 if key[1] == 0 else 0.1), distance)
+            for key, (iou, distance) in baseline.items()}
+        result = paired_bootstrap_multiseed(
+            [baseline, baseline], [repaired_a, repaired_b],
+            draws=20, seed=11)
+        self.assertEqual(result["seed_count"], 2)
+        self.assertGreater(result["delta"]["success"]["point_estimate"], 0)
+
+    def test_metric_endpoint_export_covers_empty_and_initial_frames(self):
+        source = (ROOT / "models/base_model.py").read_text(encoding="utf-8")
+        test_source = source.split(
+            "    def test_step(self, batch, batch_idx):", 1)[1].split(
+            "    def on_test_epoch_start", 1)[0]
+        self.assertIn("zip(ious, distances)", test_source)
+        self.assertIn('"tracking_endpoints.csv"', source)
 
 
 if __name__ == "__main__":

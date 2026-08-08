@@ -1,0 +1,4 @@
+run,commit,config,seed,epochs,batch_size,workers,train_source_split,training_partition,checkpoint_validation_partition,checkpoint_validation_noninitial_frames,test_split,dirty_tracked,steps_per_epoch
+Full,bb3a04d,cfgs/ct_v2/21_ct_joint_full.yaml,42,60,16,4,mini_train,train_70pct_tracklets,dev_15pct_mini_train,444,mini_val,false,855
+-B3,bb3a04d,cfgs/ct_v2/21_ct_joint_minus_b3.yaml,42,60,16,4,mini_train,train_70pct_tracklets,dev_15pct_mini_train,444,mini_val,false,855
+B2-only,a9d7d1d,cfgs/ct_v2/21_ct_joint_b2_only.yaml,42,60,16,4,mini_train,train_70pct_tracklets,dev_15pct_mini_train,444,mini_val,false,855

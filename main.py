@@ -661,6 +661,8 @@ if not cfg.test:
             candidate_views=int(getattr(
                 cfg, 'ct_recursive_candidate_views', 4)),
             seed=loader_seed,
+            partition_seed=int(getattr(
+                cfg, 'ct_partition_seed', 42)),
             partition=str(getattr(cfg, 'ct_router_partition', 'train')),
             shadow_interval=int(getattr(
                 cfg, 'ct_router_shadow_interval', 2)),

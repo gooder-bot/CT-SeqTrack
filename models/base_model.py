@@ -41,6 +41,7 @@ from utils.ct_search import (
     build_time_guided_search_box,
     combined_search_support_statistics,
     resolve_b1_search_support,
+    resolve_joint_search_geometry,
     sample_padded_search_extension,
     sample_source_aware_endpoint_points,
     sample_search_extension,
@@ -74,6 +75,7 @@ class BaseModelMF(pl.LightningModule):
         self.n_frames = TorchNumFrames()
         self._proposal_sequence_diagnostics = []
         self._proposal_test_diagnostics = []
+        self._tracking_test_endpoints = []
         self._b3_sequence_rollouts = []
         self._b3_test_rollouts = []
 
@@ -604,9 +606,24 @@ class BaseModelMF(pl.LightningModule):
         kinematic = xy("motion_prior_kinematic_xy", observation)
         learned = xy("motion_prior_xy", kinematic)
         raw_search = xy("ct_search_unmasked_raw_xy", observation)
+        raw_obs = xy("ct_search_raw_obs_xy", raw_search)
+        raw_motion = xy("ct_search_raw_motion_xy", raw_search)
+        raw_alpha = xy("ct_search_raw_alpha_xy", raw_search)
         final = xy("aux_estimation_boxes", observation)
+        observation_local4 = output[
+            "observation_aux_estimation_boxes"
+        ].detach().cpu().numpy().reshape(-1, 4)[0]
+        final_local4 = output[
+            "aux_estimation_boxes"
+        ].detach().cpu().numpy().reshape(-1, 4)[0]
+        observation_world = points_utils.getOffsetBB(
+            reference_box, observation_local4, degrees=self.config.degrees,
+            use_z=self.config.use_z, limit_box=self.config.limit_box)
+        final_world = points_utils.getOffsetBB(
+            reference_box, final_local4, degrees=self.config.degrees,
+            use_z=self.config.use_z, limit_box=self.config.limit_box)
 
-        def foreground_count(points_key, mask_key):
+        def foreground_count(points_key, mask_key, source_key=None):
             points = data_dict.get(points_key)
             mask = data_dict.get(mask_key)
             if points is None or mask is None:
@@ -615,6 +632,12 @@ class BaseModelMF(pl.LightningModule):
             mask_np = mask.detach().cpu().numpy().reshape(-1) > 0
             foreground = geometry_utils.points_in_box(
                 target_box, points_np.T, self.config.bb_scale)
+            if source_key is not None:
+                source = data_dict.get(source_key)
+                if source is None:
+                    return 0
+                source_np = source.detach().cpu().numpy().reshape(-1) > 0
+                foreground = foreground & source_np
             return int(np.sum(foreground & mask_np))
 
         endpoint_foreground = foreground_count(
@@ -622,6 +645,13 @@ class BaseModelMF(pl.LightningModule):
         tube_foreground = foreground_count(
             "trajectory_search_points",
             "trajectory_search_point_valid_mask")
+        endpoint_extension_foreground = foreground_count(
+            "search_v3_points", "search_v3_point_valid_mask",
+            "search_v3_point_source")
+        tube_extension_foreground = foreground_count(
+            "trajectory_search_points",
+            "trajectory_search_point_valid_mask",
+            "trajectory_search_point_source")
         sigma = output.get("motion_prior_log_sigma_parallel_perp")
         sigma_np = (
             np.exp(sigma.detach().cpu().numpy().reshape(-1, 2)[0])
@@ -631,6 +661,14 @@ class BaseModelMF(pl.LightningModule):
         residual_unit_np = (
             residual_unit.detach().cpu().numpy().reshape(-1, 2)[0]
             if residual_unit is not None else np.zeros(2, dtype=np.float32))
+        raw_obs_error = float(np.linalg.norm(raw_obs - target_xy))
+        raw_motion_error = float(np.linalg.norm(raw_motion - target_xy))
+        counterfactual_margin = float(getattr(
+            self.config, 'ct_query_counterfactual_margin', 0.05))
+        motion_helpful = bool(
+            raw_motion_error + counterfactual_margin < raw_obs_error)
+        motion_harmful = bool(
+            raw_obs_error + counterfactual_margin < raw_motion_error)
         return {
             "frame_id": int(frame_id),
             "b2_version": "ct_joint_full",
@@ -641,18 +679,63 @@ class BaseModelMF(pl.LightningModule):
             "endpoint_foreground_count": endpoint_foreground,
             "tube_foreground_count": tube_foreground,
             "foreground_count": endpoint_foreground + tube_foreground,
+            "extension_foreground_count": (
+                endpoint_extension_foreground
+                + tube_extension_foreground),
             "search_valid": int(self._proposal_scalar(
                 output, "ct_search_candidate_valid") > 0.0),
+            "search_geometry_valid": int(self._proposal_scalar(
+                data_dict, "ct_search_geometry_valid") > 0.0),
+            "search_new_support_valid": int(self._proposal_scalar(
+                output, "ct_search_new_support_valid") > 0.0),
+            "search_available": int(self._proposal_scalar(
+                output, "ct_search_available") > 0.0),
+            "search_geometry_source_id": int(self._proposal_scalar(
+                data_dict, "search_v3_prior_source_id")),
+            "search_quality_valid": int(self._proposal_scalar(
+                data_dict, "ct_search_quality_valid") > 0.0),
+            "search_coverage_need": int(self._proposal_scalar(
+                data_dict, "ct_search_coverage_need") > 0.0),
+            "search_total_point_count": self._proposal_scalar(
+                data_dict, "ct_search_total_point_count"),
+            "search_extension_count": self._proposal_scalar(
+                data_dict, "ct_search_extension_count"),
+            "search_extension_voxels": self._proposal_scalar(
+                data_dict, "ct_search_extension_voxels"),
             "observation_error": float(np.linalg.norm(
                 observation - target_xy)),
+            "observation_iou": float(estimateOverlap(
+                this_box, observation_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
+            "observation_distance": float(estimateAccuracy(
+                this_box, observation_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
             "kinematic_error": float(np.linalg.norm(
                 kinematic - target_xy)),
             "learned_motion_error": float(np.linalg.norm(
                 learned - target_xy)),
             "raw_search_error": float(np.linalg.norm(
                 raw_search - target_xy)),
+            "raw_obs_error": raw_obs_error,
+            "raw_motion_error": raw_motion_error,
+            "raw_alpha_error": float(np.linalg.norm(
+                raw_alpha - target_xy)),
+            "alpha_counterfactual_uplift": (
+                raw_obs_error - raw_motion_error),
+            "alpha_motion_helpful": int(motion_helpful),
+            "alpha_motion_harmful": int(motion_harmful),
+            "alpha_ambiguous": int(not (
+                motion_helpful or motion_harmful)),
             "final_error": float(np.linalg.norm(final - target_xy)),
+            "final_iou": float(estimateOverlap(
+                this_box, final_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
+            "final_distance": float(estimateAccuracy(
+                this_box, final_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
             "query_gate": self._proposal_scalar(
+                output, "ct_query_gate_probability"),
+            "query_gate_applied": self._proposal_scalar(
                 output, "ct_query_gate_internal"),
             "query_shift_norm": self._proposal_scalar(
                 output, "ct_query_shift_norm"),
@@ -660,6 +743,8 @@ class BaseModelMF(pl.LightningModule):
                 output, "ct_router_gate"),
             "router_applied_gate": self._proposal_scalar(
                 output, "ct_router_applied_gate"),
+            "router_evidence_valid": self._proposal_scalar(
+                output, "ct_router_evidence_valid"),
             "router_radius": self._proposal_scalar(
                 output, "ct_router_radius"),
             "residual_unit_parallel": float(residual_unit_np[0]),
@@ -676,6 +761,15 @@ class BaseModelMF(pl.LightningModule):
                 output, "ct_search_targetness_entropy"),
             "normalized_ess": self._proposal_scalar(
                 output, "ct_search_normalized_ess"),
+            "extension_mass_ratio": self._proposal_scalar(
+                output, "ct_search_extension_mass_ratio"),
+            "extension_vote_rms": self._proposal_scalar(
+                output, "ct_search_extension_vote_rms"),
+            "presence_probability": self._proposal_scalar(
+                output, "ct_search_presence_probability"),
+            "presence_target": int(
+                endpoint_extension_foreground
+                + tube_extension_foreground >= 1),
         }
 
     @staticmethod
@@ -796,6 +890,19 @@ class BaseModelMF(pl.LightningModule):
         self._write_csv_rows(
             output_dir / "proposal_tracklets.csv", tracklet_rows)
 
+    def _write_tracking_test_endpoints(self):
+        """Persist all metric endpoints, including frame 0 and empty crops."""
+        rows = self._tracking_test_endpoints
+        if not rows or int(getattr(self, "global_rank", 0)) != 0:
+            return
+        logger = getattr(self, "logger", None)
+        log_dir = getattr(logger, "log_dir", None)
+        if log_dir is None:
+            save_dir = getattr(logger, "save_dir", ".")
+            log_dir = Path(save_dir) / "proposal_diagnostics"
+        output_dir = Path(log_dir) / "proposal_diagnostics"
+        self._write_csv_rows(output_dir / "tracking_endpoints.csv", rows)
+
     def _write_b3_test_rollouts(self):
         rows = self._b3_test_rollouts
         if not rows or int(getattr(self, "global_rank", 0)) != 0:
@@ -896,8 +1003,11 @@ class BaseModelMF(pl.LightningModule):
                 # consumes recursive history boxes and timestamps; the
                 # current annotation is never passed to the pre-pass.
                 motion_prediction = None
-                if bool(getattr(
-                        self.config, "use_b1_prepass_support", False)):
+                if (bool(getattr(
+                        self.config, "use_b1_prepass_support", False))
+                        and bool(getattr(
+                            self, "ct_enable_b1",
+                            getattr(self.config, "ct_enable_b1", True)))):
                     predictor = getattr(self, "predict_motion_prepass", None)
                     if predictor is None:
                         raise RuntimeError(
@@ -977,7 +1087,10 @@ class BaseModelMF(pl.LightningModule):
                             self.config,
                             "export_proposal_diagnostics",
                             False))
-                            and "ct_search_raw_xy" in forward_output):
+                            and ("ct_search_raw_xy" in forward_output
+                                 or bool(getattr(
+                                     self.config,
+                                     "use_ct_joint_full", False)))):
                         proposal_diagnostics.append(
                             self._build_ct_joint_diagnostic_row(
                                 forward_output,
@@ -1227,11 +1340,28 @@ class BaseModelMF(pl.LightningModule):
             test_loaders = getattr(self.trainer, "test_dataloaders", None)
             if isinstance(test_loaders, (list, tuple)) and test_loaders:
                 test_dataset = getattr(test_loaders[0], "dataset", None)
-        tracklet_key = (
-            test_dataset.get_tracklet_key(batch_idx)
-            if test_dataset is not None
-            and hasattr(test_dataset, "get_tracklet_key")
-            else f"tracklet/{int(batch_idx)}")
+        if (test_dataset is not None
+                and hasattr(test_dataset, "get_tracklet_key")):
+            tracklet_key = test_dataset.get_tracklet_key(batch_idx)
+        elif (test_dataset is not None
+              and hasattr(test_dataset, "dataset")
+              and hasattr(test_dataset.dataset, "get_tracklet_key")):
+            source_index = int(batch_idx)
+            if hasattr(test_dataset, "tracklet_indices"):
+                source_index = int(test_dataset.tracklet_indices[batch_idx])
+            tracklet_key = test_dataset.dataset.get_tracklet_key(
+                source_index)
+        else:
+            tracklet_key = f"tracklet/{int(batch_idx)}"
+        for frame_id, (overlap, distance) in enumerate(
+                zip(ious, distances)):
+            self._tracking_test_endpoints.append({
+                "tracklet_id": int(batch_idx),
+                "tracklet_key": str(tracklet_key),
+                "frame_id": int(frame_id),
+                "final_iou": float(overlap),
+                "final_distance": float(distance),
+            })
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
@@ -1278,6 +1408,7 @@ class BaseModelMF(pl.LightningModule):
 
     def on_test_epoch_start(self):
         self._proposal_test_diagnostics = []
+        self._tracking_test_endpoints = []
         self._b3_test_rollouts = []
 
     def on_test_epoch_end(self):
@@ -1295,6 +1426,7 @@ class BaseModelMF(pl.LightningModule):
         if bool(getattr(
                 self.config, "export_proposal_diagnostics", False)):
             self._write_proposal_test_diagnostics()
+            self._write_tracking_test_endpoints()
         if bool(getattr(self.config, "export_b3_rollouts", False)):
             self._write_b3_test_rollouts()
 
@@ -1602,12 +1734,11 @@ class MotionBaseModelMF(BaseModelMF):
         if use_endpoint_search_evidence:
             motion_prediction = kwargs.get("motion_prediction")
             use_prepass = (
-                False if use_ct_joint_full else bool(getattr(
-                    self.config, "use_b1_prepass_support", False)))
-            search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
-                ref_boxs,
-                effective_delta_t_list,
-                valid_mask,
+                bool(getattr(self.config, "use_b1_prepass_support", False))
+                if (not use_ct_joint_full or int(getattr(
+                    self.config, "ct_joint_contract_version", 1)) >= 2)
+                else False)
+            support_kwargs = dict(
                 prediction=motion_prediction,
                 use_b1_prepass=use_prepass,
                 use_dynamic_sigma=bool(getattr(
@@ -1637,9 +1768,35 @@ class MotionBaseModelMF(BaseModelMF):
                 fallback_max_yaw_rate=float(search_config_value(
                     'max_yaw_rate', np.pi / 2.0)),
                 fallback_min_displacement=float(search_config_value(
-                    'min_displacement', 0.2)),
+                    'min_displacement', 0.2))
+                if not (use_ct_joint_full and int(getattr(
+                    self.config, "ct_joint_contract_version", 1)) >= 2)
+                else 0.0,
                 fallback_require_recent_transition=use_ct_joint_full,
             )
+            if (use_ct_joint_full and int(getattr(
+                    self.config, "ct_joint_contract_version", 1)) >= 2):
+                (search_v2_box,
+                 ct_search_box,
+                 search_v2_diagnostics) = resolve_joint_search_geometry(
+                    ref_boxs,
+                    effective_delta_t_list,
+                    valid_mask,
+                    **support_kwargs,
+                )
+                if ct_search_box is not None:
+                    ct_search_diagnostics = dict(search_v2_diagnostics)
+                    ct_search_pc = points_utils.generate_subwindow_with_aroundboxs(
+                        this_pc, ct_search_box, ref_boxs[0],
+                        scale=1.0, offset=0.0)
+                    expanded_search_points = ct_search_pc.points.T
+            else:
+                search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
+                    ref_boxs,
+                    effective_delta_t_list,
+                    valid_mask,
+                    **support_kwargs,
+                )
             if search_v2_box is not None:
                 learned_prior_support = (
                     search_v2_diagnostics.get("prior_source") == "b1")
@@ -1926,9 +2083,26 @@ class MotionBaseModelMF(BaseModelMF):
                 self.config, 'ct_search_min_extension_points', 8))
             and joint_support['extension_voxels'] >= int(getattr(
                 self.config, 'ct_search_min_extension_voxels', 4)))
-        search_support_valid = bool(
-            recent_history_valid and time_valid and proposal_valid
-            and coverage_need and point_support_valid)
+        geometry_valid = bool(
+            recent_history_valid and time_valid
+            and search_v2_box is not None and ct_search_box is not None
+            and search_v2_diagnostics.get('valid', False)
+            and np.isfinite(search_v2_endpoint_xy).all())
+        structural_point_valid = bool(joint_support['total_count'] >= 3)
+        new_support_valid = bool(
+            joint_support['extension_count'] >= 1
+            and joint_support['extension_voxels'] >= 1)
+        joint_contract_v2 = bool(
+            int(getattr(self.config, 'ct_joint_contract_version', 1)) >= 2)
+        if (use_ct_joint_full and joint_contract_v2 and bool(getattr(
+                self.config, 'ct_search_relaxed_validity', True))):
+            search_support_valid = bool(
+                geometry_valid and structural_point_valid
+                and new_support_valid)
+        else:
+            search_support_valid = bool(
+                recent_history_valid and time_valid and proposal_valid
+                and coverage_need and point_support_valid)
         search_has_usable_points = num_points_in_search > 2
         seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], 1.25).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
 
@@ -2053,6 +2227,18 @@ class MotionBaseModelMF(BaseModelMF):
                           device=self.device, dtype=torch.float32),
                       "ct_search_support_valid": torch.tensor(
                           [search_support_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_geometry_valid": torch.tensor(
+                          [geometry_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_structural_point_valid": torch.tensor(
+                          [structural_point_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_new_support_valid": torch.tensor(
+                          [new_support_valid], device=self.device,
+                          dtype=torch.float32),
+                      "ct_search_quality_valid": torch.tensor(
+                          [point_support_valid], device=self.device,
                           dtype=torch.float32),
                       "candidate_valid": torch.tensor(
                           [search_support_valid], device=self.device,
@@ -2271,7 +2457,8 @@ class MotionBaseModelMF(BaseModelMF):
                     (1, search_v2_points.shape[0]),
                     device=self.device, dtype=torch.long),
                 "search_v3_geometry_valid": torch.tensor(
-                    [search_support_valid],
+                    [geometry_valid
+                     if joint_contract_v2 else search_support_valid],
                     device=self.device, dtype=torch.float32),
                 "search_v3_support_valid": torch.tensor(
                     [search_support_valid],

@@ -1,0 +1,7 @@
+_base_: 22_ct_joint_repaired_full.yaml
+
+experiment_name: ct_seqtrack_joint_repaired_b0_full_nuscenes
+ct_enable_b1: false
+ct_enable_b2: false
+ct_enable_b3: false
+use_b1_prepass_support: false
