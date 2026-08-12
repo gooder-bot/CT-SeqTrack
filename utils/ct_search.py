@@ -540,6 +540,7 @@ def build_b1_uncertainty_support(
         use_dynamic_sigma,
         fixed_margins=(2.0, 1.0),
         coverage_scale=2.448,
+        standardized_residual_quantile=(1.0, 1.0),
         min_direction_speed=0.2,
         max_length=24.0,
         max_width=10.0):
@@ -558,6 +559,16 @@ def build_b1_uncertainty_support(
             "source_id": 0,
         }
     scale = max(float(coverage_scale), 1e-6)
+    residual_quantile = np.asarray(
+        standardized_residual_quantile, dtype=np.float64).reshape(-1)
+    if (residual_quantile.size != 2
+            or not np.isfinite(residual_quantile).all()
+            or np.any(residual_quantile <= 0)):
+        return None, {
+            "valid": False,
+            "reason": "invalid_standardized_residual_quantile",
+            "source_id": int(prediction.get("source_id", 1)),
+        }
     if bool(use_dynamic_sigma):
         log_sigma = np.asarray(
             prediction.get("log_sigma_parallel_perp"), dtype=np.float64)
@@ -567,7 +578,7 @@ def build_b1_uncertainty_support(
                 "reason": "invalid_dynamic_sigma",
                 "source_id": int(prediction.get("source_id", 1)),
             }
-        sigma = np.exp(log_sigma.reshape(2))
+        sigma = np.exp(log_sigma.reshape(2)) * residual_quantile
     else:
         margins = np.asarray(fixed_margins, dtype=np.float64).reshape(-1)
         if margins.size != 2 or not np.isfinite(margins).all():
@@ -577,7 +588,7 @@ def build_b1_uncertainty_support(
                 "source_id": int(prediction.get("source_id", 1)),
             }
         sigma = np.maximum(margins, 1e-3) / scale
-    return build_uncertainty_prior_tube(
+    support, diagnostics = build_uncertainty_prior_tube(
         latest_box,
         prediction.get("mu_xy", (0.0, 0.0)),
         sigma,
@@ -590,6 +601,9 @@ def build_b1_uncertainty_support(
         source_id=int(prediction.get("source_id", 1)),
         direction_xy=prediction.get("direction_xy"),
     )
+    diagnostics["standardized_residual_quantile"] = (
+        residual_quantile.astype(np.float64).tolist())
+    return support, diagnostics
 
 
 def resolve_b1_search_support(
@@ -602,6 +616,7 @@ def resolve_b1_search_support(
         use_dynamic_sigma=False,
         fixed_margins=(2.0, 1.0),
         coverage_scale=2.448,
+        standardized_residual_quantile=(1.0, 1.0),
         min_direction_speed=0.2,
         max_length=24.0,
         max_width=10.0,
@@ -621,6 +636,8 @@ def resolve_b1_search_support(
             use_dynamic_sigma=use_dynamic_sigma,
             fixed_margins=fixed_margins,
             coverage_scale=coverage_scale,
+            standardized_residual_quantile=(
+                standardized_residual_quantile),
             min_direction_speed=min_direction_speed,
             max_length=max_length,
             max_width=max_width,
@@ -682,12 +699,20 @@ def resolve_joint_search_geometry(
             diagnostics["endpoint_center"], dtype=np.float64).copy()
         endpoint.orientation = copy.deepcopy(tube.orientation)
         endpoint.wlh = np.asarray(latest.wlh, dtype=np.float64).copy()
+        support_scale = max(float(diagnostics.get(
+            "coverage_scale", kwargs.get("coverage_scale", 2.448))), 0.0)
+        parallel_margin = support_scale * float(diagnostics.get(
+            "sigma_parallel", fixed_margins[0] / max(
+                support_scale, 1e-6)))
+        perpendicular_margin = support_scale * float(diagnostics.get(
+            "sigma_perpendicular", fixed_margins[1] / max(
+                support_scale, 1e-6)))
         endpoint.wlh[0] = min(
             float(kwargs.get("max_width", 10.0)),
-            float(endpoint.wlh[0]) + 2.0 * float(fixed_margins[1]))
+            float(endpoint.wlh[0]) + 2.0 * perpendicular_margin)
         endpoint.wlh[1] = min(
             float(kwargs.get("max_length", 24.0)),
-            float(endpoint.wlh[1]) + 2.0 * float(fixed_margins[0]))
+            float(endpoint.wlh[1]) + 2.0 * parallel_margin)
     else:
         endpoint = endpoint_or_tube
         displacement_world = (
@@ -1041,6 +1066,107 @@ def sample_source_aware_endpoint_points(
         "overlap_count": overlap_count,
         "selected_extension_count": selected_extension_count,
         "selected_overlap_count": sample_count - selected_extension_count,
+    }
+
+
+def sample_joint_novel_extensions(
+        baseline_points,
+        endpoint_points,
+        tube_points,
+        endpoint_quota=128,
+        tube_quota=128,
+        seed=None,
+        tolerance=1e-6):
+    """Build an extension-only endpoint/tube pool without duplicate returns.
+
+    The B0 crop is used only as the exclusion set.  A LiDAR return present in
+    both acquisition regions is retained once and receives source id ``3``;
+    endpoint-only and tube-only returns receive ids ``1`` and ``2``.  The
+    output is padded to ``endpoint_quota + tube_quota`` and is sampled by a
+    branch-local Generator, so it cannot perturb the B0 sampling stream.
+    """
+    baseline_points = np.asarray(baseline_points)
+    endpoint_points = np.asarray(endpoint_points)
+    tube_points = np.asarray(tube_points)
+    endpoint_quota = int(endpoint_quota)
+    tube_quota = int(tube_quota)
+    if endpoint_quota <= 0 or tube_quota <= 0:
+        raise ValueError("endpoint and tube quotas must be positive")
+    if any(points.ndim != 2 for points in (
+            baseline_points, endpoint_points, tube_points)):
+        raise ValueError("search point arrays must have shape [N, C]")
+    if not (baseline_points.shape[1] == endpoint_points.shape[1]
+            == tube_points.shape[1]):
+        raise ValueError("baseline, endpoint and tube points must share channels")
+
+    tolerance = _finite_positive(tolerance, fallback=1e-6)
+    coordinate_dims = min(baseline_points.shape[1], 3)
+
+    def keys(points):
+        return np.rint(
+            points[:, :coordinate_dims] / tolerance).astype(np.int64)
+
+    baseline_keys = {tuple(row) for row in keys(baseline_points)}
+    merged = {}
+    branch_available = {1: 0, 2: 0}
+    for branch_id, points in ((1, endpoint_points), (2, tube_points)):
+        seen_in_branch = set()
+        for point, key_row in zip(points, keys(points)):
+            key = tuple(key_row)
+            if key in baseline_keys or key in seen_in_branch:
+                continue
+            seen_in_branch.add(key)
+            branch_available[branch_id] += 1
+            if key in merged:
+                merged[key] = (merged[key][0], 3)
+            else:
+                merged[key] = (point, branch_id)
+
+    endpoint_candidates = [
+        value for value in merged.values() if value[1] in (1, 3)]
+    tube_candidates = [
+        value for value in merged.values() if value[1] == 2]
+    rng = np.random.default_rng(seed)
+
+    def select(values, quota):
+        if len(values) <= quota:
+            return list(values)
+        order = rng.choice(len(values), size=quota, replace=False)
+        return [values[int(index)] for index in order]
+
+    selected_endpoint = select(endpoint_candidates, endpoint_quota)
+    selected_tube = select(tube_candidates, tube_quota)
+    selected = selected_endpoint + selected_tube
+    output_size = endpoint_quota + tube_quota
+    output = np.zeros(
+        (output_size, baseline_points.shape[1]), dtype=np.float32)
+    valid_mask = np.zeros((output_size,), dtype=np.float32)
+    source = np.zeros((output_size,), dtype=np.int64)
+    for index, (point, source_id) in enumerate(selected):
+        output[index] = point.astype(np.float32, copy=False)
+        valid_mask[index] = 1.0
+        source[index] = int(source_id)
+
+    source_counts = {
+        source_id: int(sum(value[1] == source_id for value in merged.values()))
+        for source_id in (1, 2, 3)
+    }
+    return output, valid_mask, source, {
+        "active": bool(selected),
+        "sample_count": int(len(selected)),
+        "available_count": int(len(merged)),
+        "endpoint_available_count": int(branch_available[1]),
+        "tube_available_count": int(branch_available[2]),
+        "endpoint_only_count": source_counts[1],
+        "tube_only_count": source_counts[2],
+        "both_count": source_counts[3],
+        "selected_endpoint_count": int(len(selected_endpoint)),
+        "selected_tube_count": int(len(selected_tube)),
+        # Internal sampler diagnostic.  Callers must not expose raw points as
+        # model input; it is used only to count pre-sampling target support.
+        "_pool_points": np.asarray(
+            [value[0] for value in merged.values()], dtype=np.float32
+        ).reshape(-1, baseline_points.shape[1]),
     }
 
 

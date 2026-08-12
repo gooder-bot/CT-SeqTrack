@@ -53,6 +53,7 @@ from utils.ct_search import (
     resolve_b1_search_support,
     resolve_joint_search_geometry,
     sample_padded_search_extension,
+    sample_joint_novel_extensions,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
@@ -272,6 +273,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     this_pc, this_box = this_frame['pc'], this_frame['3d_bbox']
     joint_contract_v2 = bool(
         getattr(config, 'ct_joint_contract_version', 1) >= 2)
+    joint_contract_v3 = bool(
+        getattr(config, 'ct_joint_contract_version', 1) >= 3)
     # Keep the untouched GT trajectory for M1 labels and invariance audits.
     # ``transform_box`` is non-mutating, but the local variables below are
     # intentionally rebound to candidate-coordinate boxes.
@@ -1018,6 +1021,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             ),
             coverage_scale=float(getattr(
                 config, 'search_v3_coverage_scale', 2.448)),
+            standardized_residual_quantile=tuple(getattr(
+                config,
+                'search_v3_standardized_residual_q90_parallel_perpendicular',
+                (1.0, 1.0))),
             min_direction_speed=float(getattr(
                 config, 'motion_v3_min_direction_speed', 0.2)),
             max_length=float(search_config_value('max_length', 24.0)),
@@ -1247,6 +1254,54 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     'min_points', 3)),
                 seed=search_v2_seed,
             )
+    joint_extension_sampling = None
+    joint_extension_source = None
+    if use_ct_joint_full and joint_contract_v3:
+        independent_seed_base = (
+            current_sampling_seed
+            if current_sampling_seed is not None else sample_index)
+        joint_extension_seed = (
+            int(independent_seed_base) * 22695477 + 1) & 0xFFFFFFFF
+        (joint_extension_points,
+         joint_extension_valid_mask,
+         joint_extension_source,
+         joint_extension_sampling) = sample_joint_novel_extensions(
+            baseline_search_points,
+            search_v2_expanded_points,
+            expanded_search_points,
+            endpoint_quota=int(getattr(config, 'ct_endpoint_quota', 128)),
+            tube_quota=int(getattr(config, 'ct_tube_quota', 128)),
+            seed=joint_extension_seed,
+        )
+        endpoint_quota = int(getattr(config, 'ct_endpoint_quota', 128))
+        search_v2_points = joint_extension_points[:endpoint_quota]
+        search_v2_point_valid_mask = joint_extension_valid_mask[
+            :endpoint_quota]
+        search_v2_point_source = (
+            search_v2_point_valid_mask > 0).astype(np.int64)
+        trajectory_search_points = joint_extension_points[endpoint_quota:]
+        trajectory_search_point_valid_mask = joint_extension_valid_mask[
+            endpoint_quota:]
+        trajectory_search_point_source = (
+            trajectory_search_point_valid_mask > 0).astype(np.int64)
+        search_v2_sampling = {
+            'active': bool(joint_extension_sampling['active']),
+            'sample_count': int(search_v2_point_valid_mask.sum()),
+            'available_count': int(
+                joint_extension_sampling['endpoint_available_count']),
+            'extension_count': int(search_v2_point_valid_mask.sum()),
+            'overlap_count': 0,
+            'selected_extension_count': int(
+                search_v2_point_valid_mask.sum()),
+            'selected_overlap_count': 0,
+        }
+        trajectory_search_sampling = {
+            'active': bool(trajectory_search_point_valid_mask.any()),
+            'sample_count': int(
+                trajectory_search_point_valid_mask.sum()),
+            'available_count': int(
+                joint_extension_sampling['tube_available_count']),
+        }
     joint_support = combined_search_support_statistics(
         (search_v2_points, trajectory_search_points),
         (search_v2_point_valid_mask,
@@ -1301,7 +1356,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     new_support_valid = bool(
         joint_support['extension_count'] >= 1
         and joint_support['extension_voxels'] >= 1)
-    if use_ct_joint_full and joint_contract_v2 and bool(getattr(
+    if use_ct_joint_full and joint_contract_v3:
+        # Availability is a deterministic structural contract: valid B1
+        # geometry plus at least one finite novel extension point.  No GT
+        # label, learned score, density heuristic or utility estimate enters.
+        search_support_valid = bool(
+            geometry_valid
+            and joint_extension_sampling is not None
+            and joint_extension_sampling['sample_count'] > 0)
+    elif use_ct_joint_full and joint_contract_v2 and bool(getattr(
             config, 'ct_search_relaxed_validity', True)):
         search_support_valid = bool(
             geometry_valid and structural_point_valid and new_support_valid)
@@ -1329,6 +1392,31 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         config.bb_scale,
     ).astype(np.float32)
     trajectory_search_point_labels *= trajectory_search_point_valid_mask
+    if joint_extension_sampling is not None:
+        extension_pool_points = joint_extension_sampling.pop(
+            '_pool_points', np.zeros(
+                (0, baseline_search_points.shape[1]), dtype=np.float32))
+    else:
+        extension_pool_points = np.zeros(
+            (0, baseline_search_points.shape[1]), dtype=np.float32)
+    base_target_count = int(np.sum(seg_label_this > 0))
+    expansion_regions = np.concatenate((
+        search_v2_expanded_points, expanded_search_points), axis=0)
+    if len(expansion_regions):
+        _, unique_expansion_indices = np.unique(
+            np.rint(expansion_regions[:, :3] / 1e-6).astype(np.int64),
+            axis=0, return_index=True)
+        expansion_regions = expansion_regions[
+            np.sort(unique_expansion_indices)]
+    expansion_target_count = int(np.sum(geometry_utils.points_in_box(
+        this_box, expansion_regions.T[:3, :],
+        config.bb_scale))) if len(expansion_regions) else 0
+    extension_pool_target_count = int(np.sum(geometry_utils.points_in_box(
+        this_box, extension_pool_points.T[:3, :],
+        config.bb_scale))) if len(extension_pool_points) else 0
+    extension_sampled_target_count = int(
+        np.sum(search_v2_point_labels > 0)
+        + np.sum(trajectory_search_point_labels > 0))
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
     if candidate_id != 0:
@@ -1556,6 +1644,46 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             candidate_shared_transform, dtype=np.float32),
         'candidate_shared_world_translation': candidate_shared_world_translation,
     }
+    if use_ct_joint_full and joint_contract_v3:
+        extension_points = np.concatenate(
+            (search_v2_points, trajectory_search_points), axis=0)
+        extension_labels = np.concatenate((
+            search_v2_point_labels,
+            trajectory_search_point_labels,
+        ), axis=0)
+        extension_valid_mask = np.concatenate((
+            search_v2_point_valid_mask,
+            trajectory_search_point_valid_mask,
+        ), axis=0)
+        if joint_extension_source is None:
+            raise RuntimeError("contract-v3 extension source was not built")
+        data_dict.update({
+            # This is the exact current-frame tensor appended to ``points``;
+            # no independent crop or resampling is allowed.
+            'ct_base_evidence_points': this_points.astype('float32'),
+            'ct_base_evidence_labels': seg_label_this.astype('float32'),
+            'ct_base_evidence_valid_mask': np.ones(
+                (config.point_sample_size,), dtype=np.float32),
+            'ct_extension_points': extension_points.astype('float32'),
+            'ct_extension_labels': extension_labels.astype('float32'),
+            'ct_extension_valid_mask':
+                extension_valid_mask.astype('float32'),
+            # 0=padding, 1=endpoint, 2=tube, 3=both.
+            'ct_extension_source': joint_extension_source.astype('int64'),
+            'ct_acquisition_base_target_count': np.float32(
+                base_target_count),
+            'ct_acquisition_expansion_target_count': np.float32(
+                expansion_target_count),
+            'ct_acquisition_extension_pool_target_count': np.float32(
+                extension_pool_target_count),
+            'ct_acquisition_sampled_target_count': np.float32(
+                extension_sampled_target_count),
+            'ct_acquisition_extension_pool_count': np.float32(
+                joint_extension_sampling['available_count']),
+            'ct_acquisition_sampled_count': np.float32(
+                joint_extension_sampling['sample_count']),
+            'ct_view_role': np.int64(0 if candidate_id == 0 else 1),
+        })
     if (use_trajectory_search
             or bool(getattr(config, 'use_ordered_trajectory_encoder', False))):
         data_dict.update({

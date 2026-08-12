@@ -1,0 +1,228 @@
+{
+  "schema": "ct_seqtrack.test_diagnosis.v1",
+  "generated_at": "2026-08-09T22:53:09+08:00",
+  "scope": {
+    "dataset": "nuScenes v1.0-mini",
+    "split": "mini_val",
+    "category": "Car",
+    "seed": 42,
+    "frames": 2285,
+    "tracklets": 106,
+    "virtual_rate_mode": "none"
+  },
+  "results": [
+    {
+      "rank": 1,
+      "experiment": "CT21 Full (historical Success max)",
+      "status": "completed",
+      "success": 57.749451,
+      "precision": 74.788841,
+      "checkpoint": "epoch=29-step=25650.ckpt",
+      "search_valid_rows": 0,
+      "source_run": "output/20260808-1707-21_ct_joint_full-eval_full_bestdev_minival"
+    },
+    {
+      "rank": 2,
+      "experiment": "CT21 B2-only (historical Precision max)",
+      "status": "completed",
+      "success": 56.574406,
+      "precision": 76.351204,
+      "checkpoint": "epoch=19-step=17100.ckpt",
+      "search_valid_rows": 0,
+      "source_run": "output/20260808-1707-21_ct_joint_b2_only-eval_b2_only_bestdev_minival"
+    },
+    {
+      "rank": 3,
+      "experiment": "SeqTrack baseline epoch60",
+      "status": "completed",
+      "success": 53.359955,
+      "precision": 64.381836,
+      "checkpoint": "epoch=59-step=75720.ckpt",
+      "search_valid_rows": null,
+      "source_run": "output/20260725-2326-01_seqtrack3d_baseline-ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16"
+    },
+    {
+      "rank": 4,
+      "experiment": "CT22 B1-only",
+      "status": "completed",
+      "success": 50.141136,
+      "precision": 68.038300,
+      "checkpoint": "epoch=19-step=17100.ckpt",
+      "search_valid_rows": 0,
+      "source_run": "output/20260809-2209-22_ct_joint_repaired_minus_b2-ct22_b1_only_bestdev_minival_s42"
+    },
+    {
+      "rank": 5,
+      "experiment": "CT22 B1+B2 (-B3)",
+      "status": "completed",
+      "success": 49.856674,
+      "precision": 63.109409,
+      "checkpoint": "epoch=59-step=51300.ckpt",
+      "search_valid_rows": 17,
+      "source_run": "output/20260809-2209-22_ct_joint_repaired_minus_b3-ct22_b1_b2_bestdev_minival_s42"
+    },
+    {
+      "rank": 6,
+      "experiment": "CT22 Full calibrated",
+      "status": "failed before inference",
+      "success": null,
+      "precision": null,
+      "checkpoint": "epoch=29-step=25650-router-calibrated.ckpt",
+      "search_valid_rows": null,
+      "source_run": "output/20260809-2214-22_ct_joint_repaired-ct22_full_calibrated_bestdev_minival_s42"
+    }
+  ],
+  "paired_deltas": [
+    {
+      "comparison": "CT22 B1-only - SeqTrack baseline epoch60",
+      "success_delta": -3.218818,
+      "success_ci95_low": -5.896077,
+      "success_ci95_high": -0.197002,
+      "precision_delta": 3.656456,
+      "precision_ci95_low": -0.616454,
+      "precision_ci95_high": 8.192483
+    },
+    {
+      "comparison": "CT22 B1+B2 - SeqTrack baseline epoch60",
+      "success_delta": -3.503282,
+      "success_ci95_low": -6.992039,
+      "success_ci95_high": 0.023767,
+      "precision_delta": -1.272428,
+      "precision_ci95_low": -6.530274,
+      "precision_ci95_high": 4.021905
+    },
+    {
+      "comparison": "CT22 B1+B2 - CT22 B1-only",
+      "success_delta": -0.284464,
+      "success_ci95_low": -2.920873,
+      "success_ci95_high": 2.165669,
+      "precision_delta": -4.928890,
+      "precision_ci95_low": -8.686975,
+      "precision_ci95_high": -1.438361
+    },
+    {
+      "comparison": "CT22 B1-only - historical CT21 Full",
+      "success_delta": -7.608315,
+      "success_ci95_low": -10.249902,
+      "success_ci95_high": -5.092761,
+      "precision_delta": -6.750546,
+      "precision_ci95_low": -10.243910,
+      "precision_ci95_high": -3.448829
+    },
+    {
+      "comparison": "CT22 B1-only - historical CT21 B2-only",
+      "success_delta": -6.433261,
+      "success_ci95_low": -8.772251,
+      "success_ci95_high": -4.109944,
+      "precision_delta": -8.312910,
+      "precision_ci95_low": -11.827335,
+      "precision_ci95_high": -5.045670
+    }
+  ],
+  "deployment_diagnostics": [
+    {
+      "experiment": "CT22 B1-only",
+      "proposal_rows": 1993,
+      "geometry_valid_pct": 95.885600,
+      "b1_source_among_geometry_pct": 100.0,
+      "new_extension_pct": 0.0,
+      "target_extension_rows": 0,
+      "applied_rows": 0,
+      "selected_helpful_pct": null,
+      "selected_harm_pct": null,
+      "observation_error_m": 1.215863,
+      "final_error_m": 1.215863
+    },
+    {
+      "experiment": "CT22 B1+B2 (-B3)",
+      "proposal_rows": 1986,
+      "geometry_valid_pct": 95.871098,
+      "b1_source_among_geometry_pct": 100.0,
+      "new_extension_pct": 0.855992,
+      "target_extension_rows": 0,
+      "applied_rows": 17,
+      "selected_helpful_pct": 5.882353,
+      "selected_harm_pct": 70.588235,
+      "observation_error_m": 1.552033,
+      "final_error_m": 1.555605
+    },
+    {
+      "experiment": "CT21 Full",
+      "proposal_rows": 1996,
+      "geometry_valid_pct": null,
+      "b1_source_among_geometry_pct": null,
+      "new_extension_pct": 0.0,
+      "target_extension_rows": 0,
+      "applied_rows": 0,
+      "selected_helpful_pct": null,
+      "selected_harm_pct": null,
+      "observation_error_m": 1.131047,
+      "final_error_m": 1.131047
+    },
+    {
+      "experiment": "CT21 B2-only",
+      "proposal_rows": 1991,
+      "geometry_valid_pct": null,
+      "b1_source_among_geometry_pct": null,
+      "new_extension_pct": 0.0,
+      "target_extension_rows": 0,
+      "applied_rows": 0,
+      "selected_helpful_pct": null,
+      "selected_harm_pct": null,
+      "observation_error_m": 1.080469,
+      "final_error_m": 1.080469
+    }
+  ],
+  "b1_b2_action_counterfactual": {
+    "search_applied_rows": 17,
+    "raw_alpha_mean_gain_m": -1.062513,
+    "raw_alpha_helpful_rows_margin_0_15": 1,
+    "raw_alpha_harmful_rows_margin_0_15": 13,
+    "bounded_action_helpful_rows_margin_0_15": 1,
+    "bounded_action_harmful_rows_margin_0_15": 12,
+    "observation_only_success": 49.939825,
+    "observation_only_precision": 63.189278,
+    "deployed_minus_observation_success": -0.083151,
+    "deployed_minus_observation_precision": -0.082057,
+    "extension_foreground_rows": 0,
+    "alpha_test_valid_rows": 6,
+    "alpha_test_auroc": 0.555556,
+    "alpha_test_auprc": 0.588889
+  },
+  "full_calibration": {
+    "records": 704,
+    "tracklets": 37,
+    "evidence_valid_rows": 3,
+    "evidence_valid_pct": 0.426136,
+    "valid_helpful_rate": 1.0,
+    "valid_harm_rate": 0.0,
+    "valid_mean_gain_m": 1.496699,
+    "guardrail_passing_thresholds": 0,
+    "calibrated_checkpoint_created": false,
+    "test_event_file_created": false
+  },
+  "protocol_mismatch": [
+    {
+      "experiment": "SeqTrack baseline",
+      "gradient_data": "all mini_train tracklets",
+      "checkpoint_selection": "mini_val every 5 epochs",
+      "steps_per_epoch": 1262,
+      "total_steps": 75720,
+      "final_evaluation": "same mini_val validation stream"
+    },
+    {
+      "experiment": "CT22 runs",
+      "gradient_data": "70% hash partition of mini_train tracklets",
+      "checkpoint_selection": "15% mini_train dev partition",
+      "steps_per_epoch": 855,
+      "total_steps": 51300,
+      "final_evaluation": "frozen checkpoint on untouched mini_val"
+    }
+  ],
+  "method": {
+    "metric_extraction": "TensorBoard EventAccumulator: success/test, precision/test, success/test_step and precision/test_step",
+    "diagnostic_extraction": "proposal_endpoints.csv, proposal_tracklets.csv and tracking_endpoints.csv",
+    "uncertainty": "100,000 deterministic whole-tracklet bootstrap resamples, seed 42, frame-count weighted",
+    "counterfactual": "replace the 17 deployed B1+B2 final endpoints with their logged observation_iou and observation_distance, leaving all other frames unchanged"
+  }
+}

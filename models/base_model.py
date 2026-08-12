@@ -43,6 +43,7 @@ from utils.ct_search import (
     resolve_b1_search_support,
     resolve_joint_search_geometry,
     sample_padded_search_extension,
+    sample_joint_novel_extensions,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
@@ -1574,6 +1575,9 @@ class MotionBaseModelMF(BaseModelMF):
         }
         use_ct_joint_full = bool(getattr(
             self.config, "use_ct_joint_full", False))
+        joint_contract_v3 = bool(
+            int(getattr(
+                self.config, 'ct_joint_contract_version', 1)) >= 3)
         use_trajectory_search = (
             bool(getattr(self.config, "use_trajectory_search", False))
             or use_ct_joint_full)
@@ -1753,6 +1757,10 @@ class MotionBaseModelMF(BaseModelMF):
                 ),
                 coverage_scale=float(getattr(
                     self.config, "search_v3_coverage_scale", 2.448)),
+                standardized_residual_quantile=tuple(getattr(
+                    self.config,
+                    'search_v3_standardized_residual_q90_parallel_perpendicular',
+                    (1.0, 1.0))),
                 min_direction_speed=float(getattr(
                     self.config, "motion_v3_min_direction_speed", 0.2)),
                 max_length=float(search_config_value('max_length', 24.0)),
@@ -2037,6 +2045,38 @@ class MotionBaseModelMF(BaseModelMF):
                         'min_points', 3)),
                     seed=search_v2_seed,
                 )
+        joint_extension_source = None
+        joint_extension_sampling = None
+        if use_ct_joint_full and joint_contract_v3:
+            joint_extension_seed = (
+                int(current_sampling_seed) * 22695477 + 1) & 0xFFFFFFFF
+            (joint_extension_points,
+             joint_extension_valid_mask,
+             joint_extension_source,
+             joint_extension_sampling) = sample_joint_novel_extensions(
+                baseline_search_points,
+                search_v2_expanded_points,
+                expanded_search_points,
+                endpoint_quota=int(getattr(
+                    self.config, 'ct_endpoint_quota', 128)),
+                tube_quota=int(getattr(
+                    self.config, 'ct_tube_quota', 128)),
+                seed=joint_extension_seed,
+            )
+            joint_extension_sampling.pop('_pool_points', None)
+            endpoint_quota = int(getattr(
+                self.config, 'ct_endpoint_quota', 128))
+            search_v2_points = joint_extension_points[:endpoint_quota]
+            search_v2_point_valid_mask = joint_extension_valid_mask[
+                :endpoint_quota]
+            search_v2_point_source = (
+                search_v2_point_valid_mask > 0).astype(np.int64)
+            trajectory_search_points = joint_extension_points[
+                endpoint_quota:]
+            trajectory_search_point_valid_mask = (
+                joint_extension_valid_mask[endpoint_quota:])
+            trajectory_search_point_source = (
+                trajectory_search_point_valid_mask > 0).astype(np.int64)
         joint_support = combined_search_support_statistics(
             (search_v2_points, trajectory_search_points),
             (search_v2_point_valid_mask,
@@ -2094,7 +2134,12 @@ class MotionBaseModelMF(BaseModelMF):
             and joint_support['extension_voxels'] >= 1)
         joint_contract_v2 = bool(
             int(getattr(self.config, 'ct_joint_contract_version', 1)) >= 2)
-        if (use_ct_joint_full and joint_contract_v2 and bool(getattr(
+        if use_ct_joint_full and joint_contract_v3:
+            search_support_valid = bool(
+                geometry_valid
+                and joint_extension_sampling is not None
+                and joint_extension_sampling['sample_count'] > 0)
+        elif (use_ct_joint_full and joint_contract_v2 and bool(getattr(
                 self.config, 'ct_search_relaxed_validity', True))):
             search_support_valid = bool(
                 geometry_valid and structural_point_valid
@@ -2271,6 +2316,32 @@ class MotionBaseModelMF(BaseModelMF):
                           [joint_support['extension_voxels']], device=self.device,
                           dtype=torch.float32),
                       }
+        if use_ct_joint_full and joint_contract_v3:
+            if joint_extension_source is None:
+                raise RuntimeError(
+                    "contract-v3 inference extension source was not built")
+            extension_points = np.concatenate((
+                search_v2_points, trajectory_search_points), axis=0)
+            extension_valid_mask = np.concatenate((
+                search_v2_point_valid_mask,
+                trajectory_search_point_valid_mask), axis=0)
+            data_dict.update({
+                'ct_base_evidence_points': torch.tensor(
+                    this_points[None, :], device=self.device,
+                    dtype=torch.float32),
+                'ct_base_evidence_valid_mask': torch.ones(
+                    (1, self.config.point_sample_size),
+                    device=self.device, dtype=torch.float32),
+                'ct_extension_points': torch.tensor(
+                    extension_points[None, :], device=self.device,
+                    dtype=torch.float32),
+                'ct_extension_valid_mask': torch.tensor(
+                    extension_valid_mask[None, :], device=self.device,
+                    dtype=torch.float32),
+                'ct_extension_source': torch.tensor(
+                    joint_extension_source[None, :], device=self.device,
+                    dtype=torch.long),
+            })
         if bool(getattr(self.config, "use_b1motion_v3", False)):
             # Online history is already recursive and expressed in the latest
             # predicted anchor.  Expose an explicit motion contract rather than

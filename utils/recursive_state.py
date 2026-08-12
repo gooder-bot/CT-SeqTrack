@@ -114,7 +114,7 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
             raise ValueError("shadow fraction must be in (0,1]")
         self.shadow_slots_per_event = int(round(
             self.slots * self.shadow_fraction))
-        if self.shadow_slots_per_event != 1:
+        if self.shadow_enabled and self.shadow_slots_per_event != 1:
             raise ValueError(
                 "Joint Full H=3 budget requires exactly one shadow slot "
                 "per scheduled optimizer step")

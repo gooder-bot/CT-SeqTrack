@@ -1,0 +1,355 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack CT22 mini_val 测试诊断",
+    "description": "B1-only、B1+B2、Full 与 SeqTrack、历史最高结果的同口径核验和闭环故障归因。",
+    "generatedAt": "2026-08-09T22:53:09+08:00",
+    "sources": [
+      {
+        "id": "metrics_source",
+        "label": "测试指标与运行状态",
+        "path": "compare_results/data/ct22_minival_test_diagnosis_20260809.json",
+        "query": {
+          "engine": "SQLite",
+          "language": "sql",
+          "sql": "WITH results(rank, experiment, status, success, precision) AS (VALUES (1,'CT21 Full (historical Success max)','completed',57.749451,74.788841),(2,'CT21 B2-only (historical Precision max)','completed',56.574406,76.351204),(3,'SeqTrack baseline epoch60','completed',53.359955,64.381836),(4,'CT22 B1-only','completed',50.141136,68.038300),(5,'CT22 B1+B2 (-B3)','completed',49.856674,63.109409),(6,'CT22 Full calibrated','failed',NULL,NULL)) SELECT rank, experiment, status, success, precision FROM results ORDER BY rank",
+          "description": "从TensorBoard测试事件、run_provenance和失败输出复核后，用SQLite构造报告结果表。",
+          "tables_used": [
+            "results"
+          ],
+          "executed_at": "2026-08-09T22:53:09+08:00"
+        }
+      },
+      {
+        "id": "diagnostics_source",
+        "label": "Search部署诊断",
+        "path": "compare_results/data/ct22_minival_test_diagnosis_20260809.json",
+        "query": {
+          "engine": "SQLite",
+          "language": "sql",
+          "sql": "WITH diagnostics(experiment, proposal_rows, geometry_valid_pct, new_extension_pct, target_extension_rows, applied_rows, selected_helpful_pct, selected_harm_pct, observation_error_m, final_error_m) AS (VALUES ('CT22 B1-only',1993,95.885600,0.000000,0,0,NULL,NULL,1.215863,1.215863),('CT22 B1+B2 (-B3)',1986,95.871098,0.855992,0,17,5.882353,70.588235,1.552033,1.555605),('CT21 Full',1996,NULL,0.000000,0,0,NULL,NULL,1.131047,1.131047),('CT21 B2-only',1991,NULL,0.000000,0,0,NULL,NULL,1.080469,1.080469)) SELECT * FROM diagnostics",
+          "description": "由proposal_endpoints逐行聚合的几何、扩展、动作质量与中心误差。",
+          "tables_used": [
+            "diagnostics"
+          ],
+          "executed_at": "2026-08-09T22:53:09+08:00"
+        }
+      },
+      {
+        "id": "delta_source",
+        "label": "Tracklet配对差值与置信区间",
+        "path": "compare_results/data/ct22_minival_test_diagnosis_20260809.json",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT * FROM snapshot.paired_deltas",
+          "description": "按106条tracklet配对、以帧数加权的100,000次bootstrap。",
+          "tables_used": [
+            "snapshot.paired_deltas"
+          ],
+          "executed_at": "2026-08-09T22:53:09+08:00"
+        }
+      },
+      {
+        "id": "protocol_source",
+        "label": "训练与评估协议",
+        "path": "compare_results/data/ct22_minival_test_diagnosis_20260809.json",
+        "query": {
+          "engine": "snapshot",
+          "language": "sql",
+          "sql": "SELECT * FROM snapshot.protocol_mismatch",
+          "description": "由run_provenance、事件step与数据装配代码交叉核验。",
+          "tables_used": [
+            "snapshot.protocol_mismatch"
+          ],
+          "executed_at": "2026-08-09T22:53:09+08:00"
+        }
+      },
+      {
+        "id": "code_source",
+        "label": "Search有效性与递归写回代码",
+        "path": "models/seqtrack3d.py"
+      },
+      {
+        "id": "joint_source",
+        "label": "B2候选和new-support定义",
+        "path": "models/ct_v2/joint_full.py"
+      },
+      {
+        "id": "state_source",
+        "label": "多时域rollout与数据分区",
+        "path": "utils/recursive_state.py"
+      }
+    ],
+    "charts": [
+      {
+        "id": "metric_comparison",
+        "title": "mini_val Success / Precision 对比",
+        "subtitle": "Car，seed42，2,285帧；Full因校准失败没有指标。",
+        "type": "bar",
+        "dataset": "metric_rows",
+        "sourceId": "metrics_source",
+        "encodings": {
+          "x": {
+            "field": "experiment",
+            "type": "nominal",
+            "label": "Experiment"
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "label": "Metric (%)"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Metric"
+          },
+          "tooltip": [
+            {
+              "field": "experiment",
+              "type": "nominal",
+              "label": "Experiment"
+            },
+            {
+              "field": "metric",
+              "type": "nominal",
+              "label": "Metric"
+            },
+            {
+              "field": "value",
+              "type": "quantitative",
+              "label": "Value (%)"
+            }
+          ]
+        },
+        "xAxisTitle": "Experiment",
+        "yAxisTitle": "Metric (%)"
+      }
+    ],
+    "tables": [
+      {
+        "id": "results_table",
+        "title": "测试结果与状态",
+        "subtitle": "历史最高按Success和Precision分别列出；Full未完成推理。",
+        "dataset": "results",
+        "sourceId": "metrics_source",
+        "defaultSort": {
+          "field": "rank",
+          "direction": "asc"
+        },
+        "columns": [
+          {"field": "rank", "label": "Order", "type": "number", "format": "number"},
+          {"field": "experiment", "label": "Experiment", "type": "text"},
+          {"field": "status", "label": "Status", "type": "text"},
+          {"field": "success", "label": "Success (%)", "type": "number", "format": "number"},
+          {"field": "precision", "label": "Precision (%)", "type": "number", "format": "number"},
+          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
+          {"field": "search_valid_rows", "label": "Search valid rows", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "delta_table",
+        "title": "配对差值与95%置信区间",
+        "dataset": "paired_deltas",
+        "sourceId": "delta_source",
+        "defaultSort": {
+          "field": "comparison",
+          "direction": "asc"
+        },
+        "columns": [
+          {"field": "comparison", "label": "Comparison", "type": "text"},
+          {"field": "success_delta", "label": "ΔSuccess", "type": "number", "format": "number"},
+          {"field": "success_ci", "label": "Success 95% CI", "type": "text"},
+          {"field": "precision_delta", "label": "ΔPrecision", "type": "number", "format": "number"},
+          {"field": "precision_ci", "label": "Precision 95% CI", "type": "text"}
+        ]
+      },
+      {
+        "id": "diagnostic_table",
+        "title": "部署期Search动作链路",
+        "dataset": "deployment_diagnostics",
+        "sourceId": "diagnostics_source",
+        "defaultSort": {
+          "field": "experiment",
+          "direction": "asc"
+        },
+        "columns": [
+          {"field": "experiment", "label": "Experiment", "type": "text"},
+          {"field": "proposal_rows", "label": "Proposal rows", "type": "number", "format": "number"},
+          {"field": "geometry_valid_pct", "label": "Geometry valid (%)", "type": "number", "format": "number"},
+          {"field": "new_extension_pct", "label": "Any extension (%)", "type": "number", "format": "number"},
+          {"field": "target_extension_rows", "label": "Extension has target", "type": "number", "format": "number"},
+          {"field": "applied_rows", "label": "Applied", "type": "number", "format": "number"},
+          {"field": "selected_helpful_pct", "label": "Helpful (%)", "type": "number", "format": "number"},
+          {"field": "selected_harm_pct", "label": "Harmful (%)", "type": "number", "format": "number"},
+          {"field": "observation_error_m", "label": "Obs error (m)", "type": "number", "format": "number"},
+          {"field": "final_error_m", "label": "Final error (m)", "type": "number", "format": "number"}
+        ]
+      },
+      {
+        "id": "protocol_table",
+        "title": "SeqTrack与CT22并非严格匹配训练协议",
+        "dataset": "protocol_mismatch",
+        "sourceId": "protocol_source",
+        "defaultSort": {
+          "field": "experiment",
+          "direction": "asc"
+        },
+        "columns": [
+          {"field": "experiment", "label": "Experiment", "type": "text"},
+          {"field": "gradient_data", "label": "Gradient data", "type": "text"},
+          {"field": "checkpoint_selection", "label": "Checkpoint selection", "type": "text"},
+          {"field": "steps_per_epoch", "label": "Steps/epoch", "type": "number", "format": "number"},
+          {"field": "total_steps", "label": "Total steps", "type": "number", "format": "number"},
+          {"field": "final_evaluation", "label": "Evaluation", "type": "text"}
+        ]
+      },
+      {
+        "id": "actions_table",
+        "title": "下一轮实验前的动作",
+        "dataset": "actions",
+        "sourceId": "metrics_source",
+        "defaultSort": {
+          "field": "priority",
+          "direction": "asc"
+        },
+        "columns": [
+          {"field": "priority", "label": "Priority", "type": "number", "format": "number"},
+          {"field": "action", "label": "Action", "type": "text"},
+          {"field": "acceptance", "label": "Acceptance", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# CT-SeqTrack CT22 mini_val 测试诊断\n\nnuScenes v1.0-mini · Car · seed42 · 2,285 frames / 106 tracklets · 2026-08-09"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "sourceId": "metrics_source",
+        "body": "## 结论：两组完成结果均未超过历史最高，Full实际上没有测试结果\n\nB1-only为 **50.141/68.038**，相对SeqTrack epoch60为 **−3.219/+3.656**；B1+B2为 **49.857/63.109**，相对SeqTrack为 **−3.503/−1.272**。历史最高分别是CT21 Full的Success **57.749**和CT21 B2-only的Precision **76.351**。CT22 Full在加载不存在的router-calibrated checkpoint时退出，目录中只有provenance、没有事件指标，因此不能列为已完成实验。\n\n这不是“B1没有用”。B1确实生成了几何，并在B1-only中比运动学fallback更准；主要失败发生在**训练状态分布、B2候选质量和强制写回的耦合**。"
+      },
+      {"id": "metric_chart_block", "type": "chart", "chartId": "metric_comparison"},
+      {"id": "results_table_block", "type": "table", "tableId": "results_table"},
+      {
+        "id": "seqtrack_finding",
+        "type": "markdown",
+        "sourceId": "delta_source",
+        "body": "## B1-only只表现为Precision偏高，Success显著低于SeqTrack\n\n按完整tracklet配对bootstrap，B1-only相对SeqTrack的Success差值95%区间为 **[−5.896, −0.197]**，确认是负向；Precision区间为 **[−0.616, 8.192]**，尚不能确认提升。中心精度偏高但3D IoU较低，结合固定框尺寸，优先怀疑递归训练下的yaw/姿态质量和少数长序列漂移；当前日志没有保存逐帧预测框，无法进一步把IoU损失拆成yaw与z。"
+      },
+      {"id": "delta_table_block", "type": "table", "tableId": "delta_table"},
+      {
+        "id": "search_finding",
+        "type": "markdown",
+        "sourceId": "diagnostics_source",
+        "body": "## B1几何已接通，但部署期没有真实新增目标证据\n\nB1+B2中Search几何可构造率为 **95.87%**，所有有效几何均来自B1；但只有 **17/1,986（0.856%）** 行含任意扩展点，而且这17行的扩展区域目标点数全部为0。代码中的 `ct_search_new_support_valid` 实际只检查“extension_count > 0”，语义是新增点存在，不是新增目标support。该字段命名与论文验收中的“真实新增support”仍不一致，应拆成推理可用的 `extension_present` 和仅训练/诊断可见的 `target_extension_present`。"
+      },
+      {"id": "diagnostic_table_block", "type": "table", "tableId": "diagnostic_table"},
+      {
+        "id": "b2_finding",
+        "type": "markdown",
+        "sourceId": "diagnostics_source",
+        "body": "## −B3强制动作暴露了B2候选本身有害，而不是仅有router问题\n\n17次强制动作中，按0.15m门槛只有 **1次有益、12次有害**；raw-alpha候选平均比observation差 **1.063m**。把这些动作反事实还原为同checkpoint的observation，Success/Precision只恢复 **+0.083/+0.082**，说明B1+B2相对B1-only的大部分Precision损失不是测试时17次动作直接造成，而是训练时约20%的强制Search写回改变了后续crop与B0学习分布。`−B3`是压力消融，不应被当作预期逐级涨点的中间模型。"
+      },
+      {
+        "id": "state_finding",
+        "type": "markdown",
+        "sourceId": "state_source",
+        "body": "## 修复后的rollout仍明显短于真实部署轨迹\n\n四个训练horizon为1/2/4/8，均匀轮换时理论平均learner age仅 **1.375步**、最大7步；mini_val平均tracklet长度为21.56帧，测试proposal中 **68.7%** 位于绝对frame 9以后，推理又不会reseed。训练因此主要学习“刚重置后的恢复”，而部署需要长期保持。Full校准的704行仅3行evidence-valid（0.426%），正是这一分布差距的直接结果。"
+      },
+      {
+        "id": "full_finding",
+        "type": "markdown",
+        "sourceId": "metrics_source",
+        "body": "## Full校准失败是正确的安全停止，不应绕过\n\n3个有效校准样本虽然全部有益、平均gain 1.497m，但最大可能总体coverage也只有0.426%，不可能满足5%下限，所以没有阈值通过、也没有生成calibrated checkpoint。降低precision/harm门槛或伪造checkpoint不会解决上游Search不可用，只会把未校准结果误标成Full。"
+      },
+      {
+        "id": "historical_finding",
+        "type": "markdown",
+        "sourceId": "metrics_source",
+        "body": "## 历史最高数值不能证明旧CT机制有效\n\nCT21 Full和CT21 B2-only在mini_val分别达到57.749/74.789与56.574/76.351，但两者proposal诊断中的 `search_valid` 和 `router_applied` 都是0，最终框逐行等于observation。它们是强B0权重/训练轨迹的结果，不是Search或B3贡献。论文可以把它们作为历史上界或回归目标，不能把差值归因于连续时间创新。"
+      },
+      {
+        "id": "protocol_finding",
+        "type": "markdown",
+        "sourceId": "protocol_source",
+        "body": "## 当前SeqTrack比较有数值意义，但不是严格因果对照\n\n历史SeqTrack使用全部mini_train并每5轮查看mini_val，约1,262步/epoch、75,720步；CT22只用70% train分区更新，约855步/epoch、51,300步，并在mini_train-dev选checkpoint后首次测试mini_val。CT22少约32.3%的优化步且数据预算不同。仓库已有 `22_ct_joint_repaired_b0.yaml`，但本轮没有训练它；没有matched B0就不能完成计划中的主结果验收。"
+      },
+      {"id": "protocol_table_block", "type": "table", "tableId": "protocol_table"},
+      {
+        "id": "recommendation",
+        "type": "markdown",
+        "body": "## 建议：暂缓seed43/44和正式论文表，先做一次低成本闭环修复\n\n第一，补matched CT22 B0 seed42，确定递归/reseed协议本身相对SeqTrack的代价。第二，在不改最终推理接口的前提下增加一个deployment-length learner slot或把horizon扩成含16和full-tracklet的混合，并按candidate0单独记录target-in-crop与target-in-extension。第三，把任意扩展点与真实新增目标support分开统计；B2 raw候选在扩展无目标时必须退化为observation。第四，Full只有在校准分区evidence-valid达到至少5%、候选helpful precision达到75%后再跑mini_val。"
+      },
+      {"id": "actions_table_block", "type": "table", "tableId": "actions_table"},
+      {
+        "id": "method",
+        "type": "markdown",
+        "body": "## 方法与局限\n\n最终指标读取主TensorBoard事件中的 `success/test` 与 `precision/test`；逐tracklet指标用于100,000次seed42 cluster bootstrap；动作质量读取proposal/tracking CSV，并用已记录的observation端点构造同checkpoint反事实。所有完成测试均为nuScenes mini_val、Car、2,285帧、106 tracklets、无虚拟降采样。当前只有一个seed；历史模型与CT22来自不同commit和训练协议；Full缺失，不能估计最终B3收益。"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 下一轮必须回答的问题\n\n- matched CT22 B0是否也出现Success下降、Precision偏高？\n- rollout age扩展后，mini_val的new target support是否从0恢复，而B0不退化？\n- B2 raw候选在target-extension-positive子集上是否真正优于observation？\n- Presence与alpha在deployment-like calibration上是否仍有AUROC，而不只是训练候选view上接近1？\n- Full是否能生成合法校准checkpoint，并在三个seed上同时不低于matched B0？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-09T22:53:09+08:00",
+    "datasets": {
+      "metric_rows": [
+        {"experiment": "CT21 Full", "metric": "Success", "value": 57.749451},
+        {"experiment": "CT21 Full", "metric": "Precision", "value": 74.788841},
+        {"experiment": "CT21 B2-only", "metric": "Success", "value": 56.574406},
+        {"experiment": "CT21 B2-only", "metric": "Precision", "value": 76.351204},
+        {"experiment": "SeqTrack", "metric": "Success", "value": 53.359955},
+        {"experiment": "SeqTrack", "metric": "Precision", "value": 64.381836},
+        {"experiment": "CT22 B1-only", "metric": "Success", "value": 50.141136},
+        {"experiment": "CT22 B1-only", "metric": "Precision", "value": 68.038300},
+        {"experiment": "CT22 B1+B2", "metric": "Success", "value": 49.856674},
+        {"experiment": "CT22 B1+B2", "metric": "Precision", "value": 63.109409}
+      ],
+      "results": [
+        {"rank": 1, "experiment": "CT21 Full (historical Success max)", "status": "completed", "success": 57.749451, "precision": 74.788841, "checkpoint": "epoch=29-step=25650.ckpt", "search_valid_rows": 0},
+        {"rank": 2, "experiment": "CT21 B2-only (historical Precision max)", "status": "completed", "success": 56.574406, "precision": 76.351204, "checkpoint": "epoch=19-step=17100.ckpt", "search_valid_rows": 0},
+        {"rank": 3, "experiment": "SeqTrack baseline epoch60", "status": "completed", "success": 53.359955, "precision": 64.381836, "checkpoint": "epoch=59-step=75720.ckpt", "search_valid_rows": null},
+        {"rank": 4, "experiment": "CT22 B1-only", "status": "completed", "success": 50.141136, "precision": 68.038300, "checkpoint": "epoch=19-step=17100.ckpt", "search_valid_rows": 0},
+        {"rank": 5, "experiment": "CT22 B1+B2 (-B3)", "status": "completed", "success": 49.856674, "precision": 63.109409, "checkpoint": "epoch=59-step=51300.ckpt", "search_valid_rows": 17},
+        {"rank": 6, "experiment": "CT22 Full calibrated", "status": "failed before inference", "success": null, "precision": null, "checkpoint": "router-calibrated checkpoint missing", "search_valid_rows": null}
+      ],
+      "paired_deltas": [
+        {"comparison": "B1-only - SeqTrack", "success_delta": -3.218818, "success_ci": "[-5.896, -0.197]", "precision_delta": 3.656456, "precision_ci": "[-0.616, 8.192]"},
+        {"comparison": "B1+B2 - SeqTrack", "success_delta": -3.503282, "success_ci": "[-6.992, 0.024]", "precision_delta": -1.272428, "precision_ci": "[-6.530, 4.022]"},
+        {"comparison": "B1+B2 - B1-only", "success_delta": -0.284464, "success_ci": "[-2.921, 2.166]", "precision_delta": -4.928890, "precision_ci": "[-8.687, -1.438]"},
+        {"comparison": "B1-only - CT21 Full", "success_delta": -7.608315, "success_ci": "[-10.250, -5.093]", "precision_delta": -6.750546, "precision_ci": "[-10.244, -3.449]"},
+        {"comparison": "B1-only - CT21 B2-only", "success_delta": -6.433261, "success_ci": "[-8.772, -4.110]", "precision_delta": -8.312910, "precision_ci": "[-11.827, -5.046]"}
+      ],
+      "deployment_diagnostics": [
+        {"experiment": "CT22 B1-only", "proposal_rows": 1993, "geometry_valid_pct": 95.885600, "new_extension_pct": 0.0, "target_extension_rows": 0, "applied_rows": 0, "selected_helpful_pct": null, "selected_harm_pct": null, "observation_error_m": 1.215863, "final_error_m": 1.215863},
+        {"experiment": "CT22 B1+B2 (-B3)", "proposal_rows": 1986, "geometry_valid_pct": 95.871098, "new_extension_pct": 0.855992, "target_extension_rows": 0, "applied_rows": 17, "selected_helpful_pct": 5.882353, "selected_harm_pct": 70.588235, "observation_error_m": 1.552033, "final_error_m": 1.555605},
+        {"experiment": "CT21 Full", "proposal_rows": 1996, "geometry_valid_pct": null, "new_extension_pct": 0.0, "target_extension_rows": 0, "applied_rows": 0, "selected_helpful_pct": null, "selected_harm_pct": null, "observation_error_m": 1.131047, "final_error_m": 1.131047},
+        {"experiment": "CT21 B2-only", "proposal_rows": 1991, "geometry_valid_pct": null, "new_extension_pct": 0.0, "target_extension_rows": 0, "applied_rows": 0, "selected_helpful_pct": null, "selected_harm_pct": null, "observation_error_m": 1.080469, "final_error_m": 1.080469}
+      ],
+      "protocol_mismatch": [
+        {"experiment": "SeqTrack baseline", "gradient_data": "all mini_train tracklets", "checkpoint_selection": "mini_val every 5 epochs", "steps_per_epoch": 1262, "total_steps": 75720, "final_evaluation": "same mini_val validation stream"},
+        {"experiment": "CT22 runs", "gradient_data": "70% mini_train hash partition", "checkpoint_selection": "15% mini_train dev", "steps_per_epoch": 855, "total_steps": 51300, "final_evaluation": "frozen checkpoint on mini_val"}
+      ],
+      "actions": [
+        {"priority": 1, "action": "Run matched CT22 B0 seed42", "acceptance": "Same 70/15/15 split, sampler, 60 epochs and checkpoint rule"},
+        {"priority": 2, "action": "Add deployment-length rollout coverage", "acceptance": "At least one slot reaches age 16/full tracklet; late target-in-crop does not collapse"},
+        {"priority": 3, "action": "Split extension-present from target-extension-present", "acceptance": "Both rates logged per candidate0 and per rollout-age bin"},
+        {"priority": 4, "action": "Fix B2 fail-safe before routing", "acceptance": "Raw/bounded candidate is not harmful on extension-negative rows; candidate-positive helpful precision >=75%"},
+        {"priority": 5, "action": "Re-export Full calibration", "acceptance": "Overall evidence-valid >=5%; calibrated checkpoint exists before mini_val"}
+      ]
+    }
+  },
+  "sources": []
+}

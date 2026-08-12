@@ -1,0 +1,5 @@
+_base_: 23_b0_candidate0_reseed.yaml
+
+experiment_name: ct_b0_candidate0_no_reseed_seed42
+ct_recursive_reseed_enabled: false
+

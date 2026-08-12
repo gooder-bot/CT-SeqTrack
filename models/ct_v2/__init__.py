@@ -33,6 +33,11 @@ from models.ct_v2.joint_full import (
     JointFullSearchRefiner,
     JointScalarResidualRouter,
 )
+from models.ct_v2.evidence_memory import (
+    build_box_memory_tokens,
+    ExtensionMemorySearchRefiner,
+    H3UtilityResidualRouter,
+)
 from models.ct_v2.crpa import (
     CRPA_ROLLOUT_SCHEMA,
     CRPA_ROUTER_SCHEMA,
@@ -68,6 +73,7 @@ from utils.ct_search import (
     build_time_guided_search_box,
     build_uncertainty_prior_tube,
     sample_padded_search_extension,
+    sample_joint_novel_extensions,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
@@ -95,6 +101,9 @@ __all__ = [
     "counterfactual_query_targets",
     "JointFullSearchRefiner",
     "JointScalarResidualRouter",
+    "build_box_memory_tokens",
+    "ExtensionMemorySearchRefiner",
+    "H3UtilityResidualRouter",
     "canonicalize_points",
     "chronological_frame_indices",
     "build_ordered_trajectory_search_box",
@@ -102,6 +111,7 @@ __all__ = [
     "build_time_guided_search_box",
     "build_uncertainty_prior_tube",
     "sample_padded_search_extension",
+    "sample_joint_novel_extensions",
     "sample_source_aware_endpoint_points",
     "sample_search_extension",
     "stratified_search_sample",

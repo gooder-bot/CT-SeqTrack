@@ -91,6 +91,7 @@ def fit_calibration(arrays, min_direction_speed=0.2):
         aligned ** 2 * np.exp(-2.0 * base_log_sigma), axis=0)
     log_scale = 0.5 * np.log(np.maximum(standardized_mse, 1e-12))
     calibrated = np.clip(base_log_sigma + log_scale[None, :], -4.0, 2.5)
+    standardized_after_scale = np.abs(aligned) * np.exp(-calibrated)
     fixed_sigma = np.sqrt(np.maximum(np.mean(aligned ** 2, axis=0), 1e-12))
     fixed_log_sigma = np.broadcast_to(
         np.log(fixed_sigma)[None, :], calibrated.shape)
@@ -100,6 +101,8 @@ def fit_calibration(arrays, min_direction_speed=0.2):
         "scale_parallel_perpendicular": np.exp(log_scale).tolist(),
         "fixed_margin_parallel_perpendicular_95": np.quantile(
             np.abs(aligned), 0.95, axis=0).tolist(),
+        "standardized_abs_residual_q90_parallel_perpendicular": np.quantile(
+            standardized_after_scale, 0.90, axis=0).tolist(),
         "uncalibrated": metrics(aligned, base_log_sigma),
         "calibrated": metrics(aligned, calibrated),
         "fixed_sigma_baseline": metrics(aligned, fixed_log_sigma),

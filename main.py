@@ -129,6 +129,13 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         raise TypeError("Init checkpoint does not contain a state_dict mapping")
 
     target_state = model.state_dict()
+
+    def compatible_state_value(target, source):
+        if torch.is_tensor(target) or torch.is_tensor(source):
+            return (torch.is_tensor(target) and torch.is_tensor(source)
+                    and target.shape == source.shape)
+        return type(target) is type(source)
+
     candidates = [("none", state_dict)]
     for prefix in ("model.", "module."):
         candidates.append((prefix, {
@@ -138,18 +145,21 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
     selected_prefix, normalized = max(
         candidates,
         key=lambda item: sum(
-            key in target_state and target_state[key].shape == value.shape
+            key in target_state
+            and compatible_state_value(target_state[key], value)
             for key, value in item[1].items()),
     )
     matched = {
         key: value for key, value in normalized.items()
-        if key in target_state and target_state[key].shape == value.shape
+        if key in target_state
+        and compatible_state_value(target_state[key], value)
     }
     strict_v3 = bool(getattr(
         model, "use_motion_conditioned_search_v3", False))
     shape_mismatch = sorted(
         key for key, value in normalized.items()
-        if key in target_state and target_state[key].shape != value.shape)
+        if key in target_state
+        and not compatible_state_value(target_state[key], value))
     if strict_v3 and shape_mismatch:
         raise RuntimeError(
             "Init checkpoint contains target keys with wrong shapes: "
@@ -254,6 +264,13 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
             raise RuntimeError(
                 "initialization checkpoint lacks a verified v2 B1 "
                 "calibration artifact with fixed residual margins")
+        if (int(getattr(
+                model, 'ct_joint_contract_version', 1)) >= 3
+                and len(calibration.get(
+                    'standardized_abs_residual_q90_parallel_perpendicular',
+                    [])) != 2):
+            raise RuntimeError(
+                "contract-v3 calibration lacks standardized residual q90")
         source = calibration.get('source_artifact', {})
         if (source.get('partition') != 'calibration'
                 or source.get('dataset') != str(getattr(
@@ -278,6 +295,24 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
             model.config.search_v3_fixed_margin_parallel = float(margins[0])
             model.config.search_v3_fixed_margin_perpendicular = float(
                 margins[1])
+        standardized_q90 = calibration.get(
+            'standardized_abs_residual_q90_parallel_perpendicular')
+        if (isinstance(standardized_q90, (list, tuple))
+                and len(standardized_q90) == 2):
+            model.config[
+                'search_v3_standardized_residual_q90_parallel_perpendicular'
+            ] = [float(value) for value in standardized_q90]
+    if (int(getattr(model, 'ct_joint_contract_version', 1)) >= 3
+            and bool(getattr(model, 'ct_enable_b3', False))):
+        promotion = payload.get('ct_b2_promotion')
+        if (not isinstance(promotion, dict)
+                or promotion.get('schema')
+                != 'ct_seqtrack.b2_evidence_promotion.v1'
+                or not bool(promotion.get('passed'))):
+            raise RuntimeError(
+                "contract-v3 B3 initialization requires a promoted B2 "
+                "checkpoint")
+        model._ct_b2_promotion = dict(promotion)
     target_state.update(matched)
     model.load_state_dict(target_state, strict=True)
     if bool(getattr(model, 'use_recursive_replay_cache', False)):
@@ -359,6 +394,64 @@ def validate_online_resume_checkpoint(checkpoint_path, config):
         raise ValueError(
             "online recursive training may resume only the same Joint Full "
             f"experiment/seed; expected {expected}, observed {observed}")
+
+
+def validate_candidate0_b0_initialization(checkpoint_path):
+    """Reject CT21/CT22 Full/B2-only weights for contract-v3 training."""
+    try:
+        payload = torch.load(
+            checkpoint_path, map_location='cpu', weights_only=False)
+    except TypeError:
+        payload = torch.load(checkpoint_path, map_location='cpu')
+    hyper_parameters = payload.get('hyper_parameters', {})
+    saved = hyper_parameters.get('config', hyper_parameters)
+
+    def value(key, default=None):
+        if isinstance(saved, dict):
+            return saved.get(key, default)
+        return getattr(saved, key, default)
+
+    requirements = {
+        'num_candidates': int(value('num_candidates', -1)) == 1,
+        'candidate_views': int(value(
+            'ct_recursive_candidate_views', -1)) == 1,
+        'tracklet_slots': int(value(
+            'ct_recursive_tracklet_slots', -1)) == 16,
+        'no_reseed': not bool(value(
+            'ct_recursive_reseed_enabled', True)),
+        'b1_disabled': not bool(value('ct_enable_b1', True)),
+        'b2_disabled': not bool(value('ct_enable_b2', True)),
+        'b3_disabled': not bool(value('ct_enable_b3', True)),
+        'joint_full_disabled': not bool(value('use_ct_joint_full', True)),
+        'rng_shift_disabled': not bool(value(
+            'ct_b0_rng_shift_control', False)),
+    }
+    lineage = value('ct_candidate0_b0_source')
+    lineage_requirements = (
+        lineage.get('requirements', {})
+        if isinstance(lineage, dict) else {})
+    lineage_valid = bool(
+        lineage_requirements
+        and all(bool(item) for item in lineage_requirements.values()))
+    failed = sorted(name for name, passed in requirements.items()
+                    if not passed)
+    if failed and not lineage_valid:
+        raise RuntimeError(
+            "contract-v3 initialization is not a canonical candidate0-only "
+            "no-reseed B0 checkpoint: " + ", ".join(failed))
+    if payload.get('b2_v3_init') is not None:
+        raise RuntimeError(
+            "contract-v3 refuses an old B2-v3 composed checkpoint")
+    return {
+        'experiment_name': (
+            str(lineage.get('experiment_name')) if lineage_valid
+            else str(value('experiment_name', 'unknown'))),
+        'seed': (
+            int(lineage.get('seed', 42)) if lineage_valid
+            else int(value('seed', 42) or 42)),
+        'requirements': (
+            dict(lineage_requirements) if lineage_valid else requirements),
+    }
 
 
 def parse_config():
@@ -554,6 +647,12 @@ def parse_config():
                 "formal fixed-margin training requires a B1 calibration "
                 "artifact or calibrated initialization checkpoint")
         if calibration is not None:
+            if (int(config.get('ct_joint_contract_version', 1)) >= 3
+                    and len(calibration.get(
+                        'standardized_abs_residual_q90_parallel_perpendicular',
+                        [])) != 2):
+                raise RuntimeError(
+                    "contract-v3 calibration lacks standardized residual q90")
             source = calibration.get('source_artifact', {})
             if (source.get('partition') != 'calibration'
                     or source.get('dataset') != config.get('dataset')
@@ -566,6 +665,13 @@ def parse_config():
                 'fixed_margin_parallel_perpendicular_95']
             config['search_v3_fixed_margin_parallel'] = float(margins[0])
             config['search_v3_fixed_margin_perpendicular'] = float(margins[1])
+            standardized_q90 = calibration.get(
+                'standardized_abs_residual_q90_parallel_perpendicular')
+            if (isinstance(standardized_q90, (list, tuple))
+                    and len(standardized_q90) == 2):
+                config[
+                    'search_v3_standardized_residual_q90_parallel_perpendicular'
+                ] = [float(value) for value in standardized_q90]
     defaults = {
         'batch_size': 100,
         'epoch': 60,
@@ -601,9 +707,14 @@ if cfg.test and cfg.init_checkpoint is not None:
 if (bool(getattr(cfg, 'ct_online_recursive_training', False))
         and not cfg.test):
     if cfg.init_checkpoint is not None:
-        raise ValueError(
-            "online recursive Joint Full must train from scratch; "
-            "--init_checkpoint is forbidden")
+        if int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3:
+            cfg.ct_candidate0_b0_source = (
+                validate_candidate0_b0_initialization(
+                    cfg.init_checkpoint))
+        else:
+            raise ValueError(
+                "online recursive Joint Full must train from scratch; "
+                "--init_checkpoint is forbidden")
     if cfg.checkpoint is not None:
         validate_online_resume_checkpoint(cfg.checkpoint, cfg)
 if cfg.seed is not None:
@@ -689,8 +800,11 @@ if not cfg.test:
     write_run_provenance(
         run_root_dir, cfg, {"train": train_data, "val": val_data},
         mode="train", root=project_root)
-    checkpoint_callback = ModelCheckpoint(monitor='precision/test', mode='max', save_last=True,
-                                          save_top_k=cfg.save_top_k)
+    checkpoint_callback = ModelCheckpoint(
+        monitor=str(getattr(cfg, 'checkpoint_monitor', 'precision/test')),
+        mode=str(getattr(cfg, 'checkpoint_mode', 'max')),
+        save_last=True,
+        save_top_k=cfg.save_top_k)
     learningrate_callback = LearningRateMonitor(logging_interval="step")
 
     # init trainer
@@ -704,7 +818,12 @@ if not cfg.test:
                          default_root_dir=run_root_dir,
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,
                          num_sanity_val_steps=0,
-                          gradient_clip_val=cfg.gradient_clip_val,
+                          # Contract-v3 owns unscale/clip/step per optimizer;
+                          # Trainer-level clipping would couple both domains.
+                          gradient_clip_val=(
+                              0.0 if bool(getattr(
+                                  cfg, 'ct_separate_optimizers', False))
+                              else cfg.gradient_clip_val),
                          limit_train_batches=getattr(
                              cfg, 'limit_train_batches', 1.0),
                          limit_val_batches=getattr(

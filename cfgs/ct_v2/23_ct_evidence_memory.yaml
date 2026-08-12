@@ -1,0 +1,50 @@
+_base_: 22_ct_joint_repaired.yaml
+
+experiment_name: ct_seqtrack_evidence_memory_v3
+ct_joint_contract_version: 3
+ct_recursive_reseed_enabled: false
+ct_enable_b3: false
+ct_b2_promotion_passed: false
+use_calibrated_motion_uncertainty: true
+search_v3_use_dynamic_sigma: true
+require_b1_calibration_artifact: true
+require_b1_calibration_passed: true
+
+# Candidate0 is the only B0 transaction.  Candidate1--3 are plugin-only
+# auxiliary views and are weighted 1/6 each versus candidate0's 1/2.
+num_candidates: 4
+ct_recursive_candidate_views: 4
+ct_recursive_tracklet_slots: 4
+ct_separate_optimizers: true
+ct_b0_lr: 0.000025
+ct_plugin_lr: 0.0001
+ct_b0_gradient_clip_val: 0.0
+ct_plugin_gradient_clip_val: 0.0
+ct_manual_amp_enabled: false
+
+# Full-base evidence and extension-query cross attention.
+ct_endpoint_quota: 128
+ct_tube_quota: 128
+ct_expansion_point_count: 256
+ct_search_feature_dim: 64
+ct_memory_attention_dropout: 0.0
+ct_query_motion_dropout: 0.0
+ct_memory_mode: real
+ct_base_evidence_mode: full
+# Placeholder is overwritten by the required calibration-partition artifact
+# emitted by tools/calibrate_b1_uncertainty.py before model construction.
+search_v3_standardized_residual_q90_parallel_perpendicular: [1.644854, 1.644854]
+search_v3_coverage_scale: 1.0
+ct_acquisition_calibration_status: required_q90
+ct_search_presence_init_probability: 0.1
+ct_utility_init_probability: 0.05
+ct_search_presence_threshold: 0.5
+ct_presence_hard_gate: true
+ct_router_help_margin: 0.05
+
+# This configuration accepts only a newly trained candidate0/no-reseed B0.
+# Checkpoint selection remains an explicit run-time input, never a historical
+# CT21/CT22 high-score default.
+ct_b0_initialization_policy: candidate0_no_reseed_from_scratch
+checkpoint_monitor: success/test
+checkpoint_mode: max

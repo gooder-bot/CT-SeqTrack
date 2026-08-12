@@ -4,6 +4,7 @@ from models.backbone.pointnet import MiniPointNet, SegPointNet, FeaturePointNet
 from models.attn.Models import Seq2SeqFormer
 
 import copy
+import contextlib
 import hashlib
 import math
 import numpy as np
@@ -54,6 +55,9 @@ from models.ct_v2 import (
     JointProposalFusion,
     JointFullSearchRefiner,
     JointScalarResidualRouter,
+    build_box_memory_tokens,
+    ExtensionMemorySearchRefiner,
+    H3UtilityResidualRouter,
     OrderedPhysicalMotionEncoder,
     OrderedTrajectoryEncoder,
     PointFeatureTemporalConsistencyLoss,
@@ -87,6 +91,10 @@ from utils.replay_cache import (
     tensor_prefixes_sha256,
     validate_b1_calibration_state,
     validate_replay_cache_manifest,
+)
+from utils.training_isolation import (
+    CheckpointableRNG,
+    assert_disjoint_parameter_sets,
 )
 from utils.recursive_state import (
     build_recursive_input_contract,
@@ -133,11 +141,37 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'use_ct_joint_full', False))
         self.ct_joint_contract_version = int(getattr(
             config, 'ct_joint_contract_version', 1))
-        if self.ct_joint_contract_version not in (1, 2):
-            raise ValueError("ct_joint_contract_version must be 1 or 2")
+        if self.ct_joint_contract_version not in (1, 2, 3):
+            raise ValueError("ct_joint_contract_version must be 1, 2 or 3")
         self.ct_enable_b1 = bool(getattr(config, 'ct_enable_b1', True))
         self.ct_enable_b2 = bool(getattr(config, 'ct_enable_b2', True))
         self.ct_enable_b3 = bool(getattr(config, 'ct_enable_b3', True))
+        if (self.ct_joint_contract_version >= 3 and self.ct_enable_b3
+                and not bool(getattr(
+                    config, 'ct_b2_promotion_passed', False))):
+            raise ValueError(
+                "contract-v3 B3 requires ct_b2_promotion_passed=True")
+        self.ct_separate_optimizers = bool(getattr(
+            config, 'ct_separate_optimizers', False))
+        self.ct_manual_amp_enabled = bool(getattr(
+            config, 'ct_manual_amp_enabled', False))
+        self.ct_b0_rng_shift_control = bool(getattr(
+            config, 'ct_b0_rng_shift_control', False))
+        if self.ct_separate_optimizers:
+            self.automatic_optimization = False
+        self.ct_plugin_rng = (
+            CheckpointableRNG(
+                int(getattr(config, 'seed', 42) or 42) + 24001)
+            if (self.use_ct_joint_full
+                and self.ct_joint_contract_version >= 3) else None)
+        self.ct_auxiliary_rng = (
+            CheckpointableRNG(
+                int(getattr(config, 'seed', 42) or 42) + 24002)
+            if (self.use_ct_joint_full
+                and self.ct_joint_contract_version >= 3) else None)
+        self._ct_b0_scaler = None
+        self._ct_plugin_scaler = None
+        self._ct_pending_scaler_state = None
         self.ct_enable_shared_motion_anchor = bool(getattr(
             config, 'ct_enable_shared_motion_anchor', True))
         self.ct_enable_dynamic_residual_bound = bool(getattr(
@@ -1061,7 +1095,40 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     if torch.cuda.is_available() else [])
                 with torch.random.fork_rng(devices=plugin_cuda_devices):
                     torch.manual_seed(plugin_seed + 24001)
-                    self.ct_joint_search_refiner = JointFullSearchRefiner(
+                    if self.ct_joint_contract_version >= 3:
+                        self.ct_joint_search_refiner = (
+                            ExtensionMemorySearchRefiner(
+                                feature_dim=64,
+                                num_heads=4,
+                                max_vote_offset=float(getattr(
+                                    config, 'ct_search_max_vote_offset', 4.0)),
+                                attention_dropout=float(getattr(
+                                    config, 'ct_memory_attention_dropout', 0.0)),
+                                presence_init_probability=float(getattr(
+                                    config,
+                                    'ct_search_presence_init_probability',
+                                    0.1)),
+                                utility_init_probability=float(getattr(
+                                    config,
+                                    'ct_utility_init_probability', 0.05)),
+                            ))
+                        self.ct_joint_router = H3UtilityResidualRouter(
+                            observation_stats_dim=5,
+                            hidden_dim=int(getattr(
+                                config, 'ct_router_hidden_dim', 64)),
+                            presence_threshold=float(getattr(
+                                config, 'ct_search_presence_threshold', 0.5)),
+                            decision_threshold=float(getattr(
+                                config, 'ct_router_threshold', 0.5)),
+                            radius_base=float(getattr(
+                                config, 'ct_router_radius_base', 0.5)),
+                            radius_per_second=float(getattr(
+                                config, 'ct_router_radius_per_second', 0.5)),
+                            radius_max=float(getattr(
+                                config, 'ct_router_radius_max', 2.0)),
+                        )
+                    else:
+                        self.ct_joint_search_refiner = JointFullSearchRefiner(
                         point_dim=5,
                         feature_dim=int(getattr(
                             config, 'ct_search_feature_dim', 128)),
@@ -1089,7 +1156,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         presence_hard_gate=bool(getattr(
                             config, 'ct_presence_hard_gate', True)),
                     )
-                    self.ct_joint_router = JointScalarResidualRouter(
+                        self.ct_joint_router = JointScalarResidualRouter(
                         observation_stats_dim=5,
                         hidden_dim=int(getattr(
                             config, 'ct_router_hidden_dim', 64)),
@@ -1110,7 +1177,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         contract_version=self.ct_joint_contract_version,
                         presence_hard_gate=bool(getattr(
                             config, 'ct_presence_hard_gate', True)),
-                    )
+                        )
 
         if self.use_search_evidence_v2:
             # These modules are created only after all shared B0 parameters,
@@ -1521,6 +1588,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     f"{prefix}")
 
     def on_save_checkpoint(self, checkpoint):
+        if hasattr(self, '_ct_b2_promotion'):
+            checkpoint['ct_b2_promotion'] = copy.deepcopy(
+                self._ct_b2_promotion)
         if hasattr(self, '_b2_v3_init_provenance'):
             checkpoint['b2_v3_init'] = copy.deepcopy(
                 self._b2_v3_init_provenance)
@@ -1534,11 +1604,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 and self.use_asymmetric_dual_query):
             checkpoint['b2_v3_candidate_config_sha256'] = (
                 b2_candidate_config_sha256(self.config))
+        if self.ct_separate_optimizers:
+            checkpoint['ct_isolated_scalers'] = {
+                'b0': (None if self._ct_b0_scaler is None
+                       else self._ct_b0_scaler.state_dict()),
+                'plugin': (None if self._ct_plugin_scaler is None
+                           else self._ct_plugin_scaler.state_dict()),
+            }
 
     def on_load_checkpoint(self, checkpoint):
+        if self.ct_separate_optimizers:
+            self._ct_pending_scaler_state = copy.deepcopy(
+                checkpoint.get('ct_isolated_scalers'))
         if isinstance(checkpoint.get('b2_v3_init'), dict):
             self._b2_v3_init_provenance = copy.deepcopy(
                 checkpoint['b2_v3_init'])
+        if (self.ct_joint_contract_version >= 3 and self.ct_enable_b3):
+            promotion = checkpoint.get('ct_b2_promotion')
+            if (not isinstance(promotion, dict)
+                    or promotion.get('schema')
+                    != 'ct_seqtrack.b2_evidence_promotion.v1'
+                    or not bool(promotion.get('passed'))):
+                raise RuntimeError(
+                    "contract-v3 B3 requires a promoted B2 checkpoint")
+            self._ct_b2_promotion = copy.deepcopy(promotion)
         calibration = checkpoint.get('b1_uncertainty_calibration')
         if isinstance(calibration, dict):
             validate_b1_calibration_state(
@@ -1552,6 +1641,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise RuntimeError(
                     "this configuration requires a verified v2 B1 "
                     "calibration artifact with fixed residual margins")
+            if (self.ct_joint_contract_version >= 3
+                    and len(calibration.get(
+                        'standardized_abs_residual_q90_parallel_perpendicular',
+                        [])) != 2):
+                raise RuntimeError(
+                    "contract-v3 calibration lacks standardized residual q90")
             source = calibration.get('source_artifact', {})
             if (source.get('partition') != 'calibration'
                     or source.get('dataset') != str(getattr(
@@ -1577,6 +1672,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     margins[0])
                 self.config.search_v3_fixed_margin_perpendicular = float(
                     margins[1])
+            standardized_q90 = calibration.get(
+                'standardized_abs_residual_q90_parallel_perpendicular')
+            if (isinstance(standardized_q90, (list, tuple))
+                    and len(standardized_q90) == 2):
+                self.config[
+                    'search_v3_standardized_residual_q90_parallel_perpendicular'
+                ] = [float(value) for value in standardized_q90]
         if bool(getattr(
                 self.config, 'require_b2_candidate_config_contract', False)):
             stored_candidate_config = checkpoint.get(
@@ -1656,6 +1758,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.m3_teacher.eval()
 
     def on_train_epoch_end(self):
+        if (self.ct_separate_optimizers
+                and self.config.optimizer.lower() != 'adamonecycle'):
+            schedulers = self.lr_schedulers()
+            if not isinstance(schedulers, (list, tuple)):
+                schedulers = [schedulers]
+            for scheduler in schedulers:
+                scheduler.step()
         if self.b2_v3_freeze_candidate_producers:
             self._verify_b2_v3_frozen_hashes()
         rows = getattr(self, '_ct_epoch_binary_rows', {})
@@ -1770,6 +1879,43 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if not hasattr(self, '_ct_epoch_binary_rows'):
             self._ct_epoch_binary_rows = {
                 'presence': [], 'alpha': [], 'alpha_uplift': []}
+        if self.ct_joint_contract_version >= 3:
+            labels = data['ct_extension_labels'].detach()
+            point_valid = data['ct_extension_valid_mask'].detach()
+            support_valid = output['ct_b2_available'].detach().reshape(-1)
+            presence_target = (
+                (labels * point_valid).sum(dim=1) >= 1)
+            presence_select = support_valid > 0
+            if bool(presence_select.any()):
+                self._ct_epoch_binary_rows['presence'].append((
+                    output[
+                        'ct_b2_extension_presence_probability'].detach()[
+                            presence_select].float().cpu().numpy(),
+                    presence_target[
+                        presence_select].float().cpu().numpy(),
+                ))
+            target_xy = data['box_label'][:, :2].to(
+                device=output['ct_b2_raw_box'].device,
+                dtype=output['ct_b2_raw_box'].dtype)
+            observation_xy = output[
+                'observation_aux_estimation_boxes'][:, :2].detach()
+            raw_xy = output['ct_b2_raw_box'][:, :2].detach()
+            gain = (
+                torch.linalg.norm(observation_xy - target_xy, dim=1)
+                - torch.linalg.norm(raw_xy - target_xy, dim=1))
+            helpful = gain > self.ct_router_help_margin
+            harmful = (
+                (gain < -self.ct_router_help_margin) | ~presence_target)
+            utility_valid = (support_valid > 0) & (helpful | harmful)
+            if bool(utility_valid.any()):
+                self._ct_epoch_binary_rows['alpha'].append((
+                    torch.sigmoid(output['ct_b2_utility_logit'].detach())[
+                        utility_valid].float().cpu().numpy(),
+                    helpful[utility_valid].float().cpu().numpy(),
+                ))
+                self._ct_epoch_binary_rows['alpha_uplift'].append(
+                    gain[utility_valid].float().cpu().numpy())
+            return
         endpoint_labels = data['search_v3_point_labels'].detach()
         tube_labels = data['trajectory_search_point_labels'].detach().reshape(
             -1, self.ct_tube_quota)
@@ -2150,6 +2296,230 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         )
 
 
+    def _forward_ct_contract_v3(
+            self, input_dict, output_dict, observation_box,
+            observation_stats, main_motion, history_valid_ratio,
+            batch_size, frame_count, chunk_size):
+        """Run the extension-query/full-base-memory contract-v3 path."""
+        required = (
+            'ct_base_evidence_points', 'ct_base_evidence_valid_mask',
+            'ct_extension_points', 'ct_extension_valid_mask',
+            'ct_extension_source', 'search_v3_query_delta_t',
+            'search_v3_gap_ratio', 'ref_boxs', 'bbox_size', 'valid_mask')
+        missing = [key for key in required if key not in input_dict]
+        if missing:
+            raise KeyError(
+                "CT contract-v3 input is missing: " + ", ".join(missing))
+        aligned_features = output_dict['b0_point_aligned_features']
+        if aligned_features.shape != (
+                batch_size, frame_count, chunk_size, 64):
+            raise ValueError(
+                "B0 point-aligned feature contract must be [B,L,1024,64]")
+        if chunk_size != 1024:
+            raise ValueError("contract-v3 requires exactly 1024 B0 points")
+        raw_frames = input_dict['points'].reshape(
+            batch_size, frame_count, chunk_size, -1)
+        history_features = aligned_features[:, :-1].detach()
+        current_base_features = aligned_features[:, -1].detach()
+        memory_tokens, memory_valid = build_box_memory_tokens(
+            history_features,
+            raw_frames[:, :-1],
+            input_dict['ref_boxs'],
+            input_dict['bbox_size'],
+            input_dict['valid_mask'],
+            foreground_tokens=8,
+            context_tokens=4,
+        )
+        if memory_tokens.shape[1] != 36:
+            raise RuntimeError("contract-v3 requires exactly 36 memory slots")
+        memory_mode = str(getattr(
+            self.config, 'ct_memory_mode', 'real')).strip().lower()
+        if memory_mode == 'empty':
+            memory_tokens = torch.zeros_like(memory_tokens)
+            memory_valid = torch.zeros_like(memory_valid)
+        elif memory_mode == 'shuffled':
+            if batch_size >= 2:
+                # Canonical training batches contain different tracklets, so
+                # this is the matched cross-tracklet memory control.
+                memory_tokens = torch.roll(memory_tokens, shifts=1, dims=0)
+                memory_valid = torch.roll(memory_valid, shifts=1, dims=0)
+            else:
+                # Sequential evaluation is batch-one.  Preserve token/mask
+                # statistics while breaking the learned feature semantics.
+                memory_tokens = torch.roll(
+                    memory_tokens, shifts=1, dims=2)
+        elif memory_mode != 'real':
+            raise ValueError("ct_memory_mode must be real, empty or shuffled")
+        base_evidence_mode = str(getattr(
+            self.config, 'ct_base_evidence_mode', 'full')).strip().lower()
+        base_valid_mask = input_dict[
+            'ct_base_evidence_valid_mask'].to(current_base_features.device)
+        if base_evidence_mode == 'empty':
+            base_valid_mask = torch.zeros_like(base_valid_mask)
+        elif base_evidence_mode != 'full':
+            raise ValueError("ct_base_evidence_mode must be full or empty")
+        extension_points = input_dict['ct_extension_points'].to(
+            device=current_base_features.device,
+            dtype=current_base_features.dtype)
+        extension_points = self.encode_point_time(extension_points)
+        if extension_points.shape[1:] != (256, 5):
+            raise ValueError("extension points must have shape [B,256,5]")
+        recursive_age = input_dict.get('ct_recursive_state_age')
+        if recursive_age is not None:
+            recursive_age = recursive_age.to(
+                device=current_base_features.device,
+                dtype=current_base_features.dtype)
+        with self.ct_plugin_rng.fork(current_base_features.device):
+            joint_output = self.ct_joint_search_refiner(
+                extension_points=extension_points,
+                extension_valid_mask=input_dict[
+                    'ct_extension_valid_mask'].to(
+                        current_base_features.device),
+                extension_source=input_dict[
+                    'ct_extension_source'].to(current_base_features.device),
+                current_base_features=current_base_features,
+                current_base_valid_mask=base_valid_mask,
+                memory_tokens=memory_tokens,
+                memory_valid_mask=memory_valid,
+                observation_box=observation_box,
+                observation_stats=observation_stats,
+                b1_center_xy=main_motion['prior_xy'].detach(),
+                b1_sigma_parallel_perp=torch.exp(main_motion[
+                    'log_sigma_parallel_perp']).detach(),
+                b1_direction_xy=main_motion['motion_direction_xy'].detach(),
+                b1_valid=main_motion['valid'].detach(),
+                query_delta_t=input_dict['search_v3_query_delta_t'].to(
+                    current_base_features.device),
+                gap_ratio=input_dict['search_v3_gap_ratio'].to(
+                    current_base_features.device),
+                recursive_age=recursive_age,
+            )
+        raw_box = joint_output['ct_b2_raw_box']
+        final_box, router_output = self.ct_joint_router(
+            observation_box=observation_box,
+            raw_box=raw_box,
+            availability=joint_output['ct_b2_available'],
+            base_evidence=joint_output['ct_b2_base_evidence'],
+            extension_evidence=joint_output['ct_b2_extension_evidence'],
+            base_presence_probability=joint_output[
+                'ct_b2_base_presence_probability'],
+            extension_presence_probability=joint_output[
+                'ct_b2_extension_presence_probability'],
+            h1_utility_logit=joint_output['ct_b2_utility_logit'],
+            h1_expected_gain=joint_output['ct_b2_expected_gain'],
+            observation_stats=observation_stats,
+            b1_sigma_parallel_perp=torch.exp(main_motion[
+                'log_sigma_parallel_perp']).detach(),
+            query_delta_t=input_dict['search_v3_query_delta_t'].to(
+                current_base_features.device),
+            gap_ratio=input_dict['search_v3_gap_ratio'].to(
+                current_base_features.device),
+            recursive_age=recursive_age,
+            enabled=self.ct_enable_b3,
+        )
+        joint_output.update(router_output)
+        joint_output.update({
+            'ct_final_box': final_box,
+            'candidate_valid': joint_output['ct_b2_available'],
+            'ct_search_geometry_valid': input_dict[
+                'ct_search_geometry_valid'].to(
+                    device=current_base_features.device,
+                    dtype=current_base_features.dtype).reshape(batch_size),
+            'ct_b1_geometry_source_id': input_dict[
+                'search_v3_prior_source_id'].to(
+                    device=current_base_features.device,
+                    dtype=current_base_features.dtype).reshape(batch_size),
+            'ct_memory_mode_id': current_base_features.new_full(
+                (batch_size,), {'real': 0, 'empty': 1, 'shuffled': 2}[
+                    memory_mode]),
+            'ct_base_evidence_mode_id': current_base_features.new_full(
+                (batch_size,), {'full': 0, 'empty': 1}[
+                    base_evidence_mode]),
+        })
+        output_dict.update(joint_output)
+        return final_box
+
+    def _ct_plugin_parameter(self, name):
+        return name.startswith((
+            'physical_motion_encoder.',
+            'ct_joint_search_refiner.',
+            'ct_joint_router.',
+        ))
+
+    def _build_isolated_optimizer(self, parameters, learning_rate):
+        optimizer_name = self.config.optimizer.lower()
+        if optimizer_name == 'sgd':
+            return torch.optim.SGD(
+                parameters, lr=learning_rate, momentum=0.9,
+                weight_decay=self.config.wd)
+        if optimizer_name in ('adam', 'adamonecycle'):
+            return torch.optim.Adam(
+                parameters, lr=learning_rate,
+                weight_decay=self.config.wd,
+                betas=(0.5, 0.999), eps=1e-6)
+        raise ValueError(
+            "Invalid optimizer. Please choose from 'sgd', 'adam', or "
+            "'adamonecycle'.")
+
+    def configure_optimizers(self):
+        if not self.ct_separate_optimizers:
+            return super().configure_optimizers()
+        named = [
+            (name, parameter) for name, parameter in self.named_parameters()
+            if parameter.requires_grad]
+        plugin_named = [
+            item for item in named if self._ct_plugin_parameter(item[0])]
+        b0_named = [
+            item for item in named if not self._ct_plugin_parameter(item[0])]
+        if not b0_named or not plugin_named:
+            raise RuntimeError(
+                "isolated training requires non-empty B0 and plugin parameters")
+        self._ct_b0_named_parameters = b0_named
+        self._ct_plugin_named_parameters = plugin_named
+        b0_parameters = [parameter for _, parameter in b0_named]
+        plugin_parameters = [parameter for _, parameter in plugin_named]
+        assert_disjoint_parameter_sets(b0_parameters, plugin_parameters)
+        b0_lr = float(getattr(
+            self.config, 'ct_b0_lr', float(self.config.lr) * 0.25))
+        plugin_lr = float(getattr(
+            self.config, 'ct_plugin_lr', self.config.lr))
+        optimizer_b0 = self._build_isolated_optimizer(
+            b0_parameters, b0_lr)
+        optimizer_plugin = self._build_isolated_optimizer(
+            plugin_parameters, plugin_lr)
+        if self.config.optimizer.lower() == 'adamonecycle':
+            if self.train_dataloader_length is None:
+                raise ValueError(
+                    "OneCycle isolated training needs train_dataloader_length")
+            scheduler_b0 = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer_b0,
+                max_lr=float(getattr(
+                    self.config, 'ct_b0_max_lr', b0_lr)),
+                epochs=self.config.epoch,
+                steps_per_epoch=self.train_dataloader_length)
+            scheduler_plugin = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer_plugin,
+                max_lr=float(getattr(
+                    self.config, 'ct_plugin_max_lr',
+                    getattr(self.config, 'max_lr', plugin_lr))),
+                epochs=self.config.epoch,
+                steps_per_epoch=self.train_dataloader_length)
+            interval = 'step'
+        else:
+            scheduler_b0 = torch.optim.lr_scheduler.StepLR(
+                optimizer_b0, step_size=self.config.lr_decay_step,
+                gamma=self.config.lr_decay_rate)
+            scheduler_plugin = torch.optim.lr_scheduler.StepLR(
+                optimizer_plugin, step_size=self.config.lr_decay_step,
+                gamma=self.config.lr_decay_rate)
+            interval = 'epoch'
+        return [optimizer_b0, optimizer_plugin], [
+            {'scheduler': scheduler_b0, 'interval': interval,
+             'name': 'scheduler_b0'},
+            {'scheduler': scheduler_plugin, 'interval': interval,
+             'name': 'scheduler_plugin'},
+        ]
+
     def forward(self, input_dict):
         """
         Args:
@@ -2486,15 +2856,46 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds
         collect_pftc_features = self.use_point_feature_tc and self.training
+        collect_b2_point_features = bool(
+            self.use_ct_joint_full
+            and self.ct_joint_contract_version >= 3
+            and self.ct_enable_b2)
+        collect_point_aligned_features = bool(
+            collect_pftc_features or collect_b2_point_features)
         feature_result = self.feature_pointnet(
-            solo_x, return_point_features=collect_pftc_features)
-        if collect_pftc_features:
+            solo_x, return_point_features=collect_point_aligned_features)
+        if collect_point_aligned_features:
             feature, point_aligned_feature = feature_result
-            output_dict["pftc_point_features"] = (
+            point_aligned_feature = (
                 point_aligned_feature.transpose(1, 2).reshape(
                     B, L, chunk_size, -1))
+            if point_aligned_feature.shape[-1] != 64:
+                raise RuntimeError(
+                    "FeaturePointNet second-layer features must be 64d")
+            if collect_pftc_features:
+                output_dict["pftc_point_features"] = point_aligned_feature
+            if collect_b2_point_features:
+                output_dict["b0_point_aligned_features"] = (
+                    point_aligned_feature)
+                raw_frame_points = input_dict['points'].reshape(
+                    B, L, chunk_size, -1)
+                explicit_base = input_dict.get('ct_base_evidence_points')
+                if explicit_base is None:
+                    raise KeyError(
+                        "contract-v3 B2 requires ct_base_evidence_points")
+                explicit_base = explicit_base.to(
+                    device=raw_frame_points.device,
+                    dtype=raw_frame_points.dtype)
+                if explicit_base.shape != raw_frame_points[:, -1].shape:
+                    raise ValueError(
+                        "base evidence must have shape [B,1024,5]")
+                if not torch.equal(explicit_base, raw_frame_points[:, -1]):
+                    raise RuntimeError(
+                        "base evidence diverged from B0 current 1024 points")
+                output_dict['ct_base_evidence_points'] = explicit_base
         else:
             feature = feature_result
+
         # (B*num) * C * N; N is the fixed Transformer token count per frame.
         feature = feature.transpose(1,2)
         NEW_N = feature.shape[1]
@@ -2521,6 +2922,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 box_seq_corners, points_feature,
                 input_dict["valid_mask"])  #B*4*4
             observation_query = None
+
+        if (self.training and self.ct_b0_rng_shift_control
+                and not self.ct_enable_b2):
+            # Diagnostic-only reproduction of CT21's post-observation random
+            # draw.  It changes only the subsequent global stream, never the
+            # observation computed in this step.
+            torch.rand((B,), device=feature.device)
 
         updated_ref_boxs = delta_motion[:,:HL,:]
         updated_aux_box =  delta_motion[:,-1,:]
@@ -2818,7 +3226,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise RuntimeError(
                     "CT joint Full requires the final observation decoder query")
 
-            if self.ct_enable_b2:
+            if (self.ct_enable_b2
+                    and self.ct_joint_contract_version >= 3):
+                updated_aux_box = self._forward_ct_contract_v3(
+                    input_dict, output_dict, observation_aux_box,
+                    obs_stats, main_motion, history_valid_ratio,
+                    B, L, chunk_size)
+
+            if (self.ct_enable_b2
+                    and self.ct_joint_contract_version < 3):
                 endpoint_points = input_dict['search_v3_points'].to(
                     device=point_feature.device, dtype=point_feature.dtype)
                 tube_points = input_dict['trajectory_search_points'].to(
@@ -2962,7 +3378,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     / math.sqrt(self.ct_joint_search_refiner.query_dim),
                 })
                 output_dict['ct_final_box'] = updated_aux_box
-            else:
+            elif not self.ct_enable_b2:
                 updated_aux_box = observation_aux_box
                 support_valid = input_dict[
                     'search_v3_support_valid'].to(
@@ -4048,6 +4464,171 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         loss_dict.update(twc_loss_dict)
         return loss_dict
 
+    def _compute_ct_contract_v3_loss(self, data, output, target_xy):
+        """Presence/vote/utility losses for the extension-only v3 branch."""
+        dtype = output['ct_b2_utility_logit'].dtype
+        device = output['ct_b2_utility_logit'].device
+        extension_labels = data['ct_extension_labels'].to(
+            device=device, dtype=dtype)
+        extension_valid = data['ct_extension_valid_mask'].to(
+            device=device, dtype=dtype)
+        base_labels = data['ct_base_evidence_labels'].to(
+            device=device, dtype=dtype)
+        base_valid = data['ct_base_evidence_valid_mask'].to(
+            device=device, dtype=dtype)
+        candidate_id = data.get('candidate_id')
+        if candidate_id is None:
+            sample_weight = torch.ones(
+                target_xy.shape[0], device=device, dtype=dtype)
+        else:
+            candidate_id = candidate_id.to(device=device).reshape(-1)
+            sample_weight = torch.where(
+                candidate_id == 0,
+                torch.full_like(candidate_id, 0.5, dtype=dtype),
+                torch.full_like(candidate_id, 1.0 / 6.0, dtype=dtype))
+
+        def weighted_mean(values, valid=None):
+            weights = sample_weight
+            if valid is not None:
+                weights = weights * valid.reshape(-1).to(dtype)
+            return (values.reshape(-1) * weights).sum() / torch.clamp(
+                weights.sum(), min=1.0)
+
+        targetness_error = F.binary_cross_entropy_with_logits(
+            output['ct_search_targetness_logits'],
+            extension_labels,
+            reduction='none')
+        point_weight = extension_valid * sample_weight.unsqueeze(1)
+        loss_targetness = (
+            targetness_error * point_weight).sum() / torch.clamp(
+                point_weight.sum(), min=1.0)
+
+        foreground = extension_valid * extension_labels
+        vote_target = target_xy.unsqueeze(1).expand_as(
+            output['ct_search_point_votes'])
+        vote_error = F.smooth_l1_loss(
+            output['ct_search_point_votes'], vote_target,
+            reduction='none').mean(dim=2)
+        foreground_weight = foreground * sample_weight.unsqueeze(1)
+        loss_vote = (vote_error * foreground_weight).sum() / torch.clamp(
+            foreground_weight.sum(), min=1.0)
+
+        availability = output['ct_b2_available'].detach()
+        observation_xy = output[
+            'observation_aux_estimation_boxes'][:, :2].detach()
+        raw_xy = output['ct_b2_raw_box'][:, :2]
+        raw_error_per_sample = F.smooth_l1_loss(
+            raw_xy, target_xy, reduction='none').mean(dim=1)
+        loss_raw = weighted_mean(raw_error_per_sample, availability)
+
+        base_presence_target = (
+            (base_labels * base_valid).sum(dim=1) > 0).to(dtype)
+        extension_presence_target = (
+            (extension_labels * extension_valid).sum(dim=1) > 0).to(dtype)
+        base_presence_error = F.binary_cross_entropy_with_logits(
+            output['ct_b2_base_presence_logit'],
+            base_presence_target, reduction='none')
+        extension_presence_error = F.binary_cross_entropy_with_logits(
+            output['ct_b2_extension_presence_logit'],
+            extension_presence_target, reduction='none')
+        loss_base_presence = weighted_mean(base_presence_error)
+        loss_extension_presence = weighted_mean(
+            extension_presence_error, availability)
+        loss_presence = 0.5 * (
+            loss_base_presence + loss_extension_presence)
+
+        observation_error = torch.linalg.norm(
+            observation_xy - target_xy, dim=1)
+        raw_distance_error = torch.linalg.norm(
+            raw_xy.detach() - target_xy, dim=1)
+        signed_gain = observation_error - raw_distance_error
+        helpful = signed_gain > self.ct_router_help_margin
+        harmful = (
+            (signed_gain < -self.ct_router_help_margin)
+            | ~extension_presence_target.to(torch.bool))
+        decisive = (helpful | harmful).to(dtype) * availability
+        utility_target = helpful.to(dtype)
+        utility_error = F.binary_cross_entropy_with_logits(
+            output['ct_b2_utility_logit'], utility_target,
+            reduction='none')
+        loss_utility_cls = weighted_mean(utility_error, decisive)
+        gain_error = F.smooth_l1_loss(
+            output['ct_b2_expected_gain'], signed_gain.detach(),
+            reduction='none')
+        loss_expected_gain = weighted_mean(gain_error, availability)
+        loss_utility = loss_utility_cls + loss_expected_gain
+
+        loss_h3 = target_xy.new_zeros(())
+        if self.ct_enable_b3 and 'ct_h3_gain' in data:
+            h3_gain = data['ct_h3_gain'].to(
+                device=device, dtype=dtype).reshape(-1).detach()
+            h3_valid = data['ct_h3_valid'].to(
+                device=device, dtype=dtype).reshape(-1).detach()
+            h3_target = (h3_gain > self.ct_router_h3_margin).to(dtype)
+            h3_error = F.binary_cross_entropy_with_logits(
+                output['ct_b3_h3_utility'], h3_target,
+                reduction='none')
+            loss_h3 = weighted_mean(
+                h3_error, h3_valid * availability)
+
+        def acquisition_metric(key):
+            value = data.get(key)
+            if value is None:
+                return target_xy.new_zeros((target_xy.shape[0],))
+            return value.to(device=device, dtype=dtype).reshape(-1)
+
+        base_target_count = acquisition_metric(
+            'ct_acquisition_base_target_count')
+        expansion_target_count = acquisition_metric(
+            'ct_acquisition_expansion_target_count')
+        pool_target_count = acquisition_metric(
+            'ct_acquisition_extension_pool_target_count')
+        sampled_target_count = acquisition_metric(
+            'ct_acquisition_sampled_target_count')
+        acquisition_recall = sampled_target_count / torch.clamp(
+            pool_target_count, min=1.0)
+
+        plugin_total = (
+            self.ct_targetness_weight * loss_targetness
+            + self.ct_vote_weight * loss_vote
+            + self.ct_raw_search_weight * loss_raw
+            + self.ct_presence_weight * loss_presence
+            + self.ct_router_weight * loss_utility
+            + self.ct_correction_weight * loss_h3)
+        return {
+            'loss_ct_plugin_total': plugin_total,
+            'loss_ct_targetness': loss_targetness,
+            'loss_ct_vote': loss_vote,
+            'loss_ct_raw_search': loss_raw,
+            'loss_ct_presence': loss_presence,
+            'loss_ct_base_presence': loss_base_presence,
+            'loss_ct_extension_presence': loss_extension_presence,
+            'loss_ct_utility': loss_utility,
+            'loss_ct_utility_classification': loss_utility_cls,
+            'loss_ct_expected_gain': loss_expected_gain,
+            'loss_ct_h3': loss_h3,
+            'ct_h1_signed_gain': weighted_mean(signed_gain, availability),
+            'ct_h1_helpful_rate': weighted_mean(
+                helpful.to(dtype), decisive),
+            'ct_h1_harmful_rate': weighted_mean(
+                harmful.to(dtype), decisive),
+            'ct_b2_availability_rate': availability.float().mean(),
+            'ct_b2_base_presence_target_rate':
+                base_presence_target.mean(),
+            'ct_b2_extension_presence_target_rate':
+                extension_presence_target.mean(),
+            'ct_acquisition_base_presence_rate': (
+                base_target_count > 0).to(dtype).mean(),
+            'ct_acquisition_expansion_coverage_rate': (
+                expansion_target_count > 0).to(dtype).mean(),
+            'ct_acquisition_pool_presence_rate': (
+                pool_target_count > 0).to(dtype).mean(),
+            'ct_acquisition_sampled_presence_rate': (
+                sampled_target_count > 0).to(dtype).mean(),
+            'ct_acquisition_target_recall': weighted_mean(
+                acquisition_recall, (pool_target_count > 0).to(dtype)),
+        }
+
     def compute_loss(self, data, output):
         if self.is_paired_batch(data):
             return self.compute_paired_loss(data, output)
@@ -4202,6 +4783,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "loss_center_ref": loss_center_ref,
             "loss_angle_ref": loss_angle_ref,
         })
+        # Snapshot the observation objective before any B1/B2/B3 term.  The
+        # remaining B0-only heads below extend this value explicitly.
+        b0_transaction_loss = loss_total
         if self.use_dynamics_encoder and "velocity_pred" in output and "velocity_label" in data:
             velocity_label = (
                 data.get("trajectory_velocity_label", data["velocity_label"])
@@ -4576,7 +5160,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         main_valid),
                 })
 
+        # Shared B2 dispatch marker retained for source-contract audits used by
+        # the CT21/CT22 regression suite.
         if self.use_ct_joint_full and self.ct_enable_b2:
+            pass
+
+        if (self.use_ct_joint_full and self.ct_enable_b2
+                and self.ct_joint_contract_version >= 3):
+            target_xy_v3 = center_label[:, :2].to(
+                device=output['ct_b2_raw_box'].device,
+                dtype=output['ct_b2_raw_box'].dtype)
+            v3_loss = self._compute_ct_contract_v3_loss(
+                data, output, target_xy_v3)
+            loss_total = loss_total + v3_loss['loss_ct_plugin_total']
+            loss_dict.update(v3_loss)
+            loss_dict['loss_total'] = loss_total
+
+        if (self.use_ct_joint_full and self.ct_enable_b2
+                and self.ct_joint_contract_version < 3):
             target_xy = center_label[:, :2].to(
                 device=output['ct_search_raw_xy'].device,
                 dtype=output['ct_search_raw_xy'].dtype)
@@ -5726,6 +6327,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             pred_bc = output['pred_bc'] #torch.Size([B, 4096, 9])
             loss_bc = F.smooth_l1_loss(pred_bc, bc_label)
             loss_total += loss_bc * self.config.bc_weight
+            b0_transaction_loss = (
+                b0_transaction_loss + loss_bc * self.config.bc_weight)
             loss_dict.update({
                 "loss_total": loss_total,
                 "loss_bc": loss_bc
@@ -5771,6 +6374,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_total_sup = loss_total
             loss_total = (
                 loss_total_sup
+                + pftc_effective_weight * pftc_terms["loss"])
+            b0_transaction_loss = (
+                b0_transaction_loss
                 + pftc_effective_weight * pftc_terms["loss"])
             loss_dict.update({
                 "loss_total": loss_total,
@@ -5897,6 +6503,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if key in output:
                 loss_dict[f"{key}_mean"] = output[key].float().mean()
 
+        # Manual isolated optimization differentiates this same objective with
+        # respect to two disjoint parameter sets.  B2 consumes detached B0
+        # evidence, so plugin losses have no path into the B0 transaction.
+        loss_dict['loss_b0_transaction'] = b0_transaction_loss
+        loss_dict['loss_plugin_transaction'] = loss_total
         return loss_dict
 
     def on_train_epoch_start(self):
@@ -6344,6 +6955,120 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
                 raw['this_frame'].get('timestamp'))
 
+    def _ensure_ct_scalers(self):
+        if self._ct_b0_scaler is not None:
+            return
+        enabled = bool(
+            self.ct_manual_amp_enabled and self.device.type == 'cuda')
+        try:
+            self._ct_b0_scaler = torch.amp.GradScaler(
+                'cuda', enabled=enabled)
+            self._ct_plugin_scaler = torch.amp.GradScaler(
+                'cuda', enabled=enabled)
+        except (AttributeError, TypeError):
+            self._ct_b0_scaler = torch.cuda.amp.GradScaler(enabled=enabled)
+            self._ct_plugin_scaler = torch.cuda.amp.GradScaler(
+                enabled=enabled)
+        pending = self._ct_pending_scaler_state
+        if isinstance(pending, dict):
+            if pending.get('b0') is not None:
+                self._ct_b0_scaler.load_state_dict(pending['b0'])
+            if pending.get('plugin') is not None:
+                self._ct_plugin_scaler.load_state_dict(pending['plugin'])
+        self._ct_pending_scaler_state = None
+
+    @staticmethod
+    def _slice_batch_rows(batch, row_mask):
+        """Slice collated tensors while preserving scalar diagnostics."""
+        batch_size = int(row_mask.numel())
+        sliced = {}
+        for key, value in batch.items():
+            if (torch.is_tensor(value) and value.dim() > 0
+                    and int(value.shape[0]) == batch_size):
+                sliced[key] = value[row_mask]
+            else:
+                sliced[key] = value
+        return sliced
+
+    @staticmethod
+    def _assign_parameter_gradients(parameters, gradients):
+        for parameter, gradient in zip(parameters, gradients):
+            parameter.grad = gradient
+
+    def _ct_isolated_optimizer_step(self, loss_dict):
+        """Execute two complete, non-interacting optimizer transactions."""
+        self._ensure_ct_scalers()
+        optimizers = self.optimizers(use_pl_optimizer=False)
+        if not isinstance(optimizers, (list, tuple)) or len(optimizers) != 2:
+            raise RuntimeError("isolated training requires exactly two optimizers")
+        optimizer_b0, optimizer_plugin = optimizers
+        b0_parameters = [
+            parameter for _, parameter in self._ct_b0_named_parameters]
+        plugin_parameters = [
+            parameter for _, parameter in self._ct_plugin_named_parameters]
+        optimizer_b0.zero_grad(set_to_none=True)
+        optimizer_plugin.zero_grad(set_to_none=True)
+
+        scaled_b0 = self._ct_b0_scaler.scale(
+            loss_dict['loss_b0_transaction'])
+        scaled_plugin = self._ct_plugin_scaler.scale(
+            loss_dict['loss_plugin_transaction'])
+        b0_gradients = torch.autograd.grad(
+            scaled_b0, b0_parameters, retain_graph=True,
+            allow_unused=True)
+        plugin_gradients = torch.autograd.grad(
+            scaled_plugin, plugin_parameters, retain_graph=False,
+            allow_unused=True)
+        self._assign_parameter_gradients(b0_parameters, b0_gradients)
+        self._assign_parameter_gradients(plugin_parameters, plugin_gradients)
+
+        self._ct_b0_scaler.unscale_(optimizer_b0)
+        self._ct_plugin_scaler.unscale_(optimizer_plugin)
+        b0_clip = float(getattr(
+            self.config, 'ct_b0_gradient_clip_val',
+            getattr(self.config, 'gradient_clip_val', 0.0)))
+        plugin_clip = float(getattr(
+            self.config, 'ct_plugin_gradient_clip_val',
+            getattr(self.config, 'gradient_clip_val', 0.0)))
+        b0_norm = torch.nn.utils.clip_grad_norm_(
+            b0_parameters, max_norm=b0_clip if b0_clip > 0 else float('inf'))
+        plugin_norm = torch.nn.utils.clip_grad_norm_(
+            plugin_parameters,
+            max_norm=plugin_clip if plugin_clip > 0 else float('inf'))
+
+        b0_scale_before = self._ct_b0_scaler.get_scale()
+        plugin_scale_before = self._ct_plugin_scaler.get_scale()
+        self._ct_b0_scaler.step(optimizer_b0)
+        self._ct_plugin_scaler.step(optimizer_plugin)
+        self._ct_b0_scaler.update()
+        self._ct_plugin_scaler.update()
+        b0_stepped = self._ct_b0_scaler.get_scale() >= b0_scale_before
+        plugin_stepped = (
+            self._ct_plugin_scaler.get_scale() >= plugin_scale_before)
+
+        if self.config.optimizer.lower() == 'adamonecycle':
+            schedulers = self.lr_schedulers()
+            if not isinstance(schedulers, (list, tuple)):
+                schedulers = [schedulers]
+            if b0_stepped:
+                schedulers[0].step()
+            if plugin_stepped:
+                schedulers[1].step()
+        loss_dict.update({
+            'ct_b0_unscaled_grad_norm': torch.as_tensor(
+                b0_norm, device=self.device),
+            'ct_plugin_unscaled_grad_norm': torch.as_tensor(
+                plugin_norm, device=self.device),
+            'ct_b0_amp_scale': torch.tensor(
+                float(self._ct_b0_scaler.get_scale()), device=self.device),
+            'ct_plugin_amp_scale': torch.tensor(
+                float(self._ct_plugin_scaler.get_scale()), device=self.device),
+            'ct_b0_step_applied': torch.tensor(
+                float(b0_stepped), device=self.device),
+            'ct_plugin_step_applied': torch.tensor(
+                float(plugin_stepped), device=self.device),
+        })
+
     def training_step(self, batch, batch_idx):
         """
         Args:
@@ -6363,12 +7088,67 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if online_batch and self.device.type == 'cuda':
             torch.cuda.synchronize(self.device)
         online_step_start = time.perf_counter() if online_batch else None
+        auxiliary_batch = None
         if online_batch:
             batch = self._prepare_online_recursive_batch(batch)
-        output = self(batch)
-        if online_batch:
-            self._attach_h3_shadow_labels(batch, output)
-        loss_dict = self.compute_loss(batch, output)
+            if (self.ct_joint_contract_version >= 3
+                    and 'candidate_id' in batch):
+                candidate_ids = batch['candidate_id'].reshape(-1)
+                canonical_rows = candidate_ids == 0
+                auxiliary_rows = ~canonical_rows
+                if bool(auxiliary_rows.any()):
+                    full_context = list(self._ct_online_batch_context)
+                    auxiliary_batch = self._slice_batch_rows(
+                        batch, auxiliary_rows)
+                    batch = self._slice_batch_rows(batch, canonical_rows)
+                    canonical_selector = canonical_rows.detach().cpu().tolist()
+                    self._ct_online_batch_context = [
+                        item for item, keep in zip(
+                            full_context, canonical_selector) if keep]
+                    if not bool((batch['candidate_id'] == 0).all()):
+                        raise RuntimeError(
+                            "B0 transaction contains an auxiliary candidate")
+        amp_enabled = bool(
+            self.ct_separate_optimizers
+            and self.ct_manual_amp_enabled
+            and self.device.type == 'cuda')
+        autocast_context = (
+            torch.autocast(device_type='cuda', dtype=torch.float16)
+            if amp_enabled else contextlib.nullcontext())
+        with autocast_context:
+            output = self(batch)
+            if online_batch:
+                self._attach_h3_shadow_labels(batch, output)
+            loss_dict = self.compute_loss(batch, output)
+            if auxiliary_batch is not None:
+                # The auxiliary views consume neither global RNG nor B0 BN
+                # statistics and contribute only v3 plugin losses.
+                with self.ct_auxiliary_rng.fork(self.device):
+                    with freeze_batchnorm_running_stats(self):
+                        auxiliary_output = self(auxiliary_batch)
+                auxiliary_target_xy = auxiliary_batch[
+                    'box_label'][:, :2].to(
+                        device=auxiliary_output['ct_b2_raw_box'].device,
+                        dtype=auxiliary_output['ct_b2_raw_box'].dtype)
+                auxiliary_loss = self._compute_ct_contract_v3_loss(
+                    auxiliary_batch, auxiliary_output,
+                    auxiliary_target_xy)
+                canonical_plugin = loss_dict['loss_ct_plugin_total']
+                combined_plugin = 0.5 * (
+                    canonical_plugin
+                    + auxiliary_loss['loss_ct_plugin_total'])
+                loss_dict['loss_total'] = (
+                    loss_dict['loss_total']
+                    - canonical_plugin + combined_plugin)
+                loss_dict['loss_ct_plugin_total'] = combined_plugin
+                loss_dict['loss_ct_plugin_candidate0'] = canonical_plugin
+                loss_dict['loss_ct_plugin_auxiliary'] = auxiliary_loss[
+                    'loss_ct_plugin_total']
+                for key, value in auxiliary_loss.items():
+                    if key != 'loss_ct_plugin_total':
+                        loss_dict[f'{key}_auxiliary'] = value
+                loss_dict['loss_plugin_transaction'] = loss_dict[
+                    'loss_total']
         self._accumulate_joint_binary_rows(batch, output)
         loss = loss_dict['loss_total']
         if online_batch:
@@ -6424,4 +7204,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if online_batch:
             self._commit_online_recursive_predictions(output)
 
+        if self.ct_separate_optimizers:
+            self._ct_isolated_optimizer_step(loss_dict)
+            return loss.detach()
         return loss

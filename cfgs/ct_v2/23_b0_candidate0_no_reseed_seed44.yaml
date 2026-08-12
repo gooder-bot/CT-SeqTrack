@@ -1,0 +1,4 @@
+_base_: 23_b0_candidate0_no_reseed.yaml
+
+experiment_name: ct_b0_candidate0_no_reseed_seed44
+seed: 44
