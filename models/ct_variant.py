@@ -67,6 +67,19 @@ def configure_ct_variant(config):
     if prior_mode == "fixed_cv" and variant != "b0":
         set_config(config, "use_b1motion_v3", True)
         set_config(config, "ct_enable_b1", False)
+    if variant == "b0":
+        # The v24 configs inherit data/training defaults from the v23 Full
+        # config.  These switches belong to B1/B2 support construction and
+        # must not leak into the observation-only arm.  Normalizing them here
+        # keeps every B0 config safe even when its base config evolves.
+        for name in (
+                "use_calibrated_motion_uncertainty",
+                "require_b1_calibration_artifact",
+                "require_b1_calibration_passed",
+                "search_v3_use_dynamic_sigma",
+                "use_b1_prepass_support",
+                "use_uncertainty_geometry"):
+            set_config(config, name, False)
     memory_mode = str(get_config(
         config, "ct_memory_mode", "none")).strip().lower()
     if memory_mode not in ("none", "empty", "real", "time_misaligned"):

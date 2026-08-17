@@ -76,6 +76,21 @@ def test_b0_2x2_configs_are_matched_except_registered_factors():
             assert matched == reference
 
 
+def test_b0_normalization_removes_inherited_b1_b2_runtime_switches():
+    config = load_yaml_config(
+        ROOT / "cfgs" / "ct_seqtrack" /
+        "24_b0_2x2_reseed0_rngshift0.yaml")
+    configure_ct_variant(config)
+    assert not config["use_b1motion_v3"]
+    assert not config["ct_enable_b1"]
+    assert not config["use_calibrated_motion_uncertainty"]
+    assert not config["require_b1_calibration_artifact"]
+    assert not config["require_b1_calibration_passed"]
+    assert not config["search_v3_use_dynamic_sigma"]
+    assert not config["use_b1_prepass_support"]
+    assert not config["use_uncertainty_geometry"]
+
+
 def test_every_formal_config_satisfies_normalized_scratch_contract():
     from utils.online_contract import validate_scratch_training_contract
 

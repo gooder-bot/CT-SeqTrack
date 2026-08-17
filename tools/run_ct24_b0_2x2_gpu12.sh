@@ -42,16 +42,43 @@ run_arm() {
 }
 
 worker_gpu1() {
+  local pids=()
+  local arms=()
+  local status=0
+
   export CUDA_VISIBLE_DEVICES="$GPU_QUEUE"
   run_arm "$GPU_QUEUE" \
     cfgs/ct_seqtrack/24_b0_2x2_reseed0_rngshift0.yaml \
-    reseed0_rngshift0
+    reseed0_rngshift0 \
+    >"$LOG_ROOT/reseed0_rngshift0.worker.stdout.log" 2>&1 &
+  pids+=("$!")
+  arms+=("reseed0_rngshift0")
+  echo "[$(date --iso-8601=seconds)] launched reseed0_rngshift0 as PID ${pids[0]}"
   run_arm "$GPU_QUEUE" \
     cfgs/ct_seqtrack/24_b0_2x2_reseed0_rngshift1.yaml \
-    reseed0_rngshift1
+    reseed0_rngshift1 \
+    >"$LOG_ROOT/reseed0_rngshift1.worker.stdout.log" 2>&1 &
+  pids+=("$!")
+  arms+=("reseed0_rngshift1")
+  echo "[$(date --iso-8601=seconds)] launched reseed0_rngshift1 as PID ${pids[1]}"
   run_arm "$GPU_QUEUE" \
     cfgs/ct_seqtrack/24_b0_2x2_reseed1_rngshift0.yaml \
-    reseed1_rngshift0
+    reseed1_rngshift0 \
+    >"$LOG_ROOT/reseed1_rngshift0.worker.stdout.log" 2>&1 &
+  pids+=("$!")
+  arms+=("reseed1_rngshift0")
+  echo "[$(date --iso-8601=seconds)] launched reseed1_rngshift0 as PID ${pids[2]}"
+  echo "per-arm logs: $LOG_ROOT/reseed*_rngshift*.log"
+
+  for index in "${!pids[@]}"; do
+    if wait "${pids[$index]}"; then
+      echo "[$(date --iso-8601=seconds)] completed ${arms[$index]}"
+    else
+      echo "[$(date --iso-8601=seconds)] failed ${arms[$index]}" >&2
+      status=1
+    fi
+  done
+  return "$status"
 }
 
 worker_gpu2() {
