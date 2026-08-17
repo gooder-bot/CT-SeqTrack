@@ -1,0 +1,10 @@
+_base_: 24_b0.yaml
+
+experiment_name: ct24_b0_2x2_reseed1_rngshift1_seed42
+seed: 42
+batch_size: 16
+epoch: 60
+workers: 4
+check_val_every_n_epoch: 5
+ct_recursive_reseed_enabled: true
+ct_b0_rng_shift_control: true

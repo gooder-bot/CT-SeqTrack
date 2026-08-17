@@ -29,7 +29,15 @@ from datasets.sampler import (
     online_recursive_collate,
 )
 from models import get_model
+from models.ct_variant import configure_ct_variant
 from utils.run_provenance import write_run_provenance
+from utils.acquisition_metrics import validate_preflight_artifact
+from utils.online_contract import (
+    require_scratch_initialization,
+    validate_scratch_training_contract,
+    validate_b2_method_promotion,
+    validate_online_resume_contract,
+)
 from utils.replay_cache import (
     B0_STATE_PREFIXES,
     B1_STATE_PREFIXES,
@@ -307,7 +315,7 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         promotion = payload.get('ct_b2_promotion')
         if (not isinstance(promotion, dict)
                 or promotion.get('schema')
-                != 'ct_seqtrack.b2_evidence_promotion.v1'
+                != 'ct_seqtrack.b2_evidence_promotion.v3'
                 or not bool(promotion.get('passed'))):
             raise RuntimeError(
                 "contract-v3 B3 initialization requires a promoted B2 "
@@ -364,36 +372,13 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
 
 
 def validate_online_resume_checkpoint(checkpoint_path, config):
-    """Reject cross-experiment resumes for causal online training."""
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    hyper_parameters = checkpoint.get('hyper_parameters', {})
-    saved_config = hyper_parameters.get('config', hyper_parameters)
-
-    def saved_value(key, default=None):
-        if isinstance(saved_config, dict):
-            return saved_config.get(key, default)
-        return getattr(saved_config, key, default)
-
-    expected = {
-        'experiment_name': str(config.experiment_name),
-        'seed': int(config.seed or 42),
-        'use_ct_joint_full': True,
-        'ct_online_recursive_training': True,
-    }
-    observed = {
-        'experiment_name': saved_value('experiment_name'),
-        'seed': saved_value('seed'),
-        'use_ct_joint_full': saved_value('use_ct_joint_full'),
-        'ct_online_recursive_training': saved_value(
-            'ct_online_recursive_training'),
-    }
-    if (str(observed['experiment_name']) != expected['experiment_name']
-            or int(observed['seed'] or -1) != expected['seed']
-            or observed['use_ct_joint_full'] is not True
-            or observed['ct_online_recursive_training'] is not True):
-        raise ValueError(
-            "online recursive training may resume only the same Joint Full "
-            f"experiment/seed; expected {expected}, observed {observed}")
+    """Reject cross-experiment and mid-epoch online resumes."""
+    try:
+        checkpoint = torch.load(
+            checkpoint_path, map_location='cpu', weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    return validate_online_resume_contract(checkpoint, config)
 
 
 def validate_candidate0_b0_initialization(checkpoint_path):
@@ -486,15 +471,45 @@ def parse_config():
     parser.add_argument(
         '--test_split', type=str, default=argparse.SUPPRESS,
         help='override the evaluation split (for train-tracklet calibration)')
+    parser.add_argument(
+        '--ct-eval-partition', dest='ct_eval_partition',
+        choices=('train', 'dev', 'calibration'),
+        default=argparse.SUPPRESS,
+        help='evaluate only one atomic CT tracklet partition')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
     parser.add_argument(
         '--init_checkpoint', type=str, default=None,
         help='model-only initialization; does not restore optimizer/trainer state')
+    parser.add_argument(
+        '--b2_method_promotion', type=str, default=None,
+        help='passed v2 method manifest required to start scratch Full')
+    parser.add_argument(
+        '--acquisition_preflight', type=str, default=None,
+        help='passed checkpoint-free preflight v2 required for B2 training')
+    parser.add_argument(
+        '--ct_action_calibration_path', type=str,
+        default=argparse.SUPPRESS,
+        help='passed action-calibration artifact for selective evaluation')
+    parser.add_argument(
+        '--ct_calibration_tracklet_manifest_sha256', type=str,
+        default=argparse.SUPPRESS,
+        help='SHA256 identity of the held-out calibration tracklet manifest')
     parser.add_argument('--log_dir', type=str, default=None, help='log location')
     parser.add_argument('--test', action='store_true', default=False, help='test mode')
     parser.add_argument('--preloading', action='store_true', default=False, help='preload dataset into memory')
     parser.add_argument('--tag', type=str, default="", help='an extra tag appended on output folder name')
-    parser.add_argument('--seed', type=int, help='random_seed')
+    parser.add_argument(
+        '--seed', type=int, default=argparse.SUPPRESS,
+        help='random_seed (defaults to YAML seed, then 42)')
+    reseed_group = parser.add_mutually_exclusive_group()
+    reseed_group.add_argument(
+        '--ct-reseed-enabled', dest='ct_recursive_reseed_enabled',
+        action='store_true', default=argparse.SUPPRESS,
+        help='Use the B0-2x2-selected periodic recursive reseed regime.')
+    reseed_group.add_argument(
+        '--ct-no-reseed', dest='ct_recursive_reseed_enabled',
+        action='store_false', default=argparse.SUPPRESS,
+        help='Use continuous recursive rollout with horizon diagnostics only.')
     parser.add_argument(
         '--dynamics_time_mode', choices=('true', 'fixed', 'shuffled'),
         default=argparse.SUPPRESS,
@@ -552,32 +567,6 @@ def parse_config():
         '--test_kitti_hv_interval',
         default=argparse.SUPPRESS,
         help="Role-specific KITTI-HV test interval.")
-    parser.add_argument(
-        '--m4_variant',
-        choices=('off', 'filter', 'tube', 'filter_tube'),
-        default=argparse.SUPPRESS,
-        help='Evaluation-only M4 ablation selector.')
-    parser.add_argument(
-        '--m4_time_mode',
-        choices=('fixed', 'real'),
-        default=argparse.SUPPRESS,
-        help='M4 state-transition clock control.')
-    parser.add_argument(
-        '--m4_fixed_delta_t', type=float, default=argparse.SUPPRESS,
-        help='Fixed state-transition step for M4.')
-    parser.add_argument(
-        '--m3_path_weight', type=float, default=argparse.SUPPRESS,
-        help='M3 endpoint path-distillation weight.')
-    parser.add_argument(
-        '--m3_variant',
-        choices=('off', 'distill'),
-        default=argparse.SUPPRESS,
-        help='M3 single-view or asymmetric-distillation selector.')
-    parser.add_argument(
-        '--m3_irregular_supervision_weight',
-        type=float,
-        default=argparse.SUPPRESS,
-        help='Optional supervised-loss weight for the irregular M3 view.')
     parser.add_argument(
         '--pftc_weight', type=float, default=argparse.SUPPRESS,
         help='PFTC loss lambda; use zero for the 200-batch loss preflight.')
@@ -681,33 +670,79 @@ def parse_config():
     }
     for key, value in defaults.items():
         config.setdefault(key, value)
-    m3_variant = config.get('m3_variant')
-    if m3_variant is not None:
-        if m3_variant not in ('off', 'distill'):
-            raise ValueError("m3_variant must be off or distill")
-        config['use_m3_path_distillation'] = m3_variant == 'distill'
-    m4_variant = config.get('m4_variant')
-    if m4_variant is not None:
-        if m4_variant not in ('off', 'filter', 'tube', 'filter_tube'):
-            raise ValueError(
-                "m4_variant must be off, filter, tube, or filter_tube")
-        config['use_m4_state_filter'] = m4_variant in (
-            'filter', 'filter_tube')
-        config['use_m4_trajectory_tube'] = m4_variant in (
-            'tube', 'filter_tube')
-
+    if config.get('seed') is None:
+        config['seed'] = 42
     return EasyDict(config)
 
 
 cfg = parse_config()
+if str(getattr(cfg, 'net_model', '')).strip().lower() == 'ctseqtrack':
+    configure_ct_variant(cfg)
 if cfg.checkpoint is not None and cfg.init_checkpoint is not None:
     raise ValueError("--checkpoint (resume/test) and --init_checkpoint are mutually exclusive")
 if cfg.test and cfg.init_checkpoint is not None:
     raise ValueError("--init_checkpoint is training-only; use --checkpoint for evaluation")
+require_scratch_initialization(cfg, cfg.init_checkpoint)
+validate_scratch_training_contract(cfg)
+if cfg.test and cfg.checkpoint is not None:
+    try:
+        source_checkpoint = torch.load(
+            cfg.checkpoint, map_location='cpu', weights_only=False)
+    except TypeError:
+        source_checkpoint = torch.load(cfg.checkpoint, map_location='cpu')
+    if source_checkpoint.get('epoch') is not None:
+        cfg.ct_source_checkpoint_epoch = int(
+            source_checkpoint['epoch']) + 1
+if (not cfg.test
+        and int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3
+        and bool(getattr(cfg, 'ct_enable_b2', False))):
+    if cfg.checkpoint is not None:
+        try:
+            preflight_resume = torch.load(
+                cfg.checkpoint, map_location='cpu', weights_only=False)
+        except TypeError:
+            preflight_resume = torch.load(
+                cfg.checkpoint, map_location='cpu')
+        preflight = preflight_resume.get('ct_acquisition_preflight')
+    else:
+        if not cfg.acquisition_preflight:
+            raise ValueError(
+                'contract-v3 B2/Full requires --acquisition_preflight '
+                'before training starts')
+        preflight = json.loads(Path(
+            cfg.acquisition_preflight).read_text(encoding='utf-8'))
+    cfg.ct_acquisition_preflight_manifest = validate_preflight_artifact(
+        preflight, cfg)
+    class_weights = cfg.ct_acquisition_preflight_manifest[
+        'targetness_class_weights']
+    cfg.ct_targetness_positive_weight = float(class_weights['positive'])
+    cfg.ct_targetness_negative_weight = float(class_weights['negative'])
+if (not cfg.test and bool(getattr(cfg, 'ct_enable_b3', False))
+        and str(getattr(cfg, 'ct_initialization_policy', 'legacy'))
+        == 'scratch_only'):
+    if cfg.checkpoint is not None:
+        try:
+            scratch_resume = torch.load(
+                cfg.checkpoint, map_location='cpu', weights_only=False)
+        except TypeError:
+            scratch_resume = torch.load(cfg.checkpoint, map_location='cpu')
+        method_promotion = scratch_resume.get('ct_b2_method_promotion')
+    else:
+        if not cfg.b2_method_promotion:
+            raise ValueError(
+                'scratch Full requires --b2_method_promotion; the manifest '
+                'qualifies the B2 method but supplies no weights')
+        method_promotion = json.loads(Path(
+            cfg.b2_method_promotion).read_text(encoding='utf-8'))
+    cfg.ct_b2_method_promotion_manifest = validate_b2_method_promotion(
+        method_promotion, cfg)
 if (bool(getattr(cfg, 'ct_online_recursive_training', False))
         and not cfg.test):
     if cfg.init_checkpoint is not None:
-        if int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3:
+        if (int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3
+                and str(getattr(
+                    cfg, 'ct_initialization_policy', 'legacy'))
+                != 'scratch_only'):
             cfg.ct_candidate0_b0_source = (
                 validate_candidate0_b0_initialization(
                     cfg.init_checkpoint))
@@ -761,24 +796,30 @@ if not cfg.test:
     if bool(getattr(cfg, 'ct_online_recursive_training', False)):
         if int(getattr(cfg, 'ct_router_horizon', 3)) != 3:
             raise ValueError("online Joint Full currently requires H=3")
-        if int(cfg.batch_size) != (
-                int(getattr(cfg, 'ct_recursive_tracklet_slots', 4))
-                * int(getattr(cfg, 'ct_recursive_candidate_views', 4))):
+        tracklet_slots = int(getattr(
+            cfg, 'ct_recursive_tracklet_slots', 4))
+        candidate_views = int(getattr(
+            cfg, 'ct_recursive_candidate_views', 4))
+        expected_batch_size = (
+            tracklet_slots
+            if int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3
+            else tracklet_slots * candidate_views)
+        if int(cfg.batch_size) != expected_batch_size:
             raise ValueError(
-                "online recursive batch_size must equal slots*candidate_views")
+                "online recursive batch_size must equal the canonical B0 "
+                f"slot count ({expected_batch_size})")
         online_batch_sampler = OnlineRecursiveBatchSampler(
             train_data,
-            slots=int(getattr(cfg, 'ct_recursive_tracklet_slots', 4)),
-            candidate_views=int(getattr(
-                cfg, 'ct_recursive_candidate_views', 4)),
+            slots=tracklet_slots,
+            candidate_views=candidate_views,
             seed=loader_seed,
             partition_seed=int(getattr(
                 cfg, 'ct_partition_seed', 42)),
             partition=str(getattr(cfg, 'ct_router_partition', 'train')),
             shadow_interval=int(getattr(
                 cfg, 'ct_router_shadow_interval', 2)),
-            shadow_fraction=float(getattr(
-                cfg, 'ct_router_shadow_fraction', 0.25)),
+            shadow_slots_per_event=int(getattr(
+                cfg, 'ct_router_shadow_slots_per_event', 1)),
             shadow_enabled=bool(getattr(cfg, 'ct_enable_b3', True)),
         )
         train_loader = DataLoader(
@@ -844,8 +885,18 @@ if not cfg.test:
 
     trainer.fit(net, train_loader, val_loader, ckpt_path=cfg.checkpoint)
 else:
-    test_data = get_dataset(
+    source_test_data = get_dataset(
         cfg, type='test', split=cfg.test_split, protocol_role='test')
+    eval_partition = getattr(cfg, 'ct_eval_partition', None)
+    if eval_partition is not None:
+        source_dataset = getattr(source_test_data, 'dataset', None)
+        if source_dataset is None:
+            raise RuntimeError(
+                '--ct-eval-partition requires a tracklet test sampler')
+        test_data = PartitionedTestTrackingSampler(
+            source_dataset, config=cfg, partition=eval_partition)
+    else:
+        test_data = source_test_data
     test_loader = DataLoader(test_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
     write_run_provenance(
         run_root_dir, cfg, {"test": test_data}, mode="test", root=project_root)

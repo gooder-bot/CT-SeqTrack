@@ -1,0 +1,88 @@
+"""Dependency-light configuration normalization for formal CT arms."""
+
+
+VARIANTS = {
+    "b0": (False, False, False, False),
+    "b1": (True, True, False, False),
+    "full_minus_b3": (True, True, True, False),
+    "full": (True, True, True, True),
+}
+
+
+def set_config(config, name, value):
+    if isinstance(config, dict):
+        config[name] = value
+    else:
+        setattr(config, name, value)
+
+
+def get_config(config, name, default=None):
+    return config.get(name, default) if isinstance(config, dict) else getattr(
+        config, name, default)
+
+
+def configure_ct_variant(config):
+    variant = str(get_config(config, "ct_variant", "full")).strip().lower()
+    if variant not in VARIANTS:
+        raise ValueError(
+            "ct_variant must be b0, b1, full_minus_b3 or full")
+    use_joint, use_b1, use_b2, use_b3 = VARIANTS[variant]
+    values = {
+        "ct_variant": variant,
+        "use_ct_joint_full": use_joint,
+        "use_b1motion_v3": use_b1,
+        "ct_enable_b1": use_b1,
+        "ct_enable_b2": use_b2,
+        "ct_enable_b3": use_b3,
+        "ct_joint_contract_version": 3,
+        "ct_separate_optimizers": True,
+        "ct_initialization_policy": "scratch_only",
+        "ct_b0_initialization_policy": "scratch_only",
+        "ct_training_state_policy": "observation",
+        "ct_module_isolation": "strict",
+        "use_motion_v3_legacy_fusion": False,
+    }
+    for name, value in values.items():
+        set_config(config, name, value)
+    forbidden = (
+        "use_observability_gate", "use_dynamics_encoder", "use_ct_v2",
+        "use_search_evidence_v2", "use_search_evidence_v21",
+        "use_motion_conditioned_search_v22",
+        "use_motion_conditioned_search_v3", "use_b3_risk_router",
+        "use_joint_proposal_fusion", "use_advantage_proposal_fusion",
+    )
+    enabled = [name for name in forbidden if bool(get_config(
+        config, name, False))]
+    if enabled:
+        raise ValueError(
+            "CTSEQTRACK formal variants forbid legacy runtime branches: "
+            + ", ".join(sorted(enabled)))
+    for name in forbidden:
+        set_config(config, name, False)
+    prior_mode = str(get_config(
+        config, "ct_prior_mode", "learned_physical")).strip().lower()
+    if prior_mode not in ("learned_physical", "fixed_cv"):
+        raise ValueError("ct_prior_mode must be learned_physical or fixed_cv")
+    set_config(config, "ct_prior_mode", prior_mode)
+    if prior_mode == "fixed_cv" and variant != "b0":
+        set_config(config, "use_b1motion_v3", True)
+        set_config(config, "ct_enable_b1", False)
+    memory_mode = str(get_config(
+        config, "ct_memory_mode", "none")).strip().lower()
+    if memory_mode not in ("none", "empty", "real", "time_misaligned"):
+        raise ValueError(
+            "ct_memory_mode must be none, empty, real or time_misaligned")
+    set_config(config, "ct_memory_mode", memory_mode)
+    time_mode = str(get_config(
+        config, "ct_time_mode",
+        get_config(config, "dynamics_time_mode", "true"))).strip().lower()
+    if time_mode not in ("true", "fixed", "shuffled"):
+        raise ValueError("ct_time_mode must be true, fixed or shuffled")
+    set_config(config, "ct_time_mode", time_mode)
+    # Dataset construction currently consumes this compatibility key.  It is
+    # assigned here before dataloaders are built, not deferred to model init.
+    set_config(config, "dynamics_time_mode", time_mode)
+    if variant == "b0":
+        set_config(config, "num_candidates", 1)
+        set_config(config, "ct_recursive_candidate_views", 1)
+    return config

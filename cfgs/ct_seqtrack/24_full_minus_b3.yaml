@@ -1,0 +1,14 @@
+_base_: 24_b1.yaml
+
+experiment_name: ct24_full_minus_b3_scratch_seed42
+ct_variant: full_minus_b3
+num_candidates: 4
+ct_recursive_candidate_views: 4
+ct_auxiliary_microbatch_size: 16
+ct_memory_mode: none
+ct_targetness_class_weight_source: preflight_artifact
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0
+proposal_inference_mode: raw_search
+checkpoint_monitor: success_raw_search/dev
+checkpoint_mode: max

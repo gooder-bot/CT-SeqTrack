@@ -49,7 +49,11 @@ def build_box_memory_tokens(
         history_valid_mask,
         foreground_tokens=8,
         context_tokens=4,
-        context_scale=2.0):
+        context_scale=2.0,
+        history_timestamps=None,
+        current_timestamp=None,
+        current_box=None,
+        return_metadata=False):
     """Select causal foreground/context tokens from predicted history boxes.
 
     No segmentation labels, current GT, or future frames are consumed.  Each
@@ -67,12 +71,36 @@ def build_box_memory_tokens(
     valid = torch.zeros(
         (batch_size, history_count * per_frame), dtype=torch.bool,
         device=history_features.device)
+    # local xyz, physical age, relative yaw sin/cos, inside/context role and
+    # history-frame identity.  Metadata is geometric and never learned from
+    # labels.
+    metadata = history_features.new_zeros(
+        (batch_size, history_count * per_frame, 8))
     points_xyz = history_points[..., :3].detach()
     features = history_features.detach()
     boxes = history_boxes.detach()
     sizes = box_size.detach()
     history_valid = history_valid_mask.reshape(
         batch_size, history_count).to(torch.bool)
+    if history_timestamps is None:
+        history_timestamps = history_features.new_zeros(
+            (batch_size, history_count))
+    else:
+        history_timestamps = torch.as_tensor(
+            history_timestamps, device=history_features.device,
+            dtype=history_features.dtype).reshape(batch_size, history_count)
+    if current_timestamp is None:
+        current_timestamp = history_timestamps.max(dim=1).values
+    else:
+        current_timestamp = torch.as_tensor(
+            current_timestamp, device=history_features.device,
+            dtype=history_features.dtype).reshape(batch_size)
+    if current_box is None:
+        current_box = history_features.new_zeros((batch_size, 4))
+    else:
+        current_box = torch.as_tensor(
+            current_box, device=history_features.device,
+            dtype=history_features.dtype).reshape(batch_size, 4)
 
     for batch_index in range(batch_size):
         size_xy = torch.clamp(sizes[batch_index, :2], min=1e-3)
@@ -87,12 +115,13 @@ def build_box_memory_tokens(
             cosine, sine = torch.cos(yaw), torch.sin(yaw)
             local_x = cosine * delta[:, 0] + sine * delta[:, 1]
             local_y = -sine * delta[:, 0] + cosine * delta[:, 1]
-            normalized = torch.stack((
+            normalized_signed = torch.stack((
                 2.0 * local_x / size_xy[0],
                 2.0 * local_y / size_xy[1],
                 2.0 * (xyz[:, 2] - box[2])
                 / torch.clamp(sizes[batch_index, 2], min=1e-3),
-            ), dim=1).abs()
+            ), dim=1)
+            normalized = normalized_signed.abs()
             inside = finite & (normalized <= 1.0).all(dim=1)
             neighborhood = finite & (normalized <= float(
                 context_scale)).all(dim=1) & ~inside
@@ -123,11 +152,63 @@ def build_box_memory_tokens(
                 tokens[batch_index, output_rows] = features[
                     batch_index, history_index].index_select(0, rows[:take])
                 valid[batch_index, output_rows] = True
+                selected = rows[:take]
+                physical_age = torch.clamp(
+                    current_timestamp[batch_index]
+                    - history_timestamps[batch_index, history_index], min=0.0)
+                relative_yaw = (
+                    current_box[batch_index, 3] - box[3])
+                metadata[batch_index, output_rows, :3] = (
+                    normalized_signed.index_select(0, selected))
+                metadata[batch_index, output_rows, 3] = torch.log1p(
+                    physical_age)
+                metadata[batch_index, output_rows, 4] = torch.sin(
+                    relative_yaw)
+                metadata[batch_index, output_rows, 5] = torch.cos(
+                    relative_yaw)
+                metadata[batch_index, output_rows, 6] = float(offset == 0)
+                metadata[batch_index, output_rows, 7] = float(
+                    history_index + 1) / max(float(history_count), 1.0)
+    if return_metadata:
+        return tokens, valid, metadata
     return tokens, valid
 
 
-class ExtensionMemorySearchRefiner(nn.Module):
-    """Extension-Q/current-base+history-memory-KV recovery refiner."""
+def apply_memory_control(tokens, valid, metadata, mode):
+    """Apply the pre-registered memory ablation without channel shuffling."""
+    mode = str(mode).strip().lower()
+    if mode in ("none", "empty"):
+        return (
+            torch.zeros_like(tokens), torch.zeros_like(valid),
+            torch.zeros_like(metadata))
+    if mode == "real":
+        return tokens, valid, metadata
+    if mode == "time_misaligned":
+        if tokens.shape[1] % 3:
+            raise ValueError("time-misaligned control requires three blocks")
+        block_size = tokens.shape[1] // 3
+        return tokens, valid, torch.roll(
+            metadata, shifts=block_size, dims=1)
+    raise ValueError(
+        "memory mode must be none, empty, real or time_misaligned")
+
+
+def extension_target_bearing_mask(
+        structural_available, extension_labels, extension_valid_mask):
+    """Rows permitted to supervise an extension-derived raw candidate."""
+    presence = (
+        (extension_labels * extension_valid_mask).sum(dim=1) > 0).to(
+            structural_available.dtype)
+    return structural_available.reshape(-1) * presence
+
+
+class B2EvidenceAcquirer(nn.Module):
+    """B2 extension-only evidence acquirer.
+
+    This module owns targetness, voting, presence and the raw candidate.  It
+    deliberately has no utility or action head; deciding whether applying the
+    candidate is safe belongs exclusively to B3.
+    """
 
     def __init__(
             self,
@@ -136,11 +217,13 @@ class ExtensionMemorySearchRefiner(nn.Module):
             max_vote_offset=4.0,
             attention_dropout=0.0,
             presence_init_probability=0.1,
-            utility_init_probability=0.05):
+            presence_threshold=0.5,
+            utility_init_probability=None):
         super().__init__()
         self.feature_dim = int(feature_dim)
         self.num_heads = int(num_heads)
         self.max_vote_offset = float(max_vote_offset)
+        self.presence_threshold = float(presence_threshold)
         if self.feature_dim != 64:
             raise ValueError("contract-v3 B0 point features are fixed at 64d")
         if self.feature_dim % self.num_heads:
@@ -160,6 +243,7 @@ class ExtensionMemorySearchRefiner(nn.Module):
         # longitudinal, lateral, log(dt), gap ratio, B1 validity
         self.geometry_encoder = mlp(5)
         self.source_embedding = nn.Embedding(4, 64)
+        self.memory_metadata_encoder = mlp(8)
         self.query_norm = nn.LayerNorm(64)
         self.kv_norm = nn.LayerNorm(64)
         self.cross_attention = nn.MultiheadAttention(
@@ -175,23 +259,12 @@ class ExtensionMemorySearchRefiner(nn.Module):
             nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
         self.extension_presence_head = nn.Sequential(
             nn.Linear(130, 64), nn.GELU(), nn.Linear(64, 1))
-        # base/ext evidence, residual xy, observation stats, sigma, dt, age
-        self.utility_trunk = nn.Sequential(
-            nn.Linear(64 * 2 + 2 + 5 + 2 + 2, 64),
-            nn.GELU(),
-        )
-        self.utility_logit_head = nn.Linear(64, 1)
-        self.expected_gain_head = nn.Linear(64, 1)
-
         for head, probability in (
                 (self.base_presence_head[-1], presence_init_probability),
-                (self.extension_presence_head[-1], presence_init_probability),
-                (self.utility_logit_head, utility_init_probability)):
+                (self.extension_presence_head[-1], presence_init_probability)):
             nn.init.zeros_(head.weight)
             nn.init.constant_(
                 head.bias, math.log(probability / (1.0 - probability)))
-        nn.init.zeros_(self.expected_gain_head.weight)
-        nn.init.zeros_(self.expected_gain_head.bias)
 
     def forward(
             self,
@@ -210,7 +283,8 @@ class ExtensionMemorySearchRefiner(nn.Module):
             b1_valid,
             query_delta_t,
             gap_ratio,
-            recursive_age=None):
+            recursive_age=None,
+            memory_metadata=None):
         batch_size, extension_count, _ = extension_points.shape
         if current_base_features.shape != (
                 batch_size, 1024, self.feature_dim):
@@ -225,6 +299,10 @@ class ExtensionMemorySearchRefiner(nn.Module):
         base_mask &= torch.isfinite(current_base_features).all(dim=2)
         memory_mask = memory_valid_mask.reshape(
             batch_size, 36).to(torch.bool)
+        if memory_metadata is None:
+            memory_metadata = memory_tokens.new_zeros((batch_size, 36, 8))
+        if memory_metadata.shape != (batch_size, 36, 8):
+            raise ValueError("history memory metadata must be [B,36,8]")
 
         safe_points = torch.nan_to_num(extension_points)
         direction = torch.nan_to_num(b1_direction_xy.detach())
@@ -263,7 +341,10 @@ class ExtensionMemorySearchRefiner(nn.Module):
         extension_feature = extension_feature * extension_mask.unsqueeze(2)
 
         base_features = current_base_features.detach()
-        memory_features = memory_tokens.detach()
+        memory_features = (
+            memory_tokens.detach()
+            + self.memory_metadata_encoder(memory_metadata.detach()))
+        memory_features = memory_features * memory_mask.unsqueeze(2)
         kv = torch.cat((base_features, memory_features), dim=1)
         kv_valid = torch.cat((base_mask, memory_mask), dim=1)
         no_context = ~kv_valid.any(dim=1)
@@ -318,22 +399,9 @@ class ExtensionMemorySearchRefiner(nn.Module):
         extension_presence_probability = (
             torch.sigmoid(extension_presence_logit)
             * availability.to(enriched.dtype))
-
-        if recursive_age is None:
-            recursive_age = torch.zeros_like(dt)
-        utility_input = torch.cat((
-            base_mean,
-            extension_mean,
-            raw_xy - observation_xy,
-            torch.nan_to_num(observation_stats.detach()),
-            torch.log(torch.clamp(sigma, min=0.1)),
-            torch.log1p(dt).unsqueeze(1),
-            torch.log1p(torch.clamp(
-                recursive_age.reshape(batch_size), min=0.0)).unsqueeze(1),
-        ), dim=1)
-        utility_feature = self.utility_trunk(utility_input)
-        utility_logit = self.utility_logit_head(utility_feature).squeeze(1)
-        expected_gain = self.expected_gain_head(utility_feature).squeeze(1)
+        evidence_present = (
+            extension_presence_probability >= self.presence_threshold)
+        candidate_valid = availability & evidence_present
 
         probability = scores / torch.clamp(weight_sum, min=1e-6)
         entropy = -(probability * torch.log(torch.clamp(
@@ -349,6 +417,7 @@ class ExtensionMemorySearchRefiner(nn.Module):
             "b0_current_base_features_detached": base_features,
             "ct_memory_tokens": memory_tokens,
             "ct_memory_valid_mask": memory_mask,
+            "ct_memory_metadata": memory_metadata,
             "ct_extension_query_features": enriched,
             "ct_cross_attention_weights": attention_weights,
             "ct_b2_available": availability.to(enriched.dtype),
@@ -359,14 +428,13 @@ class ExtensionMemorySearchRefiner(nn.Module):
             "ct_b2_extension_presence_probability":
                 extension_presence_probability,
             "ct_b2_extension_evidence": extension_mean,
-            "ct_b2_utility_logit": utility_logit,
-            "ct_b2_expected_gain": expected_gain,
             "ct_b2_raw_box": raw_box,
+            "ct_b2_no_extension_box": observation_box.detach(),
             "ct_search_targetness_logits": logits,
             "ct_search_point_votes": votes,
             "ct_search_unmasked_raw_xy": raw_xy,
             "ct_search_raw_xy": raw_xy,
-            "ct_search_candidate_valid": availability.to(enriched.dtype),
+            "ct_search_candidate_valid": candidate_valid.to(enriched.dtype),
             "ct_search_structural_valid": availability.to(enriched.dtype),
             "ct_search_new_support_valid": (
                 extension_point_count > 0).to(enriched.dtype),
@@ -384,9 +452,15 @@ class ExtensionMemorySearchRefiner(nn.Module):
                 extension_point_count.to(enriched.dtype),
         }
 
+class B3SelectiveUpdater(nn.Module):
+    """B3 action-level reliability model with exact observation fallback.
 
-class H3UtilityResidualRouter(nn.Module):
-    """Zero-init H3 safety correction on top of the B2 H1 utility logit."""
+    Helpful and harmful risks are predicted separately.  A correction is
+    deployable only when structural evidence, calibrated presence, calibrated
+    action reliability and the physical residual bound all pass.  B2 inputs
+    are detached here as a second line of defence in addition to isolated
+    optimizers.
+    """
 
     def __init__(
             self,
@@ -396,27 +470,70 @@ class H3UtilityResidualRouter(nn.Module):
             decision_threshold=0.5,
             radius_base=0.5,
             radius_per_second=0.5,
-            radius_max=2.0):
+            radius_max=2.0,
+            require_calibration=False,
+            helpful_init_probability=0.05,
+            harmful_init_probability=0.5):
         super().__init__()
-        self.presence_threshold = float(presence_threshold)
+        self.require_calibration = bool(require_calibration)
         self.radius_base = float(radius_base)
         self.radius_per_second = float(radius_per_second)
         self.radius_max = float(radius_max)
         self.register_buffer(
-            "decision_threshold", torch.tensor(float(decision_threshold)))
+            "presence_threshold", torch.tensor(float(presence_threshold)),
+            persistent=False)
+        self.register_buffer(
+            "decision_threshold", torch.tensor(float(decision_threshold)),
+            persistent=False)
+        self.register_buffer(
+            "calibrated", torch.tensor(not self.require_calibration,
+                                        dtype=torch.bool), persistent=False)
         self.evidence_projection = nn.Sequential(
             nn.Linear(128, 32), nn.GELU())
-        # projected base/extension evidence(32), presence(2),
-        # utility/gain(2), residual(3), uncertainty(2), dt/gap/age(3),
-        # observation statistics.
-        input_dim = 32 + 2 + 2 + 3 + 2 + 3 + int(observation_stats_dim)
-        self.residual_head = nn.Sequential(
+        # evidence(32), presence(2), coarse/refined agreement(2),
+        # observation/prior disagreement(3), observation/evidence
+        # disagreement(3), uncertainty(2), dt/gap/age(3), observation
+        # statistics(5), point evidence(6).
+        input_dim = 32 + 2 + 2 + 3 + 3 + 2 + 3 + int(
+            observation_stats_dim) + 6
+        self.risk_trunk = nn.Sequential(
             nn.Linear(input_dim, int(hidden_dim)),
             nn.GELU(),
-            nn.Linear(int(hidden_dim), 1),
         )
-        nn.init.zeros_(self.residual_head[-1].weight)
-        nn.init.zeros_(self.residual_head[-1].bias)
+        self.helpful_head = nn.Linear(int(hidden_dim), 1)
+        self.harmful_head = nn.Linear(int(hidden_dim), 1)
+        self.expected_center_gain_head = nn.Linear(int(hidden_dim), 1)
+        self.expected_iou_gain_head = nn.Linear(int(hidden_dim), 1)
+        for head, probability in (
+                (self.helpful_head, helpful_init_probability),
+                (self.harmful_head, harmful_init_probability)):
+            nn.init.zeros_(head.weight)
+            nn.init.constant_(
+                head.bias, math.log(probability / (1.0 - probability)))
+        for head in (
+                self.expected_center_gain_head,
+                self.expected_iou_gain_head):
+            nn.init.zeros_(head.weight)
+            nn.init.zeros_(head.bias)
+
+    @torch.no_grad()
+    def install_calibration(self, presence_threshold, action_threshold):
+        """Install thresholds from a validated external artifact."""
+        values = torch.as_tensor(
+            [presence_threshold, action_threshold], dtype=torch.float64)
+        if not bool(torch.isfinite(values).all()):
+            raise ValueError("calibration thresholds must be finite")
+        if not bool(((values >= 0.0) & (values <= 1.0)).all()):
+            raise ValueError("calibration thresholds must be in [0, 1]")
+        self.presence_threshold.copy_(values[0].to(self.presence_threshold))
+        self.decision_threshold.copy_(values[1].to(self.decision_threshold))
+        self.calibrated.fill_(True)
+
+    @staticmethod
+    def _box_disagreement(first, second):
+        delta = second[:, :2] - first[:, :2]
+        return torch.cat((delta, torch.linalg.norm(
+            delta, dim=1, keepdim=True)), dim=1)
 
     def forward(
             self,
@@ -427,14 +544,22 @@ class H3UtilityResidualRouter(nn.Module):
             extension_evidence,
             base_presence_probability,
             extension_presence_probability,
-            h1_utility_logit,
-            h1_expected_gain,
             observation_stats,
             b1_sigma_parallel_perp,
             query_delta_t,
             gap_ratio,
             recursive_age=None,
-            enabled=True):
+            enabled=True,
+            coarse_box=None,
+            b1_center_xy=None,
+            targetness_entropy=None,
+            normalized_ess=None,
+            extension_point_count=None,
+            extension_voxel_count=None,
+            targetness_mean=None,
+            targetness_max=None,
+            h1_utility_logit=None,
+            h1_expected_gain=None):
         observation = observation_box.detach()
         raw = raw_box.detach()
         batch_size = observation.shape[0]
@@ -443,30 +568,67 @@ class H3UtilityResidualRouter(nn.Module):
         if recursive_age is None:
             recursive_age = torch.zeros_like(dt)
         age = recursive_age.reshape(batch_size).detach().clamp(min=0.0)
-        residual = raw[:, :2] - observation[:, :2]
+        raw_finite = torch.isfinite(raw).all(dim=1)
+        residual = torch.nan_to_num(
+            raw[:, :2] - observation[:, :2], nan=0.0,
+            posinf=0.0, neginf=0.0)
         residual_norm = torch.linalg.norm(residual, dim=1)
         evidence = self.evidence_projection(torch.cat((
             base_evidence.detach(), extension_evidence.detach()), dim=1))
+        if coarse_box is None:
+            coarse_box = observation
+        coarse_box = coarse_box.detach()
+        coarse_center_gap = torch.linalg.norm(
+            coarse_box[:, :2] - observation[:, :2], dim=1)
+        coarse_yaw_gap = torch.atan2(
+            torch.sin(coarse_box[:, 3] - observation[:, 3]),
+            torch.cos(coarse_box[:, 3] - observation[:, 3])).abs()
+        coarse_agreement = torch.stack((
+            coarse_center_gap, coarse_yaw_gap), dim=1)
+        if b1_center_xy is None:
+            b1_center_xy = observation[:, :2]
+        prior_box = torch.cat((
+            b1_center_xy.detach(), observation[:, 2:].detach()), dim=1)
+
+        def column(value, default=0.0):
+            if value is None:
+                return observation.new_full((batch_size, 1), float(default))
+            return torch.nan_to_num(value.detach().reshape(batch_size, 1))
+
+        point_evidence = torch.cat((
+            column(targetness_entropy),
+            column(normalized_ess),
+            torch.log1p(column(extension_point_count).clamp(min=0.0)),
+            torch.log1p(column(extension_voxel_count).clamp(min=0.0)),
+            column(targetness_mean),
+            column(targetness_max),
+        ), dim=1)
         features = torch.cat((
             evidence,
             base_presence_probability.detach().unsqueeze(1),
             extension_presence_probability.detach().unsqueeze(1),
-            h1_utility_logit.detach().unsqueeze(1),
-            h1_expected_gain.detach().unsqueeze(1),
-            residual,
-            residual_norm.unsqueeze(1),
+            coarse_agreement,
+            self._box_disagreement(observation, prior_box),
+            self._box_disagreement(observation, raw),
             torch.log(torch.clamp(
                 b1_sigma_parallel_perp.detach(), min=0.1)),
             torch.log1p(dt).unsqueeze(1),
             torch.log1p(gap).unsqueeze(1),
             torch.log1p(age).unsqueeze(1),
             torch.nan_to_num(observation_stats.detach()),
+            point_evidence,
         ), dim=1)
-        h3_residual = self.residual_head(features).squeeze(1)
-        if not bool(enabled):
-            h3_residual = torch.zeros_like(h3_residual)
-        apply_logit = h1_utility_logit + h3_residual
-        probability = torch.sigmoid(apply_logit)
+        risk_feature = self.risk_trunk(torch.nan_to_num(features))
+        helpful_logit = self.helpful_head(risk_feature).squeeze(1)
+        harmful_logit = self.harmful_head(risk_feature).squeeze(1)
+        expected_center_gain = self.expected_center_gain_head(
+            risk_feature).squeeze(1)
+        expected_iou_gain = self.expected_iou_gain_head(
+            risk_feature).squeeze(1)
+        helpful_probability = torch.sigmoid(helpful_logit)
+        harmful_probability = torch.sigmoid(harmful_logit)
+        probability = helpful_probability * (1.0 - harmful_probability)
+        apply_logit = helpful_logit - harmful_logit
         radius = torch.clamp(
             self.radius_base + self.radius_per_second * dt,
             max=self.radius_max)
@@ -475,15 +637,31 @@ class H3UtilityResidualRouter(nn.Module):
         bounded_residual = residual * residual_scale.unsqueeze(1)
         evidence_valid = (
             (availability.reshape(batch_size) > 0)
-            & (extension_presence_probability >= self.presence_threshold)
-            & torch.isfinite(raw).all(dim=1))
-        action = evidence_valid & (
+            & (extension_presence_probability
+               >= self.presence_threshold.to(extension_presence_probability))
+            & raw_finite
+            & torch.isfinite(features).all(dim=1))
+        deployable = bool(enabled) and (
+            bool(self.calibrated) or not self.require_calibration)
+        action = evidence_valid & deployable & (
             probability >= self.decision_threshold.to(probability))
-        final_xy = observation[:, :2] + action.to(
-            observation.dtype).unsqueeze(1) * bounded_residual
+        final_xy = torch.where(
+            action.unsqueeze(1),
+            observation[:, :2] + bounded_residual,
+            observation[:, :2])
         final_box = torch.cat((final_xy, observation[:, 2:]), dim=1)
         return final_box, {
-            "ct_b3_h3_residual": h3_residual,
+            "ct_b3_help_logit": helpful_logit,
+            "ct_b3_harm_logit": harmful_logit,
+            "ct_b3_help_probability": helpful_probability,
+            "ct_b3_harm_probability": harmful_probability,
+            "ct_b3_expected_center_gain": expected_center_gain,
+            "ct_b3_expected_iou_gain": expected_iou_gain,
+            "ct_b3_action_score": probability,
+            "ct_b3_calibrated": observation.new_full(
+                (batch_size,), float(bool(self.calibrated))),
+            # v23 compatibility aliases.
+            "ct_b3_h3_residual": apply_logit,
             "ct_b3_h3_utility": apply_logit,
             "ct_b3_final_gate": action.to(observation.dtype),
             "ct_router_logit": apply_logit,

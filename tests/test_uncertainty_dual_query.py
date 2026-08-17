@@ -210,6 +210,7 @@ class PhysicalMotionUncertaintyTest(unittest.TestCase):
         error = rng.normal(size=(rows, 2)) * predicted_sigma * expected_scale
         result = fit_calibration({
             "error_xy": error,
+            "kinematic_error_xy": error * 2.0,
             "velocity_xy": np.tile([1.0, 0.0], (rows, 1)),
             "log_sigma_pp": np.log(predicted_sigma),
             "valid": np.ones(rows),
@@ -218,6 +219,8 @@ class PhysicalMotionUncertaintyTest(unittest.TestCase):
         np.testing.assert_allclose(
             result["scale_parallel_perpendicular"],
             expected_scale, rtol=0.04, atol=0.02)
+        self.assertTrue(result["promotion"]["criteria"][
+            "learned_mean_beats_kinematic"])
 
     def test_calibration_manifest_binds_partition_artifact_and_checkpoint(self):
         with tempfile.TemporaryDirectory() as temporary:

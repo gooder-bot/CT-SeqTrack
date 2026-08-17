@@ -1,22 +1,26 @@
 _base_: 22_ct_joint_repaired.yaml
 
 experiment_name: ct_seqtrack_evidence_memory_v3
+seed: 42
 ct_joint_contract_version: 3
 ct_recursive_reseed_enabled: false
 ct_enable_b3: false
 ct_b2_promotion_passed: false
 use_calibrated_motion_uncertainty: true
 search_v3_use_dynamic_sigma: true
-require_b1_calibration_artifact: true
-require_b1_calibration_passed: true
+require_b1_calibration_artifact: false
+require_b1_calibration_passed: false
 
 # Candidate0 is the only B0 transaction.  Candidate1--3 are plugin-only
 # auxiliary views and are weighted 1/6 each versus candidate0's 1/2.
 num_candidates: 4
 ct_recursive_candidate_views: 4
-ct_recursive_tracklet_slots: 4
+ct_recursive_tracklet_slots: 16
+ct_auxiliary_microbatch_size: 16
+ct_recovery_candidate_policy: weak_miss_control
+ct_router_shadow_slots_per_event: 1
 ct_separate_optimizers: true
-ct_b0_lr: 0.000025
+ct_b0_lr: 0.0001
 ct_plugin_lr: 0.0001
 ct_b0_gradient_clip_val: 0.0
 ct_plugin_gradient_clip_val: 0.0
@@ -31,20 +35,22 @@ ct_memory_attention_dropout: 0.0
 ct_query_motion_dropout: 0.0
 ct_memory_mode: real
 ct_base_evidence_mode: full
-# Placeholder is overwritten by the required calibration-partition artifact
-# emitted by tools/calibrate_b1_uncertainty.py before model construction.
+# Fixed, pre-registered training quantile.  It is not a calibrated artifact:
+# each independently selected scratch checkpoint is calibrated only afterward.
 search_v3_standardized_residual_q90_parallel_perpendicular: [1.644854, 1.644854]
 search_v3_coverage_scale: 1.0
-ct_acquisition_calibration_status: required_q90
+ct_acquisition_calibration_status: training_uncalibrated_fixed_q90
 ct_search_presence_init_probability: 0.1
 ct_utility_init_probability: 0.05
 ct_search_presence_threshold: 0.5
 ct_presence_hard_gate: true
 ct_router_help_margin: 0.05
 
-# This configuration accepts only a newly trained candidate0/no-reseed B0.
-# Checkpoint selection remains an explicit run-time input, never a historical
-# CT21/CT22 high-score default.
-ct_b0_initialization_policy: candidate0_no_reseed_from_scratch
-checkpoint_monitor: success/test
+# Every v23 B2/Full ablation initializes all enabled modules in this run.
+# Only --checkpoint may restore the same run at a completed epoch boundary.
+ct_initialization_policy: scratch_only
+ct_b0_initialization_policy: scratch_only
+checkpoint_monitor: success_raw_search/dev
 checkpoint_mode: max
+proposal_inference_mode: raw_search
+export_v3_candidate_diagnostics: true

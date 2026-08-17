@@ -1,5 +1,10 @@
 # TrajTrack GT-assisted 与 Plain SeqTrack3D 参考对比
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 > **边界：这不是公平在线排名。** TrajTrack 当前 evaluator 使用当前帧 GT overlap 触发 refinement，并用 GT overlap 从 proposals 中选择结果。下面数值只能作为实现诊断和带 oracle 辅助的参考。
 
 ## 运行完整性

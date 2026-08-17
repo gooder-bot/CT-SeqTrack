@@ -50,6 +50,16 @@ class RecursiveTrackStateTest(unittest.TestCase):
         self.assertEqual(first, [1, 2, 4, 8])
         self.assertEqual(second, [2, 4, 8, 1])
 
+    def test_four_horizons_repeat_and_rotate_across_sixteen_slots(self):
+        first = [
+            rotating_rollout_horizon([1, 2, 4, 8], slot, 0, 16)
+            for slot in range(16)]
+        second = [
+            rotating_rollout_horizon([1, 2, 4, 8], slot, 1, 16)
+            for slot in range(16)]
+        self.assertEqual(first, [1, 2, 4, 8] * 4)
+        self.assertEqual(second, [2, 4, 8, 1] * 4)
+
     def test_legacy_observation_safe_size_uses_first_frame(self):
         source = (ROOT / "datasets/sampler.py").read_text(encoding="utf-8")
         legacy_processing = source.split(
@@ -377,6 +387,24 @@ class OnlineRecursiveBatchSamplerTest(unittest.TestCase):
             shadow_fraction=0.5, shadow_enabled=False)
         self.assertTrue(all(
             not bool(row[6]) for batch in sampler for row in batch))
+
+    def test_set_epoch_replays_the_exact_epoch_order(self):
+        seed = 42
+        keys = [f"track/{index}" for index in range(80)]
+        train_keys = [
+            key for key in keys
+            if stable_tracklet_partition(key, seed) == "train"]
+        base = _FakeSequenceDataset(train_keys[:16], [4] * 16)
+        sampler = OnlineRecursiveBatchSampler(
+            _FakeMotionSampler(base), slots=16, candidate_views=4,
+            seed=seed, partition="train", shadow_enabled=False)
+        sampler.set_epoch(3)
+        first = next(iter(sampler))
+        sampler.set_epoch(3)
+        replayed = next(iter(sampler))
+        self.assertEqual(first, replayed)
+        self.assertEqual(len(first), 64)
+        self.assertEqual(sum(row[5] == 0 for row in first), 16)
 
 
 if __name__ == "__main__":

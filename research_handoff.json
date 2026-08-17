@@ -1,0 +1,44 @@
+{
+  "schema": "ct_seqtrack.research_handoff.v1",
+  "status": "implementation_complete_experiments_pending",
+  "working_title": "Observation-Anchored Evidence Recovery for Irregular-Time 3D Single-Object Tracking",
+  "central_claim": "Physical-time-guided extension evidence may apply only a calibrated bounded correction; otherwise the tracker exactly preserves the current observation.",
+  "contributions": [
+    {
+      "name": "observation_anchored_pipeline",
+      "modules": ["B0", "B1", "B2", "B3"],
+      "required_evidence": ["exact_fallback_test", "matched_scratch_hashes"]
+    },
+    {
+      "name": "extension_only_evidence",
+      "modules": ["B2"],
+      "required_evidence": ["acquisition_preflight", "no_extension_counterfactual", "raw_candidate_headroom"]
+    },
+    {
+      "name": "empirical_action_reliability",
+      "modules": ["B3"],
+      "required_evidence": ["heldout_calibration", "tracklet_bootstrap", "risk_coverage"]
+    }
+  ],
+  "conditional_claims": {
+    "physical_time": "Requires true > fixed and shuffled under matched scratch and held-out cadence.",
+    "memory": "Requires real > empty and time_misaligned with stable paired confidence intervals."
+  },
+  "claim_guardrails": [
+    "No gain, stability, SOTA, physical-time, or memory claim before the registered experiments pass.",
+    "Agreement is an input feature, not reliability itself.",
+    "Fixed Gaussian quantiles are not calibrated two-dimensional coverage.",
+    "Predicted-box membership is not ground-truth foreground.",
+    "Calibration is empirical finite-sample control, not a distribution-free guarantee."
+  ],
+  "primary_files": [
+    "models/ctseqtrack.py",
+    "models/ct_v2/pipeline_contracts.py",
+    "models/ct_v2/evidence_memory.py",
+    "utils/action_calibration.py",
+    "utils/acquisition_metrics.py",
+    "utils/online_contract.py",
+    "docs/CTSEQTRACK_B0_B3_METHOD.md",
+    "need_to_do.md"
+  ]
+}

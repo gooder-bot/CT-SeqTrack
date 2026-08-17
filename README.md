@@ -1,319 +1,176 @@
 # CT-SeqTrack
 
-> **候选创新定位（待验证）**：CT-SeqTrack 进一步研究跨帧率不变的双时钟
-> 3D 跟踪。SeqTrack3D 主干保留 order clock；物理分支用真实 `delta_t` 将
-> “每帧位移”归一为 m/s，并按 query gap 传播运动和查询轨迹端点证据，使一个
-> 共享模型有机会统一不同采样率及未见 cadence。该定位尚不是已有正结论；只有
-> shared-checkpoint 的 `true` 持续超过 dataset-mean fixed、within-dataset
-> shuffled，并在 held-out stride/gap 上成立，才支持 physical-time 因果表述。
-
-CT-SeqTrack 是基于 SeqTrack3D 的连续时间 3D 单目标跟踪项目。2026-08-04 的
-代码—数据链审计已据此修复正式配置 15–18：B1/B2 使用同一方向与 replay
-history 合同，base crop 保留，正式 raw Search 不再围绕 B1 二次裁剪。旧配置
-01–14 的行为保持不变，继续用于复现历史失败。
-
-当前目标主线是：**B1 连续时间均值与校准风险 → B2 base-preserving support
-与非对称 `q_obs/q_search` 双查询证据 → B3 observation-anchored 保守闭环决策**。
-B1 只单向耦合 B2 的 auxiliary geometry/query，原 SeqTrack3D observation 路径
-保持 motion-independent fail-safe；step 属于 B3 动作，不是第三个 candidate。
-B4 暂时退出论文主线。完整的完成度判断、连接重构、晋级门槛和消融顺序只以
-[B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
-为准；正式数据传输、online pre-pass、双 query、梯度边界和耦合消融见
-[不确定性感知非对称双查询耦合](docs/ASYMMETRIC_DUAL_QUERY_COUPLING_20260804.md)。
-[B2-v3 文档](docs/B2_V3_STATE_ALIGNED_SELECTIVE_SEARCH.md)保留为当前版本的实现与
-复现记录，不再代表下一版方法决策。
-
-## 2026-08-05 当前判断
-
-- **B1**：mean/NLL、统一运动方向、低速各向同性、calibration artifact 和
-  fixed-margin fallback 的工程合同已完成；coverage/NLL/cadence 实验尚未给出
-  晋级结论。
-- **B2**：工程前半段完成，科学方法仍未完成。motion/raw/refined endpoint error
-  为 `2.9045/2.6496/2.7344`；`refined - raw = +0.0848`，tracklet 95% CI
-  `[+0.0379,+0.1323]`，说明当前 B1-centered refinement 显著伤害 raw candidate。
-- **B2 数据链**：训练/验证 structural-valid 为 `30.58%/5.79%`，验证
-  foreground-valid 只有 `66/2004 = 3.29%`，presence AUC 为 `0.497`。
-- **B3**：v4 feature schema、raw Search 身份绑定、实际 H=3 recursive Success
-  阈值校准与 packaging gate 已完成；B2 promotion 未通过前仍不得训练正式 B3。
-- **B4**：仅保留 experimental-only 的 EMA projector + online stop-gradient
-  representation 短测，不是完整 EMA encoder teacher，也不阻塞 B1–B3。
-
-最近的实现出口是同 checkpoint 五模式归因、独立 `raw_search_xy`/no-clip、
-Transformer final decoder state 兼容 API、B1 calibration/replay v2，以及
-`q_obs/q_search` 双查询与 B3 v4 artifact。代码就绪不代表 promotion 已通过。
-可执行清单见 [need_to_do.md](need_to_do.md)，论文表格见
-[refined_plan.md](refined_plan.md)。
-
-以下内容保留为历史实验与失败证据，不代表当前优先级。
-
-第一版 v2 候选曾从大量互相耦合的实验分支收敛为：
+CT-SeqTrack studies observation-preserving evidence recovery for irregular-time
+3D single-object tracking. The paper-facing implementation is `CTSEQTRACK` and
+has one fixed chain:
 
 ```text
-SeqTrack3D
-  + Continuous-Time Motion Prior
-  + Time-Guided Search Expansion
-  + Adaptive Proposal Fusion
+B0 Observation Tracker
+  -> B1 Physical-Time Prior
+  -> B2 Evidence Acquirer
+  -> B3 Selective Updater
 ```
 
-2026-07-27 的完整 B0–B3 首筛以及后续 Search-only A1 已经否决这套三模块
-组合及当前独立搜索设计。2026-07-30 完成的 motion `alpha=0/0.25` scratch
-复核进一步确认：`alpha=0.25` 相对精确关闭 innovation 的 `alpha=0` final
-下降 `17.468/20.322`，因此问题不只是旧 `alpha=0.75` 太大，当前固定全局
-proposal innovation 正式 No-Go。
+The central rule is deliberately conservative: motion and history never replace
+the current observation directly. B1 only defines a physical-time prior and a
+fixed first-version support region; B2 must recover target evidence from
+extension-only points; B3 may apply a bounded residual only after a matching
+held-out calibration artifact passes the empirical risk gates. Every other case
+returns the B0 observation exactly.
 
-同日完成的有序/pre-crop B1motion-v2 也未修复 normal：epoch60 仅
-`20.618 Success / 19.830 Precision`，相对 B0 下降 `32.742/44.551`；
-最佳 epoch5 也只有 `30.196/34.990`。完整训练诊断表明，35% mixed-cadence
-在 adapter 仍为零时就先破坏了 gap-blind B0 主路径，epoch3 后无范数硬上限
-的 feature residual 又放大退化；pre-crop extension 实际只在 3.93% 训练样本
-有效。当前 B1motion-v2 原样配置同样 No-Go。
+The implementation is complete, but the new method has not yet passed its
+preflight, promotion, seed-42, or multi-seed experiments. Therefore this
+repository does not currently claim a gain, statistical stability, SOTA, or a
+causal benefit from physical time or memory.
 
-2026-08-01 拉回的完整日志确认第四模块 Δt-PFTC 已跑满 60 epoch。它的 final
-为 `51.189/60.886`，相对 B0 下降 `2.171/3.496`；late-3 也下降
-`1.507/2.487`，因此当前 B4 明确没有涨点。canonical yaw 逆变换符号仍与项目
-坐标约定相反，前景 feature std 到 epoch60 只剩 epoch1 的 16.4%，训练开销为
-B0 的 8.24 倍。当前结论更新为
-`NO-GO_CURRENT_B4_IMPLEMENTATION / PFTC_IDEA_NOT_YET_FAIRLY_TESTED`：停止原样
-扩展，先修正几何、防坍缩目标与性能，再做 5-epoch 三臂机制测试。
+## Paper-facing components
 
-## 已完成首筛的 v2 候选
+- `models/ctseqtrack.py`: formal composition root; normalizes the single
+  `ct_variant` interface and rejects historical branch switches.
+- `models/ct_v2/pipeline_contracts.py`: internal B0--B3 ownership contracts.
+- `models/ct_v2/evidence_memory.py`: extension-only B2 and action-risk B3.
+- `utils/action_calibration.py`: finite-sample empirical action calibration,
+  tracklet bootstrap bounds, artifact validation, and risk--coverage curves.
+- `utils/acquisition_metrics.py`: checkpoint-free acquisition preflight and
+  artifact-derived targetness class weights.
+- `utils/online_contract.py`: scratch/resume and B2-promotion identity checks.
+- `tools/compare_ct_module_audits.py`: shared-prefix parameter-hash audit.
 
-1. **Continuous-Time Motion Prior**：从历史框和真实 `delta_t` 学习速度，按当前时间间隔生成候选帧位移先验；训练时以 clean/correlated history 混合替代纯 GT history。
-2. **Time-Guided Search Expansion**：保留 SeqTrack3D 原搜索区域，额外构造有界轨迹 tube；总点数仍为 1024，其中默认 75% 来自原搜索区域。
-3. **Adaptive Proposal Fusion**：根据观测特征、运动特征、proposal disagreement、点云可靠性、时间间隔和扩展比例，预测小幅有界修正。
+The evaluator still receives flat dictionaries. Existing v23 output keys that
+are needed by analysis scripts are compatibility aliases only; they do not
+define additional paper modules.
 
-TWC、旧 Observability Gate、M3 EMA teacher、M4 Kalman/filter 等路线保留为
-历史代码，默认配置全部关闭。当前三模块候选没有晋级；第二阶段一致性和记忆
-继续暂停。
+## Formal variants
 
-历史 v2 数据流见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；当前目标数据流与
-论文计划分别见
-[B1–B4 连接重构与消融计划](docs/B1_B4_REDESIGN_AND_ABLATION_PLAN_20260804.md)
-和 [refined_plan.md](refined_plan.md)。关于真实时间的投入产出、Random-20%
-现实性、ChronoTrack/近期工作借鉴顺序和现有模块审计，见
-[真实时间价值与模块路线审计](docs/TIME_VALUE_AND_MODULE_ROADMAP_20260728.md)。
-服务器上的 KITTI、nuScenes-mini 和 nuScenes Python 包路径及其正确用法见
-[服务器路径说明](docs/SERVER_PATHS.md)。
+| Variant | Trainable modules from random initialization | Deployed output during training |
+|---|---|---|
+| `b0` | B0 | observation |
+| `b1` | B0+B1 | observation |
+| `full_minus_b3` | B0+B1+B2 | observation; B2 is shadow/counterfactual |
+| `full` | B0+B1+B2+B3 | observation; actions only after calibration |
 
-第四模块的完整数据、实现错误、坍缩诊断和恢复路径见
-[Δt-PFTC seed42 60-epoch 最终诊断](compare_results/reports/pftc_b4_seed42_final_diagnosis_20260801.md)。
+Configurations are under `cfgs/ct_seqtrack/`:
 
-Motion alpha 的完整性、曲线、机制诊断和后续 2×2 见
-[Motion fixed-alpha 复核](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.md)；
-可独立打开的图表版见
-[便携 HTML 报告](compare_results/reports/ct_motion_alpha_sweep_seed42_20260730.html)。
-对 B1motion 的逐层代码链路、训练/推理闭环、时序表达能力、历史 M2 归因和
-SeqTrack3D/M²-Track/STTracker/HVTrack/TrajTrack 对照，见
-[B1motion 深度审计](compare_results/reports/b1_motion_module_deep_audit_20260730.html)。
-有序/pre-crop 修正版的完整 60-epoch 曲线、训练损失、代码合同漏洞与下一步
-factorial kill-test 见
-[B1motion-v2 seed42 结果](compare_results/reports/b1motion_v2_seed42_20260730.md)。
+- `24_b0.yaml`
+- `24_b1.yaml`
+- `24_full_minus_b3.yaml`
+- `24_full.yaml`
+- `24_full_cv.yaml`
+- `24_full_minus_b3_cv.yaml`
+- `24_{b1,full}_time_{fixed,shuffled}.yaml`
+- `24_full_minus_b3_time_{fixed,shuffled}.yaml`
+- `24_full_memory_{real,empty,time_misaligned}.yaml`
 
-## B1motion-v2 完成结果（2026-07-30）
+All formal arms use `scratch_only`, observation recursive state, strict module
+isolation, and last-epoch checkpoints. `--init_checkpoint` is forbidden.
+`--checkpoint` is accepted only for an exact same-run epoch-boundary resume or
+for evaluation.
 
-| 组别 | final Success | final Precision | best Success | best Precision |
-|---|---:|---:|---:|---:|
-| B0 baseline | **53.360** | **64.382** | **54.135** | **64.382** |
-| legacy motion α=0 | 47.049 | 49.184 | 49.876 | 58.691 |
-| legacy motion α=0.25 | 29.581 | 28.862 | 35.027 | 41.130 |
-| B1motion-v2 ordered/pre-crop | 20.618 | 19.830 | 30.196 | 34.990 |
+## Scientific contracts
 
-本轮 B1motion-v2 训练完整，不是坏 checkpoint。当前没有该 checkpoint 的
-random20/gap1124 输出，因此不能声称 irregular 涨点；normal 大幅失败也已
-阻止晋级。下一步先重训 current-code B0，再做
-`irregular_probability 0/0.35 × adapter off/on` 的 10–15 epoch 归因实验，
-不再直接跑另一个 60 epoch。
+### B1: prior, not output
 
-## Motion fixed-alpha 复核（2026-07-30）
+B1 consumes recursive history boxes, valid masks, and physical timestamps. It
+predicts a mean, direction, heteroscedastic uncertainty, and CV fallback. Its
+mean is never used as the final box. The first B2 version uses fixed support
+margins; learned sigma remains a B3 feature and an analysis target.
 
-| 组别 | final Success | final Precision | late-3 Success | late-3 Precision |
-|---|---:|---:|---:|---:|
-| B0 baseline | **53.360** | **64.382** | **52.905** | **63.104** |
-| B1 motion，alpha=0 | 47.049 | 49.184 | 46.828 | 49.669 |
-| B1 motion，alpha=0.25 | 29.581 | 28.862 | 29.472 | 28.849 |
-| B1 motion，alpha=0.75 | 26.021 | 24.972 | 26.080 | 25.299 |
+### B2: identifiable new evidence
 
-`alpha=0/0.25` 均为 commit `5f260e7`、seed42、scratch、60 epoch、
-75,720 step，resolved config 除 cfg/tag 外只差 alpha。`alpha=0.25`
-warmup 后实际平均系数仅 0.184、平均修正约 0.083 m，仍相对 `alpha=0`
-大幅退化；epoch25–60 的 8 个验证点两项指标全部更低。与此同时它的 epoch60
-training loss 更低，说明主要矛盾是 teacher-forced 训练与 recursive tracking
-错位，而不是训练不足。
+- Targetness is trained on every valid extension point, with class weights
+  signed by the acquisition preflight artifact.
+- Vote/raw-center regression is active only for rows whose extension contains
+  target points.
+- An absent-target row trains presence-negative only; it cannot regress the GT
+  center.
+- GT-guided auxiliary rows update B2 only and cannot train presence or B3.
+- Structural availability and evidence presence are separate conditions.
+- The no-extension counterfactual is exactly the observation.
 
-当前只否定固定全局 proposal innovation，不把结论扩大为所有 motion prior
-无效。下一步不再长训更小 alpha；先用两个已有 checkpoint 做推理 alpha
-开/关 2×2，并导出逐 endpoint observation/dynamics proposal 归因。
+Memory is optional B2 context, not a standalone contribution. `time_misaligned`
+preserves token values, shape, channels, and masks while mismatching the three
+history blocks with their time/pose metadata. Memory enters the final method
+only if `real` beats both `empty` and `time_misaligned` under matched scratch
+training and paired confidence intervals.
 
-## 第四模块最终状态（2026-08-01）
+### B3: calibrated action reliability
 
-| 项目 | 结果 | 判断 |
-|---|---:|---|
-| 训练完整性 | 75,720 step / 12 验证点 / epoch60 checkpoint | 完整 |
-| epoch60 final | 51.189 Success / 60.886 Precision | 比 B0 低 2.171 / 3.496 |
-| late-3 | 51.398 / 60.618 | 比 B0 低 1.507 / 2.487 |
-| 前景 feature std | 0.0947 → 0.0156 | 只剩 16.4%，强坍缩警报 |
-| weighted/raw loss 差异中位数 | -0.252% | 没有真实时间增量证据 |
-| 单卡 step time | 2.983 s vs B0 0.362 s | 约慢 8.24 倍 |
-
-当前旧公式正式 No-Go，不再补 PFTC-U、seed43/44 或强协议。下一步依次是：把
-canonicalization 改为项目一致的 `R(-yaw)` 并修正交叉单测；加入
-projector/normalized loss/variance floor 等明确防坍缩机制；把 step time 压到
-B0 的 2 倍以内；最后才重新运行同代码 B0/PFTC-U-v2/Δt-PFTC-v2 的 5-epoch
-机制筛选。只有机制门槛全部通过，才重新预检 λ 和考虑 60-epoch 正式三臂。
-
-## 当前实验结论（2026-07-27）
-
-seed42、nuScenes-mini、Car、60 epoch 的原始 TensorBoard 标量复核结果如下。
-主比较统一采用 epoch60 final checkpoint；best 与 late-3 只作为稳定性诊断。
-
-| 组别 | 模块 | final Success | final Precision | 状态 |
-|---|---|---:|---:|---|
-| B0 | SeqTrack3D baseline | 53.360 | 64.382 | 完整 |
-| A1 | B0 + search expansion only | 27.036 | 25.596 | 完整，当前独立搜索不通过 |
-| B1 | B0 + motion prior，alpha=0.75 | 26.021 | 24.972 | 完整，当前设计不通过 |
-| B2 | B1 + search expansion | 47.973 | 52.088 | 完整，交互恢复但仍低于 B0 |
-| B3 | B2 + adaptive fusion | 25.537 | 24.707 | 完整，adaptive gate 不通过 |
-
-Search-only A1 相对 B0 下降 26.324 Success / 38.786 Precision，late-3
-也下降 24.972 / 36.705；12 个验证点均未接近 B0，不是 final checkpoint
-选择问题。A1 的末轮训练损失仅比 B0 高约 0.0013，训练 search-used sample
-ratio 为 3.460%，与 B2 的 3.458% 几乎一致，因此失败不能解释为 search
-未执行或常规训练发散。B2 相对 B1 的恢复应解释为 motion×search 交互，
-不能再当作 search 的独立正贡献。
-
-当前只保留 B0。下一步不训练 A2，而是用现有 B0/A1 checkpoint 做 Search
-开/关 2×2 评测，并补验证阶段逐 endpoint 的搜索激活、扩展点数和首次漂移
-诊断。在原因定位前，不启动多 seed、时间控制、full nuScenes、Random-20%
-或第二阶段模块。
-
-完整的可复核结果、完整性检查和机制诊断见
-[B0–B3 seed42 消融复核](compare_results/reports/ct_v2_ablation_seed42_20260727.md)。
-可用 `python tools/analyze_ct_v2_ablation.py` 从本地 event/checkpoint 重新生成
-报告、CSV 和曲线图。
-
-Search-only 的独立复核见
-[A1 Search-only 技术复核](compare_results/reports/ct_search_only_seed42_20260727.md)，
-可用 `python tools/analyze_ct_search_only.py` 重新生成报告、CSV 和曲线图。
-
-## B0–B3 复现实验入口
-
-下面入口用于复现已经完成的首筛，不代表建议重跑相同配置：
-
-```bash
-# 1. 同代码 baseline
-python tools/ct_v2/run.py train --variant baseline --path /data/nuscenes-mini
-
-# 2. 连续时间运动先验
-python tools/ct_v2/run.py train --variant motion --path /data/nuscenes-mini
-
-# 3. 加时间引导搜索扩展
-python tools/ct_v2/run.py train --variant motion_search --path /data/nuscenes-mini
-
-# 4. 完整 CT-SeqTrack v2
-python tools/ct_v2/run.py train --variant full --path /data/nuscenes-mini
-
-# 5. Search-only（已完成且未通过；仅用于复现）
-python tools/ct_v2/run.py train --variant search_only --path /data/nuscenes-mini
-```
-
-正常验证：
-
-```bash
-python tools/ct_v2/run.py test \
-  --variant full \
-  --checkpoint /path/to/last.ckpt \
-  --path /data/nuscenes-mini
-```
-
-当前 B3 没有通过 mini，所以下列 full nuScenes 命令暂不执行；仅保留为未来
-晋级模型的运行模板：
-
-```bash
-python tools/ct_v2/run.py train \
-  --variant baseline_full \
-  --path /data/nuscenes
-
-python tools/ct_v2/run.py train \
-  --variant full_dataset \
-  --path /data/nuscenes
-```
-
-时间负对照必须使用同一晋级 checkpoint。当前 B3 未晋级，以下命令只保留为
-实验合同；`fixed` 可直接运行，`shuffled` 先生成冻结 manifest：
-
-> 2026-07-25 以前的 B3 时间控制会通过 observation statistics
-> 继续读取真实 `dt`，不能作为 v2 因果证据。修复后的 gate、motion、
-> innovation radius 与 search tube 均只消费 `current_delta_t_effective`，
-> 因此必须用新代码重新运行三路控制。
-
-```bash
-python tools/build_dynamics_time_manifest.py \
-  --cfg cfgs/ct_v2/04_ct_seqtrack_v2.yaml \
-  --path /data/nuscenes-mini \
-  --role test \
-  --output protocols/manifests/ct_v2_mini_test_shuffled_seed42.json
-
-python tools/ct_v2/run.py test \
-  --variant full \
-  --checkpoint /path/to/last.ckpt \
-  --path /data/nuscenes-mini \
-  --time-mode shuffled \
-  --time-manifest protocols/manifests/ct_v2_mini_test_shuffled_seed42.json
-```
-
-Random-20% 同样暂不执行；晋级后可按下面模板复测：
-
-```bash
-python tools/ct_v2/run.py test \
-  --variant full \
-  --checkpoint /path/to/last.ckpt \
-  --path /data/nuscenes-mini \
-  --protocol random20
-```
-
-命令可加 `--dry-run` 只打印最终 `main.py` 调用。原有 `main.py --cfg cfgs/<legacy>.yaml ...` 命令保持可用。
-
-## 目录
+B3 predicts helpful probability, harmful probability, expected center gain,
+and expected IoU gain from detached upstream evidence. An action requires:
 
 ```text
-models/ct_v2/       连续时间运动与自适应融合
-utils/ct_search.py  训练/评测共享的时间引导搜索
-utils/ct_history.py 轻量的相关历史误差契约
-cfgs/ct_v2/         当前唯一活跃的消融配置
-tools/ct_v2/run.py  当前唯一推荐运行入口
-docs/legacy/        旧阶段计划和运行说明
-compare_results/    历史结果与正式分析
+structural availability
+and presence >= calibrated threshold
+and helpful * (1 - harmful) >= calibrated action threshold
+and a finite residual bounded by radius(dt)
 ```
 
-## 现有证据边界
+The calibration artifact is bound to the checkpoint SHA256, action-defining
+configuration identity, tracklet-manifest SHA256, score definition, thresholds,
+and its own content hash. Missing, failed, stale, or undersized calibration is
+fail-closed.
 
-- B0–B3 与 Search-only A1 均已完成 75,720 个训练 step、12 次验证和
-  epoch60 `last.ckpt`；本轮数据足够否决当前设计。
-- 当前固定 `alpha=0.75` 的 B1 明显低于 B0；B2 对 B1 有较大恢复，但 final
-  Success/Precision 仍分别低 5.387/12.294，不能晋级。
-- 新 scratch 对照中 `alpha=0.25` 相对 `alpha=0` final 仍下降
-  17.468/20.322；固定全局 innovation 的 No-Go 不再只是“0.75 过大”。
-- `alpha=0` 是精确关闭 correction 的 fallback control，不是 motion 正向
-  贡献；它与 B0 还存在共享初始化混杂，不能把两者差值解释为 dynamics 净效应。
-- B3 gate 从初始 0.25 快速饱和为常数上限 0.75，最终结果基本退回 B1；
-  当前 adaptive fusion 不具有可用的条件可靠性。
-- A1 相对 B0 final 下降 26.324/38.786，证明当前 search 不能独立涨点；
-  B2 的正增量只能表述为对失败 B1 的交互恢复。
-- A1/B0 checkpoint 的 320 个 state tensor 名称和 shape 完全一致；但服务器
-  初始化等价 preflight 日志未随结果拉回，因此不能声称该 artifact 已审计。
-- 可选模块在共享层之前实例化会改变后续层的随机初始化；单 seed 的精确模块
-  效应仍有初始化混杂。当前大幅退化足以做 No-Go，机制归因仍需同 checkpoint
-  Search 开/关 2×2。
-- 正确时间尚未与 fixed/shuffled 做同 checkpoint 的有效比较，因此不能声称
-  “真实时间已被证明产生因果收益”。
-- B1–B3 使用 candidate0 clean、其余 candidate correlated 的历史混合；
-  canonical displacement/velocity 标签不随该输入扰动改变。
+## Running the staged protocol
 
-历史细节见 [sum_results.md](sum_results.md) 和 [done.md](done.md)。
-## 相关工作
+First export a complete checkpoint-free acquisition pass and build its signed
+preflight artifact:
 
-- [SeqTrack3D, ICRA 2024](https://arxiv.org/abs/2402.16249)：多帧点云与历史框序列 baseline。
-- [StreamTrack, AAAI 2024](https://ojs.aaai.org/index.php/AAAI/article/view/28196)：流式多帧记忆。
-- [HVTrack, ECCV 2024](https://www.ecva.net/papers/eccv_2024/papers_ECCV/html/1145_ECCV_2024_paper.php)：历史视角跟踪与扩展搜索的收益/背景噪声边界。
-- [TrajTrack, 2025/2026](https://arxiv.org/abs/2509.11453)：显式运动 proposal 与隐式历史轨迹联合细化。
-- [ChronoTrack, CVPR 2026 Findings](https://arxiv.org/abs/2604.13789)：对齐后的紧凑时序记忆与一致性目标。
+```bash
+python tools/export_ct_acquisition_preflight_rows.py --help
+python tools/preflight_ct_acquisition.py --help
+```
+
+Then train each arm independently from scratch. B2 arms require
+`--acquisition_preflight`; Full additionally requires the method-only B2
+promotion manifest. The manifest transfers no weights.
+
+```bash
+python main.py --cfg cfgs/ct_seqtrack/24_b0.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/24_b1.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/24_full_minus_b3.yaml \
+  --path DATA_ROOT --acquisition_preflight PREFLIGHT.json
+python main.py --cfg cfgs/ct_seqtrack/24_full.yaml \
+  --path DATA_ROOT --acquisition_preflight PREFLIGHT.json \
+  --b2_method_promotion B2_PROMOTION.json
+```
+
+After Full training, export candidate action rows on held-out calibration
+tracklets and calibrate:
+
+```bash
+python tools/calibrate_ct_actions.py \
+  --rows CALIBRATION_ROWS.jsonl \
+  --checkpoint LAST.ckpt \
+  --config cfgs/ct_seqtrack/24_full.yaml \
+  --tracklet-manifest CALIBRATION_TRACKLETS.json \
+  --output ACTION_CALIBRATION.json
+```
+
+Selective evaluation must supply the same checkpoint, artifact, and manifest
+file hash:
+
+```bash
+python main.py --test --cfg cfgs/ct_seqtrack/24_full.yaml \
+  --checkpoint LAST.ckpt --path DATA_ROOT --proposal-mode selective \
+  --ct_action_calibration_path ACTION_CALIBRATION.json \
+  --ct_calibration_tracklet_manifest_sha256 MANIFEST_SHA256
+```
+
+Use `python tools/report_ct_risk_coverage.py --help` for risk--coverage output
+and `python tools/report_ct_b1.py --help` for mean-vs-CV, NLL, support and
+registered B1 strata. Use `python tools/promote_ct_memory.py --help` for the
+paired memory gate.
+Use `python tools/compare_ct_module_audits.py ...` to invalidate arms whose
+supposedly shared B0/B1/B2 prefixes diverged.
+
+## Verification and experiment status
+
+```bash
+python -m pytest -q
+```
+
+The detailed implementation and claim/evidence map is in
+[`docs/CTSEQTRACK_B0_B3_METHOD.md`](docs/CTSEQTRACK_B0_B3_METHOD.md). The active
+experiment checklist is [`need_to_do.md`](need_to_do.md). Historical designs,
+negative results, and prior reports remain in `compare_results/` and
+`docs/legacy/`; they are not evidence for the current B0--B3 method.

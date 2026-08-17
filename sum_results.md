@@ -1,5 +1,10 @@
 # CT-SeqTrack 实验结果简要总结
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 更新时间：2026-08-02
 
 这份文件只保留实验主线，不展开所有 epoch 数据。完整表格和曲线见 `compare_results/`。

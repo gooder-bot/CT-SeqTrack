@@ -1,0 +1,4 @@
+_base_: 24_full.yaml
+
+experiment_name: ct24_full_cv_scratch_seed42
+ct_prior_mode: fixed_cv

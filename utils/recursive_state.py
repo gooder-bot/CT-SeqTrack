@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from utils.twc_utils import (
+from utils.sampling_utils import (
     deterministic_candidate_offset,
     deterministic_point_seed,
 )
@@ -40,15 +40,15 @@ def stable_tracklet_partition(tracklet_key, seed=42):
 
 
 def rotating_rollout_horizon(horizons, slot, epoch, slots):
-    """Assign every fixed horizon to one slot and rotate each epoch."""
+    """Repeat a horizon cycle across slots and rotate it every epoch."""
     horizons = [int(value) for value in horizons]
     slots = int(slots)
     slot = int(slot)
     epoch = int(epoch)
-    if (slots <= 0 or len(horizons) != slots
+    if (slots <= 0 or not horizons
             or any(value <= 0 for value in horizons)):
         raise ValueError(
-            "rollout horizons must contain one positive value per slot")
+            "rollout horizons must contain at least one positive value")
     if not 0 <= slot < slots or epoch < 0:
         raise ValueError("rollout slot/epoch is out of range")
     return horizons[(slot + epoch) % len(horizons)]
@@ -96,7 +96,8 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
     def __init__(self, dataset, slots=4, candidate_views=4, seed=42,
                  partition_seed=None,
                  partition="train", shadow_interval=2,
-                 shadow_fraction=0.25, shadow_enabled=True):
+                 shadow_fraction=None, shadow_slots_per_event=1,
+                 shadow_enabled=True):
         self.dataset = dataset
         self.slots = int(slots)
         self.candidate_views = int(candidate_views)
@@ -105,19 +106,17 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
             self.seed if partition_seed is None else partition_seed)
         self.partition = str(partition)
         self.shadow_interval = max(1, int(shadow_interval))
-        self.shadow_fraction = float(shadow_fraction)
+        self.shadow_fraction = (
+            None if shadow_fraction is None else float(shadow_fraction))
         self.shadow_enabled = bool(shadow_enabled)
+        self.shadow_slots_per_event = int(shadow_slots_per_event)
         self.epoch = 0
         if self.slots <= 0 or self.candidate_views <= 0:
             raise ValueError("online recursive slots/views must be positive")
-        if not 0.0 < self.shadow_fraction <= 1.0:
-            raise ValueError("shadow fraction must be in (0,1]")
-        self.shadow_slots_per_event = int(round(
-            self.slots * self.shadow_fraction))
         if self.shadow_enabled and self.shadow_slots_per_event != 1:
             raise ValueError(
-                "Joint Full H=3 budget requires exactly one shadow slot "
-                "per scheduled optimizer step")
+                "Joint Full requires exactly one explicit shadow slot per "
+                "scheduled event")
         if self.candidate_views != int(dataset.num_candidates):
             raise ValueError(
                 "online candidate views must equal dataset.num_candidates")
@@ -158,8 +157,15 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
     def __len__(self):
         return min(self.slot_prediction_frames)
 
+    def set_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < 0:
+            raise ValueError("sampler epoch must be non-negative")
+        self.epoch = epoch
+
     def __iter__(self):
-        rng = np.random.default_rng(self.seed + self.epoch)
+        iterator_epoch = int(self.epoch)
+        rng = np.random.default_rng(self.seed + iterator_epoch)
         queues = [
             list(rng.permutation(tracklets).astype(int))
             for tracklets in self.slot_tracklets]
@@ -198,7 +204,7 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                         slot == shadow_slot and frame_id + 2 < frame_count)
                     for candidate_id in range(self.candidate_views):
                         batch.append((
-                            self.epoch, batch_index, slot,
+                            iterator_epoch, batch_index, slot,
                             int(tracklet_id), int(frame_id), int(candidate_id),
                             bool(can_shadow and candidate_id == 0),
                         ))
@@ -219,7 +225,11 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                         next_active[slot] = None
                 active = next_active
         finally:
-            self.epoch += 1
+            # Preserve standalone iteration ergonomics. Lightning calls
+            # ``set_epoch(current_epoch)`` before every epoch, so a resume
+            # always overrides this convenience increment deterministically.
+            if self.epoch == iterator_epoch:
+                self.epoch = iterator_epoch + 1
 
 
 @dataclass

@@ -1,0 +1,5 @@
+_base_: 24_full_memory_real.yaml
+
+experiment_name: ct24_full_memory_empty_scratch_seed42
+ct_memory_mode: empty
+

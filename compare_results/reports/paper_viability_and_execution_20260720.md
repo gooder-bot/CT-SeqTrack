@@ -1,5 +1,10 @@
 # CT-SeqTrack 论文可行性、主张边界与后续执行路线
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 更新时间：2026-07-20
 
 > **2026-07-21 结果回填**：同提交 TWC A/B/C seed42 已完成。`C-B` final 为 `+8.31 Success / +11.74 Precision`，但 paired-view 的 `B-A` 为 `-15.30/-24.18`，最终 `C-A=-7.00/-12.44`。因此 consistency 相对 paired control 的净效应成立，但 standard guardrail 失败，正式判定 `NO_GO_TWC_MAIN_METHOD_PROMOTION`，不补 seed43/44。本文以下内容保留为当时的预注册决策依据；实际结果、图表和新执行顺序见 [twc_abc_seed42_comparison_20260721.md](twc_abc_seed42_comparison_20260721.md)。

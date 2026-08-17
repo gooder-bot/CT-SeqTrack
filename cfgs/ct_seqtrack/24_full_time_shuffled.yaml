@@ -1,0 +1,6 @@
+_base_: 24_full.yaml
+
+experiment_name: ct24_full_time_shuffled_scratch_seed42
+ct_time_mode: shuffled
+dynamics_time_mode: shuffled
+dynamics_time_manifest: null

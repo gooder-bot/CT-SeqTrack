@@ -1,5 +1,10 @@
 # CT-SeqTrack 历史研究快照（2026-07-24）
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 CT-SeqTrack 是一个面向 **timestamp-native / variable-rate 3D 单目标跟踪** 的研究型项目。它基于 SeqTrack3D 改造，目标是把原本固定帧步长的多帧点云序列学习，推进到由真实时间间隔 `delta_t` 驱动的状态估计。
 
 当前仓库是研究快照：2026-07-24，commit `473738f` 的 R1 final 已完成 standard/gap1124 同 checkpoint `true/fixed/shuffled` 与 matched A1，M2−A1 分别为 **`+4.133/+9.445`** 和 **`+2.279/+4.143`**（Success/Precision），逐 tracklet bootstrap 的两项主指标 95% CI 均为正；正确时间本身没有稳定优于 fixed/shuffled。历史 No-Go 现在只作为归因控制，不再阻塞涨分方向。项目已进入 **M 阶段工程与实验**：M3 使用 time-agnostic canonical-to-irregular EMA endpoint distillation，M4 使用固定状态滤波与 predictive trajectory tube；matched A/B/C 训练、四臂在线递归评测和一键 runner 均已实现，等待服务器训练结果确认涨分。

@@ -2,4 +2,4 @@ _base_: 23_ct_evidence_memory.yaml
 
 experiment_name: ct_seqtrack_evidence_memory_v3_b3
 ct_enable_b3: true
-ct_b2_promotion_passed: true
+ct_b2_promotion_passed: false

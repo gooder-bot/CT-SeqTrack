@@ -3,10 +3,12 @@ _base_: 01_seqtrack3d_baseline.yaml
 experiment_name: b4_decoder_alignment_only
 experimental_only: true
 
-use_twc: true
+use_b4_paired_views: true
+b4_candidate_zero_only: true
+b4_view_a_offsets: [1, 2, 3]
+b4_view_b_offsets: [1, 3, 5]
 use_decoder_token_consistency: true
 use_point_feature_tc: false
-use_m3_path_distillation: false
 decoder_tc_invariance_weight: 1.0
 decoder_tc_variance_weight: 0.0
 decoder_tc_covariance_weight: 0.0

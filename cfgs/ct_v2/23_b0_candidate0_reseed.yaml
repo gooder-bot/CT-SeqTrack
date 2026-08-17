@@ -1,6 +1,9 @@
 _base_: 22_ct_joint_repaired_b0.yaml
 
 experiment_name: ct_b0_candidate0_reseed_seed42
+ct_initialization_policy: scratch_only
+ct_auxiliary_microbatch_size: 16
+ct_router_shadow_slots_per_event: 1
 seed: 42
 num_candidates: 1
 batch_size: 16

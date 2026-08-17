@@ -1,0 +1,16 @@
+_base_: ../ct_v2/23_ct_evidence_memory.yaml
+
+experiment_name: ct24_b0_scratch_seed42
+net_model: ctseqtrack
+ct_variant: b0
+ct_prior_mode: learned_physical
+ct_time_mode: true
+ct_memory_mode: none
+ct_training_state_policy: observation
+ct_module_isolation: strict
+ct_initialization_policy: scratch_only
+num_candidates: 1
+ct_recursive_candidate_views: 1
+ct_recursive_reseed_enabled: false
+proposal_inference_mode: observation
+save_top_k: 0

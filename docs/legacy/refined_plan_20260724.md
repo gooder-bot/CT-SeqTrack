@@ -1,5 +1,10 @@
 # CT-SeqTrack 历史研究计划与论文定位（2026-07-24）
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 更新时间：2026-07-24
 
 这份文件用于每次开始工作前快速整理研究思路。下一步执行清单见 `need_to_do.md`，已完成工程和实验记录见 `done.md`，简洁实验结论见 `sum_results.md`。2026-07-21 之后的新候选贡献、公式、代码落点和 Go/No-Go 见 `compare_results/reports/dual_clock_state_filtering_proposal_20260721.md`。

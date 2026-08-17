@@ -12,3 +12,6 @@ ct_b2_promotion_passed: false
 require_b1_calibration_artifact: false
 require_b1_calibration_passed: false
 ct_acquisition_calibration_status: fitting
+checkpoint_monitor: b1_nll/dev
+checkpoint_mode: min
+proposal_inference_mode: observation

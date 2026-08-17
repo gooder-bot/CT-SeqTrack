@@ -1,5 +1,0 @@
-_base_: 23_ct_evidence_memory.yaml
-
-experiment_name: ct_seqtrack_evidence_memory_v3_shuffled_memory
-ct_memory_mode: shuffled
-

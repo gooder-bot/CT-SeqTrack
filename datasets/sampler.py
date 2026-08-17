@@ -23,7 +23,7 @@ from datasets.misc_utils import get_history_frame_ids_and_masks, \
     build_main_time_fields, \
     build_effective_time_fields, \
     normalize_dynamics_time_mode
-from utils.twc_utils import (
+from utils.sampling_utils import (
     build_shared_candidate_offset_map,
     build_shared_point_sampling_seed_map,
     candidate_offsets_for_frame_ids,
@@ -1417,6 +1417,21 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     extension_sampled_target_count = int(
         np.sum(search_v2_point_labels > 0)
         + np.sum(trajectory_search_point_labels > 0))
+    recovery_role = int(candidate_id)
+    recovery_positive = False
+    recovery_fallback = False
+    if candidate_id == 1:
+        recovery_positive = bool(
+            base_target_count <= 2
+            and extension_pool_target_count > 0
+            and extension_sampled_target_count > 0)
+        recovery_fallback = not recovery_positive
+    elif candidate_id == 2:
+        recovery_positive = bool(
+            base_target_count == 0
+            and extension_pool_target_count > 0
+            and extension_sampled_target_count > 0)
+        recovery_fallback = not recovery_positive
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
     if candidate_id != 0:
@@ -1683,6 +1698,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'ct_acquisition_sampled_count': np.float32(
                 joint_extension_sampling['sample_count']),
             'ct_view_role': np.int64(0 if candidate_id == 0 else 1),
+            # 0=identity observation, 1=weak recovery-positive,
+            # 2=strict miss (possibly explicit fallback), 3=natural control.
+            'ct_recovery_role': np.int64(recovery_role),
+            'ct_recovery_positive': np.float32(recovery_positive),
+            'ct_recovery_fallback': np.float32(recovery_fallback),
         })
     if (use_trajectory_search
             or bool(getattr(config, 'use_ordered_trajectory_encoder', False))):
@@ -2077,11 +2097,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
     def __init__(self, dataset, config=None, **kwargs):
         super().__init__(dataset, random_sample=False, config=config, **kwargs)
         self.processing = motion_processing_mf
-        self.use_twc = getattr(self.config, 'use_twc', False)
-        self.use_m3_path_distillation = bool(getattr(
-            self.config, 'use_m3_path_distillation', False))
-        self.use_paired_history = bool(
-            self.use_twc or self.use_m3_path_distillation)
+        self.use_b4_paired_views = bool(getattr(
+            self.config, 'use_b4_paired_views', False))
+        self.use_paired_history = self.use_b4_paired_views
         self.use_b1motion_v3 = bool(getattr(
             self.config, 'use_b1motion_v3', False))
         self.use_recursive_replay_cache = bool(getattr(
@@ -2166,33 +2184,24 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                            self.motion_v3_aux_transition_gaps)):
                 raise ValueError("B1motion-v3 auxiliary gaps must be positive")
         self.paired_candidate_zero_only = bool(getattr(
-            self.config,
-            'm3_candidate_zero_only'
-            if self.use_m3_path_distillation else 'twc_candidate_zero_only',
-            getattr(self.config, 'twc_candidate_zero_only', True),
-        ))
-        default_twc_b_offsets = [1 + 2 * i for i in range(self.dataset.hist_num)]
-        self.twc_view_a_offsets = list(getattr(
-            self.config,
-            'm3_view_a_offsets' if self.use_m3_path_distillation else 'twc_view_a_offsets',
-            getattr(
-                self.config,
-                'twc_view_a_offsets',
-                list(range(1, self.dataset.hist_num + 1)))))
-        self.twc_view_b_offsets = list(getattr(
-            self.config,
-            'm3_view_b_offsets' if self.use_m3_path_distillation else 'twc_view_b_offsets',
-            getattr(self.config, 'twc_view_b_offsets', default_twc_b_offsets)))
+            self.config, 'b4_candidate_zero_only', True))
+        default_b4_b_offsets = [
+            1 + 2 * i for i in range(self.dataset.hist_num)]
+        self.b4_view_a_offsets = list(getattr(
+            self.config, 'b4_view_a_offsets',
+            list(range(1, self.dataset.hist_num + 1))))
+        self.b4_view_b_offsets = list(getattr(
+            self.config, 'b4_view_b_offsets', default_b4_b_offsets))
         if self.use_paired_history and getattr(self.config, "use_augmentation", False):
             raise ValueError(
                 "Paired history views require explicit shared transforms; "
                 "keep use_augmentation=False.")
         if self.use_paired_history:
-            if (len(self.twc_view_a_offsets) != self.dataset.hist_num
-                    or len(self.twc_view_b_offsets) != self.dataset.hist_num):
+            if (len(self.b4_view_a_offsets) != self.dataset.hist_num
+                    or len(self.b4_view_b_offsets) != self.dataset.hist_num):
                 raise ValueError(
                     "Each paired history view must provide exactly hist_num offsets.")
-            if self.twc_view_a_offsets[0] != 1 or self.twc_view_b_offsets[0] != 1:
+            if self.b4_view_a_offsets[0] != 1 or self.b4_view_b_offsets[0] != 1:
                 raise ValueError(
                     "Paired views must share the nearest t-1 anchor.")
 
@@ -2381,9 +2390,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 paired_candidate_id = (
                     0 if self.paired_candidate_zero_only else candidate_id)
                 prev_frame_ids_a, _ = get_history_frame_ids_and_masks(
-                    this_frame_id, self.dataset.hist_num, offsets=self.twc_view_a_offsets)
+                    this_frame_id, self.dataset.hist_num, offsets=self.b4_view_a_offsets)
                 prev_frame_ids_b, _ = get_history_frame_ids_and_masks(
-                    this_frame_id, self.dataset.hist_num, offsets=self.twc_view_b_offsets)
+                    this_frame_id, self.dataset.hist_num, offsets=self.b4_view_b_offsets)
                 # Sample perturbations and regularization seeds once per absolute
                 # frame id. Any physical history frame appearing in both paths,
                 # especially t-1, must share crop, coordinates, and sampled XYZ.
@@ -2402,14 +2411,14 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     list(prev_frame_ids_a) + list(prev_frame_ids_b))
                 current_sampling_seed = sample_point_sampling_seed()
                 view_a = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                          paired_candidate_id, self.twc_view_a_offsets,
+                                          paired_candidate_id, self.b4_view_a_offsets,
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
                                           current_sampling_seed=current_sampling_seed,
                                           candidate_shared_transform=candidate_shared_transform,
                                           sample_index=anno_id)
                 view_b = self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                          paired_candidate_id, self.twc_view_b_offsets,
+                                          paired_candidate_id, self.b4_view_b_offsets,
                                           candidate_offset_map=candidate_offset_map,
                                           point_sampling_seed_map=point_sampling_seed_map,
                                           current_sampling_seed=current_sampling_seed,

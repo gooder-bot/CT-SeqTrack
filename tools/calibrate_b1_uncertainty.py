@@ -81,6 +81,16 @@ def fit_calibration(arrays, min_direction_speed=0.2):
         & np.isfinite(direction_xy).all(axis=1)
         & np.isfinite(log_sigma).all(axis=1))
     valid &= finite
+    kinematic_error_xy = (
+        arrays["kinematic_error_xy"]
+        if "kinematic_error_xy" in arrays else None)
+    if kinematic_error_xy is not None:
+        kinematic_error_xy = np.asarray(
+            kinematic_error_xy, dtype=np.float64)
+        if kinematic_error_xy.shape != np.asarray(error_xy).shape:
+            raise ValueError(
+                "kinematic_error_xy must match learned error_xy")
+        valid &= np.isfinite(kinematic_error_xy).all(axis=1)
     if int(valid.sum()) < 10:
         raise RuntimeError("B1 calibration requires at least ten valid rows")
     aligned = aligned_errors(
@@ -109,11 +119,24 @@ def fit_calibration(arrays, min_direction_speed=0.2):
         "promotion": {},
         "gap_strata": {},
     }
+    learned_mean_rmse = float(np.sqrt(np.mean(np.sum(
+        np.asarray(error_xy, dtype=np.float64)[valid] ** 2, axis=1))))
+    kinematic_rmse = (
+        float(np.sqrt(np.mean(np.sum(
+            kinematic_error_xy[valid] ** 2, axis=1))))
+        if kinematic_error_xy is not None else None)
+    result["mean_prediction"] = {
+        "learned_rmse": learned_mean_rmse,
+        "kinematic_rmse": kinematic_rmse,
+    }
+    learned_beats_kinematic = bool(
+        kinematic_rmse is not None and learned_mean_rmse < kinematic_rmse)
     promoted = (
         result["calibrated"]["coverage_ece"] <= 0.05
         and result["calibrated"]["coverage"]["95"] >= 0.90
         and result["calibrated"]["nll"]
-        < result["fixed_sigma_baseline"]["nll"])
+        < result["fixed_sigma_baseline"]["nll"]
+        and learned_beats_kinematic)
     result["promotion"] = {
         "passed": bool(promoted),
         "criteria": {
@@ -124,6 +147,7 @@ def fit_calibration(arrays, min_direction_speed=0.2):
             "nll_better_than_fixed_sigma": bool(
                 result["calibrated"]["nll"]
                 < result["fixed_sigma_baseline"]["nll"]),
+            "learned_mean_beats_kinematic": learned_beats_kinematic,
         },
     }
     if "gap_ratio" in arrays:
@@ -153,6 +177,11 @@ def update_checkpoint(checkpoint_path, output_path, result):
         dtype=state[matching[0]].dtype)
     if isinstance(payload, dict):
         payload["b1_uncertainty_calibration"] = dict(result)
+        # Calibration is a post-selection evaluation transform, not an epoch
+        # boundary of the optimizer trajectory.  It must never be resumed as
+        # if it were the original scratch run.
+        payload["ct_posthoc_calibrated"] = True
+        payload["ct_epoch_boundary_complete"] = False
     torch.save(payload, output_path)
 
 
@@ -191,7 +220,8 @@ def main():
             "--checkpoint and --output-checkpoint must be supplied together")
     manifest = load_and_validate_manifest(args.input, args.checkpoint)
     arrays = np.load(args.input, allow_pickle=False)
-    for key in ("error_xy", "direction_xy", "basis_velocity_xy",
+    for key in ("error_xy", "kinematic_error_xy", "direction_xy",
+                "basis_velocity_xy",
                 "velocity_xy", "log_sigma_pp", "valid", "gap_ratio"):
         if key not in arrays:
             raise RuntimeError(f"B1 v2 residual artifact lacks {key}")

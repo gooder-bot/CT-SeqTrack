@@ -19,12 +19,12 @@ sys.path.insert(0, str(ROOT))
 from datasets import get_dataset, points_utils  # noqa: E402
 from utils.checkpoint_loading import load_initial_weights  # noqa: E402
 from models import get_model  # noqa: E402
-from models.ct_v2.crpa import stable_tracklet_partition  # noqa: E402
-from tools.selective_innovation_common import canonical_sha256  # noqa: E402
+from utils.recursive_state import stable_tracklet_partition  # noqa: E402
 from utils.config import load_yaml_config  # noqa: E402
 from utils.replay_cache import (  # noqa: E402
     b1_calibration_config_sha256,
     sha256_file,
+    sha256_json,
 )
 
 
@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--partition", choices=("train", "dev", "calibration"),
                         default="calibration")
     parser.add_argument("--path")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int)
     parser.add_argument("--max-tracklets", type=int)
     parser.add_argument("--preloading", action="store_true")
     parser.add_argument("--device", default="auto")
@@ -56,8 +56,10 @@ def resolve_device(value):
 def main():
     args = parse_args()
     raw_config = load_yaml_config(args.config)
+    seed = int(args.seed if args.seed is not None
+               else raw_config.get("seed", 42) or 42)
     raw_config.update({
-        "seed": args.seed,
+        "seed": seed,
         "test_split": args.split,
         "preloading": bool(args.preloading),
         "use_b1motion_v3": True,
@@ -86,7 +88,7 @@ def main():
                 if hasattr(source_dataset, "get_tracklet_key")
                 else f"{args.split}/tracklet/{tracklet_id}")
             if stable_tracklet_partition(
-                    tracklet_key, args.seed) != args.partition:
+                    tracklet_key, seed) != args.partition:
                 continue
             selected_tracklets += 1
             sequence = dataset[tracklet_id]
@@ -101,6 +103,8 @@ def main():
                 rows.append({
                     "error_xy": target_xy - np.asarray(
                         prediction["mu_xy"], dtype=np.float32),
+                    "kinematic_error_xy": target_xy - np.asarray(
+                        prediction["kinematic_prior_xy"], dtype=np.float32),
                     "velocity_xy": np.asarray(
                         prediction["velocity_xy"], dtype=np.float32),
                     "basis_velocity_xy": np.asarray(
@@ -130,6 +134,8 @@ def main():
     np.savez_compressed(
         output,
         error_xy=np.stack([row["error_xy"] for row in rows]),
+        kinematic_error_xy=np.stack([
+            row["kinematic_error_xy"] for row in rows]),
         velocity_xy=np.stack([row["velocity_xy"] for row in rows]),
         basis_velocity_xy=np.stack([
             row["basis_velocity_xy"] for row in rows]),
@@ -145,8 +151,8 @@ def main():
         "dataset": str(getattr(config, 'dataset', 'unknown')),
         "split": args.split,
         "partition": args.partition,
-        "seed": args.seed,
-        "config_sha256": canonical_sha256(raw_config),
+        "seed": seed,
+        "config_sha256": sha256_json(raw_config),
         "b1_config_sha256": b1_calibration_config_sha256(config),
         "checkpoint_sha256": sha256_file(args.checkpoint),
         "tracklets": selected_tracklets,

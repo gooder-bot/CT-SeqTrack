@@ -26,15 +26,7 @@ from datasets.misc_utils import (
     build_effective_time_fields,
     build_main_time_fields,
     build_time_fields,
-    normalize_timestamp,
     normalize_dynamics_time_mode,
-)
-from models.state_filter import (
-    FixedContinuousDiscreteFilter,
-    box_yaw,
-    build_trajectory_tube_box,
-    point_inside_oriented_crop,
-    union_point_clouds,
 )
 from utils.ct_search import (
     build_ordered_trajectory_search_box,
@@ -72,6 +64,11 @@ class BaseModelMF(pl.LightningModule):
 
         self.prec_step = TorchPrecision()
         self.success_step = TorchSuccess()
+        if (bool(getattr(config, "use_ct_joint_full", False))
+                and int(getattr(
+                    config, "ct_joint_contract_version", 1)) >= 3):
+            self.ct_observation_success = TorchSuccess()
+            self.ct_raw_search_success = TorchSuccess()
 
         self.n_frames = TorchNumFrames()
         self._proposal_sequence_diagnostics = []
@@ -82,9 +79,8 @@ class BaseModelMF(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        # M3 keeps a frozen EMA teacher as a registered submodule so that its
-        # state is checkpointed.  Filtering here prevents frozen teacher
-        # tensors from entering optimizer parameter groups.
+        # Experimental modules may contain non-trainable state; keep those
+        # tensors out of optimizer parameter groups.
         trainable_parameters = [
             parameter for parameter in self.parameters() if parameter.requires_grad
         ]
@@ -623,6 +619,26 @@ class BaseModelMF(pl.LightningModule):
         final_world = points_utils.getOffsetBB(
             reference_box, final_local4, degrees=self.config.degrees,
             use_z=self.config.use_z, limit_box=self.config.limit_box)
+        raw_search_local4 = observation_local4.copy()
+        raw_search_local4[:2] = raw_search
+        raw_search_world = points_utils.getOffsetBB(
+            reference_box, raw_search_local4, degrees=self.config.degrees,
+            use_z=self.config.use_z, limit_box=self.config.limit_box)
+        router_gate_applied = self._proposal_scalar(
+            output, "ct_router_applied_gate")
+        router_residual = xy(
+            "ct_router_bounded_residual_xy", (0.0, 0.0))
+        bounded_local4 = observation_local4.copy()
+        bounded_local4[:2] = observation + router_residual
+        bounded_world = points_utils.getOffsetBB(
+            reference_box, bounded_local4, degrees=self.config.degrees,
+            use_z=self.config.use_z, limit_box=self.config.limit_box)
+        selective_local4 = observation_local4.copy()
+        selective_local4[:2] = (
+            observation + router_gate_applied * router_residual)
+        selective_world = points_utils.getOffsetBB(
+            reference_box, selective_local4, degrees=self.config.degrees,
+            use_z=self.config.use_z, limit_box=self.config.limit_box)
 
         def foreground_count(points_key, mask_key, source_key=None):
             points = data_dict.get(points_key)
@@ -662,6 +678,36 @@ class BaseModelMF(pl.LightningModule):
         residual_unit_np = (
             residual_unit.detach().cpu().numpy().reshape(-1, 2)[0]
             if residual_unit is not None else np.zeros(2, dtype=np.float32))
+        b1_valid = bool(self._proposal_scalar(
+            output, "motion_prior_valid") > 0.0)
+        b1_nll = float("nan")
+        b1_mahalanobis_sq = float("nan")
+        direction = output.get("motion_prior_direction_xy")
+        log_sigma = output.get("motion_prior_log_sigma_parallel_perp")
+        if b1_valid and direction is not None and log_sigma is not None:
+            direction_np = direction.detach().cpu().numpy().reshape(-1, 2)[0]
+            direction_norm = float(np.linalg.norm(direction_np))
+            log_sigma_np = log_sigma.detach().cpu().numpy().reshape(-1, 2)[0]
+            if (np.isfinite(direction_norm) and direction_norm > 1e-8
+                    and np.isfinite(log_sigma_np).all()):
+                direction_np = direction_np / direction_norm
+                perpendicular_np = np.asarray(
+                    (-direction_np[1], direction_np[0]), dtype=np.float64)
+                learned_error_xy = target_xy - learned
+                aligned_error = np.asarray((
+                    np.dot(learned_error_xy, direction_np),
+                    np.dot(learned_error_xy, perpendicular_np),
+                ), dtype=np.float64)
+                safe_log_sigma = np.clip(log_sigma_np, -4.0, 2.5)
+                b1_nll = float(np.sum(0.5 * (
+                    aligned_error ** 2 * np.exp(-2.0 * safe_log_sigma)
+                    + 2.0 * safe_log_sigma)))
+                b1_mahalanobis_sq = float(np.sum(
+                    aligned_error ** 2 * np.exp(-2.0 * safe_log_sigma)))
+                if not np.isfinite(b1_nll):
+                    b1_nll = float("nan")
+                if not np.isfinite(b1_mahalanobis_sq):
+                    b1_mahalanobis_sq = float("nan")
         raw_obs_error = float(np.linalg.norm(raw_obs - target_xy))
         raw_motion_error = float(np.linalg.norm(raw_motion - target_xy))
         counterfactual_margin = float(getattr(
@@ -670,9 +716,57 @@ class BaseModelMF(pl.LightningModule):
             raw_motion_error + counterfactual_margin < raw_obs_error)
         motion_harmful = bool(
             raw_obs_error + counterfactual_margin < raw_motion_error)
+        observation_error = float(np.linalg.norm(observation - target_xy))
+        bounded_error = float(np.linalg.norm(
+            bounded_local4[:2] - target_xy))
+        observation_iou = float(estimateOverlap(
+            this_box, observation_world, dim=self.config.IoU_space,
+            up_axis=self.config.up_axis))
+        bounded_iou = float(estimateOverlap(
+            this_box, bounded_world, dim=self.config.IoU_space,
+            up_axis=self.config.up_axis))
         return {
             "frame_id": int(frame_id),
             "b2_version": "ct_joint_full",
+            "candidate_id": int(self._proposal_scalar(
+                data_dict, "candidate_id", default=0.0)),
+            "base_target_count": self._proposal_scalar(
+                data_dict, "ct_acquisition_base_target_count"),
+            "pool_target_count": self._proposal_scalar(
+                data_dict,
+                "ct_acquisition_extension_pool_target_count"),
+            "sampled_target_count": self._proposal_scalar(
+                data_dict, "ct_acquisition_sampled_target_count"),
+            "extension_pool_count": self._proposal_scalar(
+                data_dict, "ct_acquisition_extension_pool_count"),
+            "sampled_count": self._proposal_scalar(
+                data_dict, "ct_acquisition_sampled_count"),
+            "target_in_support": int(self._proposal_scalar(
+                data_dict,
+                "ct_acquisition_extension_pool_target_count") > 0.0),
+            "current_target_points": self._proposal_scalar(
+                data_dict, "ct_acquisition_base_target_count"),
+            "recursive_age": self._proposal_scalar(
+                data_dict, "ct_recursive_state_age"),
+            "support_actual_length": self._proposal_scalar(
+                data_dict, "search_v3_support_actual_extent", column=0),
+            "support_actual_width": self._proposal_scalar(
+                data_dict, "search_v3_support_actual_extent", column=1),
+            "support_volume": (
+                self._proposal_scalar(
+                    data_dict, "search_v3_support_actual_extent", column=0)
+                * self._proposal_scalar(
+                    data_dict, "search_v3_support_actual_extent", column=1)
+                * self._proposal_scalar(
+                    data_dict, "bbox_size", column=2)),
+            "available": int(self._proposal_scalar(
+                output, "ct_b2_available") > 0.0),
+            "structural_available": int(self._proposal_scalar(
+                output, "ct_b2_available") > 0.0),
+            "recovery_positive": int(self._proposal_scalar(
+                data_dict, "ct_recovery_positive") > 0.0),
+            "recovery_fallback": int(self._proposal_scalar(
+                data_dict, "ct_recovery_fallback") > 0.0),
             "query_delta_t": self._proposal_scalar(
                 data_dict, "search_v3_query_delta_t"),
             "gap_ratio": self._proposal_scalar(
@@ -703,11 +797,8 @@ class BaseModelMF(pl.LightningModule):
                 data_dict, "ct_search_extension_count"),
             "search_extension_voxels": self._proposal_scalar(
                 data_dict, "ct_search_extension_voxels"),
-            "observation_error": float(np.linalg.norm(
-                observation - target_xy)),
-            "observation_iou": float(estimateOverlap(
-                this_box, observation_world, dim=self.config.IoU_space,
-                up_axis=self.config.up_axis)),
+            "observation_error": observation_error,
+            "observation_iou": observation_iou,
             "observation_distance": float(estimateAccuracy(
                 this_box, observation_world, dim=self.config.IoU_space,
                 up_axis=self.config.up_axis)),
@@ -715,8 +806,34 @@ class BaseModelMF(pl.LightningModule):
                 kinematic - target_xy)),
             "learned_motion_error": float(np.linalg.norm(
                 learned - target_xy)),
+            "b1_valid": int(b1_valid and np.isfinite(b1_nll)),
+            "b1_nll": b1_nll,
+            "b1_mahalanobis_sq": b1_mahalanobis_sq,
+            "b1_coverage_50": int(
+                np.isfinite(b1_mahalanobis_sq)
+                and b1_mahalanobis_sq <= 1.38629436112),
+            "b1_coverage_80": int(
+                np.isfinite(b1_mahalanobis_sq)
+                and b1_mahalanobis_sq <= 3.21887582487),
+            "b1_coverage_95": int(
+                np.isfinite(b1_mahalanobis_sq)
+                and b1_mahalanobis_sq <= 5.99146454711),
             "raw_search_error": float(np.linalg.norm(
                 raw_search - target_xy)),
+            "raw_search_iou": float(estimateOverlap(
+                this_box, raw_search_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
+            "raw_search_distance": float(estimateAccuracy(
+                this_box, raw_search_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
+            "selective_error": float(np.linalg.norm(
+                selective_local4[:2] - target_xy)),
+            "selective_iou": float(estimateOverlap(
+                this_box, selective_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
+            "selective_distance": float(estimateAccuracy(
+                this_box, selective_world, dim=self.config.IoU_space,
+                up_axis=self.config.up_axis)),
             "raw_obs_error": raw_obs_error,
             "raw_motion_error": raw_motion_error,
             "raw_alpha_error": float(np.linalg.norm(
@@ -742,8 +859,23 @@ class BaseModelMF(pl.LightningModule):
                 output, "ct_query_shift_norm"),
             "router_gate": self._proposal_scalar(
                 output, "ct_router_gate"),
-            "router_applied_gate": self._proposal_scalar(
-                output, "ct_router_applied_gate"),
+            "action_score": self._proposal_scalar(
+                output, "ct_b3_action_score"),
+            "helpful_probability": self._proposal_scalar(
+                output, "ct_b3_help_probability"),
+            "harmful_probability": self._proposal_scalar(
+                output, "ct_b3_harm_probability"),
+            "expected_center_gain": self._proposal_scalar(
+                output, "ct_b3_expected_center_gain"),
+            "expected_iou_gain": self._proposal_scalar(
+                output, "ct_b3_expected_iou_gain"),
+            "center_gain": observation_error - bounded_error,
+            "iou_gain": bounded_iou - observation_iou,
+            "bounded_action_error": bounded_error,
+            "bounded_action_iou": bounded_iou,
+            "b3_calibrated": self._proposal_scalar(
+                output, "ct_b3_calibrated"),
+            "router_applied_gate": router_gate_applied,
             "router_evidence_valid": self._proposal_scalar(
                 output, "ct_router_evidence_valid"),
             "router_radius": self._proposal_scalar(
@@ -767,6 +899,8 @@ class BaseModelMF(pl.LightningModule):
             "extension_vote_rms": self._proposal_scalar(
                 output, "ct_search_extension_vote_rms"),
             "presence_probability": self._proposal_scalar(
+                output, "ct_search_presence_probability"),
+            "presence_score": self._proposal_scalar(
                 output, "ct_search_presence_probability"),
             "presence_target": int(
                 endpoint_extension_foreground
@@ -954,13 +1088,6 @@ class BaseModelMF(pl.LightningModule):
         distances = []
 
         results_bbs = []
-        m4_filter_enabled = bool(
-            getattr(self.config, "use_m4_state_filter", False))
-        m4_tube_enabled = bool(
-            getattr(self.config, "use_m4_trajectory_tube", False))
-        m4_enabled = m4_filter_enabled or m4_tube_enabled
-        m4_filter = self._build_m4_filter() if m4_enabled else None
-        m4_diagnostics = []
         proposal_diagnostics = []
         b3_rollouts = []
         recursive_state = None
@@ -978,27 +1105,8 @@ class BaseModelMF(pl.LightningModule):
                     timestamps={0: sequence[0].get('timestamp')},
                 )
                 new_refboxs = [prev_bb] # Update in special cases
-                if m4_filter is not None:
-                    initial_timestamp = self._m4_timestamp(sequence, frame_id)
-                    m4_filter.initialize(
-                        this_bb.center,
-                        box_yaw(this_bb),
-                        initial_timestamp,
-                    )
-                    m4_diagnostics.append({
-                        "frame_id": frame_id,
-                        "initialized": True,
-                        "reason": "first_frame_initialization",
-                    })
             else:
                 this_bb = sequence[frame_id]["3d_bbox"]
-                current_timestamp = (
-                    self._m4_timestamp(sequence, frame_id)
-                    if m4_filter is not None else None)
-                m4_prediction = (
-                    m4_filter.predict(current_timestamp)
-                    if m4_filter is not None else None
-                )
 
                 # B1 is intentionally run before point cropping.  It only
                 # consumes recursive history boxes and timestamps; the
@@ -1016,8 +1124,6 @@ class BaseModelMF(pl.LightningModule):
                     motion_prediction = predictor(
                         sequence, frame_id, results_bbs)
                 build_kwargs = {}
-                if m4_enabled:
-                    build_kwargs["m4_prediction"] = m4_prediction
                 if motion_prediction is not None:
                     build_kwargs["motion_prediction"] = motion_prediction
                 data_dict, ref_bb = self.build_input_dict(
@@ -1026,33 +1132,9 @@ class BaseModelMF(pl.LightningModule):
                     **build_kwargs)
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
-                    if (m4_filter_enabled
-                            and m4_prediction is not None
-                            and m4_prediction.get("valid", False)
-                            and bool(getattr(
-                                self.config, "m4_use_filtered_output", True))):
-                        results_bbs.append(m4_filter.box_from_state(ref_bb))
-                    else:
-                        results_bbs.append(ref_bb)
-                    if (m4_filter is not None
-                            and not bool(
-                                m4_prediction
-                                and m4_prediction.get("valid", False))):
-                        m4_filter.initialize(
-                            ref_bb.center,
-                            box_yaw(ref_bb),
-                            current_timestamp,
-                        )
+                    results_bbs.append(ref_bb)
                     print("Empty pointcloud!")
                     new_refboxs = [ref_bb]
-                    m4_diagnostics.append({
-                        "frame_id": frame_id,
-                        "initialized": True,
-                        "prediction_valid": bool(
-                            m4_prediction and m4_prediction.get("valid", False)),
-                        "measurement_accepted": False,
-                        "reason": "empty_pointcloud",
-                    })
                 else:
                     (candidate_box, _, forward_output) = (
                         self.evaluate_one_sample(data_dict, ref_box=ref_bb))
@@ -1105,71 +1187,7 @@ class BaseModelMF(pl.LightningModule):
                             and "b3_router_features" in forward_output):
                         b3_rollouts.append(self._build_b3_rollout_row(
                             forward_output, this_bb, ref_bb, frame_id))
-                    if m4_filter_enabled:
-                        if (m4_prediction is not None
-                                and m4_prediction.get("valid", False)):
-                            update = m4_filter.update(
-                                candidate_box.center, box_yaw(candidate_box))
-                        else:
-                            m4_filter.initialize(
-                                candidate_box.center,
-                                box_yaw(candidate_box),
-                                current_timestamp,
-                            )
-                            update = {
-                                "accepted": True,
-                                "reason": "invalid_delta_t_reinitialized",
-                                "mahalanobis": 0.0,
-                            }
-                        if bool(getattr(
-                                self.config, "m4_use_filtered_output", True)):
-                            candidate_box = m4_filter.box_from_state(candidate_box)
-                        results_bbs.append(candidate_box)
-                        m4_diagnostics.append({
-                            "frame_id": frame_id,
-                            "initialized": True,
-                            "prediction_valid": bool(
-                                m4_prediction and m4_prediction.get("valid", False)),
-                            "measurement_accepted": bool(update["accepted"]),
-                            "reason": update.get("reason", ""),
-                            "mahalanobis": float(update.get("mahalanobis", 0.0)),
-                        })
-                    elif m4_tube_enabled:
-                        m4_filter.observe_direct(
-                            candidate_box.center,
-                            box_yaw(candidate_box),
-                            current_timestamp,
-                            velocity_momentum=float(getattr(
-                                self.config,
-                                "m4_tube_velocity_momentum",
-                                0.5,
-                            )),
-                        )
-                        results_bbs.append(candidate_box)
-                        m4_diagnostics.append({
-                            "frame_id": frame_id,
-                            "initialized": True,
-                            "prediction_valid": bool(
-                                m4_prediction and m4_prediction.get("valid", False)),
-                            "measurement_accepted": True,
-                            "reason": "tube_only_direct_observation",
-                        })
-                    else:
-                        results_bbs.append(candidate_box)
-
-                if m4_enabled:
-                    diagnostic = m4_diagnostics[-1]
-                    for key in (
-                            "m4_num_points_search_baseline",
-                            "m4_num_points_search_tube",
-                            "m4_num_points_search_union",
-                            "m4_tube_width",
-                            "m4_tube_length"):
-                        if key in data_dict:
-                            diagnostic[key] = float(
-                                data_dict[key].detach().cpu().reshape(-1)[0])
-                    diagnostic.update(getattr(
-                        self, "_m4_last_input_diagnostics", {}))
+                    results_bbs.append(candidate_box)
 
             
             if frame_id > 0:
@@ -1184,90 +1202,9 @@ class BaseModelMF(pl.LightningModule):
             ious.append(this_overlap)
             distances.append(this_accuracy)
 
-        self._m4_sequence_diagnostics = m4_diagnostics
         self._proposal_sequence_diagnostics = proposal_diagnostics
         self._b3_sequence_rollouts = b3_rollouts
         return ious, distances, results_bbs
-
-    def _m4_timestamp(self, sequence, frame_id):
-        time_mode = str(getattr(
-            self.config, "m4_time_mode", "fixed")).strip().lower()
-        if time_mode not in ("fixed", "real"):
-            raise ValueError("m4_time_mode must be 'fixed' or 'real'")
-        default_step = float(getattr(
-            self.config, "m4_fixed_delta_t",
-            getattr(
-                self.config, "default_time_step",
-                getattr(self.config, "time_step", 0.5))))
-        if default_step <= 0:
-            raise ValueError("m4_fixed_delta_t must be positive")
-        timestamp = None
-        if time_mode == "real":
-            timestamp = normalize_timestamp(
-                sequence[frame_id].get("timestamp"))
-        if timestamp is None:
-            timestamp = float(frame_id) * default_step
-        return float(timestamp)
-
-    def _build_m4_filter(self):
-        return FixedContinuousDiscreteFilter(
-            acceleration_variance=float(getattr(
-                self.config, "m4_acceleration_variance", 2.0)),
-            yaw_acceleration_variance=float(getattr(
-                self.config, "m4_yaw_acceleration_variance", 0.5)),
-            measurement_position_variance=float(getattr(
-                self.config, "m4_measurement_position_variance", 0.25)),
-            measurement_yaw_variance=float(getattr(
-                self.config, "m4_measurement_yaw_variance", 0.09)),
-            initial_position_variance=float(getattr(
-                self.config, "m4_initial_position_variance", 0.25)),
-            initial_velocity_variance=float(getattr(
-                self.config, "m4_initial_velocity_variance", 4.0)),
-            initial_yaw_variance=float(getattr(
-                self.config, "m4_initial_yaw_variance", 0.09)),
-            initial_yaw_rate_variance=float(getattr(
-                self.config, "m4_initial_yaw_rate_variance", 1.0)),
-            mahalanobis_gate=float(getattr(
-                self.config, "m4_mahalanobis_gate", 0.0)),
-            max_delta_t=float(getattr(
-                self.config, "m4_max_delta_t", 5.0)),
-            covariance_jitter=float(getattr(
-                self.config, "m4_covariance_jitter", 1e-8)),
-        )
-
-    def _log_m4_diagnostics(self):
-        if not self._m4_sequence_diagnostics:
-            return
-        diagnostics = self._m4_sequence_diagnostics
-        for source_key, log_key in (
-                ("prediction_valid", "m4/prediction_valid_ratio"),
-                ("measurement_accepted", "m4/measurement_accept_ratio"),
-                ("m4_oracle_target_center_in_baseline",
-                 "m4/oracle_center_recall_baseline"),
-                ("m4_oracle_target_center_in_tube",
-                 "m4/oracle_center_recall_tube"),
-                ("m4_oracle_target_center_in_union",
-                 "m4/oracle_center_recall_union"),
-                ("m4_num_points_search_baseline",
-                 "m4/search_points_baseline"),
-                ("m4_num_points_search_tube",
-                 "m4/search_points_tube"),
-                ("m4_num_points_search_union",
-                 "m4/search_points_union"),
-                ("m4_tube_width", "m4/tube_width"),
-                ("m4_tube_length", "m4/tube_length")):
-            values = [item[source_key]
-                      for item in diagnostics if source_key in item]
-            if values:
-                value = torch.tensor(
-                    values, device=self.device, dtype=torch.float32).mean()
-                self.log(
-                    log_key,
-                    value,
-                    on_step=False,
-                    on_epoch=True,
-                    batch_size=len(values),
-                )
 
     def validation_step(self, batch, batch_idx):
         sequence = batch[0]  # unwrap the batch with batch size = 1
@@ -1276,13 +1213,14 @@ class BaseModelMF(pl.LightningModule):
         epoch_number = int(getattr(self, "current_epoch", 0)) + 1
         if (bool(getattr(
                 self.config, "export_v3_candidate_diagnostics", False))
-                and epoch_number in (5, 10, 15, 20)):
+                and self._proposal_sequence_diagnostics):
             if not hasattr(self, "_v3_validation_proposal_diagnostics"):
                 self._v3_validation_proposal_diagnostics = []
             for row in self._proposal_sequence_diagnostics:
                 row = dict(row)
                 row["tracklet_id"] = int(batch_idx)
                 row["epoch"] = epoch_number
+                row["partition"] = "dev"
                 self._v3_validation_proposal_diagnostics.append(row)
         end_time = time.time()
         runtime = end_time-start_time
@@ -1295,10 +1233,64 @@ class BaseModelMF(pl.LightningModule):
 
         self.log('success/test', self.success, on_epoch=True)
         self.log('precision/test', self.prec, on_epoch=True)
+        proposal_rows = getattr(self, '_proposal_sequence_diagnostics', [])
+        b1_rows = [
+            row for row in proposal_rows
+            if bool(row.get('b1_valid', False))
+            and np.isfinite(float(row.get('b1_nll', float('nan'))))
+            and np.isfinite(float(row.get(
+                'learned_motion_error', float('nan'))))
+            and np.isfinite(float(row.get(
+                'kinematic_error', float('nan'))))
+        ]
+        if b1_rows:
+            b1_nll = torch.tensor(
+                [float(row['b1_nll']) for row in b1_rows],
+                device=self.device, dtype=torch.float32).mean()
+            learned_mse = torch.tensor(
+                [float(row['learned_motion_error']) ** 2
+                 for row in b1_rows],
+                device=self.device, dtype=torch.float32).mean()
+            kinematic_mse = torch.tensor(
+                [float(row['kinematic_error']) ** 2
+                 for row in b1_rows],
+                device=self.device, dtype=torch.float32).mean()
+            self.log(
+                'b1_nll/dev', b1_nll, on_step=False, on_epoch=True,
+                batch_size=len(b1_rows))
+            self.log(
+                'b1_learned_motion_mse/dev', learned_mse,
+                on_step=False, on_epoch=True, batch_size=len(b1_rows))
+            self.log(
+                'b1_kinematic_mse/dev', kinematic_mse,
+                on_step=False, on_epoch=True, batch_size=len(b1_rows))
+        if (hasattr(self, 'ct_observation_success') and proposal_rows
+                and all('observation_iou' in row
+                        and 'raw_search_iou' in row
+                        for row in proposal_rows)):
+            observation_ious = torch.tensor(
+                [float(row['observation_iou']) for row in proposal_rows],
+                device=self.device)
+            raw_search_ious = torch.tensor(
+                [float(row['raw_search_iou']) for row in proposal_rows],
+                device=self.device)
+            # Tracking initializes frame 0 from GT.  Include that endpoint so
+            # observation/raw-search dev Success is directly comparable with
+            # matched B0 success/test and with the official sequence metric.
+            frame0_iou = observation_ious.new_ones((1,))
+            observation_ious = torch.cat((frame0_iou, observation_ious))
+            raw_search_ious = torch.cat((frame0_iou, raw_search_ious))
+            self.ct_observation_success(observation_ious)
+            self.ct_raw_search_success(raw_search_ious)
+            self.log(
+                'success_observation/dev', self.ct_observation_success,
+                on_epoch=True, batch_size=len(proposal_rows) + 1)
+            self.log(
+                'success_raw_search/dev', self.ct_raw_search_success,
+                on_epoch=True, batch_size=len(proposal_rows) + 1)
 
         self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
         self.log('precision/test_step', self.prec_step, on_step=True, on_epoch=False)
-        self._log_m4_diagnostics()
 
         self.runtime(torch.tensor(runtime, device=self.device),
                      torch.tensor(n_frames, device=self.device))
@@ -1366,6 +1358,14 @@ class BaseModelMF(pl.LightningModule):
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
+            eval_partition = getattr(
+                self.config, "ct_eval_partition", None)
+            if eval_partition is not None:
+                row["partition"] = str(eval_partition)
+            source_epoch = getattr(
+                self.config, "ct_source_checkpoint_epoch", None)
+            if source_epoch is not None:
+                row["epoch"] = int(source_epoch)
             if bool(getattr(
                     self.config, "use_asymmetric_dual_query", False)):
                 row["tracklet_key"] = str(tracklet_key)
@@ -1395,7 +1395,6 @@ class BaseModelMF(pl.LightningModule):
 
         self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
         self.log('precision/test_step', self.prec_step, on_step=True, on_epoch=False)
-        self._log_m4_diagnostics()
 
         self.success_step.reset()
         self.prec_step.reset()
@@ -1833,57 +1832,6 @@ class MotionBaseModelMF(BaseModelMF):
                         search_v2_box, ref_boxs[0])
                     search_v2_endpoint_xy = np.asarray(
                         search_v2_local_box.center[:2], dtype=np.float32)
-        num_points_in_search_baseline = this_frame_pc.nbr_points()
-        num_points_in_search_tube = 0
-        tube_box = None
-        m4_diagnostics_enabled = bool(
-            getattr(self.config, "use_m4_state_filter", False)
-            or getattr(self.config, "use_m4_trajectory_tube", False))
-        target_center = None
-        target_center_in_baseline = False
-        target_center_in_tube = False
-        if m4_diagnostics_enabled:
-            target_center = np.asarray(
-                this_frame["3d_bbox"].center, dtype=np.float64)
-            target_center_in_baseline = point_inside_oriented_crop(
-                ref_boxs[0],
-                target_center,
-                scale=self.config.bb_scale,
-                offset=self.config.bb_offset,
-            )
-        m4_prediction = kwargs.get("m4_prediction")
-        if (bool(getattr(self.config, "use_m4_trajectory_tube", False))
-                and m4_prediction is not None
-                and m4_prediction.get("valid", False)):
-            tube_box = build_trajectory_tube_box(
-                ref_boxs[0],
-                m4_prediction,
-                base_length=float(getattr(
-                    self.config, "m4_tube_base_length", 4.0)),
-                base_width=float(getattr(
-                    self.config, "m4_tube_base_width", 2.0)),
-                sigma_parallel_scale=float(getattr(
-                    self.config, "m4_tube_sigma_parallel_scale", 2.0)),
-                sigma_perpendicular_scale=float(getattr(
-                    self.config, "m4_tube_sigma_perpendicular_scale", 2.0)),
-                max_length=float(getattr(
-                    self.config, "m4_tube_max_length", 20.0)),
-                max_width=float(getattr(
-                    self.config, "m4_tube_max_width", 8.0)),
-                min_speed=float(getattr(
-                    self.config, "m4_tube_min_speed", 0.2)),
-            )
-            tube_pc = points_utils.generate_subwindow_with_aroundboxs(
-                this_pc,
-                tube_box,
-                ref_boxs[0],
-                scale=1.0,
-                offset=0.0,
-            )
-            num_points_in_search_tube = tube_pc.nbr_points()
-            this_frame_pc = union_point_clouds(this_frame_pc, tube_pc)
-            target_center_in_tube = point_inside_oriented_crop(
-                tube_box, target_center)
         num_points_in_search = this_frame_pc.nbr_points()
 
         coordinate_anchor_box = ref_boxs[0]
@@ -2587,51 +2535,6 @@ class MotionBaseModelMF(BaseModelMF):
                       search_v2_diagnostics.get("width", 0.0)]],
                     device=self.device, dtype=torch.float32),
             })
-        if m4_diagnostics_enabled:
-            data_dict.update({
-                "m4_num_points_search_baseline": torch.tensor(
-                    [num_points_in_search_baseline], device=self.device,
-                    dtype=torch.float32),
-                "m4_num_points_search_tube": torch.tensor(
-                    [num_points_in_search_tube], device=self.device,
-                    dtype=torch.float32),
-                "m4_num_points_search_union": torch.tensor(
-                    [num_points_in_search], device=self.device,
-                    dtype=torch.float32),
-                "m4_prediction_valid": torch.tensor(
-                    [bool(
-                        m4_prediction
-                        and m4_prediction.get("valid", False))],
-                    device=self.device, dtype=torch.float32),
-            })
-            # Evaluation-only oracle diagnostics stay outside model input.
-            # They are never visible to ``forward`` or tracker decisions.
-            self._m4_last_input_diagnostics = {
-                "m4_oracle_target_center_in_baseline": float(
-                    target_center_in_baseline),
-                "m4_oracle_target_center_in_tube": float(
-                    target_center_in_tube),
-                "m4_oracle_target_center_in_union": float(
-                    target_center_in_baseline or target_center_in_tube),
-            }
-        else:
-            self._m4_last_input_diagnostics = {}
-        if tube_box is not None:
-            data_dict.update({
-                "m4_tube_center": torch.tensor(
-                    np.asarray(tube_box.center)[None, :],
-                    device=self.device, dtype=torch.float32),
-                "m4_tube_size": torch.tensor(
-                    np.asarray(tube_box.wlh)[None, :],
-                    device=self.device, dtype=torch.float32),
-                "m4_tube_width": torch.tensor(
-                    [float(tube_box.wlh[0])],
-                    device=self.device, dtype=torch.float32),
-                "m4_tube_length": torch.tensor(
-                    [float(tube_box.wlh[1])],
-                    device=self.device, dtype=torch.float32),
-            })
-
         if getattr(self.config, 'box_aware', False):
             stack_points_split = np.split(stack_points, num_hist + 1, axis=0)
             hist_points_list = stack_points_split[:num_hist] 

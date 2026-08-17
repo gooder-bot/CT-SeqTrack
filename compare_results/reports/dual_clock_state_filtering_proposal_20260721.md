@@ -1,5 +1,10 @@
 # CT-SeqTrack 新贡献框架与方法改造规格
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 更新时间：2026-07-22
 
 状态：**候选方法，M0 收口与 M2 训练并行。M1/M2 Engineering Gate、E6 静态冻结、commit `473738f` 的服务器 manifests/preflight 已通过；R1 A1-init M2 formal 与用户报告的 R2 M2 scratch/R3 matched W0 scratch 正在运行，尚未完成性能或因果时间验证。** 本文定义下一版可以进入论文的方法叙事、实现顺序、因果验收和停止条件；它不覆盖已经完成的 No-Go 结论，也不能被引用为实验结果。当前 alpha/R/warmup/唯一 formal 配置与 same-checkpoint controls 已固定；M3–M4 必须按本文门槛逐级解锁。

@@ -1,5 +1,10 @@
 # B1motion 根因复核：为什么当前版本远差于 Dyn / M2
 
+> **TrajTrack 参考状态（2026-08-16）**：自本标注起，TrajTrack 不再作为
+> CT-SeqTrack 后续方法设计、Gate/proposal 机制选择、超参数设定或性能有效性的
+> 参考依据；仅保留为必须引用的相关工作、历史审计对象和 GT-free 评测警示。
+> 下文既有 TrajTrack 内容均为历史记录，不再驱动当前或未来方案。
+
 日期：2026-07-31  
 范围：nuScenes-mini Car、seed42；当前 B1motion-v2、旧 B1、A2-Dyn、M2；代码、训练指标与相关论文交叉复核。
 
