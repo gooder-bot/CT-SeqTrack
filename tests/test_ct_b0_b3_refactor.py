@@ -16,6 +16,7 @@ from utils.action_calibration import (
     require_selective_calibration,
     validate_action_calibration,
 )
+from utils.online_contract import online_candidate_state_consistent
 from utils.config import load_yaml_config
 from utils.memory_promotion import evaluate_memory_promotion
 from tools.report_ct_b1 import build_report
@@ -89,6 +90,29 @@ def test_b0_normalization_removes_inherited_b1_b2_runtime_switches():
     assert not config["search_v3_use_dynamic_sigma"]
     assert not config["use_b1_prepass_support"]
     assert not config["use_uncertainty_geometry"]
+
+
+def test_online_candidate_state_contract_accepts_b0_without_b1_fields():
+    target_size = torch.tensor([2.0, 4.0, 1.5]).numpy()
+    b0 = {"bbox_size": target_size.copy()}
+    assert online_candidate_state_consistent(b0, target_size)
+
+    motion_history = torch.zeros(3, 4).numpy()
+    b1 = {
+        "bbox_size": target_size.copy(),
+        "motion_main_ref_boxs": motion_history,
+    }
+    assert online_candidate_state_consistent(b1, target_size)
+
+    b2 = dict(
+        b1, b2_v3_history_ref_boxs=motion_history.copy())
+    assert online_candidate_state_consistent(b2, target_size)
+
+    with pytest.raises(RuntimeError, match="without its B1"):
+        online_candidate_state_consistent({
+            "bbox_size": target_size.copy(),
+            "b2_v3_history_ref_boxs": motion_history,
+        }, target_size)
 
 
 def test_every_formal_config_satisfies_normalized_scratch_contract():

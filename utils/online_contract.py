@@ -4,8 +4,32 @@ from __future__ import annotations
 
 import copy
 
+import numpy as np
+
 
 ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v3"
+
+
+def online_candidate_state_consistent(processed, target_size):
+    """Validate only the history contracts owned by the active CT arm.
+
+    B0 intentionally has neither a B1 motion history nor a B2 Search history.
+    B1-only may have the former, while B2 must expose both and keep them
+    byte-identical.
+    """
+    motion_history = processed.get("motion_main_ref_boxs")
+    search_history = processed.get("b2_v3_history_ref_boxs")
+    if search_history is not None and motion_history is None:
+        raise RuntimeError(
+            "B2 Search history exists without its B1 motion history")
+    history_consistent = bool(
+        search_history is None
+        or np.array_equal(motion_history, search_history))
+    size_consistent = bool(np.allclose(
+        np.asarray(processed["bbox_size"], dtype=np.float64),
+        np.asarray(target_size, dtype=np.float64),
+        rtol=0.0, atol=1e-6))
+    return history_consistent and size_consistent
 
 
 def _get(config, key, default=None):

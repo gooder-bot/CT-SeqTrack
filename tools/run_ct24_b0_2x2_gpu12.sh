@@ -11,6 +11,34 @@ GPU_SINGLE="${CTSEQ_B0_SINGLE_GPU:-2}"
 RUN_ROOT="${CTSEQ_B0_RUN_ROOT:-$PROJECT_ROOT/output/ct24_b0_2x2_60ep_seed42}"
 LOG_ROOT="${CTSEQ_B0_LOG_ROOT:-$PROJECT_ROOT/logs/ct24_b0_2x2_60ep_seed42}"
 
+run_first_step_preflight() {
+  local run_dir="$RUN_ROOT/_first_step_preflight"
+  local log_file="$LOG_ROOT/first_step_preflight.log"
+
+  if [[ -e "$run_dir" ]]; then
+    echo "Refusing to reuse existing preflight directory: $run_dir" >&2
+    return 2
+  fi
+  echo "[$(date --iso-8601=seconds)] running one-batch B0 preflight on physical GPU $GPU_QUEUE"
+  CUDA_VISIBLE_DEVICES="$GPU_QUEUE" \
+  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$PYTHON_BIN" main.py \
+    --cfg cfgs/ct_seqtrack/24_b0_2x2_reseed0_rngshift0.yaml \
+    --path "$DATA_ROOT" \
+    --batch_size 16 \
+    --epoch 1 \
+    --workers 4 \
+    --seed 42 \
+    --preloading \
+    --check_val_every_n_epoch 1 \
+    --limit_train_batches 1 \
+    --limit_val_batches 1 \
+    --log_dir "$run_dir" \
+    --tag first_step_preflight \
+    2>&1 | tee "$log_file"
+  echo "[$(date --iso-8601=seconds)] one-batch B0 preflight passed"
+}
+
 run_arm() {
   local gpu="$1"
   local config="$2"
@@ -117,6 +145,7 @@ case "${1:-launch}" in
     "$PYTHON_BIN" -c \
       "import pytorch_lightning as pl; assert pl.__version__ == '2.0.2', pl.__version__; from nuscenes.nuscenes import NuScenes; print('environment preflight: OK')"
     mkdir -p "$LOG_ROOT"
+    run_first_step_preflight
     nohup bash "$0" --worker-gpu1 \
       >"$LOG_ROOT/gpu${GPU_QUEUE}_queue.stdout.log" 2>&1 </dev/null &
     gpu1_pid=$!

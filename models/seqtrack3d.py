@@ -118,6 +118,7 @@ from utils.training_isolation import (
 )
 from utils.online_contract import (
     build_online_resume_contract,
+    online_candidate_state_consistent,
     validate_b2_method_promotion,
 )
 from utils.metrics import estimateOverlap
@@ -6856,16 +6857,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     "raw/state auxiliary history contract mismatch")
             payload['online_motion_aux_state'] = aux_contract
         processed = motion_processing_mf(payload, self.config)
-        search_history = processed.get(
-            'b2_v3_history_ref_boxs', processed['motion_main_ref_boxs'])
-        candidate_consistent = bool(
-            np.array_equal(
-                processed['motion_main_ref_boxs'],
-                search_history)
-            and np.allclose(
-                processed['bbox_size'].astype(np.float64),
-                contract['target_size'].astype(np.float64),
-                rtol=0.0, atol=1e-6))
+        candidate_consistent = online_candidate_state_consistent(
+            processed, contract['target_size'])
         if not candidate_consistent:
             raise RuntimeError(
                 "candidate crop/history/Search state contract diverged")
