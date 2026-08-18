@@ -133,6 +133,7 @@ from utils.metrics import estimateOverlap
 from utils.action_calibration import require_selective_calibration
 from utils.acquisition_metrics import validate_preflight_artifact
 from utils.recursive_state import (
+    apply_training_reanchor,
     build_recursive_input_contract,
     commit_canonical_prediction,
     RecursiveTrackState,
@@ -198,8 +199,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'ct_separate_optimizers', False))
         self.ct_manual_amp_enabled = bool(getattr(
             config, 'ct_manual_amp_enabled', False))
-        self.ct_b0_rng_shift_control = bool(getattr(
-            config, 'ct_b0_rng_shift_control', False))
+        self.ct_b0_rng_protocol = str(getattr(
+            config, 'ct_b0_rng_protocol',
+            ('post_observation_shift_v1' if bool(getattr(
+                config, 'ct_b0_rng_shift_control', False)) else 'off'))
+        ).strip().lower()
+        if self.ct_b0_rng_protocol not in (
+                'off', 'post_observation_shift_v1'):
+            raise ValueError(
+                'ct_b0_rng_protocol must be off or '
+                'post_observation_shift_v1')
+        self.ct_b0_rng_shift_control = (
+            self.ct_b0_rng_protocol == 'post_observation_shift_v1')
         if self.ct_separate_optimizers:
             self.automatic_optimization = False
         self.ct_plugin_rng = (
@@ -1641,9 +1652,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     for name in getattr(self, '_ct_optimizer_names', ())},
                 'last_gradient_norm': dict(getattr(
                     self, '_ct_last_gradient_norm', {})),
+                'b0_hash_timeline': copy.deepcopy(getattr(
+                    self, '_ct_parameter_hash_timeline', [])),
             }
 
     def on_load_checkpoint(self, checkpoint):
+        module_audit = checkpoint.get('ct_module_audit')
+        if isinstance(module_audit, dict):
+            timeline = module_audit.get('b0_hash_timeline')
+            if isinstance(timeline, list):
+                self._ct_parameter_hash_timeline = copy.deepcopy(timeline)
         if (bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
                 and not bool(getattr(self.config, 'test', False))):
@@ -1792,6 +1810,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self.decoder_token_consistency.update_teacher()
 
     def on_train_epoch_end(self):
+        if (int(getattr(self.config, 'ct_protocol_version', 24)) >= 25
+                and int(getattr(self, 'current_epoch', 0)) == 0):
+            missing_updates = [
+                name for name in getattr(self, '_ct_optimizer_names', ())
+                if int(getattr(self, f'ct_{name}_update_step').item()) <= 0]
+            if missing_updates:
+                raise RuntimeError(
+                    'v25 epoch 1 requires a nonzero update count for every '
+                    'enabled module: ' + ', '.join(missing_updates))
         if (self.ct_separate_optimizers
                 and self.config.optimizer.lower() != 'adamonecycle'):
             schedulers = self.lr_schedulers()
@@ -1803,6 +1830,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         self, f'_ct_{name}_updated_this_epoch', False):
                     scheduler.step()
         self._ct_epoch_boundary_complete = True
+        if (int(getattr(self.config, 'ct_protocol_version', 24)) >= 25
+                and hasattr(self, '_ct_named_parameters_by_module')):
+            self._ct_record_parameter_hash(
+                f'epoch_{int(self.current_epoch) + 1}_end')
         acquisition = getattr(self, '_ct_epoch_acquisition_totals', {})
         for population, totals in acquisition.items():
             eligible = totals['eligible_rows']
@@ -1823,11 +1854,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             totals['support_truncation_rate'] = (
                 totals['support_truncated_rows'] / totals['available_rows']
                 if totals['available_rows'] > 0 else None)
+            totals['support_volume_mean'] = (
+                totals['support_volume_sum'] / totals['support_volume_count']
+                if totals['support_volume_count'] > 0 else None)
             for metric in ('eligible_rows', 'retained_rows',
                            'pool_targets', 'sampled_targets',
                            'available_rows', 'role_satisfied_rows',
                            'boundary_ratio_sum', 'boundary_ratio_count',
                            'support_truncated_rows',
+                           'support_volume_sum', 'support_volume_count',
                            'recovery_positive_rows',
                            'recovery_fallback_rows'):
                 self.log(
@@ -1835,7 +1870,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     float(totals[metric]), on_step=False, on_epoch=True)
             for metric in (
                     'row_recall', 'point_recall', 'role_satisfaction_rate',
-                    'boundary_ratio_mean', 'support_truncation_rate'):
+                    'boundary_ratio_mean', 'support_truncation_rate',
+                    'support_volume_mean'):
                 if totals[metric] is not None:
                     self.log(
                         f'ct_acquisition/{population}_{metric}',
@@ -1848,6 +1884,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output = Path(log_dir) / 'acquisition_supply' / (
                 f'epoch_{int(self.current_epoch) + 1:02d}.json')
             output.parent.mkdir(parents=True, exist_ok=True)
+            selector = getattr(self, '_ct_selector_epoch', {})
+            comparisons = int(selector.get('migration_comparisons', 0))
+            selector_summary = {
+                'gap_counts': selector.get('gap_counts', {}),
+                'boundary_available': int(
+                    selector.get('available', {}).get('1', 0)),
+                'outside_available': int(
+                    selector.get('available', {}).get('2', 0)),
+                'boundary_satisfied_rate': (
+                    selector.get('satisfied', {}).get('1', 0)
+                    / max(selector.get('available', {}).get('1', 0), 1)),
+                'outside_satisfied_rate': (
+                    selector.get('satisfied', {}).get('2', 0)
+                    / max(selector.get('available', {}).get('2', 0), 1)),
+                'migration_comparisons': comparisons,
+                'migration_rate': (
+                    selector.get('migrations', 0) / comparisons
+                    if comparisons else None),
+            }
             output.write_text(json.dumps({
                 'schema': 'ct_seqtrack.acquisition_training_supply.v2',
                 'experiment_name': str(getattr(
@@ -1855,7 +1910,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'seed': int(getattr(self.config, 'seed', 42) or 42),
                 'epoch': int(self.current_epoch) + 1,
                 'populations': acquisition,
+                'selector': selector_summary,
             }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+            self._ct_selector_previous = dict(selector.get('current', {}))
         if self.b2_v3_freeze_candidate_producers:
             self._verify_b2_v3_frozen_hashes()
         rows = getattr(self, '_ct_epoch_binary_rows', {})
@@ -2548,36 +2605,44 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         )
         raw_box = evidence_contract.raw_box
         if self.ct_enable_b3:
-            final_box, router_output = self.ct_joint_router(
-                observation_box=observation_box,
-                raw_box=raw_box,
-                availability=evidence_contract.structural_available,
-                base_evidence=joint_output['ct_b2_base_evidence'],
-                extension_evidence=joint_output['ct_b2_extension_evidence'],
-                base_presence_probability=joint_output[
-                    'ct_b2_base_presence_probability'],
-                extension_presence_probability=joint_output[
-                    'ct_b2_extension_presence_probability'],
-                observation_stats=observation_stats,
-                b1_sigma_parallel_perp=torch.exp(prior_contract.log_sigma),
-                query_delta_t=input_dict['search_v3_query_delta_t'].to(
-                    current_base_features.device),
-                gap_ratio=input_dict['search_v3_gap_ratio'].to(
-                    current_base_features.device),
-                recursive_age=recursive_age,
-                enabled=True,
-                coarse_box=coarse_box,
-                b1_center_xy=prior_contract.center_xy,
-                targetness_entropy=evidence_contract.point_diagnostics[
-                    'entropy'],
-                normalized_ess=evidence_contract.point_diagnostics['ess'],
-                extension_point_count=evidence_contract.point_diagnostics[
-                    'count'],
-                extension_voxel_count=input_dict.get(
-                    'ct_search_extension_voxels'),
-                targetness_mean=joint_output['ct_search_targetness_mean'],
-                targetness_max=joint_output['ct_search_targetness_max'],
-            )
+            # B3 is currently deterministic, but keeping it in the plugin
+            # stream makes the RNG ownership contract explicit and protects
+            # canonical B0 if stochastic routing is introduced later.
+            with self.ct_plugin_rng.fork(current_base_features.device):
+                final_box, router_output = self.ct_joint_router(
+                    observation_box=observation_box,
+                    raw_box=raw_box,
+                    availability=evidence_contract.structural_available,
+                    base_evidence=joint_output['ct_b2_base_evidence'],
+                    extension_evidence=joint_output['ct_b2_extension_evidence'],
+                    base_presence_probability=joint_output[
+                        'ct_b2_base_presence_probability'],
+                    extension_presence_probability=joint_output[
+                        'ct_b2_extension_presence_probability'],
+                    observation_stats=observation_stats,
+                    b1_sigma_parallel_perp=torch.exp(
+                        prior_contract.log_sigma),
+                    query_delta_t=input_dict[
+                        'search_v3_query_delta_t'].to(
+                            current_base_features.device),
+                    gap_ratio=input_dict['search_v3_gap_ratio'].to(
+                        current_base_features.device),
+                    recursive_age=recursive_age,
+                    enabled=True,
+                    coarse_box=coarse_box,
+                    b1_center_xy=prior_contract.center_xy,
+                    targetness_entropy=evidence_contract.point_diagnostics[
+                        'entropy'],
+                    normalized_ess=evidence_contract.point_diagnostics['ess'],
+                    extension_point_count=evidence_contract.point_diagnostics[
+                        'count'],
+                    extension_voxel_count=input_dict.get(
+                        'ct_search_extension_voxels'),
+                    targetness_mean=joint_output[
+                        'ct_search_targetness_mean'],
+                    targetness_max=joint_output[
+                        'ct_search_targetness_max'],
+                )
         else:
             dt = input_dict['search_v3_query_delta_t'].to(
                 current_base_features.device).reshape(batch_size).clamp(
@@ -2713,6 +2778,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "Invalid optimizer. Please choose from 'sgd', 'adam', or "
             "'adamonecycle'.")
 
+    def _ct_parameter_group_sha256(self, group_name):
+        digest = hashlib.sha256()
+        for parameter_name, parameter in sorted(
+                self._ct_named_parameters_by_module[group_name]):
+            tensor = parameter.detach().cpu().contiguous()
+            digest.update(parameter_name.encode('utf-8'))
+            digest.update(str(tensor.dtype).encode('ascii'))
+            digest.update(str(tuple(tensor.shape)).encode('ascii'))
+            digest.update(tensor.numpy().tobytes())
+        return digest.hexdigest()
+
+    def _ct_record_parameter_hash(self, event):
+        timeline = getattr(self, '_ct_parameter_hash_timeline', None)
+        if timeline is None:
+            timeline = []
+            self._ct_parameter_hash_timeline = timeline
+        timeline.append({
+            'event': str(event),
+            'epoch': int(getattr(self, 'current_epoch', 0)),
+            'b0_update_step': int(getattr(
+                self, 'ct_b0_update_step').item()),
+            'b0_sha256': self._ct_parameter_group_sha256('b0'),
+        })
+
     def configure_optimizers(self):
         if not self.ct_separate_optimizers:
             return super().configure_optimizers()
@@ -2731,6 +2820,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'b3': self.ct_enable_b3,
         }
         for group_name in ('b1', 'b2', 'b3'):
+            if (int(getattr(
+                    self.config, 'ct_protocol_version', 24)) >= 25
+                    and enabled[group_name]
+                    and any(not parameter.requires_grad
+                            for name, parameter in self.named_parameters()
+                            if self._ct_any_plugin_parameter(name)
+                            if self._ct_plugin_group(name) == group_name)):
+                raise RuntimeError(
+                    f'v25 forbids frozen parameters in enabled {group_name}')
             group = [
                 item for item in named
                 if (self._ct_any_plugin_parameter(item[0])
@@ -2751,6 +2849,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self._ct_plugin_named_parameters = [
             item for name in ('b1', 'b2', 'b3')
             for item in module_named.get(name, [])]
+        if int(getattr(self.config, 'ct_protocol_version', 24)) >= 25:
+            frozen_b0 = [
+                name for name, parameter in self.named_parameters()
+                if (not self._ct_any_plugin_parameter(name)
+                    and not parameter.requires_grad)]
+            if frozen_b0:
+                raise RuntimeError(
+                    'v25 forbids frozen B0 parameters: '
+                    + ', '.join(frozen_b0[:5]))
+            self._ct_record_parameter_hash('initialization')
         plugin_lr = float(getattr(
             self.config, 'ct_plugin_lr', self.config.lr))
         learning_rates = {
@@ -3181,11 +3289,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 input_dict["valid_mask"])  #B*4*4
             observation_query = None
 
-        if (self.training and self.ct_b0_rng_shift_control
-                and not self.ct_enable_b2):
-            # Diagnostic-only reproduction of CT21's post-observation random
-            # draw.  It changes only the subsequent global stream, never the
-            # observation computed in this step.
+        if self.training and self.ct_b0_rng_shift_control:
+            # v25 gives every canonical B0 forward the same post-observation
+            # RNG schedule, independently of which plugin arms are enabled.
+            # Auxiliary/B2/B3 forwards remain inside their private RNG forks.
             torch.rand((B,), device=feature.device)
 
         updated_ref_boxs = delta_motion[:,:HL,:]
@@ -4745,6 +4852,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_recovery_fallback') * candidate_available
         support_truncated = acquisition_metric(
             'search_v3_support_truncated') * candidate_available
+        support_extent = data.get('search_v3_support_actual_extent')
+        if support_extent is None:
+            support_volume = target_xy.new_zeros((target_xy.shape[0],))
+        else:
+            support_extent = support_extent.to(device=device, dtype=dtype)
+            support_volume = (
+                support_extent[:, 0] * support_extent[:, 1]
+                * data['bbox_size'][:, 2].to(
+                    device=device, dtype=dtype)) * candidate_available
         eligible_rows = pool_target_count > 0
         retained_rows = eligible_rows & (sampled_target_count > 0)
         eligible_row_count = eligible_rows.to(dtype).sum()
@@ -4806,6 +4922,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 candidate_boundary_ratio * candidate_available).sum(),
             'ct_candidate_boundary_ratio_count': candidate_available.sum(),
             'ct_support_truncated_row_count': support_truncated.sum(),
+            'ct_support_volume_sum': support_volume.sum(),
+            'ct_support_volume_count': candidate_available.sum(),
             'ct_b2_base_presence_target_rate':
                 base_presence_target.mean(),
             'ct_b2_extension_presence_target_rate':
@@ -6754,10 +6872,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'boundary_ratio_sum': 0.0,
                 'boundary_ratio_count': 0.0,
                 'support_truncated_rows': 0.0,
+                'support_volume_sum': 0.0,
+                'support_volume_count': 0.0,
                 'recovery_positive_rows': 0.0,
                 'recovery_fallback_rows': 0.0,
             }
             for population in ('candidate0', 'auxiliary_train')}
+        self._ct_selector_epoch = {
+            'gap_counts': {'1': {}, '2': {}},
+            'available': {'1': 0, '2': 0},
+            'satisfied': {'1': 0, '2': 0},
+            'migration_comparisons': 0,
+            'migrations': 0,
+            'current': {},
+        }
         if bool(getattr(
                 self.config, 'ct_online_recursive_training', False)):
             self._ct_recursive_states = {}
@@ -6824,42 +6952,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def _prepare_online_state_group(self, raw, state):
         """Apply one causal expert boundary before all candidate views."""
         horizon = self._online_rollout_horizon(raw)
-        frame_id = int(raw['this_frame_id'])
-        history_frames = self._ordered_online_history_frames(raw)
-        history_ids = [int(value) for value in raw['prev_frame_ids']]
-        pre_reset_anchor = state.history_boxes(
-            [history_ids[0]], [1])[0]
-        gt_anchor = history_frames[0]['3d_bbox']
-        pre_reset_error = float(np.linalg.norm(
-            np.asarray(pre_reset_anchor.center[:2], dtype=np.float64)
-            - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
-        reseed_enabled = bool(getattr(
-            self.config, 'ct_recursive_reseed_enabled', True))
-        reset_boundary = bool(
-            reseed_enabled and (frame_id - 1) % horizon == 0)
-        if reset_boundary and frame_id > 1:
-            state.reseed_history(
-                history_ids,
-                [frame['3d_bbox'] for frame in history_frames],
-                [frame.get('timestamp') for frame in history_frames],
-                before_frame_id=frame_id,
-                rollout_horizon=horizon,
-            )
-        elif frame_id == 1:
-            state.rollout_horizon = horizon
-            state.last_reseed_before_frame = 1
-        post_reset_anchor = state.history_boxes(
-            [history_ids[0]], [1])[0]
-        post_reset_error = float(np.linalg.norm(
-            np.asarray(post_reset_anchor.center[:2], dtype=np.float64)
-            - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
-        return {
-            'rollout_horizon': horizon,
-            'rollout_age': state.rollout_age(frame_id),
-            'reset_boundary': reset_boundary,
-            'pre_reset_anchor_error': pre_reset_error,
-            'post_reset_anchor_error': post_reset_error,
-        }
+        return apply_training_reanchor(
+            raw, state, horizon, self.config)
 
     def _online_motion_prepass(self, raw, state):
         return self._online_motion_prepass_batch([(raw, state)])[0]
@@ -7028,6 +7122,26 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'candidate_role_satisfied': float(
                         role['role_satisfied']),
                 })
+                selector = getattr(self, '_ct_selector_epoch', None)
+                if isinstance(selector, dict):
+                    role_key = str(role_id)
+                    gap_key = str(gap)
+                    selector['gap_counts'][role_key][gap_key] = (
+                        selector['gap_counts'][role_key].get(gap_key, 0) + 1)
+                    selector['available'][role_key] += int(
+                        bool(role['available']))
+                    selector['satisfied'][role_key] += int(
+                        bool(role['available'])
+                        and bool(role['role_satisfied']))
+                    identity = (
+                        str(group['raw']['tracklet_key']),
+                        int(group['raw']['this_frame_id']), role_id)
+                    previous = getattr(
+                        self, '_ct_selector_previous', {}).get(identity)
+                    if previous is not None:
+                        selector['migration_comparisons'] += 1
+                        selector['migrations'] += int(int(previous) != gap)
+                    selector['current'][identity] = gap
                 expanded.append((
                     view, group['state'], group['diagnostics'],
                     prediction_map[(group_key, gap)]))
@@ -7458,6 +7572,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'boundary_ratio_sum': 'ct_candidate_boundary_ratio_sum',
             'boundary_ratio_count': 'ct_candidate_boundary_ratio_count',
             'support_truncated_rows': 'ct_support_truncated_row_count',
+            'support_volume_sum': 'ct_support_volume_sum',
+            'support_volume_count': 'ct_support_volume_count',
             'recovery_positive_rows': 'ct_recovery_positive_row_count',
             'recovery_fallback_rows': 'ct_recovery_fallback_row_count',
         }
@@ -7530,6 +7646,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 setattr(self, f'_ct_{name}_updated_this_epoch', True)
         if stepped.get('b0'):
             self._ct_b0_updated_this_epoch = True
+            b0_step = int(self.ct_b0_update_step.item())
+            if (int(getattr(
+                    self.config, 'ct_protocol_version', 24)) >= 25
+                    and b0_step in (1, 100)):
+                self._ct_record_parameter_hash(f'step_{b0_step}')
         plugin_stepped = any(
             stepped.get(name, False) for name in ('b1', 'b2', 'b3'))
         if plugin_stepped:

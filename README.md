@@ -18,12 +18,13 @@ extension-only points; B3 may apply a bounded residual only after a matching
 held-out calibration artifact passes the empirical risk gates. Every other case
 returns the B0 observation exactly.
 
-The seed-42 B0 2x2 development study is archived; the causal audit additionally
-requires GT-free online histories (`ct_recursive_reseed_enabled=false`). The
-new method has not yet passed acquisition preflight, module promotion, formal
-four-arm seed-42, or multi-seed experiments. Therefore this repository does not
-currently claim a gain, statistical stability, SOTA, or a causal benefit from
-physical time or memory.
+The seed-42 B0 2x2 development study is archived in v24. The new v25 mainline
+uses the selected `reseed=true, rngshift=true` optimization protocol in all
+four arms, but every arm still starts from random initialization. This is
+reported as mixed-horizon past-GT re-anchored rollout training; inference never
+re-anchors with GT. v25 has not yet completed server experiments, so this
+repository does not currently claim a gain, statistical stability, SOTA, or a
+causal benefit from physical time or memory.
 
 ## Paper-facing components
 
@@ -31,8 +32,8 @@ physical time or memory.
   `ct_variant` interface and rejects historical branch switches.
 - `models/ct_v2/pipeline_contracts.py`: internal B0--B3 ownership contracts.
 - `models/ct_v2/evidence_memory.py`: extension-only B2 and action-risk B3.
-- `utils/action_calibration.py`: finite-sample empirical action calibration,
-  tracklet bootstrap bounds, artifact validation, and risk--coverage curves.
+- `utils/action_calibration.py`: disjoint scene-level threshold selection and
+  selective closed-loop audit for v25 (plus the archived v24 interface).
 - `utils/acquisition_metrics.py`: checkpoint-free acquisition preflight and
   artifact-derived targetness class weights.
 - `utils/online_contract.py`: scratch/resume and B2-promotion identity checks.
@@ -52,6 +53,16 @@ define additional paper modules.
 | `full` | B0+B1+B2+B3 | observation; actions only after calibration |
 
 Configurations are under `cfgs/ct_seqtrack/`:
+
+- v25 mini: `25_b0.yaml`, `25_b1.yaml`, `25_full_minus_b3.yaml`,
+  `25_full.yaml`.
+- v25 full-data overrides: the corresponding `25_*_full.yaml` files.
+- v25 controls: live selector vs uniform, B2 target scale 1.0 vs 1.25,
+  and true/fixed/shuffled physical time.
+- The complete v25 protocol and server workflow are in
+  `docs/CTSEQTRACK_V25_PROTOCOL.md`.
+
+The following v24 configurations remain reproducible and unchanged:
 
 - `24_b0.yaml`
 - `24_b1.yaml`
@@ -111,9 +122,10 @@ and a finite residual bounded by radius(dt)
 ```
 
 The calibration artifact is bound to the checkpoint SHA256, action-defining
-configuration identity, tracklet-manifest SHA256, score definition, thresholds,
-and its own content hash. Missing, failed, stale, or undersized calibration is
-fail-closed.
+configuration identity, disjoint selection/audit scene-manifest identities,
+the actual scene populations, score definition, thresholds, and its own content
+hash. Missing, failed, stale, overlapping, or undersized calibration is
+fail-closed. The archived v24 interface retains its tracklet-level manifest.
 
 ## Running the staged protocol
 

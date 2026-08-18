@@ -648,7 +648,9 @@ class BaseModelMF(pl.LightningModule):
             points_np = points.detach().cpu().numpy()[0, :, :3]
             mask_np = mask.detach().cpu().numpy().reshape(-1) > 0
             foreground = geometry_utils.points_in_box(
-                target_box, points_np.T, self.config.bb_scale)
+                target_box, points_np.T, float(getattr(
+                    self.config, 'ct_b2_target_bb_scale',
+                    self.config.bb_scale)))
             if source_key is not None:
                 source = data_dict.get(source_key)
                 if source is None:
@@ -669,6 +671,8 @@ class BaseModelMF(pl.LightningModule):
             "trajectory_search_points",
             "trajectory_search_point_valid_mask",
             "trajectory_search_point_source")
+        base_foreground = foreground_count(
+            "ct_base_evidence_points", "ct_base_evidence_valid_mask")
         sigma = output.get("motion_prior_log_sigma_parallel_perp")
         sigma_np = (
             np.exp(sigma.detach().cpu().numpy().reshape(-1, 2)[0])
@@ -756,6 +760,16 @@ class BaseModelMF(pl.LightningModule):
                 "ct_acquisition_extension_pool_target_count") > 0.0),
             "current_target_points": self._proposal_scalar(
                 data_dict, "ct_acquisition_base_target_count"),
+            "evidence_raw_point_count": self._proposal_scalar(
+                data_dict, "ct_evidence_raw_point_count",
+                default=self._proposal_scalar(
+                    data_dict, "ct_search_baseline_points")),
+            "evidence_base_unique_count": self._proposal_scalar(
+                data_dict, "ct_evidence_base_unique_count"),
+            "evidence_extension_unique_count": self._proposal_scalar(
+                data_dict, "ct_evidence_extension_unique_count"),
+            "evidence_foreground_count": int(
+                base_foreground + endpoint_foreground + tube_foreground),
             "recursive_age": self._proposal_scalar(
                 data_dict, "ct_recursive_state_age"),
             "support_actual_length": self._proposal_scalar(
@@ -1356,11 +1370,27 @@ class BaseModelMF(pl.LightningModule):
                 source_index)
         else:
             tracklet_key = f"tracklet/{int(batch_idx)}"
+        if (test_dataset is not None
+                and hasattr(test_dataset, "get_partition_group_key")):
+            partition_group_key = test_dataset.get_partition_group_key(
+                batch_idx)
+        elif (test_dataset is not None
+              and hasattr(test_dataset, "dataset")
+              and hasattr(
+                  test_dataset.dataset, "get_partition_group_key")):
+            source_index = int(batch_idx)
+            if hasattr(test_dataset, "tracklet_indices"):
+                source_index = int(test_dataset.tracklet_indices[batch_idx])
+            partition_group_key = (
+                test_dataset.dataset.get_partition_group_key(source_index))
+        else:
+            partition_group_key = str(tracklet_key)
         for frame_id, (overlap, distance) in enumerate(
                 zip(ious, distances)):
             self._tracking_test_endpoints.append({
                 "tracklet_id": int(batch_idx),
                 "tracklet_key": str(tracklet_key),
+                "partition_group_key": str(partition_group_key),
                 "frame_id": int(frame_id),
                 "final_iou": float(overlap),
                 "final_distance": float(distance),
@@ -1368,6 +1398,18 @@ class BaseModelMF(pl.LightningModule):
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
+            row["partition_group_key"] = str(partition_group_key)
+            row["rollout_mode"] = str(getattr(
+                self.config, "proposal_inference_mode", "full"))
+            calibration = getattr(
+                self, "_ct_action_calibration",
+                getattr(self, "_ct_action_threshold_selection", None))
+            if isinstance(calibration, dict):
+                thresholds = calibration.get("thresholds", {})
+                row["calibrated_presence_threshold"] = float(
+                    thresholds.get("presence", np.nan))
+                row["calibrated_action_threshold"] = float(
+                    thresholds.get("action", np.nan))
             eval_partition = getattr(
                 self.config, "ct_eval_partition", None)
             if eval_partition is not None:
@@ -1388,6 +1430,7 @@ class BaseModelMF(pl.LightningModule):
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
             row["tracklet_key"] = str(tracklet_key)
+            row["partition_group_key"] = str(partition_group_key)
             self._b3_test_rollouts.append(row)
         end_time = time.time()
         runtime = end_time-start_time
@@ -1587,6 +1630,8 @@ class MotionBaseModelMF(BaseModelMF):
         joint_contract_v3 = bool(
             int(getattr(
                 self.config, 'ct_joint_contract_version', 1)) >= 3)
+        point_evidence_contract_v2 = bool(int(getattr(
+            self.config, 'ct_point_evidence_contract_version', 1)) >= 2)
         use_trajectory_search = (
             bool(getattr(self.config, "use_trajectory_search", False))
             or use_ct_joint_full)
@@ -1859,13 +1904,23 @@ class MotionBaseModelMF(BaseModelMF):
             points_utils.transform_box(ref_box, ref_boxs[0]) for ref_box in ref_boxs
         ]
 
-        prev_points_list = [
-            points_utils.regularize_pc(
-                prev_frame_pc.points.T, self.config.point_sample_size,
-                seed=seed)[0]
-            for prev_frame_pc, seed in zip(
-                prev_frame_pcs, prev_sampling_seeds)
-        ]
+        if point_evidence_contract_v2:
+            prev_points_list = [
+                points_utils.regularize_pc_with_metadata(
+                    prev_frame_pc.points.T, self.config.point_sample_size,
+                    seed=seed).points
+                for prev_frame_pc, seed in zip(
+                    prev_frame_pcs, prev_sampling_seeds)
+            ]
+        else:
+            prev_points_list = [
+                points_utils.regularize_pc(
+                    prev_frame_pc.points.T, self.config.point_sample_size,
+                    seed=seed)[0]
+                for prev_frame_pc, seed in zip(
+                    prev_frame_pcs, prev_sampling_seeds)
+            ]
+        base_regularized = None
 
         trajectory_search_points = np.zeros(
             (int(getattr(self.config, "ct_tube_quota", 128)
@@ -1884,11 +1939,17 @@ class MotionBaseModelMF(BaseModelMF):
         trajectory_search_point_source = np.zeros(
             (trajectory_search_points.shape[0],), dtype=np.int64)
         if use_trajectory_search:
-            this_points, idx_this = points_utils.regularize_pc(
-                baseline_search_points,
-                self.config.point_sample_size,
-                seed=current_sampling_seed,
-            )
+            if point_evidence_contract_v2:
+                base_regularized = points_utils.regularize_pc_with_metadata(
+                    baseline_search_points, self.config.point_sample_size,
+                    seed=current_sampling_seed)
+                this_points = base_regularized.points
+            else:
+                this_points, idx_this = points_utils.regularize_pc(
+                    baseline_search_points,
+                    self.config.point_sample_size,
+                    seed=current_sampling_seed,
+                )
             if use_ct_joint_full:
                 (trajectory_search_points,
                  trajectory_search_point_valid_mask,
@@ -1931,6 +1992,10 @@ class MotionBaseModelMF(BaseModelMF):
                 num_points_in_search += int(
                     trajectory_search_sampling["available_count"])
         elif bool(getattr(self.config, "use_time_guided_search", False)):
+            if point_evidence_contract_v2:
+                raise ValueError(
+                    'point-evidence contract v2 forbids '
+                    'use_time_guided_search')
             this_points, ct_search_sampling = stratified_search_sample(
                 baseline_search_points,
                 expanded_search_points,
@@ -1948,10 +2013,16 @@ class MotionBaseModelMF(BaseModelMF):
                 num_points_in_search += int(
                     ct_search_sampling["expansion_available_count"])
         else:
-            this_points, idx_this = points_utils.regularize_pc(
-                this_frame_pc.points.T,
-                self.config.point_sample_size,
-                seed=current_sampling_seed)
+            if point_evidence_contract_v2:
+                base_regularized = points_utils.regularize_pc_with_metadata(
+                    baseline_search_points, self.config.point_sample_size,
+                    seed=current_sampling_seed)
+                this_points = base_regularized.points
+            else:
+                this_points, idx_this = points_utils.regularize_pc(
+                    this_frame_pc.points.T,
+                    self.config.point_sample_size,
+                    seed=current_sampling_seed)
             ct_search_sampling = {
                 "baseline_sample_count": int(self.config.point_sample_size),
                 "expansion_sample_count": 0,
@@ -2290,8 +2361,11 @@ class MotionBaseModelMF(BaseModelMF):
                 'ct_base_evidence_points': torch.tensor(
                     this_points[None, :], device=self.device,
                     dtype=torch.float32),
-                'ct_base_evidence_valid_mask': torch.ones(
-                    (1, self.config.point_sample_size),
+                'ct_base_evidence_valid_mask': torch.tensor(
+                    ((base_regularized.unique_valid_mask
+                      if point_evidence_contract_v2 else np.ones(
+                          self.config.point_sample_size,
+                          dtype=np.float32))[None, :]),
                     device=self.device, dtype=torch.float32),
                 'ct_extension_points': torch.tensor(
                     extension_points[None, :], device=self.device,
@@ -2302,6 +2376,17 @@ class MotionBaseModelMF(BaseModelMF):
                 'ct_extension_source': torch.tensor(
                     joint_extension_source[None, :], device=self.device,
                     dtype=torch.long),
+                'ct_evidence_raw_point_count': torch.tensor(
+                    [len(baseline_search_points)], device=self.device,
+                    dtype=torch.float32),
+                'ct_evidence_base_unique_count': torch.tensor([
+                    (base_regularized.unique_point_count
+                     if point_evidence_contract_v2 else
+                     self.config.point_sample_size)
+                ], device=self.device, dtype=torch.float32),
+                'ct_evidence_extension_unique_count': torch.tensor(
+                    [float(extension_valid_mask.sum())], device=self.device,
+                    dtype=torch.float32),
             })
         if bool(getattr(self.config, "use_b1motion_v3", False)):
             # Online history is already recursive and expressed in the latest

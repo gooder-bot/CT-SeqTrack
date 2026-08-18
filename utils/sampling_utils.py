@@ -67,6 +67,17 @@ def deterministic_point_seed(config, *seed_parts):
     return stable_uint32_seed(base_seed, "points", *seed_parts)
 
 
+def physical_frame_point_seed(
+        config, tracklet_key, current_frame_id, frame_id=None):
+    """v25 seed shared by every role that observes one physical frame."""
+    if frame_id is None:
+        return deterministic_point_seed(
+            config, tracklet_key, int(current_frame_id), 'physical_current')
+    return deterministic_point_seed(
+        config, tracklet_key, int(current_frame_id),
+        'physical_history', int(frame_id))
+
+
 def sample_candidate_offset(candidate_id, config):
     if int(candidate_id) == 0:
         return np.zeros(3, dtype=np.float32)
@@ -103,4 +114,3 @@ def point_sampling_seeds_for_frame_ids(frame_ids, seed_map):
     return np.asarray([
         int(seed_map[int(frame_id)]) for frame_id in frame_ids],
         dtype=np.int64)
-

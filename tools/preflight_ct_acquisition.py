@@ -83,11 +83,15 @@ def main():
     validate_scratch_training_contract(config)
     data_manifest = json.loads(
         manifest_path.read_text(encoding="utf-8"))
+    expected_manifest_schema = (
+        "ct_seqtrack.acquisition_data_manifest.v3"
+        if int(config.get("ct_protocol_version", 24)) >= 25 else
+        "ct_seqtrack.acquisition_data_manifest.v2")
     if (not isinstance(data_manifest, dict)
-            or data_manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v2"
+            or data_manifest.get("schema") != expected_manifest_schema
             or data_manifest.get("checkpoint_loaded") is not False
-            or data_manifest.get("complete") is not True):
+            or data_manifest.get("complete") is not True
+            or int(data_manifest.get("dropped_rows", 0)) != 0):
         raise ValueError(
             "--data-manifest must be a complete checkpoint-free acquisition "
             "manifest; --max-batches output is diagnostic-only")

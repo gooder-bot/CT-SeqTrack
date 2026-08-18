@@ -34,6 +34,7 @@ from utils.sampling_utils import (
     sample_point_sampling_seed,
     deterministic_candidate_offset,
     deterministic_point_seed,
+    physical_frame_point_seed,
 )
 from utils.candidate_utils import (
     anchor_relative_trajectory_targets,
@@ -65,6 +66,8 @@ from utils.ct_search import (
 from utils.replay_cache import RecursiveReplayCache, replay_config_sha256
 from utils.recursive_state import (
     OnlineRecursiveBatchSampler,
+    build_scene_partition_manifest,
+    scene_partition_tracklet_ids,
     stable_tracklet_partition,
 )
 
@@ -278,6 +281,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         getattr(config, 'ct_joint_contract_version', 1) >= 2)
     joint_contract_v3 = bool(
         getattr(config, 'ct_joint_contract_version', 1) >= 3)
+    point_evidence_contract_v2 = bool(
+        int(getattr(config, 'ct_point_evidence_contract_version', 1)) >= 2)
     # Keep the untouched GT trajectory for M1 labels and invariance audits.
     # ``transform_box`` is non-mutating, but the local variables below are
     # intentionally rebound to candidate-coordinate boxes.
@@ -1132,11 +1137,23 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     motion_boxs = [points_utils.transform_box(this_box, prev_box) for prev_box in prev_boxs]  
 
     # Resample each frame of the point cloud to a specific number
-    prev_points_list = [
-        points_utils.regularize_pc(
-            prev_frame_pc.points.T, config.point_sample_size, seed=seed)[0]
-        for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
-    ]
+    if point_evidence_contract_v2:
+        prev_regularized = [
+            points_utils.regularize_pc_with_metadata(
+                prev_frame_pc.points.T, config.point_sample_size, seed=seed)
+            for prev_frame_pc, seed in zip(
+                prev_frame_pcs, prev_sampling_seeds)
+        ]
+        prev_points_list = [item.points for item in prev_regularized]
+    else:
+        prev_points_list = [
+            points_utils.regularize_pc(
+                prev_frame_pc.points.T,
+                config.point_sample_size, seed=seed)[0]
+            for prev_frame_pc, seed in zip(
+                prev_frame_pcs, prev_sampling_seeds)
+        ]
+    base_regularized = None
     trajectory_search_points = np.zeros(
         (int(getattr(config, 'ct_tube_quota', 128)
              if use_ct_joint_full else getattr(
@@ -1156,11 +1173,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if use_trajectory_search:
         # Keep every baseline token exactly as in B0.  The extension is encoded
         # by a separate lightweight branch instead of stealing a fixed quota.
-        this_points = points_utils.regularize_pc(
-            baseline_search_points,
-            config.point_sample_size,
-            seed=current_sampling_seed,
-        )[0]
+        if point_evidence_contract_v2:
+            base_regularized = points_utils.regularize_pc_with_metadata(
+                baseline_search_points, config.point_sample_size,
+                seed=current_sampling_seed)
+            this_points = base_regularized.points
+        else:
+            this_points = points_utils.regularize_pc(
+                baseline_search_points,
+                config.point_sample_size,
+                seed=current_sampling_seed,
+            )[0]
         if use_ct_joint_full:
             (trajectory_search_points,
              trajectory_search_point_valid_mask,
@@ -1196,6 +1219,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 trajectory_search_sampling['available_count']),
         }
     elif bool(getattr(config, 'use_time_guided_search', False)):
+        if point_evidence_contract_v2:
+            raise ValueError(
+                'point-evidence contract v2 requires the formal unchanged '
+                'B0 baseline sampler, not use_time_guided_search')
         this_points, ct_search_sampling = stratified_search_sample(
             baseline_search_points,
             expanded_search_points,
@@ -1207,11 +1234,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             seed=current_sampling_seed,
         )
     else:
-        this_points = points_utils.regularize_pc(
-            baseline_search_points,
-            config.point_sample_size,
-            seed=current_sampling_seed,
-        )[0]
+        if point_evidence_contract_v2:
+            base_regularized = points_utils.regularize_pc_with_metadata(
+                baseline_search_points, config.point_sample_size,
+                seed=current_sampling_seed)
+            this_points = base_regularized.points
+        else:
+            this_points = points_utils.regularize_pc(
+                baseline_search_points,
+                config.point_sample_size,
+                seed=current_sampling_seed,
+            )[0]
         ct_search_sampling = {
             'baseline_sample_count': int(config.point_sample_size),
             'expansion_sample_count': 0,
@@ -1391,17 +1424,32 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             ct_search_sampling['expansion_available_count'])
     search_has_usable_points = num_points_in_search > 2
 
-    seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
+    # B0 keeps the SeqTrack3D 1.25-scale segmentation definition.  B2 owns an
+    # independent exact-box target contract in v25.
+    seg_label_this = geometry_utils.points_in_box(
+        this_box, this_points.T[:3, :], config.bb_scale).astype(int)
+    b2_target_bb_scale = float(getattr(
+        config, 'ct_b2_target_bb_scale', config.bb_scale))
+    b2_base_labels = geometry_utils.points_in_box(
+        this_box, this_points.T[:3, :], b2_target_bb_scale
+    ).astype(np.float32)
+    if point_evidence_contract_v2:
+        if base_regularized is None:
+            raise RuntimeError("v25 base evidence metadata was not produced")
+        base_unique_valid_mask = base_regularized.unique_valid_mask
+    else:
+        base_unique_valid_mask = np.ones(
+            (config.point_sample_size,), dtype=np.float32)
     search_v2_point_labels = geometry_utils.points_in_box(
         this_box,
         search_v2_points.T[:3, :],
-        config.bb_scale,
+        b2_target_bb_scale,
     ).astype(np.float32)
     search_v2_point_labels *= search_v2_point_valid_mask
     trajectory_search_point_labels = geometry_utils.points_in_box(
         this_box,
         trajectory_search_points.T[:3, :],
-        config.bb_scale,
+        b2_target_bb_scale,
     ).astype(np.float32)
     trajectory_search_point_labels *= trajectory_search_point_valid_mask
     if joint_extension_sampling is not None:
@@ -1411,7 +1459,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     else:
         extension_pool_points = np.zeros(
             (0, baseline_search_points.shape[1]), dtype=np.float32)
-    base_target_count = int(np.sum(seg_label_this > 0))
+    base_target_count = int(np.sum(
+        (b2_base_labels > 0) * (base_unique_valid_mask > 0)))
     expansion_regions = np.concatenate((
         search_v2_expanded_points, expanded_search_points), axis=0)
     if len(expansion_regions):
@@ -1422,10 +1471,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             np.sort(unique_expansion_indices)]
     expansion_target_count = int(np.sum(geometry_utils.points_in_box(
         this_box, expansion_regions.T[:3, :],
-        config.bb_scale))) if len(expansion_regions) else 0
+        b2_target_bb_scale))) if len(expansion_regions) else 0
     extension_pool_target_count = int(np.sum(geometry_utils.points_in_box(
         this_box, extension_pool_points.T[:3, :],
-        config.bb_scale))) if len(extension_pool_points) else 0
+        b2_target_bb_scale))) if len(extension_pool_points) else 0
     extension_sampled_target_count = int(
         np.sum(search_v2_point_labels > 0)
         + np.sum(trajectory_search_point_labels > 0))
@@ -1700,9 +1749,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             # This is the exact current-frame tensor appended to ``points``;
             # no independent crop or resampling is allowed.
             'ct_base_evidence_points': this_points.astype('float32'),
-            'ct_base_evidence_labels': seg_label_this.astype('float32'),
-            'ct_base_evidence_valid_mask': np.ones(
-                (config.point_sample_size,), dtype=np.float32),
+            'ct_base_evidence_labels': b2_base_labels.astype('float32'),
+            'ct_base_evidence_valid_mask':
+                base_unique_valid_mask.astype('float32'),
             'ct_extension_points': extension_points.astype('float32'),
             'ct_extension_labels': extension_labels.astype('float32'),
             'ct_extension_valid_mask':
@@ -1721,6 +1770,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 joint_extension_sampling['available_count']),
             'ct_acquisition_sampled_count': np.float32(
                 joint_extension_sampling['sample_count']),
+            'ct_evidence_raw_point_count': np.float32(
+                len(baseline_search_points)),
+            'ct_evidence_base_unique_count': np.float32(
+                np.sum(base_unique_valid_mask > 0)),
+            'ct_evidence_extension_unique_count': np.float32(
+                np.sum(extension_valid_mask > 0)),
+            'ct_evidence_foreground_count': np.float32(
+                base_target_count + extension_sampled_target_count),
             'ct_view_role': np.int64(0 if candidate_id == 0 else 1),
         })
         if not causal_temporal_policy:
@@ -2060,13 +2117,27 @@ class PartitionedTestTrackingSampler(TestTrackingSampler):
         seed = int(getattr(
             self.config, 'ct_partition_seed',
             getattr(self.config, 'seed', 42)) or 42)
-        self.tracklet_indices = []
-        for tracklet_id in range(dataset.get_num_tracklets()):
-            key = (
-                dataset.get_tracklet_key(tracklet_id)
-                if hasattr(dataset, 'get_tracklet_key') else str(tracklet_id))
-            if stable_tracklet_partition(key, seed) == self.partition:
-                self.tracklet_indices.append(tracklet_id)
+        self.partition_scheme = str(getattr(
+            self.config, 'ct_partition_scheme', 'tracklet_v1'
+        )).strip().lower()
+        self.partition_manifest = None
+        if self.partition_scheme == 'scene_v2':
+            self.partition_manifest = build_scene_partition_manifest(
+                dataset, seed)
+            self.tracklet_indices = scene_partition_tracklet_ids(
+                self.partition_manifest, self.partition)
+        elif self.partition_scheme in ('tracklet_v1', 'legacy'):
+            self.tracklet_indices = []
+            for tracklet_id in range(dataset.get_num_tracklets()):
+                key = (
+                    dataset.get_tracklet_key(tracklet_id)
+                    if hasattr(dataset, 'get_tracklet_key')
+                    else str(tracklet_id))
+                if stable_tracklet_partition(key, seed) == self.partition:
+                    self.tracklet_indices.append(tracklet_id)
+        else:
+            raise ValueError(
+                'ct_partition_scheme must be tracklet_v1 or scene_v2')
         if not self.tracklet_indices:
             raise ValueError(
                 f"tracklet partition {self.partition!r} is empty")
@@ -2085,6 +2156,12 @@ class PartitionedTestTrackingSampler(TestTrackingSampler):
         if hasattr(self.dataset, 'get_tracklet_key'):
             return self.dataset.get_tracklet_key(tracklet_id)
         return str(tracklet_id)
+
+    def get_partition_group_key(self, index):
+        tracklet_id = self.tracklet_indices[index]
+        if hasattr(self.dataset, 'get_partition_group_key'):
+            return self.dataset.get_partition_group_key(tracklet_id)
+        return self.get_tracklet_key(index)
 
 
 def online_recursive_collate(items):
@@ -2367,6 +2444,24 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         tracklet_key = (
             self.dataset.get_tracklet_key(tracklet_id)
             if hasattr(self.dataset, 'get_tracklet_key') else str(tracklet_id))
+        physical_seed_scope = str(getattr(
+            self.config, 'ct_candidate_sampling_seed_scope', 'candidate_role'
+        )).strip().lower() == 'physical_frame'
+
+        def history_point_seed(frame_id, *legacy_parts):
+            if physical_seed_scope:
+                return physical_frame_point_seed(
+                    self.config, tracklet_key, this_frame_id, frame_id)
+            return deterministic_point_seed(
+                self.config, *legacy_parts, 'history', int(frame_id))
+
+        def current_point_seed(*legacy_parts):
+            if physical_seed_scope:
+                return physical_frame_point_seed(
+                    self.config, tracklet_key, this_frame_id)
+            return deterministic_point_seed(
+                self.config, *legacy_parts, 'current')
+
         temporal_pool = None
         if self.causal_temporal_candidates:
             if int(candidate_id) != 0:
@@ -2403,12 +2498,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     'valid_mask': history_valid,
                     'history_offsets': history_offsets,
                     'point_sampling_seeds': np.asarray([
-                        deterministic_point_seed(
-                            self.config, *gap_seed_parts,
-                            'history', int(frame_id))
+                        history_point_seed(int(frame_id), *gap_seed_parts)
                         for frame_id in frame_ids], dtype=np.int64),
-                    'current_sampling_seed': deterministic_point_seed(
-                        self.config, *gap_seed_parts, 'current'),
+                    'current_sampling_seed': current_point_seed(
+                        *gap_seed_parts),
                 }
             normal = temporal_pool[1]
             prev_frames = [
@@ -2441,11 +2534,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     candidate_id, self.config, *seed_parts,
                     'coherent_recursive_view')),
             'point_sampling_seeds': np.asarray([
-                deterministic_point_seed(
-                    self.config, *seed_parts, 'history', frame_id)
+                history_point_seed(frame_id, *seed_parts)
                 for frame_id in prev_frame_ids], dtype=np.int64),
-            'current_sampling_seed': deterministic_point_seed(
-                self.config, *seed_parts, 'current'),
+            'current_sampling_seed': current_point_seed(*seed_parts),
             'shadow_future': [],
         }
         if temporal_pool is not None:

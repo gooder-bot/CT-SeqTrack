@@ -1,0 +1,24 @@
+_base_: 24_b0.yaml
+
+experiment_name: ct25_b0_scratch_seed42
+ct_protocol_version: 25
+
+# Selected by the completed B0 2x2.  These are training protocols, not model
+# contributions, and no historical score/checkpoint is inherited.
+ct_training_reanchor_policy: periodic_past_gt
+ct_recursive_reseed_enabled: true
+ct_b0_rng_protocol: post_observation_shift_v1
+ct_b0_rng_shift_control: true
+
+ct_partition_scheme: scene_v2
+ct_partition_seed: 42
+ct_candidate_sampling_seed_scope: physical_frame
+ct_point_evidence_contract_version: 2
+ct_b2_target_bb_scale: 1.0
+ct_recursive_rollout_horizons: [1, 2, 4, 8]
+
+# Every enabled parameter is initialized and updated in this run.
+ct_initialization_policy: scratch_only
+ct_b0_initialization_policy: scratch_only
+motion_v3_warmup_epoch: 0
+proposal_inference_mode: observation

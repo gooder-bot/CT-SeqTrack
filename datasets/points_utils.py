@@ -1,7 +1,11 @@
-import nuscenes.utils.geometry_utils
+try:
+    from nuscenes.utils import geometry_utils as nuscenes_geometry_utils
+except ModuleNotFoundError:  # Sampling-only unit tests do not need dev-kit.
+    nuscenes_geometry_utils = None
 import torch
 import copy
 import numpy as np
+from dataclasses import dataclass
 from pyquaternion import Quaternion
 from datasets.data_classes import PointCloud
 from scipy.spatial.distance import cdist
@@ -39,6 +43,69 @@ def regularize_pc(points, sample_size, seed=None):
         points = np.zeros((sample_size, num_feature), dtype='float32') 
 
     return points, new_pts_idx
+
+
+@dataclass(frozen=True)
+class RegularizedPointCloud:
+    """Fixed-size points plus provenance for independent B0/B2 semantics."""
+
+    points: np.ndarray
+    source_indices: np.ndarray
+    unique_valid_mask: np.ndarray
+    raw_point_count: int
+    unique_point_count: int
+
+
+def regularize_pc_with_metadata(
+        points, sample_size, seed=None, structural_min_points=3):
+    """Sample fixed-size evidence without inventing independent B2 points.
+
+    B0 may consume repeated samples even for one or two raw points.  B2 sees a
+    structural-valid mask only when at least ``structural_min_points`` exist,
+    and each raw point contributes at most once when sampling uses replacement.
+    """
+    points = np.asarray(points)
+    sample_size = int(sample_size)
+    structural_min_points = int(structural_min_points)
+    if points.ndim != 2 or sample_size <= 0:
+        raise ValueError("points must be [N,C] and sample_size must be positive")
+    raw_count, feature_count = points.shape
+    if raw_count == 0:
+        sampled = np.zeros(
+            (sample_size, feature_count), dtype=points.dtype)
+        source_indices = np.full(sample_size, -1, dtype=np.int64)
+        unique_mask = np.zeros(sample_size, dtype=np.float32)
+        return RegularizedPointCloud(
+            sampled, source_indices, unique_mask, 0, 0)
+
+    rng = np.random if seed is None else np.random.default_rng(seed)
+    if raw_count == sample_size:
+        source_indices = np.arange(raw_count, dtype=np.int64)
+    elif raw_count < sample_size:
+        # Cover every physical point once before adding replacement samples.
+        # This makes the unique-valid mask a faithful evidence inventory
+        # instead of randomly discarding up to ~37% of a 1023-point crop.
+        first_pass = np.asarray(
+            rng.permutation(raw_count), dtype=np.int64)
+        repeats = np.asarray(rng.choice(
+            raw_count, size=sample_size - raw_count, replace=True),
+            dtype=np.int64)
+        source_indices = np.concatenate((first_pass, repeats), axis=0)
+    else:
+        source_indices = np.asarray(rng.choice(
+            raw_count, size=sample_size,
+            replace=False), dtype=np.int64)
+    sampled = points[source_indices, :]
+    unique_mask = np.zeros(sample_size, dtype=np.float32)
+    if raw_count >= structural_min_points:
+        seen = set()
+        for index, source_index in enumerate(source_indices.tolist()):
+            if source_index not in seen:
+                unique_mask[index] = 1.0
+                seen.add(source_index)
+    unique_count = int(unique_mask.sum())
+    return RegularizedPointCloud(
+        sampled, source_indices, unique_mask, int(raw_count), unique_count)
 
 
 def getOffsetBB(box, offset, degrees=True, use_z=False, limit_box=True, inplace=False):
@@ -437,7 +504,11 @@ def apply_transform(in_box_pc, box, translation, rotation, flip_x, flip_y, rotat
 
 
 def apply_augmentation(pc, box, wlh_factor=1.25): 
-    in_box_mask = nuscenes.utils.geometry_utils.points_in_box(box, pc.points[0:3,:], wlh_factor=wlh_factor) 
+    if nuscenes_geometry_utils is None:
+        raise ModuleNotFoundError(
+            "nuscenes-devkit is required for points-in-box geometry")
+    in_box_mask = nuscenes_geometry_utils.points_in_box(
+        box, pc.points[0:3, :], wlh_factor=wlh_factor)
 
     in_box_pc = copy.deepcopy(pc) 
     in_box_pc.points = pc.points[:, in_box_mask] 

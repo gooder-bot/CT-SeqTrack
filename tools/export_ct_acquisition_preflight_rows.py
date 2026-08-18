@@ -10,6 +10,7 @@ loaded.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -25,14 +26,18 @@ sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset
 from datasets.sampler import motion_processing_mf
+import datasets.points_utils as points_utils
 from datasets.misc_utils import build_time_fields
 from models.ct_variant import configure_ct_variant
 from utils.online_contract import validate_scratch_training_contract
 from utils.config import load_yaml_config
 from utils.recursive_state import (
-    OnlineRecursiveBatchSampler,
     RecursiveTrackState,
+    apply_training_reanchor,
+    build_scene_partition_manifest,
     build_recursive_input_contract,
+    scene_partition_tracklet_ids,
+    stable_tracklet_partition,
 )
 from utils.ct_history import (
     normalize_causal_temporal_gaps,
@@ -220,56 +225,113 @@ def process_raw(raw, state, config, motion_prediction):
             "ct_acquisition_extension_pool_count"]),
         "sampled_count": float(processed[
             "ct_acquisition_sampled_count"]),
+        "evidence_raw_point_count": float(processed[
+            "ct_evidence_raw_point_count"]),
+        "evidence_base_unique_count": float(processed[
+            "ct_evidence_base_unique_count"]),
+        "evidence_extension_unique_count": float(processed[
+            "ct_evidence_extension_unique_count"]),
+        "evidence_foreground_count": float(processed[
+            "ct_evidence_foreground_count"]),
         "available": bool(raw["candidate_available"]),
         "support_truncated": bool(processed.get(
             "search_v3_support_truncated", False)),
         "processing_time_ms": float(processing_time_ms),
         "tracklet_key": str(raw["tracklet_key"]),
+        "partition_group_key": str(raw.get(
+            "partition_group_key", raw["tracklet_key"])),
         "frame_id": int(raw["this_frame_id"]),
+        "rollout_horizon": int(raw["rollout_horizon"]),
+        "state_source": str(raw["state_source"]),
     }
 
 
-def export_partition(dataset, config, partition, max_batches):
-    sampler = OnlineRecursiveBatchSampler(
-        dataset,
-        slots=int(config.ct_recursive_tracklet_slots),
-        candidate_views=int(config.ct_recursive_candidate_views),
-        seed=int(config.seed or 42),
-        partition_seed=int(config.ct_partition_seed),
-        partition=partition,
-        shadow_enabled=False,
-    )
-    states = {}
+def _fixed_cv_state_box(raw, state, config, prediction):
+    """Convert the canonical fixed-CV displacement into the next state."""
+    history_id = int(raw["prev_frame_ids"][0])
+    anchor = state.history_boxes([history_id], [1])[0]
+    if prediction is None or not bool(prediction.get("valid", False)):
+        return copy.deepcopy(anchor)
+    mu_xy = np.asarray(prediction["mu_xy"], dtype=np.float64).reshape(2)
+    if not np.isfinite(mu_xy).all():
+        return copy.deepcopy(anchor)
+    return points_utils.getOffsetBB(
+        anchor, [float(mu_xy[0]), float(mu_xy[1]), 0.0, 0.0],
+        degrees=bool(config.degrees), use_z=False, limit_box=False)
+
+
+def _partition_tracklet_ids(base, config, partition, scene_manifest):
+    if str(getattr(
+            config, "ct_partition_scheme", "tracklet_v1"
+            )).strip().lower() == "scene_v2":
+        return scene_partition_tracklet_ids(scene_manifest, partition)
+    selected = []
+    seed = int(config.ct_partition_seed)
+    for tracklet_id in range(base.get_num_tracklets()):
+        key = (base.get_tracklet_key(tracklet_id)
+               if hasattr(base, "get_tracklet_key") else str(tracklet_id))
+        if stable_tracklet_partition(key, seed) == partition:
+            selected.append(tracklet_id)
+    if not selected:
+        raise ValueError(f"preflight partition {partition!r} is empty")
+    return selected
+
+
+def export_partition(
+        dataset, config, partition, max_batches, scene_manifest=None):
+    base = dataset.dataset
+    tracklet_ids = _partition_tracklet_ids(
+        base, config, partition, scene_manifest)
+    horizons = [int(value) for value in getattr(
+        config, "ct_recursive_rollout_horizons", [1, 2, 4, 8])]
     rows = []
-    for batch_index, indices in enumerate(sampler):
-        if max_batches is not None and batch_index >= max_batches:
+    query_count = 0
+    stopped = False
+    for tracklet_id in tracklet_ids:
+        frame_count = int(base.get_num_frames_tracklet(tracklet_id))
+        tracklet_key = str(
+            base.get_tracklet_key(tracklet_id)
+            if hasattr(base, "get_tracklet_key") else tracklet_id)
+        group_key = str(
+            base.get_partition_group_key(tracklet_id)
+            if hasattr(base, "get_partition_group_key") else tracklet_key)
+        first_frame = base.get_frames(tracklet_id, frame_ids=(0,))[0]
+        for horizon_index, horizon in enumerate(horizons):
+            state = RecursiveTrackState(
+                int(tracklet_id), tracklet_key,
+                first_frame["3d_bbox"],
+                timestamps={0: first_frame.get("timestamp")})
+            for frame_id in range(1, frame_count):
+                if max_batches is not None and query_count >= max_batches:
+                    stopped = True
+                    break
+                raw = dataset._online_raw_view(
+                    0, query_count, horizon_index, tracklet_id, frame_id,
+                    candidate_id=0, build_shadow=False)
+                raw["partition_group_key"] = group_key
+                raw["rollout_horizon"] = horizon
+                raw["state_source"] = "fixed_cv_recursive_prediction"
+                apply_training_reanchor(raw, state, horizon, config)
+                expanded = expand_raw(raw, state, config)
+                for view, prediction in expanded:
+                    view["partition_group_key"] = group_key
+                    view["rollout_horizon"] = horizon
+                    view["state_source"] = "fixed_cv_recursive_prediction"
+                    row = process_raw(view, state, config, prediction)
+                    row["partition"] = partition
+                    rows.append(row)
+                canonical_prediction = expanded[0][1]
+                predicted_box = _fixed_cv_state_box(
+                    expanded[0][0], state, config, canonical_prediction)
+                if max(state.predictions) < frame_id:
+                    state.append(
+                        frame_id, predicted_box,
+                        raw["this_frame"].get("timestamp"))
+                query_count += 1
+            if stopped:
+                break
+        if stopped:
             break
-        raw_items = [dataset[index] for index in indices]
-        groups = {}
-        for raw in raw_items:
-            key = str(raw["tracklet_key"])
-            state = states.get(key)
-            if state is None:
-                state = RecursiveTrackState(
-                    int(raw["tracklet_id"]), key,
-                    raw["first_frame"]["3d_bbox"],
-                    timestamps={0: raw["first_frame"].get("timestamp")})
-                states[key] = state
-            for view, prediction in expand_raw(raw, state, config):
-                row = process_raw(view, state, config, prediction)
-                row["partition"] = partition
-                rows.append(row)
-            groups.setdefault((key, int(raw["this_frame_id"])), raw)
-        # Geometry preflight has no tracker weights.  Once this query has
-        # been counted, append its observation (past GT for the next query)
-        # so the next fixed-CV support has a causally ordered history.
-        for (key, frame_id), raw in groups.items():
-            state = states[key]
-            if max(state.predictions) < frame_id:
-                state.append(
-                    frame_id, raw["this_frame"]["3d_bbox"],
-                    raw["this_frame"].get("timestamp"))
-    base = sampler.dataset.dataset
     tracklet_identity = [
         {
             "tracklet_key": str(
@@ -277,21 +339,27 @@ def export_partition(dataset, config, partition, max_batches):
                 if hasattr(base, "get_tracklet_key") else tracklet_id),
             "frame_count": int(base.get_num_frames_tracklet(tracklet_id)),
         }
-        for tracklet_id in sorted(sampler.tracklet_ids)
+        for tracklet_id in sorted(tracklet_ids)
     ]
     identity_sha256 = hashlib.sha256(json.dumps(
         tracklet_identity, sort_keys=True, separators=(",", ":"),
         ensure_ascii=False).encode("utf-8")).hexdigest()
-    rows_per_batch = sampler.slots * sampler.candidate_views
-    expected_rows = len(sampler) * rows_per_batch
+    expected_rows = sum(
+        max(0, int(base.get_num_frames_tracklet(tracklet_id)) - 1)
+        for tracklet_id in tracklet_ids) * len(horizons) * 3
+    dropped_rows = max(0, expected_rows - len(rows))
     return rows, {
         "partition": partition,
-        "tracklet_count": len(sampler.tracklet_ids),
-        "prediction_frames": sampler.prediction_frames,
+        "tracklet_count": len(tracklet_ids),
+        "prediction_frames": sum(
+            max(0, int(base.get_num_frames_tracklet(tracklet_id)) - 1)
+            for tracklet_id in tracklet_ids),
+        "horizons": horizons,
         "exported_rows": len(rows),
         "expected_rows": expected_rows,
+        "dropped_rows": dropped_rows,
         "complete": bool(
-            max_batches is None and len(rows) == expected_rows),
+            max_batches is None and dropped_rows == 0),
         "tracklet_identity_sha256": identity_sha256,
     }
 
@@ -350,22 +418,37 @@ def main():
         protocol_role="train")
     rows = []
     partitions = []
+    scene_manifest = None
+    if str(getattr(
+            config, "ct_partition_scheme", "tracklet_v1"
+            )).strip().lower() == "scene_v2":
+        scene_manifest = build_scene_partition_manifest(
+            dataset.dataset, int(config.ct_partition_seed))
     for partition in ("train", "dev"):
         part_rows, identity = export_partition(
-            dataset, config, partition, args.max_batches)
+            dataset, config, partition, args.max_batches, scene_manifest)
         rows.extend(part_rows)
         partitions.append(identity)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
         encoding="utf-8")
+    protocol_version = int(getattr(config, "ct_protocol_version", 24))
     manifest = {
-        "schema": "ct_seqtrack.acquisition_data_manifest.v2",
+        "schema": (
+            "ct_seqtrack.acquisition_data_manifest.v3"
+            if protocol_version >= 25 else
+            "ct_seqtrack.acquisition_data_manifest.v2"),
         "dataset": str(config.dataset),
         "split": str(config.train_split),
         "path": str(config.path),
         "seed": int(config.seed or 42),
-        "history_source": "past_observation_fixed_cv_causal_geometry_audit",
+        "history_source": (
+            "fixed_cv_recursive_predictions_with_periodic_past_gt_reanchor"
+            if protocol_version >= 25 else
+            "past_observation_fixed_cv_causal_geometry_audit"),
+        "state_write_source": (
+            "fixed_cv_prediction" if protocol_version >= 25 else None),
         "current_gt_role": {
             "candidate0": "target-count-label-only",
             "candidate1_2": "target-count-label-only",
@@ -376,6 +459,11 @@ def main():
             "uniform valid temporal gaps; current GT hidden"),
         "checkpoint_loaded": False,
         "complete": bool(all(item["complete"] for item in partitions)),
+        "dropped_rows": sum(item["dropped_rows"] for item in partitions),
+        "scene_partition_manifest_sha256": (
+            scene_manifest.get("content_sha256")
+            if isinstance(scene_manifest, dict) else None),
+        "scene_partition_manifest": scene_manifest,
         "max_batches": args.max_batches,
         "partitions": partitions,
     }

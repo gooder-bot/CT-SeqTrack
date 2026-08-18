@@ -41,6 +41,7 @@ def git_state(root):
 
 def dataset_provenance(wrapped):
     dataset = getattr(wrapped, "dataset", wrapped)
+    partition_manifest = getattr(wrapped, "partition_manifest", None)
     return {
         "dataset": dataset.__class__.__name__,
         "version": getattr(dataset, "version", None),
@@ -58,6 +59,16 @@ def dataset_provenance(wrapped):
         "virtual_rate_manifest_file_sha256": getattr(
             dataset, "virtual_rate_manifest_file_sha256", None),
         "dynamics_time_summary": getattr(dataset, "dynamics_time_summary", {}),
+        "partition_scheme": getattr(
+            wrapped, "partition_scheme", getattr(
+                getattr(wrapped, "config", None),
+                "ct_partition_scheme", None)),
+        "partition_manifest_sha256": (
+            partition_manifest.get("content_sha256")
+            if isinstance(partition_manifest, dict) else None),
+        "partition_manifest_partitions": (
+            partition_manifest.get("partitions", {})
+            if isinstance(partition_manifest, dict) else {}),
     }
 
 
@@ -70,6 +81,21 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
     resolved_config = dict(cfg)
     resolved_config_json = json.dumps(
         resolved_config, sort_keys=True, separators=(",", ":"), default=str)
+    dataset_records = {}
+    for name, wrapped in datasets.items():
+        record = dataset_provenance(wrapped)
+        partition_manifest = getattr(wrapped, "partition_manifest", None)
+        if isinstance(partition_manifest, dict):
+            manifest_path = output_dir / f"{name}_scene_partition_manifest.json"
+            with manifest_path.open("w", encoding="utf-8") as handle:
+                json.dump(
+                    partition_manifest, handle, indent=2,
+                    sort_keys=True, default=str)
+                handle.write("\n")
+            record["partition_manifest_path"] = str(manifest_path)
+            record["partition_manifest_file_sha256"] = sha256_file(
+                manifest_path)
+        dataset_records[name] = record
     payload = {
         "schema": "ct_seqtrack.run_provenance",
         "schema_version": 1,
@@ -90,9 +116,7 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
             if mode == "train" else
             "test: use the explicitly supplied frozen checkpoint; no threshold retuning"
         ),
-        "datasets": {
-            name: dataset_provenance(dataset) for name, dataset in datasets.items()
-        },
+        "datasets": dataset_records,
     }
     path = output_dir / "run_provenance.json"
     with path.open("w", encoding="utf-8") as handle:

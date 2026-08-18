@@ -70,6 +70,7 @@ def build_online_resume_contract(config):
         "seed": int(_get(config, "seed", 42) or 42),
         "joint_contract_version": int(_get(
             config, "ct_joint_contract_version", 1)),
+        "protocol_version": int(_get(config, "ct_protocol_version", 24)),
         "online_recursive_training": bool(_get(
             config, "ct_online_recursive_training", False)),
         "use_ct_joint_full": bool(_get(
@@ -88,8 +89,14 @@ def build_online_resume_contract(config):
             config, "ct_recursive_reseed_enabled", False)),
         "b0_rng_shift_control": bool(_get(
             config, "ct_b0_rng_shift_control", False)),
+        "training_reanchor_policy": str(_get(
+            config, "ct_training_reanchor_policy", "legacy_boolean")),
+        "b0_rng_protocol": str(_get(
+            config, "ct_b0_rng_protocol", "legacy_boolean")),
         "partition": str(_get(config, "ct_router_partition", "train")),
         "partition_seed": int(_get(config, "ct_partition_seed", 42)),
+        "partition_scheme": str(_get(
+            config, "ct_partition_scheme", "tracklet_v1")),
         "optimizer": str(_get(config, "optimizer", "Adam")).lower(),
         "base_lr": base_lr,
         "b0_lr": float(_get(config, "ct_b0_lr", base_lr)),
@@ -138,6 +145,12 @@ def build_online_resume_contract(config):
             config, "ct_temporal_candidate_gaps", [2, 4, 8])),
         "temporal_boundary_band": float(_get(
             config, "ct_temporal_boundary_band", 0.2)),
+        "candidate_sampling_seed_scope": str(_get(
+            config, "ct_candidate_sampling_seed_scope", "candidate_role")),
+        "point_evidence_contract_version": int(_get(
+            config, "ct_point_evidence_contract_version", 1)),
+        "b2_target_bb_scale": float(_get(
+            config, "ct_b2_target_bb_scale", _get(config, "bb_scale", 1.25))),
         "presence_training_scope": str(_get(
             config, "ct_presence_training_scope", "all_candidates")),
         "candidate_loss_weights": (0.5, 0.3, 0.2),
@@ -261,6 +274,19 @@ def validate_scratch_training_contract(config):
     require_equal("ct_recursive_tracklet_slots", 16, 1)
     require_equal("ct_recursive_rollout_horizons", [1, 2, 4, 8], [1])
 
+    protocol_version = int(_get(config, "ct_protocol_version", 24))
+    if protocol_version >= 25:
+        require_equal(
+            "ct_training_reanchor_policy", "periodic_past_gt", None)
+        require_equal("ct_recursive_reseed_enabled", True, False)
+        require_equal(
+            "ct_b0_rng_protocol", "post_observation_shift_v1", None)
+        require_equal("ct_b0_rng_shift_control", True, False)
+        require_equal("ct_partition_scheme", "scene_v2", None)
+        require_equal(
+            "ct_candidate_sampling_seed_scope", "physical_frame", None)
+        require_equal("ct_point_evidence_contract_version", 2, 1)
+
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))
     b3 = bool(_get(config, "ct_enable_b3", False))
@@ -286,7 +312,13 @@ def validate_scratch_training_contract(config):
     if b2:
         require_equal("num_candidates", 3, 1)
         require_equal("ct_recursive_candidate_views", 3, 1)
-        require_equal("ct_recursive_reseed_enabled", False, False)
+        if protocol_version < 25:
+            require_equal("ct_recursive_reseed_enabled", False, False)
+        else:
+            b2_scale = float(_get(config, "ct_b2_target_bb_scale", -1.0))
+            if b2_scale not in (1.0, 1.25):
+                errors.append(
+                    "v25 ct_b2_target_bb_scale must be 1.0 or 1.25")
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
         require_equal(
             "ct_recovery_candidate_policy", "off", "off")
@@ -329,15 +361,20 @@ def build_b2_method_contract(config):
         "time_manifest", "training_state_policy",
         "module_isolation",
         "joint_contract_version", "enable_b1", "enable_b2",
+        "protocol_version",
         "num_candidates", "candidate_views", "tracklet_slots",
-        "rollout_horizons", "reseed_enabled", "partition",
-        "partition_seed", "optimizer", "base_lr", "b0_lr", "b1_lr",
+        "rollout_horizons", "reseed_enabled", "training_reanchor_policy",
+        "b0_rng_shift_control", "b0_rng_protocol", "partition",
+        "partition_seed", "partition_scheme", "optimizer", "base_lr",
+        "b0_lr", "b1_lr",
         "b2_lr", "b3_lr", "plugin_lr",
         "weight_decay", "adam_betas", "adam_eps", "scheduler",
         "lr_decay_step", "lr_decay_rate", "b0_gradient_clip",
         "plugin_gradient_clip", "canonical_batch_size",
         "auxiliary_microbatch_size", "initialization_policy",
         "recovery_candidate_policy", "candidate_policy",
+        "candidate_sampling_seed_scope", "point_evidence_contract_version",
+        "b2_target_bb_scale",
         "temporal_candidate_gaps", "temporal_boundary_band",
         "presence_training_scope",
         "candidate_loss_weights",

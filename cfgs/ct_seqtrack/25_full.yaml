@@ -1,0 +1,13 @@
+_base_: 25_full_minus_b3.yaml
+
+experiment_name: ct25_full_scratch_seed42
+ct_variant: full
+ct_require_action_calibration: true
+ct_action_threshold_selection_path: null
+ct_action_calibration_path: null
+ct_calibration_select_scene_manifest_sha256: null
+ct_calibration_audit_scene_manifest_sha256: null
+
+# B3 learns in shadow against observation state.  Selective recursion is an
+# evaluation-only audit after threshold selection.
+proposal_inference_mode: observation

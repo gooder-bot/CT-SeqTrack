@@ -1,7 +1,3 @@
-from datasets import sampler, \
-                    kitti_mf, \
-                    nuscenes_lidar_mf,  \
-                    waymo_data_mf
 from datasets.protocol_utils import (
     normalize_protocol_role,
     resolve_dynamics_time_kwargs,
@@ -12,6 +8,9 @@ from datasets.protocol_utils import (
 
 
 def get_dataset(config, type='train', **kwargs):
+    # Import dataset backends lazily.  Geometry/unit-test utilities should not
+    # require every training-only dependency (for example EasyDict or Waymo).
+    from datasets import sampler, kitti_mf, nuscenes_lidar_mf, waymo_data_mf
     if config.dataset == 'nuscenes_mf':
         split = kwargs.get('split', 'train_track')
         role = kwargs.get('protocol_role')

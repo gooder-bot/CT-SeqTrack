@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +38,195 @@ def stable_tracklet_partition(tracklet_key, seed=42):
     if value < 0.85:
         return "dev"
     return "calibration"
+
+
+SCENE_PARTITIONS = (
+    "train", "dev", "calibration_select", "calibration_audit")
+
+
+def _content_sha256(payload):
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _scene_partition_counts(group_count):
+    """Return deterministic 70/15/7.5/7.5 counts with no empty split."""
+    group_count = int(group_count)
+    if group_count < len(SCENE_PARTITIONS):
+        raise ValueError(
+            "scene_v2 requires at least four scenes so every partition is "
+            "non-empty")
+    ratios = (0.70, 0.15, 0.075, 0.075)
+    counts = [int(np.floor(group_count * ratio)) for ratio in ratios]
+    for index in range(len(counts)):
+        if counts[index] == 0:
+            counts[index] = 1
+    while sum(counts) > group_count:
+        donor = max(
+            range(len(counts)),
+            key=lambda index: (counts[index] - 1, ratios[index], -index))
+        if counts[donor] <= 1:
+            raise ValueError("cannot make every scene partition non-empty")
+        counts[donor] -= 1
+    fractions = [group_count * ratio - np.floor(group_count * ratio)
+                 for ratio in ratios]
+    while sum(counts) < group_count:
+        receiver = max(
+            range(len(counts)),
+            key=lambda index: (fractions[index], ratios[index], -index))
+        counts[receiver] += 1
+        fractions[receiver] = -1.0
+        if all(value < 0 for value in fractions):
+            fractions = [group_count * ratio - np.floor(group_count * ratio)
+                         for ratio in ratios]
+    return tuple(counts)
+
+
+def build_scene_partition_manifest(dataset, seed=42):
+    """Build and validate the shared scene-level v25 partition manifest.
+
+    Tracklet identity remains the target identity.  Partition membership is
+    assigned only from ``get_partition_group_key`` (a scene), so no target or
+    physical frame can leak between the four protocol partitions.
+    """
+    if not hasattr(dataset, "get_partition_group_key"):
+        raise TypeError(
+            "scene_v2 dataset must implement get_partition_group_key")
+    seed = int(seed)
+    groups = {}
+    frame_owners = {}
+    tracklets = []
+    for tracklet_id in range(int(dataset.get_num_tracklets())):
+        group_key = str(dataset.get_partition_group_key(tracklet_id))
+        tracklet_key = str(
+            dataset.get_tracklet_key(tracklet_id)
+            if hasattr(dataset, "get_tracklet_key") else tracklet_id)
+        frame_count = int(dataset.get_num_frames_tracklet(tracklet_id))
+        if not group_key or not tracklet_key or frame_count <= 0:
+            raise ValueError(
+                "scene manifest found an empty identity or tracklet")
+        group = groups.setdefault(group_key, {
+            "group_key": group_key,
+            "tracklet_count": 0,
+            "frame_count": 0,
+            "unique_frame_tokens": set(),
+        })
+        group["tracklet_count"] += 1
+        group["frame_count"] += frame_count
+        tracklets.append({
+            "tracklet_id": int(tracklet_id),
+            "tracklet_key": tracklet_key,
+            "group_key": group_key,
+            "frame_count": frame_count,
+        })
+        if hasattr(dataset, "get_frame_token"):
+            for frame_id in range(frame_count):
+                frame_token = str(dataset.get_frame_token(
+                    tracklet_id, frame_id))
+                if not frame_token:
+                    raise ValueError("scene manifest found an empty frame token")
+                owner = frame_owners.setdefault(frame_token, group_key)
+                if owner != group_key:
+                    raise ValueError(
+                        "physical frame token belongs to multiple scenes: "
+                        f"{frame_token}")
+                group["unique_frame_tokens"].add(frame_token)
+
+    ordered_groups = sorted(
+        groups,
+        key=lambda key: (
+            hashlib.sha256(
+                f"{seed}::{key}".encode("utf-8")).hexdigest(), key))
+    counts = _scene_partition_counts(len(ordered_groups))
+    assignments = {}
+    cursor = 0
+    for partition, count in zip(SCENE_PARTITIONS, counts):
+        for group_key in ordered_groups[cursor:cursor + count]:
+            assignments[group_key] = partition
+        cursor += count
+    if cursor != len(ordered_groups):
+        raise RuntimeError("scene partition allocation did not cover all scenes")
+
+    group_rows = []
+    for group_key in sorted(groups):
+        group = groups[group_key]
+        group_rows.append({
+            "group_key": group_key,
+            "partition": assignments[group_key],
+            "tracklet_count": int(group["tracklet_count"]),
+            "frame_count": int(group["frame_count"]),
+            "unique_frame_count": int(len(group["unique_frame_tokens"])),
+        })
+    tracklet_rows = []
+    seen_tracklet_keys = set()
+    for row in sorted(tracklets, key=lambda value: value["tracklet_key"]):
+        if row["tracklet_key"] in seen_tracklet_keys:
+            raise ValueError(
+                "scene manifest found duplicate tracklet key: "
+                f"{row['tracklet_key']}")
+        seen_tracklet_keys.add(row["tracklet_key"])
+        tracklet_rows.append({
+            **row,
+            "partition": assignments[row["group_key"]],
+        })
+    partition_summary = {}
+    for partition in SCENE_PARTITIONS:
+        partition_groups = [
+            row for row in group_rows if row["partition"] == partition]
+        partition_tracklets = [
+            row for row in tracklet_rows if row["partition"] == partition]
+        if not partition_groups or not partition_tracklets:
+            raise ValueError(f"scene partition {partition!r} is empty")
+        partition_summary[partition] = {
+            "scene_count": len(partition_groups),
+            "tracklet_count": len(partition_tracklets),
+            "frame_count": sum(
+                row["frame_count"] for row in partition_tracklets),
+            "prediction_frame_count": sum(
+                max(0, row["frame_count"] - 1)
+                for row in partition_tracklets),
+            "content_sha256": _content_sha256({
+                "partition": partition,
+                "groups": [row["group_key"]
+                           for row in partition_groups],
+                "tracklets": [{
+                    "tracklet_key": row["tracklet_key"],
+                    "frame_count": row["frame_count"],
+                } for row in partition_tracklets],
+            }),
+        }
+    content = {
+        "schema": "ct_seqtrack.scene_partition_manifest.v1",
+        "partition_scheme": "scene_v2",
+        "seed": seed,
+        "groups": group_rows,
+        "tracklets": tracklet_rows,
+        "partitions": partition_summary,
+    }
+    return {**content, "content_sha256": _content_sha256(content)}
+
+
+def scene_partition_tracklet_ids(manifest, partition):
+    """Resolve tracklet ids after re-validating a scene manifest digest."""
+    partition = str(partition)
+    if partition not in SCENE_PARTITIONS:
+        raise ValueError(f"unknown scene partition {partition!r}")
+    payload = dict(manifest)
+    observed = payload.pop("content_sha256", None)
+    if observed != _content_sha256(payload):
+        raise ValueError("scene partition manifest SHA256 mismatch")
+    rows = [row for row in payload.get("tracklets", [])
+            if row.get("partition") == partition]
+    if not rows:
+        raise ValueError(f"scene partition {partition!r} is empty")
+    return [int(row["tracklet_id"]) for row in rows]
+
+
+def scene_partition_identity_sha256(manifest, partition):
+    scene_partition_tracklet_ids(manifest, partition)
+    return str(manifest["partitions"][str(partition)]["content_sha256"])
 
 
 def rotating_rollout_horizon(horizons, slot, epoch, slots):
@@ -95,7 +285,8 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
 
     def __init__(self, dataset, slots=4, candidate_views=1, seed=42,
                  partition_seed=None,
-                 partition="train", shadow_interval=2,
+                 partition="train", partition_scheme="tracklet_v1",
+                 shadow_interval=2,
                  shadow_fraction=None, shadow_slots_per_event=1,
                  shadow_enabled=True):
         self.dataset = dataset
@@ -105,6 +296,7 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
         self.partition_seed = int(
             self.seed if partition_seed is None else partition_seed)
         self.partition = str(partition)
+        self.partition_scheme = str(partition_scheme).strip().lower()
         self.shadow_interval = max(1, int(shadow_interval))
         self.shadow_fraction = (
             None if shadow_fraction is None else float(shadow_fraction))
@@ -128,12 +320,28 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
         self.tracklet_ids = []
         self.prediction_frames = 0
         base = dataset.dataset
+        self.partition_manifest = None
+        if self.partition_scheme == "scene_v2":
+            self.partition_manifest = build_scene_partition_manifest(
+                base, self.partition_seed)
+            selected_ids = set(scene_partition_tracklet_ids(
+                self.partition_manifest, self.partition))
+        elif self.partition_scheme in ("tracklet_v1", "legacy"):
+            selected_ids = None
+        else:
+            raise ValueError(
+                "partition_scheme must be tracklet_v1 or scene_v2")
         for tracklet_id in range(base.get_num_tracklets()):
             key = (
                 base.get_tracklet_key(tracklet_id)
                 if hasattr(base, "get_tracklet_key") else str(tracklet_id))
-            if (stable_tracklet_partition(key, self.partition_seed)
-                    != self.partition):
+            if selected_ids is not None:
+                included = tracklet_id in selected_ids
+            else:
+                included = (
+                    stable_tracklet_partition(key, self.partition_seed)
+                    == self.partition)
+            if not included:
                 continue
             frame_count = int(base.get_num_frames_tracklet(tracklet_id))
             if frame_count > 1:
@@ -353,6 +561,101 @@ class RecursiveTrackState:
     @property
     def results_bbs(self):
         return [self.predictions[index] for index in sorted(self.predictions)]
+
+
+def _ordered_history_records(history_contract):
+    frames = history_contract["prev_frames"]
+    ordered_frames = [
+        frames[key] for key in sorted(
+            frames, key=lambda value: abs(int(value)))]
+    frame_ids = [int(value) for value in history_contract["prev_frame_ids"]]
+    if len(ordered_frames) != len(frame_ids):
+        raise ValueError("history frames and absolute frame ids must align")
+    return list(zip(frame_ids, ordered_frames))
+
+
+def candidate_history_union(raw):
+    """Return every distinct physical past frame needed by c0/c1/c2."""
+    query_frame = int(raw["this_frame_id"])
+    contracts = [raw]
+    temporal_pool = raw.get("temporal_candidate_pool")
+    if temporal_pool is not None:
+        contracts.extend(
+            temporal_pool[key] for key in sorted(
+                temporal_pool, key=lambda value: int(value)))
+    records = {}
+    for contract in contracts:
+        for frame_id, frame in _ordered_history_records(contract):
+            if frame_id < 0 or frame_id >= query_frame:
+                raise ValueError(
+                    "training reanchor may not read current or future GT")
+            records.setdefault(frame_id, frame)
+    return [(frame_id, records[frame_id]) for frame_id in sorted(records)]
+
+
+def resolve_training_reanchor_policy(config):
+    """Resolve the v25 enum while retaining the v24 boolean interface."""
+    explicit = getattr(config, "ct_training_reanchor_policy", None)
+    if explicit is None and isinstance(config, dict):
+        explicit = config.get("ct_training_reanchor_policy")
+    if explicit is None:
+        legacy = getattr(config, "ct_recursive_reseed_enabled", False)
+        if isinstance(config, dict):
+            legacy = config.get("ct_recursive_reseed_enabled", False)
+        return "periodic_past_gt" if bool(legacy) else "off"
+    policy = str(explicit).strip().lower()
+    if policy not in ("off", "periodic_past_gt"):
+        raise ValueError(
+            "ct_training_reanchor_policy must be off or periodic_past_gt")
+    return policy
+
+
+def apply_training_reanchor(raw, state, horizon, config):
+    """Apply the shared, past-only mixed-horizon training intervention.
+
+    This is deliberately a data protocol function.  It is called by both the
+    model training path and the checkpoint-free preflight exporter.  Inference
+    never invokes it.
+    """
+    horizon = int(horizon)
+    frame_id = int(raw["this_frame_id"])
+    if horizon <= 0 or frame_id <= 0:
+        raise ValueError("training reanchor requires positive horizon/frame")
+    union = candidate_history_union(raw)
+    canonical_id, canonical_frame = _ordered_history_records(raw)[0]
+    pre_anchor = state.history_boxes([canonical_id], [1])[0]
+    gt_anchor = canonical_frame["3d_bbox"]
+    pre_error = float(np.linalg.norm(
+        np.asarray(pre_anchor.center[:2], dtype=np.float64)
+        - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
+    enabled = resolve_training_reanchor_policy(config) == "periodic_past_gt"
+    reset_boundary = bool(enabled and (frame_id - 1) % horizon == 0)
+    reanchored_ids = []
+    if reset_boundary and frame_id > 1:
+        reanchored_ids = [frame for frame, _ in union]
+        state.reseed_history(
+            reanchored_ids,
+            [record["3d_bbox"] for _, record in union],
+            [record.get("timestamp") for _, record in union],
+            before_frame_id=frame_id,
+            rollout_horizon=horizon,
+        )
+    elif frame_id == 1:
+        state.rollout_horizon = horizon
+        state.last_reseed_before_frame = 1
+    post_anchor = state.history_boxes([canonical_id], [1])[0]
+    post_error = float(np.linalg.norm(
+        np.asarray(post_anchor.center[:2], dtype=np.float64)
+        - np.asarray(gt_anchor.center[:2], dtype=np.float64)))
+    return {
+        "rollout_horizon": horizon,
+        "rollout_age": state.rollout_age(frame_id),
+        "reset_boundary": reset_boundary,
+        "reanchored_frame_ids": reanchored_ids,
+        "candidate_history_union_size": len(union),
+        "pre_reset_anchor_error": pre_error,
+        "post_reset_anchor_error": post_error,
+    }
 
 
 def commit_canonical_prediction(

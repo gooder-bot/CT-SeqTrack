@@ -1,0 +1,4 @@
+_base_: 25_full_minus_b3.yaml
+
+experiment_name: ct25_full_minus_b3_b2_scale125_scratch_seed42
+ct_b2_target_bb_scale: 1.25

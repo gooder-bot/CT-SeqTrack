@@ -346,6 +346,16 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
     def get_num_frames_tracklet(self, tracklet_id):
         return self.tracklet_len_list[int(tracklet_id)]
 
+    def get_tracklet_key(self, tracklet_id):
+        return str(self._tracklet_identity(tracklet_id)["tracklet_key"])
+
+    def get_partition_group_key(self, tracklet_id):
+        return str(self._tracklet_identity(tracklet_id)["scene_id"])
+
+    def get_frame_token(self, tracklet_id, frame_id):
+        anno = self.tracklet_anno_list[int(tracklet_id)][int(frame_id)]
+        return self._anno_frame_token(anno)
+
     def get_frames(self, seq_id, frame_ids):
         seq_id = int(seq_id)
         frame_ids = [int(frame_id) for frame_id in frame_ids]

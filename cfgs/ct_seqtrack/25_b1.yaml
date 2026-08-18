@@ -1,0 +1,9 @@
+_base_: 25_b0.yaml
+
+experiment_name: ct25_b1_scratch_seed42
+ct_variant: b1
+search_v3_use_dynamic_sigma: false
+search_v3_fixed_margin_parallel: 2.0
+search_v3_fixed_margin_perpendicular: 1.0
+checkpoint_monitor: b1_nll/dev
+checkpoint_mode: min

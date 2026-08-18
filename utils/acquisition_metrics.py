@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 PREFLIGHT_SCHEMA = "ct_seqtrack.acquisition_preflight.v3"
+PREFLIGHT_SCHEMA_V4 = "ct_seqtrack.acquisition_preflight.v4"
 
 
 def acquisition_config_identity(config):
@@ -28,6 +29,10 @@ def acquisition_config_identity(config):
         "ct_joint_contract_version", "ct_recursive_candidate_views",
         "ct_recursive_tracklet_slots", "ct_recursive_rollout_horizons",
         "ct_recursive_reseed_enabled", "ct_partition_seed",
+        "ct_protocol_version", "ct_training_reanchor_policy",
+        "ct_b0_rng_protocol", "ct_b0_rng_shift_control",
+        "ct_partition_scheme", "ct_candidate_sampling_seed_scope",
+        "ct_point_evidence_contract_version", "ct_b2_target_bb_scale",
         "ct_router_partition", "ct_auxiliary_microbatch_size",
         "ct_recovery_candidate_policy", "ct_candidate_policy",
         "ct_temporal_candidate_gaps", "ct_temporal_boundary_band",
@@ -233,16 +238,24 @@ def build_preflight_artifact(
     primary = group(str(primary_partition), 0)
     boundary = group(str(primary_partition), 1)
     outside = group(str(primary_partition), 2)
-    train_positive = sum(
-        item["sampled_target_count"] for item in groups
-        if item["partition"] == "train")
-    train_total = sum(
-        item["sampled_valid_count"] for item in groups
-        if item["partition"] == "train")
-    train_negative = max(train_total - train_positive, 0.0)
     acquisition_identity = (
         config_identity.get("acquisition", {})
         if isinstance(config_identity, dict) else {})
+    protocol_version = int(acquisition_identity.get(
+        "ct_protocol_version", 24))
+    schema = PREFLIGHT_SCHEMA_V4 if protocol_version >= 25 else PREFLIGHT_SCHEMA
+    role_weights = {0: 0.5, 1: 0.3, 2: 0.2}
+    train_positive = sum(
+        item["sampled_target_count"] * (
+            role_weights[item["candidate_id"]]
+            if protocol_version >= 25 else 1.0)
+        for item in groups if item["partition"] == "train")
+    train_total = sum(
+        item["sampled_valid_count"] * (
+            role_weights[item["candidate_id"]]
+            if protocol_version >= 25 else 1.0)
+        for item in groups if item["partition"] == "train")
+    train_negative = max(train_total - train_positive, 0.0)
     candidate_policy = str(acquisition_identity.get(
         "ct_candidate_policy", "causal_b1_boundary"))
     criteria = {
@@ -292,7 +305,7 @@ def build_preflight_artifact(
         "negative_points": train_negative,
     }
     payload = {
-        "schema": PREFLIGHT_SCHEMA,
+        "schema": schema,
         "passed": all(criteria.values()),
         "criteria": criteria,
         "seed": int(seed),
@@ -309,8 +322,16 @@ def build_preflight_artifact(
         "groups": groups,
         "targetness_class_weights": targetness_class_weights,
     }
-    payload["statistics_sha256"] = sha256_json({
-        "schema": PREFLIGHT_SCHEMA,
+    if protocol_version >= 25:
+        payload["role_weights"] = {
+            str(key): value for key, value in role_weights.items()}
+        payload["role_weighted_class_counts"] = {
+            "positive_points": train_positive,
+            "negative_points": train_negative,
+            "total_points": class_total,
+        }
+    statistics = {
+        "schema": schema,
         "seed": payload["seed"],
         "primary_population": payload["primary_population"],
         "requirements": payload["requirements"],
@@ -318,18 +339,27 @@ def build_preflight_artifact(
         "data_manifest": payload["data_manifest"],
         "groups": groups,
         "targetness_class_weights": targetness_class_weights,
-    })
+    }
+    if protocol_version >= 25:
+        statistics["role_weights"] = payload["role_weights"]
+        statistics["role_weighted_class_counts"] = payload[
+            "role_weighted_class_counts"]
+    payload["statistics_sha256"] = sha256_json(statistics)
     return payload
 
 
 def validate_preflight_artifact(artifact, config):
     """Verify schema, statistics hash and runtime sampling identity."""
+    protocol_version = int(_config_get(config, "ct_protocol_version", 24))
+    expected_schema = (
+        PREFLIGHT_SCHEMA_V4 if protocol_version >= 25 else PREFLIGHT_SCHEMA)
     if (not isinstance(artifact, dict)
-            or artifact.get("schema") != PREFLIGHT_SCHEMA
+            or artifact.get("schema") != expected_schema
             or not bool(artifact.get("passed"))):
-        raise ValueError("training requires a passed causal acquisition preflight v3")
-    expected_hash = sha256_json({
-        "schema": PREFLIGHT_SCHEMA,
+        raise ValueError(
+            f"training requires a passed causal acquisition {expected_schema}")
+    statistics = {
+        "schema": expected_schema,
         "seed": artifact.get("seed"),
         "primary_population": artifact.get("primary_population"),
         "requirements": artifact.get("requirements"),
@@ -338,7 +368,15 @@ def validate_preflight_artifact(artifact, config):
         "groups": artifact.get("groups"),
         "targetness_class_weights": artifact.get(
             "targetness_class_weights"),
-    })
+    }
+    if protocol_version >= 25:
+        statistics["role_weights"] = artifact.get("role_weights")
+        statistics["role_weighted_class_counts"] = artifact.get(
+            "role_weighted_class_counts")
+        if artifact.get("role_weights") != {
+                "0": 0.5, "1": 0.3, "2": 0.2}:
+            raise ValueError("v25 preflight role weights must be 0.5/0.3/0.2")
+    expected_hash = sha256_json(statistics)
     if artifact.get("statistics_sha256") != expected_hash:
         raise ValueError("acquisition preflight statistics hash mismatch")
     if int(artifact.get("seed", -1)) != int(_config_get(
@@ -360,9 +398,12 @@ def validate_preflight_artifact(artifact, config):
         raise ValueError("acquisition preflight/config identity mismatch")
     manifest_identity = artifact.get("data_manifest", {})
     manifest = manifest_identity.get("manifest")
+    expected_manifest_schema = (
+        "ct_seqtrack.acquisition_data_manifest.v3"
+        if protocol_version >= 25 else
+        "ct_seqtrack.acquisition_data_manifest.v2")
     if (not isinstance(manifest, dict)
-            or manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v2"
+            or manifest.get("schema") != expected_manifest_schema
             or manifest.get("checkpoint_loaded") is not False
             or manifest.get("complete") is not True):
         raise ValueError(
@@ -378,9 +419,24 @@ def validate_preflight_artifact(artifact, config):
     manifest_mismatches = [
         key for key, value in expected_manifest.items()
         if manifest.get(key) != value]
-    if manifest.get("history_source") != (
-            "past_observation_fixed_cv_causal_geometry_audit"):
+    expected_history_source = (
+        "fixed_cv_recursive_predictions_with_periodic_past_gt_reanchor"
+        if protocol_version >= 25 else
+        "past_observation_fixed_cv_causal_geometry_audit")
+    if manifest.get("history_source") != expected_history_source:
         manifest_mismatches.append("history_source")
+    if protocol_version >= 25:
+        if manifest.get("state_write_source") != "fixed_cv_prediction":
+            manifest_mismatches.append("state_write_source")
+        if int(manifest.get("dropped_rows", -1)) != 0:
+            manifest_mismatches.append("dropped_rows")
+        scene_manifest = manifest.get("scene_partition_manifest")
+        if (not isinstance(scene_manifest, dict)
+                or scene_manifest.get("schema")
+                != "ct_seqtrack.scene_partition_manifest.v1"
+                or manifest.get("scene_partition_manifest_sha256")
+                != scene_manifest.get("content_sha256")):
+            manifest_mismatches.append("scene_partition_manifest")
     if manifest.get("current_gt_role") != {
             "candidate0": "target-count-label-only",
             "candidate1_2": "target-count-label-only"}:
@@ -412,6 +468,8 @@ def validate_preflight_artifact(artifact, config):
             if (not isinstance(item, dict)
                     or not item.get("tracklet_identity_sha256")
                     or item.get("complete") is not True
+                    or (protocol_version >= 25
+                        and int(item.get("dropped_rows", -1)) != 0)
                     or int(item.get("exported_rows", -1))
                     != int(item.get("expected_rows", -2))):
                 manifest_mismatches.append(f"partitions.{partition}")

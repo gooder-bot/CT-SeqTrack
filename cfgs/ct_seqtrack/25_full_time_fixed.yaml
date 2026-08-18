@@ -1,0 +1,6 @@
+_base_: 25_full.yaml
+
+experiment_name: ct25_full_time_fixed_scratch_seed42
+ct_time_mode: fixed
+dynamics_time_mode: fixed
+dynamics_fixed_delta_t: 0.5

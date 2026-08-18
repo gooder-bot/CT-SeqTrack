@@ -17,7 +17,10 @@ from utils.acquisition_metrics import validate_preflight_artifact
 
 
 SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v4'
-PREFLIGHT_SCHEMA = 'ct_seqtrack.acquisition_preflight.v3'
+PREFLIGHT_SCHEMAS = {
+    'ct_seqtrack.acquisition_preflight.v3',
+    'ct_seqtrack.acquisition_preflight.v4',
+}
 
 
 def sha256_file(path):
@@ -106,7 +109,7 @@ def main():
         raise FileExistsError(output_path)
     metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
     preflight = json.loads(preflight_path.read_text(encoding='utf-8'))
-    if (preflight.get('schema') != PREFLIGHT_SCHEMA
+    if (preflight.get('schema') not in PREFLIGHT_SCHEMAS
             or not bool(preflight.get('passed'))
             or not preflight.get('statistics_sha256')):
         raise RuntimeError(

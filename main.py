@@ -473,7 +473,9 @@ def parse_config():
         help='override the evaluation split (for train-tracklet calibration)')
     parser.add_argument(
         '--ct-eval-partition', dest='ct_eval_partition',
-        choices=('train', 'dev', 'calibration'),
+        choices=(
+            'train', 'dev', 'calibration',
+            'calibration_select', 'calibration_audit'),
         default=argparse.SUPPRESS,
         help='evaluate only one atomic CT tracklet partition')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
@@ -494,6 +496,16 @@ def parse_config():
         '--ct_calibration_tracklet_manifest_sha256', type=str,
         default=argparse.SUPPRESS,
         help='SHA256 identity of the held-out calibration tracklet manifest')
+    parser.add_argument(
+        '--ct_action_threshold_selection_path', type=str,
+        default=argparse.SUPPRESS,
+        help='v25 provisional thresholds, usable only on calibration_audit')
+    parser.add_argument(
+        '--ct_calibration_select_scene_manifest_sha256', type=str,
+        default=argparse.SUPPRESS)
+    parser.add_argument(
+        '--ct_calibration_audit_scene_manifest_sha256', type=str,
+        default=argparse.SUPPRESS)
     parser.add_argument('--log_dir', type=str, default=None, help='log location')
     parser.add_argument('--test', action='store_true', default=False, help='test mode')
     parser.add_argument('--preloading', action='store_true', default=False, help='preload dataset into memory')
@@ -816,12 +828,15 @@ if not cfg.test:
             partition_seed=int(getattr(
                 cfg, 'ct_partition_seed', 42)),
             partition=str(getattr(cfg, 'ct_router_partition', 'train')),
+            partition_scheme=str(getattr(
+                cfg, 'ct_partition_scheme', 'tracklet_v1')),
             shadow_interval=int(getattr(
                 cfg, 'ct_router_shadow_interval', 2)),
             shadow_slots_per_event=int(getattr(
                 cfg, 'ct_router_shadow_slots_per_event', 1)),
             shadow_enabled=bool(getattr(cfg, 'ct_enable_b3', True)),
         )
+        train_data.partition_manifest = online_batch_sampler.partition_manifest
         train_loader = DataLoader(
             train_data,
             batch_sampler=online_batch_sampler,

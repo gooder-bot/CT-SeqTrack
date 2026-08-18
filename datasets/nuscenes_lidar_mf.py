@@ -682,6 +682,14 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
     def get_tracklet_key(self, tracklet_id):
         return str(self.virtual_rate_meta[int(tracklet_id)]['tracklet_key'])
 
+    def get_partition_group_key(self, tracklet_id):
+        """Scene-level identity used only for v25 data partitioning."""
+        return str(self.virtual_rate_meta[int(tracklet_id)]['scene_token'])
+
+    def get_frame_token(self, tracklet_id, frame_id):
+        anno = self.tracklet_anno_list[int(tracklet_id)][int(frame_id)]
+        return self._anno_frame_token(anno)
+
     def get_endpoint_key(self, tracklet_id, frame_id):
         tracklet_id = int(tracklet_id)
         frame_id = int(frame_id)

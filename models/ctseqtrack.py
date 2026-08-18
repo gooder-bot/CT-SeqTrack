@@ -16,6 +16,7 @@ from utils.action_calibration import (
     sha256_file,
     sha256_json,
     validate_action_calibration,
+    validate_threshold_selection,
 )
 
 
@@ -29,7 +30,11 @@ class CTSEQTRACK(SEQTRACK3D):
         if self.ct_enable_b3 and artifact_path:
             checkpoint_path = get_config(config, "checkpoint")
             manifest_sha = get_config(
-                config, "ct_calibration_tracklet_manifest_sha256")
+                config, "ct_calibration_audit_scene_manifest_sha256",
+                get_config(
+                    config, "ct_calibration_tracklet_manifest_sha256"))
+            selection_manifest_sha = get_config(
+                config, "ct_calibration_select_scene_manifest_sha256")
             if not checkpoint_path or not manifest_sha:
                 raise ValueError(
                     "action calibration requires checkpoint and calibration "
@@ -39,8 +44,34 @@ class CTSEQTRACK(SEQTRACK3D):
                 action_calibration_config_identity(config))
             validate_action_calibration(
                 artifact, sha256_file(checkpoint_path), config_sha,
-                manifest_sha)
+                manifest_sha, selection_manifest_sha)
             self.ct_joint_router.install_calibration(
                 artifact["thresholds"]["presence"],
                 artifact["thresholds"]["action"])
             self._ct_action_calibration = artifact
+        selection_path = get_config(
+            config, "ct_action_threshold_selection_path")
+        if self.ct_enable_b3 and selection_path and not artifact_path:
+            checkpoint_path = get_config(config, "checkpoint")
+            manifest_sha = get_config(
+                config, "ct_calibration_select_scene_manifest_sha256")
+            if (not checkpoint_path or not manifest_sha
+                    or str(get_config(
+                        config, "ct_eval_partition", ""))
+                    != "calibration_audit"
+                    or str(get_config(
+                        config, "proposal_inference_mode", ""))
+                    != "selective"):
+                raise ValueError(
+                    "a provisional threshold-selection artifact is allowed "
+                    "only for selective calibration_audit rollout")
+            artifact = load_action_calibration(selection_path)
+            config_sha = sha256_json(
+                action_calibration_config_identity(config))
+            validate_threshold_selection(
+                artifact, sha256_file(checkpoint_path), config_sha,
+                manifest_sha)
+            self.ct_joint_router.install_calibration(
+                artifact["thresholds"]["presence"],
+                artifact["thresholds"]["action"])
+            self._ct_action_threshold_selection = artifact

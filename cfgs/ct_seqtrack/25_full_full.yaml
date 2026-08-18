@@ -1,0 +1,11 @@
+_base_: 25_full.yaml
+
+experiment_name: ct25_full_full_scratch_seed42
+path: /home/lishengjie/data/nuscenes
+version: v1.0-trainval
+train_split: train_track
+val_split: val
+test_split: val
+batch_size: 16
+workers: 12
+epoch: 60
