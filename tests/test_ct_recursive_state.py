@@ -184,6 +184,22 @@ class RecursiveTrackStateTest(unittest.TestCase):
         self.assertIn("np.stack([item['ref_boxs']", training)
         self.assertNotIn("['3d_bbox']", training)
 
+    def test_causal_gap_selection_cannot_read_current_gt(self):
+        source = (ROOT / "models/seqtrack3d.py").read_text(encoding="utf-8")
+        selection = source.split(
+            "    def _expand_causal_temporal_groups", 1)[1].split(
+                "    def _process_online_raw", 1)[0]
+        self.assertIn("select_causal_temporal_candidates(", selection)
+        self.assertNotIn("3d_bbox", selection)
+        self.assertNotIn("seg_label", selection)
+
+    def test_causal_main_views_replace_legacy_b1_auxiliary_history(self):
+        source = (ROOT / "datasets/sampler.py").read_text(encoding="utf-8")
+        processing = source.split(
+            "def motion_processing_mf", 1)[1].split(
+                "class PartitionedTestTrackingSampler", 1)[0]
+        self.assertIn("and not causal_temporal_policy", processing)
+
 
 class SearchSupportStatisticsTest(unittest.TestCase):
     def test_joint_geometry_uses_b1_for_endpoint_and_tube(self):
@@ -317,12 +333,32 @@ class _FakeSequenceDataset:
 
 
 class _FakeMotionSampler:
-    def __init__(self, base, candidates=4):
+    def __init__(self, base, candidates=4, candidate_policy=None):
         self.dataset = base
         self.num_candidates = candidates
+        if candidate_policy is not None:
+            self.config = type("Config", (), {
+                "ct_candidate_policy": candidate_policy})()
 
 
 class OnlineRecursiveBatchSamplerTest(unittest.TestCase):
+    def test_causal_policy_emits_one_grouped_carrier_per_slot(self):
+        seed = 42
+        keys = [f"track/{index}" for index in range(40)]
+        train_keys = [
+            key for key in keys
+            if stable_tracklet_partition(key, seed) == "train"]
+        base = _FakeSequenceDataset(train_keys[:2], [7, 7])
+        dataset = _FakeMotionSampler(
+            base, candidates=3, candidate_policy="causal_b1_boundary")
+        sampler = OnlineRecursiveBatchSampler(
+            dataset, slots=2, candidate_views=3, seed=seed,
+            partition="train", shadow_enabled=False)
+        batch = next(iter(sampler))
+        self.assertEqual(len(batch), 2)
+        self.assertEqual([row[5] for row in batch], [0, 0])
+        self.assertEqual([row[2] for row in batch], [0, 1])
+
     def test_training_seed_does_not_change_fixed_tracklet_partition(self):
         keys = [f"track/{index}" for index in range(80)]
         base = _FakeSequenceDataset(keys, [5] * len(keys))

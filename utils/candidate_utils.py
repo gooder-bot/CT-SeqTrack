@@ -104,6 +104,65 @@ def physical_motion_targets(
     return displacement_xy, velocity_xy
 
 
+def reexpress_motion_prediction(
+        prediction, source_anchor, target_anchor):
+    """Re-express an unbatched B1 prediction before support construction.
+
+    Center-like displacement endpoints undergo the full local-frame SE(2)
+    change; directions and velocities rotate only.  Parallel/perpendicular
+    log-sigma values are eigen-axis magnitudes and therefore remain unchanged.
+    Exact identity returns the original dictionary so candidate0 sampling and
+    inference stay bitwise unchanged.
+    """
+    if not isinstance(prediction, dict):
+        raise TypeError("motion prediction must be a dictionary")
+    source_center = np.asarray(source_anchor.center[:2], dtype=np.float64)
+    target_center = np.asarray(target_anchor.center[:2], dtype=np.float64)
+    source_rotation = np.asarray(
+        source_anchor.rotation_matrix[:2, :2], dtype=np.float64)
+    target_rotation = np.asarray(
+        target_anchor.rotation_matrix[:2, :2], dtype=np.float64)
+    if not all(np.isfinite(value).all() for value in (
+            source_center, target_center,
+            source_rotation, target_rotation)):
+        raise ValueError("motion prediction anchors must be finite")
+    if (np.array_equal(source_center, target_center)
+            and np.array_equal(source_rotation, target_rotation)):
+        return prediction
+    output = dict(prediction)
+    relative_rotation = target_rotation.T @ source_rotation
+
+    def transform_endpoint(value):
+        array = np.asarray(value)
+        if array.shape != (2,) or not np.isfinite(array).all():
+            raise ValueError("motion prediction endpoint must be finite [2]")
+        world = source_center + source_rotation @ array.astype(np.float64)
+        return (target_rotation.T @ (world - target_center)).astype(
+            array.dtype, copy=False)
+
+    def rotate_vector(value):
+        array = np.asarray(value)
+        if array.shape != (2,) or not np.isfinite(array).all():
+            raise ValueError("motion prediction vector must be finite [2]")
+        return (relative_rotation @ array.astype(np.float64)).astype(
+            array.dtype, copy=False)
+
+    for key in ("mu_xy", "prior_xy", "kinematic_prior_xy"):
+        if key in output:
+            output[key] = transform_endpoint(output[key])
+    for key in ("direction_xy", "velocity_xy", "basis_velocity_xy"):
+        if key in output:
+            output[key] = rotate_vector(output[key])
+    if "covariance_xy" in output:
+        covariance = np.asarray(output["covariance_xy"])
+        if covariance.shape != (2, 2) or not np.isfinite(covariance).all():
+            raise ValueError("motion prediction covariance must be finite [2,2]")
+        output["covariance_xy"] = (
+            relative_rotation @ covariance.astype(np.float64)
+            @ relative_rotation.T).astype(covariance.dtype, copy=False)
+    return output
+
+
 def yaw_rotation_matrix(angle, degrees=False):
     angle_rad = np.deg2rad(angle) if degrees else float(angle)
     cosine = np.cos(angle_rad)

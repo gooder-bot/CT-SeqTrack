@@ -7,7 +7,7 @@ import copy
 import numpy as np
 
 
-ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v3"
+ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v4"
 
 
 def online_candidate_state_consistent(processed, target_size):
@@ -132,6 +132,15 @@ def build_online_resume_contract(config):
             config, "ct_base_evidence_mode", "full")),
         "recovery_candidate_policy": str(_get(
             config, "ct_recovery_candidate_policy", "off")),
+        "candidate_policy": str(_get(
+            config, "ct_candidate_policy", "legacy_spatial")),
+        "temporal_candidate_gaps": tuple(int(value) for value in _get(
+            config, "ct_temporal_candidate_gaps", [2, 4, 8])),
+        "temporal_boundary_band": float(_get(
+            config, "ct_temporal_boundary_band", 0.2)),
+        "presence_training_scope": str(_get(
+            config, "ct_presence_training_scope", "all_candidates")),
+        "candidate_loss_weights": (0.5, 0.3, 0.2),
         "initialization_policy": str(_get(
             config, "ct_initialization_policy",
             _get(config, "ct_b0_initialization_policy", "legacy"))),
@@ -275,16 +284,33 @@ def validate_scratch_training_contract(config):
                         f"ct_{module_name}_lr=1e-4")
 
     if b2:
-        require_equal("num_candidates", 4, 1)
-        require_equal("ct_recursive_candidate_views", 4, 1)
+        require_equal("num_candidates", 3, 1)
+        require_equal("ct_recursive_candidate_views", 3, 1)
+        require_equal("ct_recursive_reseed_enabled", False, False)
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
         require_equal(
-            "ct_recovery_candidate_policy", "weak_miss_control", "off")
+            "ct_recovery_candidate_policy", "off", "off")
+        candidate_policy = str(_get(
+            config, "ct_candidate_policy", "legacy_spatial"))
+        if candidate_policy not in (
+                "causal_b1_boundary", "causal_temporal_uniform"):
+            errors.append(
+                "ct_candidate_policy must be causal_b1_boundary or "
+                "causal_temporal_uniform")
+        require_equal("ct_temporal_candidate_gaps", [2, 4, 8], [2, 4, 8])
+        require_equal("ct_temporal_boundary_band", 0.2, 0.2)
+        presence_scope = str(_get(
+            config, "ct_presence_training_scope", "all_candidates"))
+        if presence_scope not in ("all_candidates", "candidate0"):
+            errors.append(
+                "ct_presence_training_scope must be all_candidates or candidate0")
         if not bool(_get(config, "export_proposal_diagnostics", False)):
             errors.append("B2 requires export_proposal_diagnostics=true")
     else:
         require_equal("num_candidates", 1, 1)
         require_equal("ct_recursive_candidate_views", 1, 1)
+        require_equal("ct_recovery_candidate_policy", "off", "off")
+        require_equal("ct_candidate_policy", "off", "off")
 
     if errors:
         raise ValueError(
@@ -311,7 +337,10 @@ def build_b2_method_contract(config):
         "lr_decay_step", "lr_decay_rate", "b0_gradient_clip",
         "plugin_gradient_clip", "canonical_batch_size",
         "auxiliary_microbatch_size", "initialization_policy",
-        "recovery_candidate_policy",
+        "recovery_candidate_policy", "candidate_policy",
+        "temporal_candidate_gaps", "temporal_boundary_band",
+        "presence_training_scope",
+        "candidate_loss_weights",
         "acquisition_preflight_statistics_sha256",
         "targetness_class_weight_source", "targetness_positive_weight",
         "targetness_negative_weight",
@@ -322,9 +351,9 @@ def build_b2_method_contract(config):
 def validate_b2_method_promotion(promotion, config):
     if (not isinstance(promotion, dict)
             or promotion.get("schema")
-            != "ct_seqtrack.b2_evidence_promotion.v3"
+            != "ct_seqtrack.b2_evidence_promotion.v4"
             or not bool(promotion.get("passed"))):
-        raise ValueError("Full scratch requires a passed B2 method manifest v3")
+        raise ValueError("Full scratch requires a passed B2 method manifest v4")
     observed = promotion.get("b2_method_contract")
     expected = build_b2_method_contract(config)
     if not isinstance(observed, dict):

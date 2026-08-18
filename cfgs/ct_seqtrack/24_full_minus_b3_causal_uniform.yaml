@@ -1,0 +1,4 @@
+_base_: 24_full_minus_b3.yaml
+
+experiment_name: ct24_full_minus_b3_causal_uniform_scratch_seed42
+ct_candidate_policy: causal_temporal_uniform

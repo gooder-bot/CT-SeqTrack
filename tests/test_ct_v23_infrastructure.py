@@ -22,6 +22,7 @@ from utils.config import load_yaml_config
 ROOT = Path(__file__).resolve().parents[1]
 from utils.training_isolation import (
     advance_lightning_manual_transaction,
+    causal_candidate_weight,
     candidate_stratified_mean,
 )
 from tools.build_ct_b2_promotion_metrics import build_metrics, success_auc
@@ -37,8 +38,8 @@ def base_config():
         "ct_enable_b1": True,
         "ct_enable_b2": True,
         "ct_enable_b3": False,
-        "num_candidates": 4,
-        "ct_recursive_candidate_views": 4,
+        "num_candidates": 3,
+        "ct_recursive_candidate_views": 3,
         "ct_recursive_tracklet_slots": 16,
         "ct_recursive_rollout_horizons": [1, 2, 4, 8],
         "ct_recursive_reseed_enabled": False,
@@ -55,7 +56,10 @@ def base_config():
         "ct_manual_amp_enabled": False,
         "batch_size": 16,
         "ct_auxiliary_microbatch_size": 16,
-        "ct_recovery_candidate_policy": "weak_miss_control",
+        "ct_recovery_candidate_policy": "off",
+        "ct_candidate_policy": "causal_b1_boundary",
+        "ct_temporal_candidate_gaps": [2, 4, 8],
+        "ct_temporal_boundary_band": 0.2,
         "export_proposal_diagnostics": True,
         "ct_initialization_policy": "scratch_only",
         "dataset": "nuscenes",
@@ -117,7 +121,26 @@ def test_scratch_contract_rejects_finetune_lr_and_wrong_geometry():
         validate_scratch_training_contract(dict(config, ct_b0_lr=2.5e-5))
     with pytest.raises(ValueError, match="candidate_views"):
         validate_scratch_training_contract(dict(
-            config, ct_recursive_candidate_views=3))
+            config, ct_recursive_candidate_views=4))
+    with pytest.raises(ValueError, match="ct_candidate_policy"):
+        validate_scratch_training_contract(dict(
+            config, ct_candidate_policy="legacy_spatial_gt_ablation"))
+
+
+def test_registered_causal_controls_are_independent_scratch_configs():
+    uniform = load_yaml_config(
+        ROOT / "cfgs" / "ct_seqtrack" /
+        "24_full_minus_b3_causal_uniform.yaml")
+    configure_ct_variant(uniform)
+    assert uniform["ct_candidate_policy"] == "causal_temporal_uniform"
+    validate_scratch_training_contract(uniform)
+
+    presence_c0 = load_yaml_config(
+        ROOT / "cfgs" / "ct_seqtrack" /
+        "24_full_minus_b3_presence_c0.yaml")
+    configure_ct_variant(presence_c0)
+    assert presence_c0["ct_presence_training_scope"] == "candidate0"
+    validate_scratch_training_contract(presence_c0)
 
 
 def test_b1_and_fixed_cv_ablation_configs_are_independent_scratch_runs():
@@ -151,7 +174,7 @@ def test_full_memory_controls_use_the_same_method_only_promotion():
         ROOT / 'cfgs' / 'ct_seqtrack' / '24_full_minus_b3.yaml')
     configure_ct_variant(source)
     promotion = {
-        "schema": "ct_seqtrack.b2_evidence_promotion.v3",
+        "schema": "ct_seqtrack.b2_evidence_promotion.v4",
         "passed": True,
         "b2_method_contract": build_b2_method_contract(source),
     }
@@ -188,32 +211,46 @@ def test_manual_dual_optimizer_has_one_hundred_logical_steps():
     assert tracker.completed == 100
 
 
-def test_three_auxiliary_microbatches_match_one_48_row_transaction():
+def test_two_auxiliary_microbatches_match_registered_weighted_transaction():
     torch.manual_seed(9)
-    inputs = torch.randn(48, 7)
-    valid = (torch.rand(48, 7) > 0.35).float()
-    candidate_ids = torch.arange(1, 4).repeat_interleave(16)
+    inputs = torch.randn(32, 7)
+    valid = (torch.rand(32, 7) > 0.35).float()
+    candidate_ids = torch.arange(1, 3).repeat_interleave(16)
 
     full_parameter = torch.nn.Parameter(torch.tensor(0.7))
     full_values = (full_parameter * inputs).square()
-    full_loss = 0.5 * candidate_stratified_mean(
-        full_values, valid, candidate_ids)
+    full_loss = sum(
+        causal_candidate_weight(candidate_id) * candidate_stratified_mean(
+            full_values[candidate_ids == candidate_id],
+            valid[candidate_ids == candidate_id],
+            candidate_ids[candidate_ids == candidate_id])
+        for candidate_id in (1, 2))
     full_gradient = torch.autograd.grad(full_loss, full_parameter)[0]
 
     micro_parameter = torch.nn.Parameter(torch.tensor(0.7))
     micro_loss = micro_parameter.new_zeros(())
-    for candidate_id in (1, 2, 3):
+    for candidate_id in (1, 2):
         rows = candidate_ids == candidate_id
         values = (micro_parameter * inputs[rows]).square()
-        micro_loss = micro_loss + candidate_stratified_mean(
-            values, valid[rows], candidate_ids[rows]) / 6.0
+        micro_loss = micro_loss + causal_candidate_weight(
+            candidate_id) * candidate_stratified_mean(
+                values, valid[rows], candidate_ids[rows])
     micro_gradient = torch.autograd.grad(micro_loss, micro_parameter)[0]
     assert torch.equal(full_loss, micro_loss)
-    assert torch.equal(full_gradient, micro_gradient)
+    assert torch.allclose(full_gradient, micro_gradient, atol=1e-6, rtol=0.0)
+
+
+def test_candidate_stratified_mean_uses_registered_three_role_weights():
+    values = torch.tensor([[2.0], [10.0], [20.0]])
+    valid = torch.ones_like(values)
+    candidate_ids = torch.tensor([0, 1, 2])
+    observed = candidate_stratified_mean(values, valid, candidate_ids)
+    expected = 0.5 * values[0, 0] + 0.3 * values[1, 0] + 0.2 * values[2, 0]
+    assert torch.equal(observed, expected)
 
 
 def _row(partition, candidate, pool, sampled, positive=False,
-         fallback=False):
+          fallback=False):
     return {
         "partition": partition,
         "candidate_id": candidate,
@@ -223,19 +260,29 @@ def _row(partition, candidate, pool, sampled, positive=False,
         "available": True,
         "recovery_positive": positive,
         "recovery_fallback": fallback,
+        "candidate_gap_frames": {0: 1, 1: 4, 2: 8}[candidate],
+        "boundary_ratio": {0: 0.2, 1: 0.95, 2: 1.1}[candidate],
+        "role_satisfied": bool(candidate == 0 or positive),
     }
 
 
 def _manifest_identity(config):
     from utils.acquisition_metrics import sha256_json
     manifest = {
-        "schema": "ct_seqtrack.acquisition_data_manifest.v1",
+        "schema": "ct_seqtrack.acquisition_data_manifest.v2",
         "dataset": config["dataset"],
         "split": config["train_split"],
         "path": config["path"],
         "seed": config["seed"],
         "checkpoint_loaded": False,
         "complete": True,
+        "history_source": "past_observation_fixed_cv_causal_geometry_audit",
+        "current_gt_role": {
+            "candidate0": "target-count-label-only",
+            "candidate1_2": "target-count-label-only",
+        },
+        "candidate_selection": (
+            "fixed-cv endpoint boundary/outside; current GT hidden"),
         "partitions": [
             {"partition": "train", "tracklet_identity_sha256": "a",
              "complete": True, "exported_rows": 48,
@@ -255,6 +302,8 @@ def test_preflight_keeps_row_and_point_recall_distinct():
     rows = [_row("dev", 0, 100, 100)]
     rows.extend(_row("dev", 0, 1, 0) for _ in range(9))
     rows.extend([
+        _row("dev", 1, 2, 1, positive=True),
+        _row("dev", 2, 2, 1, positive=True),
         _row("train", 1, 2, 1, positive=True),
         _row("train", 2, 2, 1, positive=True),
     ])
@@ -284,6 +333,8 @@ def test_preflight_fails_closed_on_zero_eligible_primary_rows():
 def test_preflight_hash_and_sampling_contract_are_fail_closed():
     rows = [
         *[_row("dev", 0, 1, 1) for _ in range(100)],
+        *[_row("dev", 1, 1, 1, positive=True) for _ in range(100)],
+        *[_row("dev", 2, 1, 1, positive=True) for _ in range(100)],
         _row("train", 1, 1, 1, positive=True),
         _row("train", 2, 1, 1, positive=True),
     ]
@@ -299,9 +350,36 @@ def test_preflight_hash_and_sampling_contract_are_fail_closed():
         validate_preflight_artifact(tampered, config)
 
 
+def test_uniform_control_preflight_gates_availability_not_boundary_roles():
+    rows = [
+        *[_row("dev", 0, 1, 1) for _ in range(100)],
+        *[_row("dev", 1, 1, 1, positive=False) for _ in range(100)],
+        *[_row("dev", 2, 1, 1, positive=False) for _ in range(100)],
+        _row("train", 1, 1, 1),
+        _row("train", 2, 1, 1),
+    ]
+    config = dict(base_config(),
+                  ct_candidate_policy="causal_temporal_uniform")
+    manifest_identity = _manifest_identity(config)
+    manifest_identity["manifest"]["candidate_selection"] = (
+        "uniform valid temporal gaps; current GT hidden")
+    from utils.acquisition_metrics import sha256_json
+    manifest_identity["manifest_sha256"] = sha256_json(
+        manifest_identity["manifest"])
+    artifact = build_preflight_artifact(
+        rows, {"acquisition": acquisition_config_identity(config)},
+        manifest_identity, 42)
+    assert artifact["passed"]
+    assert artifact["criteria"][
+        "dev_candidate1_uniform_available_rows_at_least_minimum"]
+    validate_preflight_artifact(artifact, config)
+
+
 def test_preflight_rejects_a_different_dataset_manifest():
     rows = [
         *[_row("dev", 0, 1, 1) for _ in range(100)],
+        *[_row("dev", 1, 1, 1, positive=True) for _ in range(100)],
+        *[_row("dev", 2, 1, 1, positive=True) for _ in range(100)],
         _row("train", 1, 1, 1, positive=True),
         _row("train", 2, 1, 1, positive=True),
     ]

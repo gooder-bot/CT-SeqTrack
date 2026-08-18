@@ -12,7 +12,9 @@ import datasets.points_utils as points_utils
 from utils.ct_history import (
     b2_v3_history_mode_id,
     build_alternating_aux_history_offsets,
+    build_causal_temporal_history_offsets,
     build_irregular_history_offsets,
+    normalize_causal_temporal_gaps,
     select_b2_v3_history_mode,
 )
 
@@ -43,6 +45,7 @@ from utils.candidate_utils import (
     equivalent_local_offsets,
     normalize_candidate_trajectory_mode,
     physical_motion_targets,
+    reexpress_motion_prediction,
     shared_se2_world_translation,
     validate_shared_se2_transform,
 )
@@ -515,6 +518,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         degrees=config.degrees,
     )
     use_motion_v3 = bool(getattr(config, 'use_b1motion_v3', False))
+    causal_temporal_policy = str(getattr(
+        config, 'ct_candidate_policy', 'legacy_spatial'
+    )).strip().lower() in (
+        'causal_b1_boundary', 'causal_temporal_uniform')
     motion_main_ref_boxs = None
     if use_motion_v3:
         # Match recursive inference: the newest trajectory box is the actual
@@ -606,7 +613,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         effective_local_timestamps = np.asarray(
             effective_relative_timestamps + [0.0], dtype=np.float32)
     motion_aux_contract = None
-    if use_motion_v3 and not observation_only:
+    if (use_motion_v3 and not observation_only
+            and not causal_temporal_policy):
         motion_aux_prev_frames = data.get('motion_aux_prev_frames')
         if motion_aux_prev_frames is None:
             raise KeyError(
@@ -1008,6 +1016,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             support_prediction = dict(replay_b1)
             support_prediction.setdefault(
                 'current_delta_t', recursive_replay['current_delta_t'])
+        if (joint_contract_v2 and isinstance(support_prediction, dict)
+                and bool(support_prediction.get('valid', False))):
+            support_prediction = reexpress_motion_prediction(
+                support_prediction, motion_anchor_box, ref_boxs[0])
         support_kwargs = dict(
             prediction=support_prediction,
             use_b1_prepass=use_prepass_support,
@@ -1651,6 +1663,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'canonical_ref_boxs': canonical_ref_boxs,
         'ct_motion_ref_boxs': ct_motion_ref_boxs,
         'candidate_id': np.int64(candidate_id),
+        'candidate_gap_frames': np.int64(data.get(
+            'candidate_gap_frames',
+            int(np.asarray(history_offsets).reshape(-1)[0])
+            if history_offsets is not None else 1)),
+        'candidate_role': np.int64(data.get(
+            'candidate_role', candidate_id)),
+        'candidate_available': np.float32(data.get(
+            'candidate_available', 1.0)),
+        'candidate_boundary_ratio': np.float32(data.get(
+            'candidate_boundary_ratio', endpoint_ratio)),
+        'candidate_role_satisfied': np.float32(data.get(
+            'candidate_role_satisfied', 1.0 if candidate_id == 0 else 0.0)),
         'candidate_trajectory_mode_id': np.int64(
             {'independent': 0, 'shared_se2': 1}[candidate_trajectory_mode]),
         'coordinate_anchor': coordinate_anchor,
@@ -1698,12 +1722,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'ct_acquisition_sampled_count': np.float32(
                 joint_extension_sampling['sample_count']),
             'ct_view_role': np.int64(0 if candidate_id == 0 else 1),
-            # 0=identity observation, 1=weak recovery-positive,
-            # 2=strict miss (possibly explicit fallback), 3=natural control.
-            'ct_recovery_role': np.int64(recovery_role),
-            'ct_recovery_positive': np.float32(recovery_positive),
-            'ct_recovery_fallback': np.float32(recovery_fallback),
         })
+        if not causal_temporal_policy:
+            # Explicit legacy_spatial_gt_ablation diagnostics only.  Formal
+            # causal batches expose role/gap metadata above instead.
+            data_dict.update({
+                'ct_recovery_role': np.int64(recovery_role),
+                'ct_recovery_positive': np.float32(recovery_positive),
+                'ct_recovery_fallback': np.float32(recovery_fallback),
+            })
     if (use_trajectory_search
             or bool(getattr(config, 'use_ordered_trajectory_encoder', False))):
         data_dict.update({
@@ -1901,6 +1928,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'motion_main_valid_mask': np.asarray(valid_mask, dtype=np.int64),
             'motion_main_target_xy': motion_main_target_xy.astype('float32'),
             'motion_main_anchor': (
+                motion_anchor if joint_contract_v2 else coordinate_anchor),
+            'motion_source_anchor': (
                 motion_anchor if joint_contract_v2 else coordinate_anchor),
         })
         if motion_aux_contract is not None:
@@ -2106,6 +2135,21 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             self.config, 'use_recursive_replay_cache', False))
         self.online_recursive_training = bool(getattr(
             self.config, 'ct_online_recursive_training', False))
+        self.ct_candidate_policy = str(getattr(
+            self.config, 'ct_candidate_policy', 'legacy_spatial')).strip().lower()
+        self.causal_temporal_candidates = self.ct_candidate_policy in (
+            'causal_b1_boundary', 'causal_temporal_uniform')
+        recovery_policy = str(getattr(
+            self.config, 'ct_recovery_candidate_policy', 'off'
+        )).strip().lower()
+        if (recovery_policy != 'off'
+                and self.ct_candidate_policy != 'legacy_spatial_gt_ablation'):
+            raise ValueError(
+                "GT-spatial recovery requires the explicit "
+                "legacy_spatial_gt_ablation policy")
+        self.ct_temporal_candidate_gaps = normalize_causal_temporal_gaps(
+            getattr(self.config, 'ct_temporal_candidate_gaps', [2, 4, 8])
+        ) if self.causal_temporal_candidates else []
         self.recursive_replay_cache = None
         if self.use_recursive_replay_cache:
             cache_dir = getattr(
@@ -2135,9 +2179,12 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 raise ValueError(
                     "online recursive training requires shared_se2 candidates")
             if int(self.num_candidates) != int(getattr(
-                    self.config, 'ct_recursive_candidate_views', 4)):
+                    self.config, 'ct_recursive_candidate_views', 1)):
                 raise ValueError(
                     "num_candidates must match ct_recursive_candidate_views")
+            if self.causal_temporal_candidates and int(self.num_candidates) != 3:
+                raise ValueError(
+                    "causal temporal policies require exactly three candidates")
         self.trajectory_training_irregular_probability = float(getattr(
             self.config, 'trajectory_training_irregular_probability', 0.0))
         self.trajectory_training_query_gaps = [
@@ -2317,11 +2364,59 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             this_frame_id, self.dataset.hist_num, offsets=offsets)
         first_frame, this_frame = self.dataset.get_frames(
             tracklet_id, frame_ids=(0, this_frame_id))
-        prev_frames = self.dataset.get_frames(
-            tracklet_id, frame_ids=prev_frame_ids)
         tracklet_key = (
             self.dataset.get_tracklet_key(tracklet_id)
             if hasattr(self.dataset, 'get_tracklet_key') else str(tracklet_id))
+        temporal_pool = None
+        if self.causal_temporal_candidates:
+            if int(candidate_id) != 0:
+                raise ValueError(
+                    "causal temporal online sampling uses one candidate0 carrier")
+            histories = {1: offsets}
+            histories.update({
+                gap: build_causal_temporal_history_offsets(
+                    self.dataset.hist_num, gap)
+                for gap in self.ct_temporal_candidate_gaps
+            })
+            history_contracts = {}
+            unique_frame_ids = []
+            for gap, history_offsets in histories.items():
+                frame_ids, history_valid = get_history_frame_ids_and_masks(
+                    this_frame_id, self.dataset.hist_num,
+                    offsets=history_offsets)
+                history_contracts[gap] = (
+                    list(history_offsets), list(frame_ids), list(history_valid))
+                unique_frame_ids.extend(frame_ids)
+            unique_frame_ids = sorted(set(int(value) for value in unique_frame_ids))
+            unique_frames = self.dataset.get_frames(
+                tracklet_id, frame_ids=unique_frame_ids)
+            frame_map = dict(zip(unique_frame_ids, unique_frames))
+            temporal_pool = {}
+            for gap, (history_offsets, frame_ids, history_valid) in (
+                    history_contracts.items()):
+                gap_seed_parts = (
+                    tracklet_key, int(this_frame_id), 'temporal_gap', int(gap))
+                temporal_pool[int(gap)] = {
+                    'prev_frames': create_history_frame_dict([
+                        frame_map[int(frame_id)] for frame_id in frame_ids]),
+                    'prev_frame_ids': frame_ids,
+                    'valid_mask': history_valid,
+                    'history_offsets': history_offsets,
+                    'point_sampling_seeds': np.asarray([
+                        deterministic_point_seed(
+                            self.config, *gap_seed_parts,
+                            'history', int(frame_id))
+                        for frame_id in frame_ids], dtype=np.int64),
+                    'current_sampling_seed': deterministic_point_seed(
+                        self.config, *gap_seed_parts, 'current'),
+                }
+            normal = temporal_pool[1]
+            prev_frames = [
+                normal['prev_frames'][str(-(index + 1))]
+                for index in range(self.dataset.hist_num)]
+        else:
+            prev_frames = self.dataset.get_frames(
+                tracklet_id, frame_ids=prev_frame_ids)
         seed_parts = (tracklet_key, int(this_frame_id), int(candidate_id))
         raw = {
             'online_recursive_raw': True,
@@ -2339,9 +2434,12 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             'sample_index': int(this_frame_id),
             'tracklet_id': int(tracklet_id),
             'tracklet_key': tracklet_key,
-            'candidate_shared_transform': deterministic_candidate_offset(
-                candidate_id, self.config, *seed_parts,
-                'coherent_recursive_view'),
+            'candidate_shared_transform': (
+                np.zeros(3, dtype=np.float32)
+                if self.causal_temporal_candidates else
+                deterministic_candidate_offset(
+                    candidate_id, self.config, *seed_parts,
+                    'coherent_recursive_view')),
             'point_sampling_seeds': np.asarray([
                 deterministic_point_seed(
                     self.config, *seed_parts, 'history', frame_id)
@@ -2350,7 +2448,13 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 self.config, *seed_parts, 'current'),
             'shadow_future': [],
         }
-        if self.use_b1motion_v3:
+        if temporal_pool is not None:
+            raw['temporal_candidate_pool'] = temporal_pool
+            raw['point_sampling_seeds'] = temporal_pool[1][
+                'point_sampling_seeds']
+            raw['current_sampling_seed'] = temporal_pool[1][
+                'current_sampling_seed']
+        if self.use_b1motion_v3 and not self.causal_temporal_candidates:
             motion_aux_offsets = self._motion_v3_aux_offsets(this_frame_id)
             motion_aux_frame_ids, motion_aux_valid_mask = (
                 get_history_frame_ids_and_masks(

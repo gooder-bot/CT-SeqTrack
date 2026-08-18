@@ -12,6 +12,9 @@ from models.ct_v2.pipeline_contracts import (
     MotionPriorOutput,
     EvidenceOutput,
     DecisionOutput,
+    reexpress_motion_prior,
+    motion_prior_covariance_xy,
+    validate_motion_prior_support_alignment,
 )
 from models.ct_v2.pipeline import B0Observation, B1PhysicalTimePrior
 from models.ct_v2.decoder_token_consistency import (
@@ -37,6 +40,9 @@ __all__ = [
     "MotionPriorOutput",
     "EvidenceOutput",
     "DecisionOutput",
+    "reexpress_motion_prior",
+    "motion_prior_covariance_xy",
+    "validate_motion_prior_support_alignment",
     # B4 is experimental-only and disabled in every formal configuration.
     "DecoderTokenConsistencyLoss",
     "GradientRatioWeightSelector",

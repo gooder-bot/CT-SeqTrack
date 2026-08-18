@@ -315,7 +315,7 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         promotion = payload.get('ct_b2_promotion')
         if (not isinstance(promotion, dict)
                 or promotion.get('schema')
-                != 'ct_seqtrack.b2_evidence_promotion.v3'
+                != 'ct_seqtrack.b2_evidence_promotion.v4'
                 or not bool(promotion.get('passed'))):
             raise RuntimeError(
                 "contract-v3 B3 initialization requires a promoted B2 "
@@ -485,7 +485,7 @@ def parse_config():
         help='passed v2 method manifest required to start scratch Full')
     parser.add_argument(
         '--acquisition_preflight', type=str, default=None,
-        help='passed checkpoint-free preflight v2 required for B2 training')
+        help='passed checkpoint-free causal preflight v3 required for B2 training')
     parser.add_argument(
         '--ct_action_calibration_path', type=str,
         default=argparse.SUPPRESS,
@@ -799,7 +799,7 @@ if not cfg.test:
         tracklet_slots = int(getattr(
             cfg, 'ct_recursive_tracklet_slots', 4))
         candidate_views = int(getattr(
-            cfg, 'ct_recursive_candidate_views', 4))
+            cfg, 'ct_recursive_candidate_views', 1))
         expected_batch_size = (
             tracklet_slots
             if int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3

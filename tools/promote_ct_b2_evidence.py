@@ -16,8 +16,8 @@ from utils.online_contract import build_b2_method_contract
 from utils.acquisition_metrics import validate_preflight_artifact
 
 
-SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v3'
-PREFLIGHT_SCHEMA = 'ct_seqtrack.acquisition_preflight.v2'
+SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v4'
+PREFLIGHT_SCHEMA = 'ct_seqtrack.acquisition_preflight.v3'
 
 
 def sha256_file(path):
@@ -110,7 +110,7 @@ def main():
             or not bool(preflight.get('passed'))
             or not preflight.get('statistics_sha256')):
         raise RuntimeError(
-            'B2 promotion requires a passed acquisition preflight v2')
+            'B2 promotion requires a passed causal acquisition preflight v3')
     manifest = preflight.get('data_manifest', {}).get('manifest', {})
     dev_identity = next((
         item for item in manifest.get('partitions', [])

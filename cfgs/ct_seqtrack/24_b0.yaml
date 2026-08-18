@@ -11,6 +11,12 @@ ct_module_isolation: strict
 ct_initialization_policy: scratch_only
 num_candidates: 1
 ct_recursive_candidate_views: 1
+ct_candidate_policy: "off"
+ct_recovery_candidate_policy: "off"
+# Formal causal experiments never rewrite online B0 history with GT.  The
+# completed 2x2 diagnostic configs below this file explicitly override this
+# switch when reproducing the historical reseed study.
 ct_recursive_reseed_enabled: false
+ct_b0_rng_shift_control: false
 proposal_inference_mode: observation
 save_top_k: 0

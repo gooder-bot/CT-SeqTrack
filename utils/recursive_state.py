@@ -93,7 +93,7 @@ def build_recursive_input_contract(
 class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
     """Yield ordered tracklet slots with coherent candidate groups."""
 
-    def __init__(self, dataset, slots=4, candidate_views=4, seed=42,
+    def __init__(self, dataset, slots=4, candidate_views=1, seed=42,
                  partition_seed=None,
                  partition="train", shadow_interval=2,
                  shadow_fraction=None, shadow_slots_per_event=1,
@@ -110,6 +110,11 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
             None if shadow_fraction is None else float(shadow_fraction))
         self.shadow_enabled = bool(shadow_enabled)
         self.shadow_slots_per_event = int(shadow_slots_per_event)
+        config = getattr(dataset, "config", None)
+        self.grouped_candidate_carrier = str(getattr(
+            config, "ct_candidate_policy", "legacy_spatial"
+        )).strip().lower() in (
+            "causal_b1_boundary", "causal_temporal_uniform")
         self.epoch = 0
         if self.slots <= 0 or self.candidate_views <= 0:
             raise ValueError("online recursive slots/views must be positive")
@@ -139,9 +144,9 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                 "online recursive partition has fewer tracklets than slots")
         self.slot_tracklets = [[] for _ in range(self.slots)]
         self.slot_prediction_frames = [0 for _ in range(self.slots)]
-        # Longest-first greedy assignment keeps the four causal slots close
+        # Longest-first greedy assignment keeps the causal slots close
         # in workload, which minimizes the final tail that cannot form a full
-        # 4-slot/16-view optimizer batch.
+        # complete optimizer batch.
         ordered_tracklets = sorted(
             self.tracklet_ids,
             key=lambda item: int(base.get_num_frames_tracklet(item)),
@@ -202,7 +207,10 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                             tracklet_id))
                     can_shadow = bool(
                         slot == shadow_slot and frame_id + 2 < frame_count)
-                    for candidate_id in range(self.candidate_views):
+                    candidate_ids = (
+                        (0,) if self.grouped_candidate_carrier
+                        else range(self.candidate_views))
+                    for candidate_id in candidate_ids:
                         batch.append((
                             iterator_epoch, batch_index, slot,
                             int(tracklet_id), int(frame_id), int(candidate_id),

@@ -40,6 +40,17 @@ def test_four_formal_arms_are_single_variant_scratch_configs():
         assert config["ct_training_state_policy"] == "observation"
         assert config["ct_module_isolation"] == "strict"
         assert config["save_top_k"] == 0
+        assert config["ct_recursive_reseed_enabled"] is False
+        assert config["ct_b0_rng_shift_control"] is False
+        assert config["ct_recovery_candidate_policy"] == "off"
+        if variant in ("full_minus_b3", "full"):
+            assert config["num_candidates"] == 3
+            assert config["ct_recursive_candidate_views"] == 3
+            assert config["ct_candidate_policy"] == "causal_b1_boundary"
+            assert config["ct_temporal_candidate_gaps"] == [2, 4, 8]
+            assert config["ct_recovery_candidate_policy"] == "off"
+        else:
+            assert config["ct_candidate_policy"] == "off"
 
 
 def test_b0_2x2_configs_are_matched_except_registered_factors():

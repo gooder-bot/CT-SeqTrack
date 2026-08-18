@@ -18,6 +18,7 @@ ct_recursive_candidate_views: 4
 ct_recursive_tracklet_slots: 16
 ct_auxiliary_microbatch_size: 16
 ct_recovery_candidate_policy: weak_miss_control
+ct_candidate_policy: legacy_spatial_gt_ablation
 ct_router_shadow_slots_per_event: 1
 ct_separate_optimizers: true
 ct_b0_lr: 0.0001

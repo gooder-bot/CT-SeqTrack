@@ -1,6 +1,6 @@
 # CT-SeqTrack v24 实验清单
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 本文件只描述当前 B0--B3 主线。代码完成不等于模块晋级；任何未通过 gate 的
 分支都不能进入论文主结果。
@@ -17,12 +17,15 @@
 - [x] optimizer map、梯度范数、step count、parameter hash 与 resume RNG 合同已实现。
 - [x] M3、M4、TWC 的正式运行入口已移除；B4 paired views 独立保留。
 - [x] 重构前基线为 `243 passed / 1 skipped`；删除旧 M3/M4/TWC、CRPA、旧
-  selective-router 测试后，当前 paper-facing suite 为 `106 passed / 1 skipped`。
-- [ ] 所有新实验均尚未运行；当前不得声称涨点或论文结论成立。
+  selective-router 测试后，当前 paper-facing suite 为 `109 passed / 1 skipped`。
+- [x] B0 2×2 seed42 协议选择实验已完整运行并归档。
+- [ ] Acquisition preflight 及其后的模块实验尚未运行；当前不得声称涨点或论文
+  结论成立。
 
 ## 1. 必须先完成的代码验收
 
-- [ ] 全量 `pytest`、`py_compile` 与 `git diff --check` 通过。
+- [x] 全量 `pytest`（`109 passed / 1 skipped`）、`py_compile` 与
+  `git diff --check` 通过。
 - [ ] 对固定 batch 保存 B0/B1/B2/B3 新入口输出 fixture，并与迁移前 v23 fixture
   核对允许差异。
 - [ ] fixture parity 在完整运行环境通过后，物理删除 `SEQTRACK3D` 中仍保留的
@@ -37,19 +40,30 @@
 
 ## 2. B0 2×2：固定代码与协议
 
-- [ ] seed42 从头运行 reseed on/off × RNG-shift on/off。
-- [ ] 四组固定 candidate0 数据、loss、optimizer、scheduler、训练预算与最终 epoch。
-- [ ] 选择的是后续统一代码/数据协议，不把某一组参数作为其他 arm 的初始化。
-- [ ] 固定后不再修改 B0 实现；所有 arm 仍分别随机初始化 B0。
-- [ ] 保存 resolved config、git diff、数据 manifest、RNG provenance 与 final checkpoint
-  SHA256。
+- [x] seed42 从头运行 reseed on/off × RNG-shift on/off；四组均完成 60 epoch、
+  12,780 optimizer steps 和 12 次 atomic-dev 验证。
+- [x] 四组除两个注册因子和运行路径元数据外，candidate0 数据、loss、optimizer、
+  scheduler、训练预算与最终 epoch 完全匹配。
+- [x] 2×2 历史诊断曾选择 `ct_recursive_reseed_enabled=true`；因果时间候选正式协议已改为
+  `ct_recursive_reseed_enabled=false`，避免 GT 重写 B0 history/crop anchor；
+  `ct_b0_rng_shift_control=false`；选择的是训练协议，不是可写成贡献的模块。
+- [x] 不把 2×2 的任何 checkpoint 作为其他 arm 的初始化；正式四臂仍分别随机
+  初始化 B0，并统一使用 final epoch。
+- [x] 从现在起不再修改 B0 模型、在线 sampler、candidate0、loss、optimizer、
+  scheduler 或该协议；若修改，必须重跑 2×2。
+- [x] resolved config、代码 commit、数据 selection hash、RNG state 与四个 final
+  checkpoint SHA256 已核验并记录在
+  `compare_results/reports/ct24_b0_2x2_seed42_20260818.md`。
+- [x] 结果只来自 mini_train 的 37-tracklet atomic dev，不是 mini_val；完整数值、
+  因子效应、限制与后续顺序见上述报告。
 
 ## 3. Acquisition preflight
 
 - [ ] 使用完整 train/dev tracklets，无 checkpoint、无 `--max-batches` 截断。
 - [ ] candidate0 至少 100 个 target-bearing extension rows。
 - [ ] candidate0 target-bearing row retention >= 50%。
-- [ ] candidate1/2 recovery-positive 均非零；结构可用行非零。
+- [ ] dev c1 boundary-role、c2 outside-role satisfied rows 各至少 100；
+  同时报告 gap 选择率、`r_g` 分布、截断率、coverage 与耗时。
 - [ ] train extension 点同时含正负类，artifact 生成有限的 targetness 正负权重。
 - [ ] 若不通过，只调整预注册 support 几何/采样；不得先训练 Full 再解释。
 

@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 
 
-PREFLIGHT_SCHEMA = "ct_seqtrack.acquisition_preflight.v2"
+PREFLIGHT_SCHEMA = "ct_seqtrack.acquisition_preflight.v3"
 
 
 def acquisition_config_identity(config):
@@ -29,7 +29,10 @@ def acquisition_config_identity(config):
         "ct_recursive_tracklet_slots", "ct_recursive_rollout_horizons",
         "ct_recursive_reseed_enabled", "ct_partition_seed",
         "ct_router_partition", "ct_auxiliary_microbatch_size",
-        "ct_recovery_candidate_policy", "ct_endpoint_quota",
+        "ct_recovery_candidate_policy", "ct_candidate_policy",
+        "ct_temporal_candidate_gaps", "ct_temporal_boundary_band",
+        "ct_presence_training_scope",
+        "ct_endpoint_quota",
         "ct_tube_quota", "ct_expansion_point_count",
         "ct_search_training_history", "ct_search_min_points",
         "ct_tube_max_length", "ct_tube_max_width",
@@ -70,6 +73,20 @@ def _number(row, key, default=0.0):
     return value
 
 
+def _quantile(values, probability):
+    """Dependency-light linear quantile for immutable JSON artifacts."""
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    position = (len(ordered) - 1) * float(probability)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
 def summarize_acquisition_rows(rows):
     """Summarize each partition/candidate without mixing populations."""
     groups = {}
@@ -92,6 +109,15 @@ def summarize_acquisition_rows(rows):
             "sampled_valid_count": 0.0,
             "recovery_positive_rows": 0,
             "recovery_fallback_rows": 0,
+            "role_satisfied_rows": 0,
+            "boundary_ratio_sum": 0.0,
+            "boundary_ratio_count": 0,
+            "gap_counts": {},
+            "support_truncated_rows": 0,
+            "processing_time_ms_sum": 0.0,
+            "processing_time_ms_count": 0,
+            "processing_times_ms": [],
+            "selection_pool_ratios": {},
         })
         pool_targets = _number(row, "pool_target_count")
         sampled_targets = _number(row, "sampled_target_count")
@@ -124,6 +150,34 @@ def summarize_acquisition_rows(rows):
             "recovery_positive", False)))
         stats["recovery_fallback_rows"] += int(bool(row.get(
             "recovery_fallback", False)))
+        role_satisfied = bool(row.get(
+            "role_satisfied", candidate_id == 0))
+        boundary_ratio = _number(row, "boundary_ratio", 0.0)
+        candidate_gap = int(row.get(
+            "candidate_gap_frames", 1 if candidate_id == 0 else 0))
+        stats["role_satisfied_rows"] += int(role_satisfied)
+        stats["boundary_ratio_sum"] += boundary_ratio
+        stats["boundary_ratio_count"] += 1
+        gap_key = str(candidate_gap)
+        stats["gap_counts"][gap_key] = stats["gap_counts"].get(gap_key, 0) + 1
+        stats["support_truncated_rows"] += int(bool(row.get(
+            "support_truncated", False)))
+        if "processing_time_ms" in row:
+            processing_time_ms = _number(row, "processing_time_ms")
+            stats["processing_time_ms_sum"] += processing_time_ms
+            stats["processing_time_ms_count"] += 1
+            stats["processing_times_ms"].append(processing_time_ms)
+        # The grouped carrier records the full pre-selection pool only on c0,
+        # so every logical slot contributes exactly once to each gap stratum.
+        if candidate_id == 0:
+            for gap, ratio in dict(row.get(
+                    "candidate_gap_pool_ratios", {})).items():
+                numeric = float(ratio)
+                if not math.isfinite(numeric) or numeric < 0.0:
+                    raise ValueError(
+                        "candidate gap-pool ratios must be finite and non-negative")
+                stats["selection_pool_ratios"].setdefault(
+                    str(int(gap)), []).append(numeric)
     output = []
     for key in sorted(groups):
         stats = groups[key]
@@ -135,6 +189,32 @@ def summarize_acquisition_rows(rows):
         stats["point_recall"] = (
             stats["sampled_target_count"] / pool_targets
             if pool_targets else None)
+        stats["boundary_ratio_mean"] = (
+            stats["boundary_ratio_sum"] / stats["boundary_ratio_count"]
+            if stats["boundary_ratio_count"] else None)
+        stats["support_truncation_rate"] = (
+            stats["support_truncated_rows"] / stats["available_rows"]
+            if stats["available_rows"] else None)
+        stats["processing_time_ms_mean"] = (
+            stats["processing_time_ms_sum"]
+            / stats["processing_time_ms_count"]
+            if stats["processing_time_ms_count"] else None)
+        stats["processing_time_ms_p95"] = _quantile(
+            stats["processing_times_ms"], 0.95)
+        del stats["processing_times_ms"]
+        # Replace raw values by stable distribution summaries before hashing.
+        pool_summary = {}
+        for gap, values in sorted(stats["selection_pool_ratios"].items()):
+            pool_summary[gap] = {
+                "count": len(values),
+                "min": min(values),
+                "q10": _quantile(values, 0.10),
+                "q50": _quantile(values, 0.50),
+                "q90": _quantile(values, 0.90),
+                "max": max(values),
+            }
+        stats["selection_pool_ratio_distribution"] = pool_summary
+        del stats["selection_pool_ratios"]
         output.append(stats)
     return output
 
@@ -151,8 +231,8 @@ def build_preflight_artifact(
                      and item["candidate_id"] == candidate_id), None)
 
     primary = group(str(primary_partition), 0)
-    weak = group("train", 1)
-    strict = group("train", 2)
+    boundary = group(str(primary_partition), 1)
+    outside = group(str(primary_partition), 2)
     train_positive = sum(
         item["sampled_target_count"] for item in groups
         if item["partition"] == "train")
@@ -160,6 +240,11 @@ def build_preflight_artifact(
         item["sampled_valid_count"] for item in groups
         if item["partition"] == "train")
     train_negative = max(train_total - train_positive, 0.0)
+    acquisition_identity = (
+        config_identity.get("acquisition", {})
+        if isinstance(config_identity, dict) else {})
+    candidate_policy = str(acquisition_identity.get(
+        "ct_candidate_policy", "causal_b1_boundary"))
     criteria = {
         "dev_candidate0_present": primary is not None,
         "dev_candidate0_target_bearing_extension_nonzero": bool(
@@ -174,13 +259,27 @@ def build_preflight_artifact(
         "dev_candidate0_row_retention_at_least_minimum": bool(
             primary and primary["row_recall"] is not None
             and primary["row_recall"] >= float(min_row_retention)),
-        "train_candidate1_recovery_positive_nonzero": bool(
-            weak and weak["recovery_positive_rows"] > 0),
-        "train_candidate2_strict_recovery_positive_nonzero": bool(
-            strict and strict["recovery_positive_rows"] > 0),
         "train_targetness_positive_nonzero": train_positive > 0,
         "train_targetness_negative_nonzero": train_negative > 0,
     }
+    if candidate_policy == "causal_temporal_uniform":
+        criteria.update({
+            "dev_candidate1_uniform_available_rows_at_least_minimum": bool(
+                boundary and boundary["available_rows"]
+                >= int(min_target_bearing_rows)),
+            "dev_candidate2_uniform_available_rows_at_least_minimum": bool(
+                outside and outside["available_rows"]
+                >= int(min_target_bearing_rows)),
+        })
+    else:
+        criteria.update({
+            "dev_candidate1_boundary_role_rows_at_least_minimum": bool(
+                boundary and boundary["role_satisfied_rows"]
+                >= int(min_target_bearing_rows)),
+            "dev_candidate2_outside_role_rows_at_least_minimum": bool(
+                outside and outside["role_satisfied_rows"]
+                >= int(min_target_bearing_rows)),
+        })
     class_total = train_positive + train_negative
     targetness_class_weights = {
         "positive": (
@@ -228,7 +327,7 @@ def validate_preflight_artifact(artifact, config):
     if (not isinstance(artifact, dict)
             or artifact.get("schema") != PREFLIGHT_SCHEMA
             or not bool(artifact.get("passed"))):
-        raise ValueError("training requires a passed acquisition preflight v2")
+        raise ValueError("training requires a passed causal acquisition preflight v3")
     expected_hash = sha256_json({
         "schema": PREFLIGHT_SCHEMA,
         "seed": artifact.get("seed"),
@@ -263,7 +362,7 @@ def validate_preflight_artifact(artifact, config):
     manifest = manifest_identity.get("manifest")
     if (not isinstance(manifest, dict)
             or manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v1"
+            != "ct_seqtrack.acquisition_data_manifest.v2"
             or manifest.get("checkpoint_loaded") is not False
             or manifest.get("complete") is not True):
         raise ValueError(
@@ -279,6 +378,21 @@ def validate_preflight_artifact(artifact, config):
     manifest_mismatches = [
         key for key, value in expected_manifest.items()
         if manifest.get(key) != value]
+    if manifest.get("history_source") != (
+            "past_observation_fixed_cv_causal_geometry_audit"):
+        manifest_mismatches.append("history_source")
+    if manifest.get("current_gt_role") != {
+            "candidate0": "target-count-label-only",
+            "candidate1_2": "target-count-label-only"}:
+        manifest_mismatches.append("current_gt_role")
+    runtime_policy = str(_config_get(
+        config, "ct_candidate_policy", "causal_b1_boundary"))
+    expected_selection = (
+        "uniform valid temporal gaps; current GT hidden"
+        if runtime_policy == "causal_temporal_uniform" else
+        "fixed-cv endpoint boundary/outside; current GT hidden")
+    if manifest.get("candidate_selection") != expected_selection:
+        manifest_mismatches.append("candidate_selection")
     runtime_path = _config_get(config, "path")
     manifest_path = manifest.get("path")
     if runtime_path is None or manifest_path is None:

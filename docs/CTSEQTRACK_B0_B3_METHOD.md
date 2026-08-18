@@ -39,14 +39,20 @@ B2 raw center 由 extension 点的 targetness-weighted votes 构造。base 和 m
 
 ```text
 targetness_mask = every valid extension point
-raw/vote_mask   = candidate0 or auxiliary row with target in extension
-presence_mask   = candidate0 only
+raw/vote_mask   = every available candidate row with target in extension
+presence_mask   = every available candidate (including empty negatives)
 B3_mask         = candidate0 only
 ```
 
-因此 extension 中无目标的样本只提供 presence-negative；GT-guided auxiliary view
-不能污染 presence、utility、B3 或递归状态。`candidate_valid` 是 structural
+因此 extension 中无目标的样本仍训练 targetness/background 与 presence-negative。
+c1/c2 由 live B1 endpoint 在 `g∈{2,4,8}` 中无 GT 地选择 boundary/outside gap，
+各自使用完整 `[g,g+1,g+2]` 历史；旧 GT-spatial view 只保留为显式 legacy ablation。
+`candidate_valid` 是 structural
 availability 与 predicted presence 的合取，而不是“采到了任意扩展点”。
+
+B1 prior 在进入 B2 前从 `motion_source_anchor` 通过 SE(2) 重表达到
+`coordinate_anchor`：中心和方向旋转/平移，parallel/perpendicular log-sigma 保持
+不变；恒等 anchor 精确保持 candidate0。该项是正确性修复，不作为论文创新。
 
 no-extension 条件下 raw candidate 精确退回 observation；若未来修改重新允许 base
 或 memory 单独产生位置增益，测试应立即失败。
@@ -87,14 +93,30 @@ presence 和 `radius(dt)` 有界残差条件。
 四臂各自随机初始化，不共享 checkpoint。可归因性来自训练事务相同：
 
 - B0 只收 observation loss；
-- B1 只收 candidate0 mean/NLL；
-- B2 收 candidate0 evidence 与 auxiliary acquisition；
+- B1 收 c0/c1/c2 physical mean/NLL，角色权重 `0.5/0.3/0.2`；
+- B2 收 c0/c1/c2 evidence，角色权重 `0.5/0.3/0.2`；
 - B3 只收 candidate0 H1/H3 action-risk labels；
+- c0 更新 B0/B1/B2/B3，c1/c2 只更新 B1/B2；aux B0 forward 不累计梯度或 BN 状态；
 - B2/B3 只做 shadow 学习，canonical recursive state 永远写 observation；
 - 每模块独立 optimizer/scaler/scheduler/clip/step/hash。
 
 共享 prefix 的初始化、step1、step100、epoch-end hash 任一不一致，即判消融不匹配，
 不再解释最终分数。
+
+### 7.1 冻结的 B0 训练协议
+
+seed42 的 matched 2×2 development study 已归档；经过当前因果性审计，正式四臂固定为
+`ct_recursive_reseed_enabled=false`、`ct_b0_rng_shift_control=false`。正式因果
+实验不再按 `[1, 2, 4, 8]` 有限视野周期用 GT 重写历史；所有 crop/support anchor
+均来自当前 B0 在线递归状态。旧 reseed 仅保留在显式 2×2 诊断配置中；视野内部仍递归写入
+observation，验证和部署不使用 GT re-seed。RNG-shift 只是诊断用的无语义随机数
+消耗，正式配置永久关闭。
+
+该选择属于优化/数据协议，不是方法贡献。2×2 指标来自 mini_train 的 atomic dev，
+不能与历史 mini_val 数字直接比较，也不能证明涨点或统计稳定。完整结果与
+checkpoint 身份见
+`compare_results/reports/ct24_b0_2x2_seed42_20260818.md`。后续所有 arm 必须重新
+scratch，且不得用本次任一 checkpoint 初始化。
 
 ## 8. Claim--evidence map
 

@@ -125,8 +125,26 @@ def advance_lightning_manual_transaction(trainer):
     progress.increment_completed()
 
 
+CAUSAL_CANDIDATE_WEIGHTS = {0: 0.5, 1: 0.3, 2: 0.2}
+
+
+def causal_candidate_weight(candidate_id):
+    """Return the registered three-role objective weight."""
+    candidate_id = int(candidate_id)
+    if candidate_id not in CAUSAL_CANDIDATE_WEIGHTS:
+        raise ValueError("causal candidate id must be 0, 1 or 2")
+    return CAUSAL_CANDIDATE_WEIGHTS[candidate_id]
+
+
 def candidate_stratified_mean(values, valid, candidate_ids):
-    """Normalize within each candidate, then apply the 1/2,1/6 contract."""
+    """Average within each present role, then apply the causal role weights.
+
+    Weights are normalized over roles present in this tensor.  A role-isolated
+    microbatch therefore returns its ordinary masked mean; the outer optimizer
+    transaction owns the registered 0.5/0.3/0.2 cross-role weighting.  A
+    combined c0/c1/c2 tensor has weights summing to one and is exactly the
+    paper-facing objective.
+    """
     values = values.reshape(values.shape[0], -1)
     candidate_ids = candidate_ids.to(device=values.device).reshape(-1)
     if valid is None:
@@ -143,7 +161,7 @@ def candidate_stratified_mean(values, valid, candidate_ids):
         branch_valid = valid[rows]
         numerator = (values[rows] * branch_valid).sum()
         denominator = branch_valid.sum().clamp_min(1.0)
-        branch_weight = 0.5 if int(branch_id) == 0 else 1.0 / 6.0
+        branch_weight = causal_candidate_weight(branch_id)
         total = total + branch_weight * numerator / denominator
         total_branch_weight += branch_weight
     return total / max(total_branch_weight, 1e-12)

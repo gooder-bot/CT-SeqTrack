@@ -20,6 +20,7 @@ from utils.acquisition_metrics import (
 )
 from utils.config import load_yaml_config
 from models.ct_variant import configure_ct_variant
+from utils.online_contract import validate_scratch_training_contract
 
 
 def sha256_file(path):
@@ -79,11 +80,12 @@ def main():
     if hasattr(args, "ct_recursive_reseed_enabled"):
         config["ct_recursive_reseed_enabled"] = bool(
             args.ct_recursive_reseed_enabled)
+    validate_scratch_training_contract(config)
     data_manifest = json.loads(
         manifest_path.read_text(encoding="utf-8"))
     if (not isinstance(data_manifest, dict)
             or data_manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v1"
+            != "ct_seqtrack.acquisition_data_manifest.v2"
             or data_manifest.get("checkpoint_loaded") is not False
             or data_manifest.get("complete") is not True):
         raise ValueError(

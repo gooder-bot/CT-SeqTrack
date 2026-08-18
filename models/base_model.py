@@ -730,6 +730,16 @@ class BaseModelMF(pl.LightningModule):
             "b2_version": "ct_joint_full",
             "candidate_id": int(self._proposal_scalar(
                 data_dict, "candidate_id", default=0.0)),
+            "candidate_gap_frames": int(self._proposal_scalar(
+                data_dict, "candidate_gap_frames", default=1.0)),
+            "candidate_role": int(self._proposal_scalar(
+                data_dict, "candidate_role", default=0.0)),
+            "candidate_available": int(self._proposal_scalar(
+                data_dict, "candidate_available", default=1.0) > 0.0),
+            "boundary_ratio": self._proposal_scalar(
+                data_dict, "candidate_boundary_ratio", default=0.0),
+            "role_satisfied": int(self._proposal_scalar(
+                data_dict, "candidate_role_satisfied", default=0.0) > 0.0),
             "base_target_count": self._proposal_scalar(
                 data_dict, "ct_acquisition_base_target_count"),
             "pool_target_count": self._proposal_scalar(
@@ -2176,6 +2186,9 @@ class MotionBaseModelMF(BaseModelMF):
                      "ref_boxs":torch.tensor(ref_boxs_np[None, :], device=self.device, dtype=torch.float32), 
                      "valid_mask":torch.tensor(valid_mask, device=self.device, dtype=torch.float32).unsqueeze(0), 
                      "bbox_size":torch.tensor(bbox_size[None, :],device=self.device, dtype=torch.float32),
+                     "coordinate_anchor": torch.tensor(
+                         coordinate_anchor[None, :], device=self.device,
+                         dtype=torch.float32),
                      "timestamps": torch.tensor(main_timestamps[None, :], device=self.device, dtype=torch.float32),
                      "delta_t": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
                      "delta_t_real": torch.tensor(np.array(delta_t_list, dtype=np.float32)[None, :], device=self.device, dtype=torch.float32),
@@ -2301,6 +2314,9 @@ class MotionBaseModelMF(BaseModelMF):
                     "current_delta_t_effective"],
                 "motion_main_valid_mask": data_dict["valid_mask"],
                 "motion_main_anchor": torch.tensor(
+                    coordinate_anchor[None, :],
+                    device=self.device, dtype=torch.float32),
+                "motion_source_anchor": torch.tensor(
                     coordinate_anchor[None, :],
                     device=self.device, dtype=torch.float32),
             })

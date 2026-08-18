@@ -18,10 +18,12 @@ extension-only points; B3 may apply a bounded residual only after a matching
 held-out calibration artifact passes the empirical risk gates. Every other case
 returns the B0 observation exactly.
 
-The implementation is complete, but the new method has not yet passed its
-preflight, promotion, seed-42, or multi-seed experiments. Therefore this
-repository does not currently claim a gain, statistical stability, SOTA, or a
-causal benefit from physical time or memory.
+The seed-42 B0 2x2 development study is archived; the causal audit additionally
+requires GT-free online histories (`ct_recursive_reseed_enabled=false`). The
+new method has not yet passed acquisition preflight, module promotion, formal
+four-arm seed-42, or multi-seed experiments. Therefore this repository does not
+currently claim a gain, statistical stability, SOTA, or a causal benefit from
+physical time or memory.
 
 ## Paper-facing components
 
@@ -54,6 +56,8 @@ Configurations are under `cfgs/ct_seqtrack/`:
 - `24_b0.yaml`
 - `24_b1.yaml`
 - `24_full_minus_b3.yaml`
+- `24_full_minus_b3_causal_uniform.yaml`
+- `24_full_minus_b3_presence_c0.yaml`
 - `24_full.yaml`
 - `24_full_cv.yaml`
 - `24_full_minus_b3_cv.yaml`
@@ -81,9 +85,10 @@ margins; learned sigma remains a B3 feature and an analysis target.
   signed by the acquisition preflight artifact.
 - Vote/raw-center regression is active only for rows whose extension contains
   target points.
-- An absent-target row trains presence-negative only; it cannot regress the GT
-  center.
-- GT-guided auxiliary rows update B2 only and cannot train presence or B3.
+- An absent-target row trains targetness/background and presence-negative; it
+  cannot regress the GT center.
+- c1/c2 are selected from live-B1 temporal gaps without GT; they update B1/B2,
+  train presence, and never update B0/B3 or the recursive state.
 - Structural availability and evidence presence are separate conditions.
 - The no-extension counterfactual is exactly the observation.
 

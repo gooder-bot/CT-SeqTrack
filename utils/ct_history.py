@@ -181,3 +181,118 @@ def build_alternating_aux_history_offsets(
     gap = query_gaps[int(sample_index) % len(query_gaps)]
     return build_irregular_history_offsets(
         hist_num, gap, transition_gaps)
+
+
+def normalize_causal_temporal_gaps(gaps=(2, 4, 8)):
+    """Validate the registered temporal-candidate query gaps."""
+    values = [int(value) for value in gaps]
+    if len(values) < 2:
+        raise ValueError("causal temporal candidates require at least two gaps")
+    if any(value <= 1 for value in values):
+        raise ValueError("auxiliary temporal gaps must be greater than one")
+    if values != sorted(set(values)):
+        raise ValueError("causal temporal gaps must be unique and increasing")
+    return values
+
+
+def build_causal_temporal_history_offsets(hist_num, gap):
+    """Return the complete local history ``[g,g+1,...]`` for one gap."""
+    return build_irregular_history_offsets(hist_num, int(gap), [1])
+
+
+def select_causal_temporal_candidates(
+        boundary_ratios, available, *, boundary_band=0.2):
+    """Select deterministic boundary/outside roles without target labels.
+
+    Candidate 2 first takes the closest endpoint strictly outside the B0 crop.
+    Candidate 1 then takes the closest remaining endpoint to the boundary.  If
+    no endpoint is outside, the two largest ratios become boundary and fallback
+    outside roles.  Returned role ids are the serialized candidate ids 1/2.
+    """
+    ratios = {
+        int(gap): float(value) for gap, value in boundary_ratios.items()}
+    availability = {
+        int(gap): bool(value) for gap, value in available.items()}
+    if set(ratios) != set(availability):
+        raise ValueError("boundary ratios and availability must share gaps")
+    if not ratios:
+        raise ValueError("candidate selection requires at least one gap")
+    if any(not np.isfinite(value) or value < 0.0 for value in ratios.values()):
+        raise ValueError("boundary ratios must be finite and non-negative")
+    boundary_band = float(boundary_band)
+    if boundary_band < 0.0:
+        raise ValueError("boundary band must be non-negative")
+
+    valid_gaps = sorted(gap for gap in ratios if availability[gap])
+    selected = {}
+    outside = sorted(
+        (gap for gap in valid_gaps if ratios[gap] > 1.0),
+        key=lambda gap: (ratios[gap] - 1.0, gap),
+    )
+    if outside:
+        outside_gap = outside[0]
+        selected[2] = outside_gap
+        remaining = [gap for gap in valid_gaps if gap != outside_gap]
+        if remaining:
+            selected[1] = min(
+                remaining, key=lambda gap: (abs(ratios[gap] - 1.0), gap))
+    else:
+        descending = sorted(valid_gaps, key=lambda gap: (-ratios[gap], gap))
+        if descending:
+            selected[1] = descending[0]
+        if len(descending) > 1:
+            selected[2] = descending[1]
+
+    result = {}
+    for role_id in (1, 2):
+        gap = selected.get(role_id)
+        ratio = 0.0 if gap is None else ratios[gap]
+        role_satisfied = (
+            abs(ratio - 1.0) <= boundary_band
+            if role_id == 1 else ratio > 1.0)
+        result[role_id] = {
+            "gap": gap,
+            "available": gap is not None,
+            "boundary_ratio": ratio,
+            "role_satisfied": bool(gap is not None and role_satisfied),
+        }
+    return result
+
+
+def select_uniform_temporal_candidates(
+        boundary_ratios, available, *, seed_parts=()):
+    """Choose up to two valid gaps uniformly without target/B1 ranking.
+
+    Hash ordering is deterministic for an online slot but changes with the
+    supplied epoch/tracklet/frame identity.  Boundary ratios are returned only
+    as diagnostics and never affect selection.
+    """
+    ratios = {
+        int(gap): float(value) for gap, value in boundary_ratios.items()}
+    availability = {
+        int(gap): bool(value) for gap, value in available.items()}
+    if set(ratios) != set(availability) or not ratios:
+        raise ValueError(
+            "uniform candidate ratios/availability must share non-empty gaps")
+    if any(not np.isfinite(value) or value < 0.0 for value in ratios.values()):
+        raise ValueError("boundary ratios must be finite and non-negative")
+    prefix = "::".join(str(value) for value in seed_parts)
+    valid_gaps = [gap for gap in sorted(ratios) if availability[gap]]
+    ordered = sorted(valid_gaps, key=lambda gap: (
+        hashlib.sha256(
+            f"causal-uniform::{prefix}::{gap}".encode("utf-8")
+        ).digest(),
+        gap,
+    ))
+    result = {}
+    for role_id in (1, 2):
+        gap = ordered[role_id - 1] if len(ordered) >= role_id else None
+        result[role_id] = {
+            "gap": gap,
+            "available": gap is not None,
+            "boundary_ratio": 0.0 if gap is None else ratios[gap],
+            # For the uniform control the registered role is simply
+            # "selected uniform auxiliary", not boundary/outside.
+            "role_satisfied": gap is not None,
+        }
+    return result

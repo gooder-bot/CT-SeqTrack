@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 
-REPLAY_SCHEMA_VERSION = 2
+REPLAY_SCHEMA_VERSION = 3
 B0_STATE_PREFIXES = (
     "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
     "motion_state_mlp.", "feature_pointnet.", "Transformer.",
@@ -18,6 +18,8 @@ B0_STATE_PREFIXES = (
 B1_STATE_PREFIXES = ("physical_motion_encoder.",)
 REPLAY_CONFIG_FIELDS = (
     "dataset", "category_name", "hist_num", "num_candidates",
+    "ct_candidate_policy", "ct_temporal_candidate_gaps",
+    "ct_temporal_boundary_band", "ct_recursive_candidate_views",
     "bb_scale", "bb_offset", "point_sample_size", "degrees",
     "observation_safe_bbox_size",
     "use_real_time", "default_time_step", "pseudo_time_step",
