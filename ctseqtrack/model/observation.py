@@ -229,6 +229,36 @@ def _observation_backbone(model, input_dict):
     if model.training and model.ct_b0_rng_shift_control:
         torch.rand((batch_size,), device=feature.device)
 
+    observation_box = delta_motion[:, -1, :]
+    center_gap = torch.linalg.norm(
+        coarse_box[:, :2].detach() - observation_box[:, :2].detach(), dim=1
+    )
+    yaw_gap = torch.atan2(
+        torch.sin(coarse_box[:, 3].detach() - observation_box[:, 3].detach()),
+        torch.cos(coarse_box[:, 3].detach() - observation_box[:, 3].detach()),
+    ).abs()
+    output["ct_b0_history_diagnostic"] = torch.stack(
+        (
+            torch.log1p(observation_aux["obs_num_points_search"].detach().clamp(min=0)),
+            torch.log1p(
+                observation_aux["obs_estimated_fg_points"].detach().clamp(min=0)
+            ),
+            observation_aux["obs_mean_fg_score"].detach(),
+            observation_aux["obs_segmentation_entropy"].detach(),
+            center_gap,
+            yaw_gap,
+        ),
+        dim=1,
+    )
+    output["ct_b0_history_diagnostic_valid"] = (
+        torch.isfinite(output["ct_b0_history_diagnostic"])
+        .all(dim=1)
+        .to(observation_box.dtype)
+    )
+    output["ct_b0_history_diagnostic"] = torch.nan_to_num(
+        output["ct_b0_history_diagnostic"]
+    )
+
     return {
         "output": output,
         "point_feature": point_feature,
@@ -239,7 +269,7 @@ def _observation_backbone(model, input_dict):
         "motion_prediction": motion_prediction,
         "coarse_box": coarse_box,
         "updated_reference_boxes": delta_motion[:, :history_length, :],
-        "observation_box": delta_motion[:, -1, :],
+        "observation_box": observation_box,
         "batch_size": batch_size,
         "frame_count": frame_count,
         "chunk_size": chunk_size,
@@ -273,6 +303,12 @@ def _physical_prior(model, input_dict, context):
             input_dict["motion_main_delta_t"],
             input_dict["motion_main_valid_mask"],
             input_dict["motion_main_current_delta_t"],
+            history_observation_diagnostics=input_dict.get(
+                "motion_main_history_observation_diagnostics"
+            ),
+            history_diagnostic_valid_mask=input_dict.get(
+                "motion_main_history_diagnostic_valid_mask"
+            ),
         )
     if bool(getattr(model.config, "force_b1_invalid", False)):
         main_motion = dict(main_motion)
@@ -306,6 +342,19 @@ def _physical_prior(model, input_dict, context):
             "motion_prior_direction_xy": main_motion["motion_direction_xy"],
             "motion_prior_source_id": main_motion["source_id"],
             "motion_prior_gap_ratio": main_motion["gap_ratio"],
+            "motion_prior_mode_centers_xy": main_motion["mode_centers_xy"],
+            "motion_prior_mode_probabilities": main_motion["mode_probabilities"],
+            "motion_prior_motion_quantiles_pp": main_motion["motion_quantiles_pp"],
+            "motion_prior_support_quantiles_pp": main_motion["support_quantiles_pp"],
+            "motion_prior_recoverability_probability": main_motion[
+                "recoverability_probability"
+            ],
+            "motion_prior_expert_disagreement": main_motion["expert_disagreement"],
+            "motion_prior_residual_acceleration_pp": main_motion[
+                "residual_acceleration_pp"
+            ],
+            "motion_prior_residual_gate": main_motion["residual_gate"],
+            "motion_prior_expert_valid_mask": main_motion["expert_valid_mask"],
         }
     )
     if (
@@ -318,6 +367,12 @@ def _physical_prior(model, input_dict, context):
             input_dict["motion_aux_delta_t"],
             input_dict["motion_aux_valid_mask"],
             input_dict["motion_aux_current_delta_t"],
+            history_observation_diagnostics=input_dict.get(
+                "motion_aux_history_observation_diagnostics"
+            ),
+            history_diagnostic_valid_mask=input_dict.get(
+                "motion_aux_history_diagnostic_valid_mask"
+            ),
         )
         output.update(
             {
@@ -332,6 +387,29 @@ def _physical_prior(model, input_dict, context):
                 ],
                 "motion_aux_prior_direction_xy": auxiliary_motion[
                     "motion_direction_xy"
+                ],
+                "motion_aux_prior_mode_centers_xy": auxiliary_motion["mode_centers_xy"],
+                "motion_aux_prior_mode_probabilities": auxiliary_motion[
+                    "mode_probabilities"
+                ],
+                "motion_aux_prior_motion_quantiles_pp": auxiliary_motion[
+                    "motion_quantiles_pp"
+                ],
+                "motion_aux_prior_support_quantiles_pp": auxiliary_motion[
+                    "support_quantiles_pp"
+                ],
+                "motion_aux_prior_recoverability_probability": auxiliary_motion[
+                    "recoverability_probability"
+                ],
+                "motion_aux_prior_expert_disagreement": auxiliary_motion[
+                    "expert_disagreement"
+                ],
+                "motion_aux_prior_residual_acceleration_pp": auxiliary_motion[
+                    "residual_acceleration_pp"
+                ],
+                "motion_aux_prior_residual_gate": auxiliary_motion["residual_gate"],
+                "motion_aux_prior_expert_valid_mask": auxiliary_motion[
+                    "expert_valid_mask"
                 ],
             }
         )

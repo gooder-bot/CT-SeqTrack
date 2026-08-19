@@ -537,8 +537,8 @@ class B3SelectiveUpdater(nn.Module):
         # evidence(32), presence(2), coarse/refined agreement(2),
         # observation/prior disagreement(3), observation/evidence
         # disagreement(3), uncertainty(2), dt/gap/age(3), observation
-        # statistics(5), point evidence(6).
-        input_dim = 32 + 2 + 2 + 3 + 3 + 2 + 3 + int(observation_stats_dim) + 6
+        # statistics(5), point evidence(6), RA-PMM risk features(8).
+        input_dim = 32 + 2 + 2 + 3 + 3 + 2 + 3 + int(observation_stats_dim) + 6 + 8
         self.risk_trunk = nn.Sequential(
             nn.Linear(input_dim, int(hidden_dim)),
             nn.GELU(),
@@ -601,6 +601,12 @@ class B3SelectiveUpdater(nn.Module):
         targetness_max=None,
         h1_utility_logit=None,
         h1_expected_gain=None,
+        b1_recoverability=None,
+        b1_motion_q95=None,
+        b1_support_q95=None,
+        b1_mode_probabilities=None,
+        b1_expert_disagreement=None,
+        b1_support_saturation=None,
     ):
         observation = observation_box.detach()
         raw = raw_box.detach()
@@ -651,6 +657,30 @@ class B3SelectiveUpdater(nn.Module):
             ),
             dim=1,
         )
+        if b1_mode_probabilities is None:
+            mode_entropy = column(None)
+        else:
+            mode_probability = b1_mode_probabilities.detach().clamp(min=1e-8)
+            mode_entropy = -(mode_probability * torch.log(mode_probability)).sum(
+                dim=1, keepdim=True
+            )
+
+        def two_columns(value):
+            if value is None:
+                return observation.new_zeros((batch_size, 2))
+            return torch.nan_to_num(value.detach().reshape(batch_size, 2))
+
+        ra_pmm_risk = torch.cat(
+            (
+                column(b1_recoverability),
+                torch.log1p(two_columns(b1_motion_q95).clamp(min=0.0)),
+                torch.log1p(two_columns(b1_support_q95).clamp(min=0.0)),
+                mode_entropy,
+                column(b1_expert_disagreement),
+                column(b1_support_saturation),
+            ),
+            dim=1,
+        )
         features = torch.cat(
             (
                 evidence,
@@ -665,6 +695,7 @@ class B3SelectiveUpdater(nn.Module):
                 torch.log1p(age).unsqueeze(1),
                 torch.nan_to_num(observation_stats.detach()),
                 point_evidence,
+                ra_pmm_risk,
             ),
             dim=1,
         )

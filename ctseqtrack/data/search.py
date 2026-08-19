@@ -5,6 +5,8 @@ import math
 
 import numpy as np
 
+from ctseqtrack.data.multimodal_support import select_secondary_expert
+
 
 def _finite_positive(value, fallback):
     try:
@@ -471,7 +473,8 @@ def build_b1_uncertainty_support(
     standardized_residual_quantile=(1.0, 1.0),
     min_direction_speed=0.2,
     max_length=24.0,
-    max_width=10.0
+    max_width=10.0,
+    max_margins=(4.0, 3.0),
 ):
     """Pure B1-to-support contract shared by training and inference.
 
@@ -502,16 +505,36 @@ def build_b1_uncertainty_support(
             "source_id": int(prediction.get("source_id", 1)),
         }
     if bool(use_dynamic_sigma):
-        log_sigma = np.asarray(
-            prediction.get("log_sigma_parallel_perp"), dtype=np.float64
-        )
-        if log_sigma.size != 2 or not np.isfinite(log_sigma).all():
-            return None, {
-                "valid": False,
-                "reason": "invalid_dynamic_sigma",
-                "source_id": int(prediction.get("source_id", 1)),
-            }
-        sigma = np.exp(log_sigma.reshape(2)) * residual_quantile
+        support_quantiles = prediction.get("support_quantiles_pp")
+        if support_quantiles is not None:
+            support_quantiles = np.asarray(support_quantiles, dtype=np.float64)
+            if (
+                support_quantiles.shape != (3, 2)
+                or not np.isfinite(support_quantiles).all()
+            ):
+                return None, {
+                    "valid": False,
+                    "reason": "invalid_support_quantiles",
+                    "source_id": int(prediction.get("source_id", 1)),
+                }
+            minimum = np.asarray(fixed_margins, dtype=np.float64).reshape(2)
+            maximum = np.asarray(max_margins, dtype=np.float64).reshape(2)
+            requested_margin = support_quantiles[2]
+            margin = np.clip(requested_margin, minimum, maximum)
+            sigma = margin / scale
+            support_saturated = bool(np.any(requested_margin > maximum))
+        else:
+            log_sigma = np.asarray(
+                prediction.get("log_sigma_parallel_perp"), dtype=np.float64
+            )
+            if log_sigma.size != 2 or not np.isfinite(log_sigma).all():
+                return None, {
+                    "valid": False,
+                    "reason": "invalid_dynamic_sigma",
+                    "source_id": int(prediction.get("source_id", 1)),
+                }
+            sigma = np.exp(log_sigma.reshape(2)) * residual_quantile
+            support_saturated = False
     else:
         margins = np.asarray(fixed_margins, dtype=np.float64).reshape(-1)
         if margins.size != 2 or not np.isfinite(margins).all():
@@ -537,6 +560,15 @@ def build_b1_uncertainty_support(
     diagnostics["standardized_residual_quantile"] = residual_quantile.astype(
         np.float64
     ).tolist()
+    diagnostics["support_saturated"] = bool(
+        support_saturated if bool(use_dynamic_sigma) else False
+    )
+    diagnostics["recoverability_probability"] = float(
+        prediction.get("recoverability_probability", 0.0)
+    )
+    diagnostics["expert_disagreement"] = float(
+        prediction.get("expert_disagreement", 0.0)
+    )
     return support, diagnostics
 
 
@@ -554,13 +586,15 @@ def resolve_b1_search_support(
     min_direction_speed=0.2,
     max_length=24.0,
     max_width=10.0,
+    max_margins=(4.0, 3.0),
+    enable_top2_tube=False,
     fallback_max_speed=20.0,
     fallback_max_acceleration=8.0,
     fallback_max_displacement=12.0,
     fallback_acceleration_weight=0.5,
     fallback_max_yaw_rate=math.pi / 2.0,
     fallback_min_displacement=0.2,
-    fallback_require_recent_transition=False
+    fallback_require_recent_transition=False,
 ):
     """Resolve the identical B1/fallback/base-only support in all paths."""
     query_delta_t = float(delta_t[0]) if len(delta_t) else 0.0
@@ -579,6 +613,7 @@ def resolve_b1_search_support(
             min_direction_speed=min_direction_speed,
             max_length=max_length,
             max_width=max_width,
+            max_margins=max_margins,
         )
         if support is not None:
             diagnostics.update(
@@ -705,6 +740,55 @@ def resolve_joint_search_geometry(history_boxes, delta_t, valid_mask, **kwargs):
             "tube_support_center": np.asarray(tube.center, dtype=np.float64).copy(),
         }
     )
+    prediction = kwargs.get("prediction")
+    if (
+        prior_source == "b1"
+        and bool(kwargs.get("enable_top2_tube", False))
+        and isinstance(prediction, dict)
+    ):
+        scale = max(float(kwargs.get("coverage_scale", 1.0)), 1e-6)
+        secondary = select_secondary_expert(
+            prediction,
+            fixed_margins,
+            np.asarray(kwargs.get("max_margins", (4.0, 3.0))),
+            scale,
+            (
+                diagnostics.get("sigma_parallel", fixed_margins[0]),
+                diagnostics.get("sigma_perpendicular", fixed_margins[1]),
+            ),
+        )
+        if secondary is not None:
+            center = secondary["center_xy"]
+            secondary_tube, secondary_diagnostics = build_uncertainty_prior_tube(
+                latest,
+                center,
+                np.maximum(secondary["margin"], 1e-3) / scale,
+                center / max(float(diagnostics.get("query_delta_t", 0.0)), 1e-3),
+                valid=True,
+                coverage_scale=scale,
+                min_direction_speed=float(kwargs.get("min_direction_speed", 0.2)),
+                max_length=float(kwargs.get("max_length", 24.0)),
+                max_width=float(kwargs.get("max_width", 10.0)),
+                source_id=1,
+                direction_xy=center,
+            )
+            if secondary_tube is not None:
+                diagnostics.update(
+                    {
+                        "top2_tube_active": True,
+                        "secondary_tube_probability": secondary["probability"],
+                        "secondary_tube_separation": secondary["separation"],
+                        "secondary_tube_quota_fraction": secondary["quota_fraction"],
+                        "_secondary_tube": secondary_tube,
+                        "secondary_tube_length": secondary_diagnostics.get(
+                            "length", 0.0
+                        ),
+                        "secondary_tube_width": secondary_diagnostics.get(
+                            "width", 0.0
+                        ),
+                    }
+                )
+    diagnostics.setdefault("top2_tube_active", False)
     return endpoint, tube, diagnostics
 
 
@@ -880,6 +964,8 @@ def sample_joint_novel_extensions(
     tube_points,
     endpoint_quota=128,
     tube_quota=128,
+    secondary_tube_points=None,
+    secondary_tube_fraction=0.0,
     seed=None,
     tolerance=1e-6,
 ):
@@ -894,16 +980,30 @@ def sample_joint_novel_extensions(
     baseline_points = np.asarray(baseline_points)
     endpoint_points = np.asarray(endpoint_points)
     tube_points = np.asarray(tube_points)
+    secondary_tube_points = (
+        np.empty((0, tube_points.shape[1]), dtype=tube_points.dtype)
+        if secondary_tube_points is None
+        else np.asarray(secondary_tube_points)
+    )
     endpoint_quota = int(endpoint_quota)
     tube_quota = int(tube_quota)
     if endpoint_quota <= 0 or tube_quota <= 0:
         raise ValueError("endpoint and tube quotas must be positive")
     if any(
-        points.ndim != 2 for points in (baseline_points, endpoint_points, tube_points)
+        points.ndim != 2
+        for points in (
+            baseline_points,
+            endpoint_points,
+            tube_points,
+            secondary_tube_points,
+        )
     ):
         raise ValueError("search point arrays must have shape [N, C]")
     if not (
-        baseline_points.shape[1] == endpoint_points.shape[1] == tube_points.shape[1]
+        baseline_points.shape[1]
+        == endpoint_points.shape[1]
+        == tube_points.shape[1]
+        == secondary_tube_points.shape[1]
     ):
         raise ValueError("baseline, endpoint and tube points must share channels")
 
@@ -914,6 +1014,28 @@ def sample_joint_novel_extensions(
         return np.rint(points[:, :coordinate_dims] / tolerance).astype(np.int64)
 
     baseline_keys = {tuple(row) for row in keys(baseline_points)}
+    rng = np.random.default_rng(seed)
+    secondary_fraction = float(np.clip(secondary_tube_fraction, 0.0, 1.0))
+    if len(secondary_tube_points) and secondary_fraction > 0.0:
+        primary_quota = int(round(tube_quota * (1.0 - secondary_fraction)))
+        secondary_quota = tube_quota - primary_quota
+
+        def quota_sample(points, quota):
+            if len(points) <= quota:
+                return points
+            return points[rng.choice(len(points), size=quota, replace=False)]
+
+        primary = quota_sample(tube_points, primary_quota)
+        secondary = quota_sample(secondary_tube_points, secondary_quota)
+        primary_shortfall = max(0, primary_quota - len(primary))
+        secondary_shortfall = max(0, secondary_quota - len(secondary))
+        if primary_shortfall and len(secondary_tube_points) > len(secondary):
+            secondary = quota_sample(
+                secondary_tube_points, secondary_quota + primary_shortfall
+            )
+        if secondary_shortfall and len(tube_points) > len(primary):
+            primary = quota_sample(tube_points, primary_quota + secondary_shortfall)
+        tube_points = np.concatenate((primary, secondary), axis=0)
     merged = {}
     branch_available = {1: 0, 2: 0}
     for branch_id, points in ((1, endpoint_points), (2, tube_points)):
@@ -931,7 +1053,6 @@ def sample_joint_novel_extensions(
 
     endpoint_candidates = [value for value in merged.values() if value[1] in (1, 3)]
     tube_candidates = [value for value in merged.values() if value[1] == 2]
-    rng = np.random.default_rng(seed)
 
     def select(values, quota):
         if len(values) <= quota:

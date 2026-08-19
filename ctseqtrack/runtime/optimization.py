@@ -903,6 +903,11 @@ def ct_training_step(self, batch, batch_idx):
             batch_size=log_batch_size,
         )
 
+    if self.ct_separate_optimizers:
+        # The optimizer transaction owns the authoritative post-backward grad
+        # norm and step counters; populate them before serializing this step.
+        self._ct_isolated_optimizer_step(loss_dict, auxiliary_gradients)
+
     log_dict = {k: v.item() for k, v in loss_dict.items()}
 
     self.logger.experiment.add_scalars("loss", log_dict, global_step=self.global_step)
@@ -921,6 +926,5 @@ def ct_training_step(self, batch, batch_idx):
         self._commit_online_recursive_predictions(output)
 
     if self.ct_separate_optimizers:
-        self._ct_isolated_optimizer_step(loss_dict, auxiliary_gradients)
         return loss.detach()
     return loss

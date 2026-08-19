@@ -123,10 +123,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
     @torch.no_grad()
     def predict_motion_from_history(
-        self, ref_boxs, delta_t, valid_mask, current_delta_t
+        self,
+        ref_boxs,
+        delta_t,
+        valid_mask,
+        current_delta_t,
+        history_observation_diagnostics=None,
+        history_diagnostic_valid_mask=None,
     ):
         return predict_motion_from_history(
-            self, ref_boxs, delta_t, valid_mask, current_delta_t
+            self,
+            ref_boxs,
+            delta_t,
+            valid_mask,
+            current_delta_t,
+            history_observation_diagnostics,
+            history_diagnostic_valid_mask,
         )
 
     def _build_motion_prepass_inputs_contract(
@@ -140,6 +152,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         effective_current_timestamp,
         dynamics_time_mode_value,
         current_frame_id,
+        history_observation_diagnostics=None,
+        history_diagnostic_valid_mask=None,
     ):
         return build_motion_prepass_inputs(
             self,
@@ -152,6 +166,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             effective_current_timestamp,
             dynamics_time_mode_value,
             current_frame_id,
+            history_observation_diagnostics,
+            history_diagnostic_valid_mask,
         )
 
     def _empty_motion_prepass_prediction(self):
@@ -173,6 +189,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         effective_current_timestamp,
         dynamics_time_mode_value,
         current_frame_id,
+        history_observation_diagnostics=None,
+        history_diagnostic_valid_mask=None,
     ):
         return predict_motion_prepass_contract(
             self,
@@ -185,11 +203,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             effective_current_timestamp,
             dynamics_time_mode_value,
             current_frame_id,
+            history_observation_diagnostics,
+            history_diagnostic_valid_mask,
         )
 
     @torch.no_grad()
-    def predict_motion_prepass(self, sequence, frame_id, results_bbs):
-        return predict_motion_prepass(self, sequence, frame_id, results_bbs)
+    def predict_motion_prepass(
+        self, sequence, frame_id, results_bbs, recursive_state=None
+    ):
+        return predict_motion_prepass(
+            self, sequence, frame_id, results_bbs, recursive_state=recursive_state
+        )
 
     def _ct_plugin_parameter(self, name):
         return (

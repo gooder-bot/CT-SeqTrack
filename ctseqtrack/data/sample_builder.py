@@ -428,6 +428,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         (0, baseline_search_points.shape[1]),
         dtype=baseline_search_points.dtype,
     )
+    secondary_expanded_search_points = np.empty_like(expanded_search_points)
     use_trajectory_search = use_ct_joint_full and not observation_only
     if use_trajectory_search:
         search_history_mode = (
@@ -553,6 +554,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             ),
             max_length=float(search_config_value("max_length", 24.0)),
             max_width=float(search_config_value("max_width", 10.0)),
+            max_margins=(
+                float(getattr(config, "motion_v3_support_cap_parallel", 4.0)),
+                float(getattr(config, "motion_v3_support_cap_perpendicular", 3.0)),
+            ),
+            enable_top2_tube=bool(getattr(config, "search_v3_enable_top2_tube", False)),
             fallback_max_speed=float(search_config_value("max_speed", 20.0)),
             fallback_max_acceleration=float(
                 search_config_value("max_acceleration", 8.0)
@@ -587,6 +593,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 this_pc, ct_search_box, ref_boxs[0], scale=1.0, offset=0.0
             )
             expanded_search_points = expanded_search_pc.points.T
+            secondary_tube = search_v2_diagnostics.get("_secondary_tube")
+            if secondary_tube is not None:
+                secondary_pc = points_utils.generate_subwindow_with_aroundboxs(
+                    this_pc, secondary_tube, ref_boxs[0], scale=1.0, offset=0.0
+                )
+                secondary_expanded_search_points = secondary_pc.points.T
         if search_v2_box is not None:
             learned_prior_support = search_v2_diagnostics.get("prior_source") == "b1"
             search_v2_expanded_pc = points_utils.generate_subwindow_with_aroundboxs(

@@ -1,0 +1,8 @@
+# RA-PMM Full scratch arm. Populate GT-only hard q50/q90 from the server preflight.
+_base_: ../25_full.yaml
+experiment_name: ct25_full_ra_pmm_scratch_seed42
+motion_v3_ra_pmm: true
+motion_v3_require_hard_statistics: true
+motion_v3_nll_weight: 0.0
+motion_v3_aux_nll_weight: 0.0
+search_v3_use_dynamic_sigma: true

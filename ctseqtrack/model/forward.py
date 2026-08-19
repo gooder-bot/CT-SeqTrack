@@ -121,6 +121,14 @@ def forward_contract_v3(
         source=input_dict["search_v3_prior_source_id"]
         .to(current_base_features.device)
         .detach(),
+        mode_centers_xy=main_motion["mode_centers_xy"].detach(),
+        mode_probabilities=main_motion["mode_probabilities"].detach(),
+        motion_quantiles_pp=main_motion["motion_quantiles_pp"].detach(),
+        support_quantiles_pp=main_motion["support_quantiles_pp"].detach(),
+        recoverability_probability=main_motion["recoverability_probability"].detach(),
+        expert_disagreement=main_motion["expert_disagreement"].detach(),
+        residual_acceleration_pp=main_motion["residual_acceleration_pp"].detach(),
+        residual_gate=main_motion["residual_gate"].detach(),
     )
     prior_contract = reexpress_motion_prior(
         canonical_prior_contract,
@@ -215,6 +223,20 @@ def forward_contract_v3(
                 extension_voxel_count=input_dict.get("ct_search_extension_voxels"),
                 targetness_mean=joint_output["ct_search_targetness_mean"],
                 targetness_max=joint_output["ct_search_targetness_max"],
+                b1_recoverability=prior_contract.recoverability_probability,
+                b1_motion_q95=(
+                    None
+                    if prior_contract.motion_quantiles_pp is None
+                    else prior_contract.motion_quantiles_pp[:, 2]
+                ),
+                b1_support_q95=(
+                    None
+                    if prior_contract.support_quantiles_pp is None
+                    else prior_contract.support_quantiles_pp[:, 2]
+                ),
+                b1_mode_probabilities=prior_contract.mode_probabilities,
+                b1_expert_disagreement=prior_contract.expert_disagreement,
+                b1_support_saturation=input_dict.get("search_v3_support_saturated"),
             )
     else:
         dt = (

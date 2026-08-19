@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
 from pathlib import Path
 
 import torch
@@ -56,6 +58,33 @@ def apply_b1_calibration_contract(model, payload, state_dict):
             model.config.search_v3_fixed_margin_parallel = float(margins[0])
             model.config.search_v3_fixed_margin_perpendicular = float(margins[1])
     return calibration
+
+
+def apply_b1_quantile_calibration_contract(model):
+    path = getattr(model, "motion_v3_quantile_calibration_path", None)
+    required = bool(getattr(model, "motion_v3_require_quantile_calibration", False))
+    if not path:
+        if required:
+            raise RuntimeError("RA-PMM evaluation requires a quantile artifact")
+        return None
+    artifact = json.loads(Path(path).read_text(encoding="utf-8"))
+    if artifact.get("schema") != "ct_seqtrack.b1_quantile_calibration.v1":
+        raise RuntimeError("unsupported RA-PMM quantile calibration schema")
+    if artifact.get("produces_checkpoint") is not False:
+        raise RuntimeError("quantile calibration artifact may not produce checkpoints")
+    if required and not bool(artifact.get("promotion", {}).get("passed")):
+        raise RuntimeError("RA-PMM quantile calibration did not pass audit")
+    inflation = float(artifact.get("global_inflation", float("nan")))
+    if not math.isfinite(inflation) or inflation < 1.0:
+        raise RuntimeError("invalid RA-PMM quantile inflation")
+    encoder = getattr(model, "physical_motion_encoder", None)
+    if encoder is None or not bool(getattr(encoder, "ra_pmm", False)):
+        raise RuntimeError("quantile calibration requires an RA-PMM encoder")
+    log_scale = math.log(inflation)
+    encoder.set_motion_quantile_calibration([log_scale, log_scale])
+    encoder.set_support_quantile_calibration([log_scale, log_scale])
+    model._b1_quantile_calibration = copy.deepcopy(artifact)
+    return artifact
 
 
 def load_evaluation_weights(model, checkpoint_path, report_path=None):
@@ -129,6 +158,7 @@ def load_evaluation_weights(model, checkpoint_path, report_path=None):
     target.update(matched)
     model.load_state_dict(target, strict=True)
     apply_b1_calibration_contract(model, payload, normalized)
+    apply_b1_quantile_calibration_contract(model)
     return {
         "checkpoint": str(Path(checkpoint_path)),
         "selected_prefix_strip": selected_prefix,

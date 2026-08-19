@@ -7,15 +7,70 @@ import numpy as np
 from nuscenes.utils import geometry_utils
 
 from datasets import points_utils
+from datasets.misc_utils import normalize_timestamp
 from utils.metrics import estimateAccuracy, estimateOverlap
 
 
 def build_ct_joint_diagnostic_row(
-    self, output, data_dict, this_box, reference_box, frame_id
+    self,
+    output,
+    data_dict,
+    this_box,
+    reference_box,
+    frame_id,
+    previous_ground_truth_box=None,
+    older_ground_truth_box=None,
+    previous_ground_truth_delta_t=None,
 ):
     """Export paper-facing joint-Full diagnostics; GT stays outside forward."""
     target_box = points_utils.transform_box(this_box, reference_box)
     target_xy = np.asarray(target_box.center[:2], dtype=np.float64)
+    if previous_ground_truth_box is None:
+        physical_target_xy = target_xy.copy()
+    else:
+        world_physical_displacement = np.asarray(
+            this_box.center, dtype=np.float64
+        ) - np.asarray(previous_ground_truth_box.center, dtype=np.float64)
+        physical_target_xy = (
+            np.asarray(reference_box.rotation_matrix, dtype=np.float64).T
+            @ world_physical_displacement
+        )[:2]
+    anchor_drift_xy = target_xy - physical_target_xy
+    gt_cv_difficulty = float("nan")
+    if older_ground_truth_box is not None and previous_ground_truth_box is not None:
+        current_dt = max(
+            self._proposal_scalar(
+                data_dict,
+                "search_v3_query_delta_t",
+                default=self._proposal_scalar(
+                    data_dict, "motion_main_physical_delta_t", default=0.5
+                ),
+            ),
+            1e-3,
+        )
+        if isinstance(previous_ground_truth_delta_t, (tuple, list)):
+            newest_timestamp = normalize_timestamp(previous_ground_truth_delta_t[0])
+            older_timestamp = normalize_timestamp(previous_ground_truth_delta_t[1])
+            previous_dt = (
+                newest_timestamp - older_timestamp
+                if newest_timestamp is not None and older_timestamp is not None
+                else current_dt
+            )
+        else:
+            previous_dt = float(previous_ground_truth_delta_t or current_dt)
+        previous_dt = max(previous_dt, 1e-3)
+        previous_world_displacement = np.asarray(
+            previous_ground_truth_box.center[:2], dtype=np.float64
+        ) - np.asarray(older_ground_truth_box.center[:2], dtype=np.float64)
+        current_world_displacement = np.asarray(
+            this_box.center[:2], dtype=np.float64
+        ) - np.asarray(previous_ground_truth_box.center[:2], dtype=np.float64)
+        cv_error = np.linalg.norm(
+            current_world_displacement
+            - previous_world_displacement * (current_dt / previous_dt)
+        )
+        dt_floor = float(getattr(self.config, "motion_v3_dt_floor", 0.05))
+        gt_cv_difficulty = float(2.0 * cv_error / max(current_dt, dt_floor) ** 2)
 
     def xy(key, fallback):
         value = output.get(key)
@@ -158,7 +213,7 @@ def build_ct_joint_diagnostic_row(
             perpendicular_np = np.asarray(
                 (-direction_np[1], direction_np[0]), dtype=np.float64
             )
-            learned_error_xy = target_xy - learned
+            learned_error_xy = physical_target_xy - learned
             aligned_error = np.asarray(
                 (
                     np.dot(learned_error_xy, direction_np),
@@ -207,6 +262,76 @@ def build_ct_joint_diagnostic_row(
             dim=self.config.IoU_space,
             up_axis=self.config.up_axis,
         )
+    )
+    direction_np = (
+        direction.detach().cpu().numpy().reshape(-1, 2)[0]
+        if direction is not None
+        else np.asarray((1.0, 0.0), dtype=np.float64)
+    )
+    direction_np = direction_np / max(float(np.linalg.norm(direction_np)), 1e-8)
+    perpendicular_np = np.asarray((-direction_np[1], direction_np[0]))
+    physical_aligned_error = np.abs(
+        np.asarray(
+            (
+                np.dot(physical_target_xy - learned, direction_np),
+                np.dot(physical_target_xy - learned, perpendicular_np),
+            )
+        )
+    )
+    support_aligned_error = np.abs(
+        np.asarray(
+            (
+                np.dot(target_xy - learned, direction_np),
+                np.dot(target_xy - learned, perpendicular_np),
+            )
+        )
+    )
+
+    def quantiles(key):
+        value = output.get(key)
+        if value is None:
+            return np.full((3, 2), np.nan, dtype=np.float64)
+        return value.detach().cpu().numpy().reshape(-1, 3, 2)[0]
+
+    motion_quantiles = quantiles("motion_prior_motion_quantiles_pp")
+    support_quantiles = quantiles("motion_prior_support_quantiles_pp")
+    mode_probability_value = output.get("motion_prior_mode_probabilities")
+    mode_centers_value = output.get("motion_prior_mode_centers_xy")
+    if mode_probability_value is not None and mode_centers_value is not None:
+        mode_probability_np = (
+            mode_probability_value.detach().cpu().numpy().reshape(-1, 3)[0]
+        )
+        mode_centers_np = mode_centers_value.detach().cpu().numpy().reshape(-1, 3, 2)[0]
+        expert_errors = np.linalg.norm(
+            mode_centers_np - physical_target_xy[None, :], axis=1
+        )
+        expert_order = np.argsort(expert_errors)
+        expert_ratio = float(
+            expert_errors[expert_order[0]] / max(expert_errors[expert_order[1]], 1e-6)
+        )
+        mode_oracle_regret = float(
+            np.linalg.norm(
+                np.sum(mode_probability_np[:, None] * mode_centers_np, axis=0)
+                - physical_target_xy
+            )
+            - expert_errors[expert_order[0]]
+        )
+        selected_expert = int(np.argmax(mode_probability_np))
+    else:
+        mode_probability_np = np.asarray((1.0, 0.0, 0.0))
+        expert_ratio = float("nan")
+        mode_oracle_regret = float("nan")
+        selected_expert = 0
+    support_cap = np.asarray(
+        (
+            getattr(self.config, "motion_v3_support_cap_parallel", 4.0),
+            getattr(self.config, "motion_v3_support_cap_perpendicular", 3.0),
+        ),
+        dtype=np.float64,
+    )
+    recoverable = bool(np.all(support_aligned_error <= support_cap))
+    boundary_band = bool(
+        recoverable and np.any(support_aligned_error >= 0.8 * support_cap)
     )
     return {
         "frame_id": int(frame_id),
@@ -269,6 +394,27 @@ def build_ct_joint_diagnostic_row(
             base_foreground + endpoint_foreground + tube_foreground
         ),
         "recursive_age": self._proposal_scalar(data_dict, "ct_recursive_state_age"),
+        "b0_history_diagnostic_valid": self._proposal_scalar(
+            data_dict, "motion_main_history_diagnostic_valid_mask", column=0
+        ),
+        "b0_history_log_search_points": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=0
+        ),
+        "b0_history_log_foreground_points": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=1
+        ),
+        "b0_history_mean_foreground_score": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=2
+        ),
+        "b0_history_segmentation_entropy": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=3
+        ),
+        "b0_history_center_disagreement": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=4
+        ),
+        "b0_history_yaw_disagreement": self._proposal_scalar(
+            data_dict, "motion_main_history_observation_diagnostics", column=5
+        ),
         "support_actual_length": self._proposal_scalar(
             data_dict, "search_v3_support_actual_extent", column=0
         ),
@@ -294,7 +440,13 @@ def build_ct_joint_diagnostic_row(
         "recovery_fallback": int(
             self._proposal_scalar(data_dict, "ct_recovery_fallback") > 0.0
         ),
-        "query_delta_t": self._proposal_scalar(data_dict, "search_v3_query_delta_t"),
+        "query_delta_t": self._proposal_scalar(
+            data_dict,
+            "search_v3_query_delta_t",
+            default=self._proposal_scalar(
+                data_dict, "motion_main_physical_delta_t", default=0.5
+            ),
+        ),
         "gap_ratio": self._proposal_scalar(
             data_dict, "search_v3_gap_ratio", default=1.0
         ),
@@ -344,8 +496,45 @@ def build_ct_joint_diagnostic_row(
                 up_axis=self.config.up_axis,
             )
         ),
-        "kinematic_error": float(np.linalg.norm(kinematic - target_xy)),
-        "learned_motion_error": float(np.linalg.norm(learned - target_xy)),
+        "kinematic_error": float(np.linalg.norm(kinematic - physical_target_xy)),
+        "learned_motion_error": float(np.linalg.norm(learned - physical_target_xy)),
+        "b1_physical_error": float(np.linalg.norm(learned - physical_target_xy)),
+        "b1_endpoint_error": float(np.linalg.norm(learned - target_xy)),
+        "b1_anchor_drift_error": float(np.linalg.norm(anchor_drift_xy)),
+        "b1_gt_cv_difficulty": gt_cv_difficulty,
+        "b1_motion_q95_joint_covered": int(
+            np.isfinite(motion_quantiles[2]).all()
+            and np.all(physical_aligned_error <= motion_quantiles[2])
+        ),
+        "b1_support_q95_joint_covered": int(
+            np.isfinite(support_quantiles[2]).all()
+            and np.all(support_aligned_error <= support_quantiles[2])
+        ),
+        "b1_support_q95_capped_covered": int(
+            np.isfinite(support_quantiles[2]).all()
+            and np.all(
+                np.minimum(support_aligned_error, support_cap) <= support_quantiles[2]
+            )
+        ),
+        "b1_recoverable": int(recoverable),
+        "b1_boundary_band": int(boundary_band),
+        "b1_recoverability_probability": self._proposal_scalar(
+            output, "motion_prior_recoverability_probability"
+        ),
+        "b1_mode_entropy": float(
+            -np.sum(
+                mode_probability_np * np.log(np.clip(mode_probability_np, 1e-8, 1.0))
+            )
+        ),
+        "b1_mode_skip": int(np.isfinite(expert_ratio) and expert_ratio >= 0.9),
+        "b1_mode_oracle_regret": mode_oracle_regret,
+        "b1_selected_expert": selected_expert,
+        "b1_expert_disagreement": self._proposal_scalar(
+            output, "motion_prior_expert_disagreement"
+        ),
+        "support_saturated": int(
+            self._proposal_scalar(data_dict, "search_v3_support_saturated") > 0
+        ),
         "b1_valid": int(b1_valid and np.isfinite(b1_nll)),
         "b1_nll": b1_nll,
         "b1_mahalanobis_sq": b1_mahalanobis_sq,

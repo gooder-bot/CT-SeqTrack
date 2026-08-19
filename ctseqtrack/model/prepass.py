@@ -14,7 +14,15 @@ from datasets.misc_utils import (
 
 
 @torch.no_grad()
-def predict_motion_from_history(model, ref_boxs, delta_t, valid_mask, current_delta_t):
+def predict_motion_from_history(
+    model,
+    ref_boxs,
+    delta_t,
+    valid_mask,
+    current_delta_t,
+    history_observation_diagnostics=None,
+    history_diagnostic_valid_mask=None,
+):
     if not model.use_b1motion_v3:
         raise RuntimeError("predict_motion_from_history requires use_b1motion_v3")
     parameter = next(model.physical_motion_encoder.parameters())
@@ -27,6 +35,16 @@ def predict_motion_from_history(model, ref_boxs, delta_t, valid_mask, current_de
     delta_t = as_tensor(delta_t)
     valid_mask = as_tensor(valid_mask)
     current_delta_t = as_tensor(current_delta_t)
+    history_observation_diagnostics = (
+        None
+        if history_observation_diagnostics is None
+        else as_tensor(history_observation_diagnostics)
+    )
+    history_diagnostic_valid_mask = (
+        None
+        if history_diagnostic_valid_mask is None
+        else as_tensor(history_diagnostic_valid_mask)
+    )
     if ref_boxs.dim() == 2:
         ref_boxs = ref_boxs.unsqueeze(0)
     if delta_t.dim() == 1:
@@ -46,7 +64,12 @@ def predict_motion_from_history(model, ref_boxs, delta_t, valid_mask, current_de
         )
     else:
         prediction = model.physical_motion_encoder(
-            motion_ref_boxs, delta_t, valid_mask, current_delta_t
+            motion_ref_boxs,
+            delta_t,
+            valid_mask,
+            current_delta_t,
+            history_observation_diagnostics=history_observation_diagnostics,
+            history_diagnostic_valid_mask=history_diagnostic_valid_mask,
         )
     if bool(getattr(model.config, "force_b1_invalid", False)):
         prediction = dict(prediction)
@@ -66,6 +89,14 @@ def predict_motion_from_history(model, ref_boxs, delta_t, valid_mask, current_de
             "valid",
             "gap_ratio",
             "source_id",
+            "mode_centers_xy",
+            "mode_probabilities",
+            "motion_quantiles_pp",
+            "support_quantiles_pp",
+            "recoverability_probability",
+            "expert_disagreement",
+            "residual_acceleration_pp",
+            "residual_gate",
         )
     }
 
@@ -81,6 +112,8 @@ def build_motion_prepass_inputs(
     effective_current_timestamp,
     dynamics_time_mode_value,
     current_frame_id,
+    history_observation_diagnostics=None,
+    history_diagnostic_valid_mask=None,
 ):
     if int(current_frame_id) <= 0:
         raise ValueError("motion pre-pass is only defined after frame 0")
@@ -124,12 +157,21 @@ def build_motion_prepass_inputs(
             else local_box.orientation.radians * local_box.orientation.axis[-1]
         )
         local_rows.append(np.append(local_box.center, yaw).astype(np.float32))
-    return {
+    result = {
         "ref_boxs": np.stack(local_rows, axis=0),
         "delta_t": np.asarray(effective_delta_t, dtype=np.float32),
         "valid_mask": np.asarray(valid_mask, dtype=np.float32),
         "current_delta_t": np.float32(effective_delta_t[0]),
     }
+    if history_observation_diagnostics is not None:
+        result["history_observation_diagnostics"] = np.asarray(
+            history_observation_diagnostics, dtype=np.float32
+        )
+    if history_diagnostic_valid_mask is not None:
+        result["history_diagnostic_valid_mask"] = np.asarray(
+            history_diagnostic_valid_mask, dtype=np.float32
+        )
+    return result
 
 
 def empty_motion_prepass_prediction(model):
@@ -146,6 +188,16 @@ def empty_motion_prepass_prediction(model):
         "valid": False,
         "gap_ratio": 1.0,
         "source_id": 0,
+        "mode_centers_xy": np.zeros((3, 2), dtype=np.float32),
+        "mode_probabilities": np.asarray((1.0, 0.0, 0.0), dtype=np.float32),
+        "motion_quantiles_pp": np.zeros((3, 2), dtype=np.float32),
+        "support_quantiles_pp": np.asarray(
+            ((0.5, 0.25), (1.0, 0.5), (2.0, 1.0)), dtype=np.float32
+        ),
+        "recoverability_probability": 0.0,
+        "expert_disagreement": 0.0,
+        "residual_acceleration_pp": np.zeros(2, dtype=np.float32),
+        "residual_gate": 0.0,
         "current_delta_t": float(getattr(model.config, "default_time_step", 0.5)),
     }
 
@@ -199,6 +251,8 @@ def predict_motion_prepass_contract(
     effective_current_timestamp,
     dynamics_time_mode_value,
     current_frame_id,
+    history_observation_diagnostics=None,
+    history_diagnostic_valid_mask=None,
 ):
     inputs = build_motion_prepass_inputs(
         model,
@@ -211,6 +265,8 @@ def predict_motion_prepass_contract(
         effective_current_timestamp,
         dynamics_time_mode_value,
         current_frame_id,
+        history_observation_diagnostics,
+        history_diagnostic_valid_mask,
     )
     if inputs is None:
         return empty_motion_prepass_prediction(model)
@@ -220,6 +276,8 @@ def predict_motion_prepass_contract(
         inputs["delta_t"],
         inputs["valid_mask"],
         inputs["current_delta_t"],
+        inputs.get("history_observation_diagnostics"),
+        inputs.get("history_diagnostic_valid_mask"),
     )
     return unbatch_motion_prepass_predictions(prediction, [inputs["current_delta_t"]])[
         0
@@ -227,7 +285,7 @@ def predict_motion_prepass_contract(
 
 
 @torch.no_grad()
-def predict_motion_prepass(model, sequence, frame_id, results_bbs):
+def predict_motion_prepass(model, sequence, frame_id, results_bbs, recursive_state=None):
     """Predict before cropping without reading the current annotation."""
     if frame_id <= 0:
         raise ValueError("motion pre-pass is only defined after frame 0")
@@ -235,6 +293,12 @@ def predict_motion_prepass(model, sequence, frame_id, results_bbs):
     history_boxes = get_last_n_bounding_boxes(results_bbs, valid_mask)
     previous_frames = [sequence[index] for index in history_ids]
     current_frame = sequence[frame_id]
+    history_diagnostics = None
+    history_diagnostic_valid = None
+    if recursive_state is not None:
+        state_contract = recursive_state.history_contract(history_ids, valid_mask)
+        history_diagnostics = state_contract["history_observation_diagnostics"]
+        history_diagnostic_valid = state_contract["history_diagnostic_valid_mask"]
     return predict_motion_prepass_contract(
         model,
         history_boxes,
@@ -249,6 +313,8 @@ def predict_motion_prepass(model, sequence, frame_id, results_bbs):
             getattr(model.config, "dynamics_time_mode", "true"),
         ),
         frame_id,
+        history_diagnostics,
+        history_diagnostic_valid,
     )
 
 

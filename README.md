@@ -159,6 +159,10 @@ python main.py --cfg cfgs/ct_seqtrack/25_full.yaml \
   --b2_method_promotion B2_PROMOTION.json
 ```
 
+The reliability-aware physical mixture implementation and its checkpoint-free
+server preflight/calibration workflow are documented in
+[`docs/RA_PMM_B1.md`](docs/RA_PMM_B1.md).
+
 After Full training, export candidate action rows on held-out calibration
 tracklets and calibrate:
 

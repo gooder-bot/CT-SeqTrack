@@ -47,19 +47,33 @@ class MotionPriorOutput:
     log_sigma: Tensor
     valid: Tensor
     source: Tensor
+    mode_centers_xy: Optional[Tensor] = None
+    mode_probabilities: Optional[Tensor] = None
+    motion_quantiles_pp: Optional[Tensor] = None
+    support_quantiles_pp: Optional[Tensor] = None
+    recoverability_probability: Optional[Tensor] = None
+    expert_disagreement: Optional[Tensor] = None
+    residual_acceleration_pp: Optional[Tensor] = None
+    residual_gate: Optional[Tensor] = None
 
     def detached(self):
+        def detach(value):
+            return None if value is None else value.detach()
+
         return MotionPriorOutput(
-            *(
-                value.detach()
-                for value in (
-                    self.center_xy,
-                    self.direction_xy,
-                    self.log_sigma,
-                    self.valid,
-                    self.source,
-                )
-            )
+            center_xy=self.center_xy.detach(),
+            direction_xy=self.direction_xy.detach(),
+            log_sigma=self.log_sigma.detach(),
+            valid=self.valid.detach(),
+            source=self.source.detach(),
+            mode_centers_xy=detach(self.mode_centers_xy),
+            mode_probabilities=detach(self.mode_probabilities),
+            motion_quantiles_pp=detach(self.motion_quantiles_pp),
+            support_quantiles_pp=detach(self.support_quantiles_pp),
+            recoverability_probability=detach(self.recoverability_probability),
+            expert_disagreement=detach(self.expert_disagreement),
+            residual_acceleration_pp=detach(self.residual_acceleration_pp),
+            residual_gate=detach(self.residual_gate),
         )
 
 
@@ -142,12 +156,44 @@ def reexpress_motion_prior(prior, source_anchor, target_anchor, *, degrees=False
     identity = torch.all(source == target, dim=1, keepdim=True)
     converted_center = torch.where(identity, center, converted_center)
     converted_direction = torch.where(identity, direction, converted_direction)
+    converted_mode_centers = prior.mode_centers_xy
+    if converted_mode_centers is not None:
+        if converted_mode_centers.shape != (center.shape[0], 3, 2):
+            raise ValueError("motion mode centers must have shape [B,3,2]")
+        flat_modes = converted_mode_centers.reshape(-1, 2).to(compute_dtype)
+        repeated_source_center = (
+            source_work[:, None, :2].expand(-1, 3, -1).reshape(-1, 2)
+        )
+        repeated_target_center = (
+            target_work[:, None, :2].expand(-1, 3, -1).reshape(-1, 2)
+        )
+        repeated_source_yaw = source_yaw[:, None].expand(-1, 3).reshape(-1)
+        repeated_target_yaw = target_yaw[:, None].expand(-1, 3).reshape(-1)
+        world_modes = repeated_source_center + _rotate_xy(
+            flat_modes, repeated_source_yaw
+        )
+        converted_mode_centers = (
+            _rotate_xy(world_modes - repeated_target_center, -repeated_target_yaw)
+            .reshape(-1, 3, 2)
+            .to(prior.mode_centers_xy.dtype)
+        )
+        converted_mode_centers = torch.where(
+            identity.unsqueeze(1), prior.mode_centers_xy, converted_mode_centers
+        )
     return MotionPriorOutput(
         center_xy=converted_center,
         direction_xy=converted_direction,
         log_sigma=prior.log_sigma,
         valid=prior.valid,
         source=prior.source,
+        mode_centers_xy=converted_mode_centers,
+        mode_probabilities=prior.mode_probabilities,
+        motion_quantiles_pp=prior.motion_quantiles_pp,
+        support_quantiles_pp=prior.support_quantiles_pp,
+        recoverability_probability=prior.recoverability_probability,
+        expert_disagreement=prior.expert_disagreement,
+        residual_acceleration_pp=prior.residual_acceleration_pp,
+        residual_gate=prior.residual_gate,
     )
 
 

@@ -32,7 +32,8 @@ def normalize_candidate_trajectory_mode(mode):
     key = str(mode if mode is not None else "independent").lower().replace("-", "_")
     if key not in _CANDIDATE_TRAJECTORY_MODES:
         raise ValueError(
-            "candidate_trajectory_mode must be 'independent' or 'shared_se2'")
+            "candidate_trajectory_mode must be 'independent' or 'shared_se2'"
+        )
     return _CANDIDATE_TRAJECTORY_MODES[key]
 
 
@@ -49,7 +50,8 @@ def wrap_yaw(angle, degrees=False):
 
 
 def anchor_relative_trajectory_targets(
-        current_box, anchor_box, current_delta_t, degrees=False, eps=1e-3):
+    current_box, anchor_box, current_delta_t, degrees=False, eps=1e-3
+):
     """Express the next-box target in the actual crop-anchor coordinates.
 
     The online tracker predicts from its latest estimated box, not from the
@@ -59,29 +61,34 @@ def anchor_relative_trajectory_targets(
     trajectory loss in this same local frame.
     """
     current_delta_t = max(float(current_delta_t), float(eps))
-    world_displacement = (
-        np.asarray(current_box.center, dtype=np.float64)
-        - np.asarray(anchor_box.center, dtype=np.float64)
+    world_displacement = np.asarray(current_box.center, dtype=np.float64) - np.asarray(
+        anchor_box.center, dtype=np.float64
     )
     local_displacement = (
-        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T
-        @ world_displacement
+        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T @ world_displacement
     )
     yaw_displacement = wrap_yaw(
         box_yaw(current_box, degrees) - box_yaw(anchor_box, degrees),
         degrees,
     )
-    trajectory_displacement = np.concatenate((
-        local_displacement,
-        np.asarray([yaw_displacement], dtype=np.float64),
-    )).astype(np.float32)
+    trajectory_displacement = np.concatenate(
+        (
+            local_displacement,
+            np.asarray([yaw_displacement], dtype=np.float64),
+        )
+    ).astype(np.float32)
     velocity = (local_displacement / current_delta_t).astype(np.float32)
     return trajectory_displacement, velocity
 
 
 def physical_motion_targets(
-        current_box, latest_history_box, anchor_box, current_delta_t,
-        degrees=False, eps=1e-3):
+    current_box,
+    latest_history_box,
+    anchor_box,
+    current_delta_t,
+    degrees=False,
+    eps=1e-3,
+):
     """Return candidate-translation-independent physical xy motion.
 
     ``anchor_box`` defines only the coordinate axes.  The displacement origin
@@ -91,21 +98,18 @@ def physical_motion_targets(
     observation branch remains responsible for correcting the online anchor.
     """
     current_delta_t = max(float(current_delta_t), float(eps))
-    world_displacement = (
-        np.asarray(current_box.center, dtype=np.float64)
-        - np.asarray(latest_history_box.center, dtype=np.float64)
+    world_displacement = np.asarray(current_box.center, dtype=np.float64) - np.asarray(
+        latest_history_box.center, dtype=np.float64
     )
     local_displacement = (
-        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T
-        @ world_displacement
+        np.asarray(anchor_box.rotation_matrix, dtype=np.float64).T @ world_displacement
     )
     displacement_xy = local_displacement[:2].astype(np.float32)
     velocity_xy = (displacement_xy / current_delta_t).astype(np.float32)
     return displacement_xy, velocity_xy
 
 
-def reexpress_motion_prediction(
-        prediction, source_anchor, target_anchor):
+def reexpress_motion_prediction(prediction, source_anchor, target_anchor):
     """Re-express an unbatched B1 prediction before support construction.
 
     Center-like displacement endpoints undergo the full local-frame SE(2)
@@ -119,15 +123,19 @@ def reexpress_motion_prediction(
     source_center = np.asarray(source_anchor.center[:2], dtype=np.float64)
     target_center = np.asarray(target_anchor.center[:2], dtype=np.float64)
     source_rotation = np.asarray(
-        source_anchor.rotation_matrix[:2, :2], dtype=np.float64)
+        source_anchor.rotation_matrix[:2, :2], dtype=np.float64
+    )
     target_rotation = np.asarray(
-        target_anchor.rotation_matrix[:2, :2], dtype=np.float64)
-    if not all(np.isfinite(value).all() for value in (
-            source_center, target_center,
-            source_rotation, target_rotation)):
+        target_anchor.rotation_matrix[:2, :2], dtype=np.float64
+    )
+    if not all(
+        np.isfinite(value).all()
+        for value in (source_center, target_center, source_rotation, target_rotation)
+    ):
         raise ValueError("motion prediction anchors must be finite")
-    if (np.array_equal(source_center, target_center)
-            and np.array_equal(source_rotation, target_rotation)):
+    if np.array_equal(source_center, target_center) and np.array_equal(
+        source_rotation, target_rotation
+    ):
         return prediction
     output = dict(prediction)
     relative_rotation = target_rotation.T @ source_rotation
@@ -138,18 +146,27 @@ def reexpress_motion_prediction(
             raise ValueError("motion prediction endpoint must be finite [2]")
         world = source_center + source_rotation @ array.astype(np.float64)
         return (target_rotation.T @ (world - target_center)).astype(
-            array.dtype, copy=False)
+            array.dtype, copy=False
+        )
 
     def rotate_vector(value):
         array = np.asarray(value)
         if array.shape != (2,) or not np.isfinite(array).all():
             raise ValueError("motion prediction vector must be finite [2]")
         return (relative_rotation @ array.astype(np.float64)).astype(
-            array.dtype, copy=False)
+            array.dtype, copy=False
+        )
 
     for key in ("mu_xy", "prior_xy", "kinematic_prior_xy"):
         if key in output:
             output[key] = transform_endpoint(output[key])
+    if "mode_centers_xy" in output:
+        centers = np.asarray(output["mode_centers_xy"])
+        if centers.shape != (3, 2) or not np.isfinite(centers).all():
+            raise ValueError("motion mode centers must be finite [3,2]")
+        output["mode_centers_xy"] = np.stack(
+            [transform_endpoint(center) for center in centers], axis=0
+        )
     for key in ("direction_xy", "velocity_xy", "basis_velocity_xy"):
         if key in output:
             output[key] = rotate_vector(output[key])
@@ -158,8 +175,8 @@ def reexpress_motion_prediction(
         if covariance.shape != (2, 2) or not np.isfinite(covariance).all():
             raise ValueError("motion prediction covariance must be finite [2,2]")
         output["covariance_xy"] = (
-            relative_rotation @ covariance.astype(np.float64)
-            @ relative_rotation.T).astype(covariance.dtype, copy=False)
+            relative_rotation @ covariance.astype(np.float64) @ relative_rotation.T
+        ).astype(covariance.dtype, copy=False)
     return output
 
 
@@ -168,9 +185,7 @@ def yaw_rotation_matrix(angle, degrees=False):
     cosine = np.cos(angle_rad)
     sine = np.sin(angle_rad)
     return np.asarray(
-        [[cosine, -sine, 0.0],
-         [sine, cosine, 0.0],
-         [0.0, 0.0, 1.0]],
+        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
         dtype=np.float64,
     )
 
@@ -178,7 +193,9 @@ def yaw_rotation_matrix(angle, degrees=False):
 def validate_shared_se2_transform(transform):
     value = np.asarray(transform, dtype=np.float64)
     if value.shape != (3,):
-        raise ValueError(f"shared SE(2) transform must have shape (3,), got {value.shape}")
+        raise ValueError(
+            f"shared SE(2) transform must have shape (3,), got {value.shape}"
+        )
     if not np.isfinite(value).all():
         raise ValueError("shared SE(2) transform contains non-finite values")
     return value
@@ -213,11 +230,14 @@ def apply_shared_se2_to_box(box, anchor_box, transform, degrees=False):
     )
     delta_rotation = (
         Quaternion(axis=[0, 0, 1], degrees=dtheta)
-        if degrees else Quaternion(axis=[0, 0, 1], radians=dtheta)
+        if degrees
+        else Quaternion(axis=[0, 0, 1], radians=dtheta)
     )
     transformed.orientation = delta_rotation * transformed.orientation
     if hasattr(transformed, "velocity"):
-        transformed.velocity = rotation @ np.asarray(transformed.velocity, dtype=np.float64)
+        transformed.velocity = rotation @ np.asarray(
+            transformed.velocity, dtype=np.float64
+        )
     return transformed
 
 
@@ -237,21 +257,30 @@ def apply_shared_se2_to_boxes(boxes, transform, degrees=False, anchor_index=0):
 def boxes_to_anchor_parameters(boxes, anchor_box, degrees=False):
     """Express boxes as ``[x,y,z,yaw]`` in a common anchor coordinate frame."""
     anchor_center = np.asarray(anchor_box.center, dtype=np.float64)
-    anchor_rotation_inv = yaw_rotation_matrix(
-        -box_yaw(anchor_box, degrees), degrees)
+    anchor_rotation_inv = yaw_rotation_matrix(-box_yaw(anchor_box, degrees), degrees)
     anchor_yaw = box_yaw(anchor_box, degrees)
     parameters = []
     for box in boxes:
         local_center = anchor_rotation_inv @ (
-            np.asarray(box.center, dtype=np.float64) - anchor_center)
+            np.asarray(box.center, dtype=np.float64) - anchor_center
+        )
         local_yaw = wrap_yaw(box_yaw(box, degrees) - anchor_yaw, degrees)
         parameters.append(np.concatenate((local_center, [local_yaw])))
     return np.asarray(parameters, dtype=np.float32)
 
 
 def build_b1_physical_contract(
-        current_box, ground_truth_history, recursive_history,
-        current_delta_t, degrees=False, eps=1e-3):
+    current_box,
+    ground_truth_history,
+    recursive_history,
+    current_delta_t,
+    degrees=False,
+    eps=1e-3,
+    history_delta_t=None,
+    history_valid_mask=None,
+    dt_floor=0.05,
+    support_cap_pp=(4.0, 3.0),
+):
     """Build the candidate-invariant B1 input/label pair.
 
     Recursive boxes define the input and coordinate axes.  The newest GT
@@ -265,15 +294,67 @@ def build_b1_physical_contract(
     if len(ground_truth_history) != len(recursive_history):
         raise ValueError("GT and recursive B1 histories must align")
     anchor = recursive_history[0]
-    ref_boxs = boxes_to_anchor_parameters(
-        recursive_history, anchor, degrees=degrees)
+    ref_boxs = boxes_to_anchor_parameters(recursive_history, anchor, degrees=degrees)
     target_xy, velocity_xy = physical_motion_targets(
-        current_box, ground_truth_history[0], anchor, current_delta_t,
-        degrees=degrees, eps=eps)
+        current_box,
+        ground_truth_history[0],
+        anchor,
+        current_delta_t,
+        degrees=degrees,
+        eps=eps,
+    )
+    endpoint_xy, _ = anchor_relative_trajectory_targets(
+        current_box, anchor, current_delta_t, degrees=degrees, eps=eps
+    )
+    endpoint_xy = endpoint_xy[:2].astype(np.float32)
+    anchor_drift_xy = (endpoint_xy - target_xy).astype(np.float32)
+
+    gt_cv_difficulty = np.float32(0.0)
+    if len(ground_truth_history) >= 2:
+        history_valid = (
+            np.ones(len(ground_truth_history), dtype=np.int64)
+            if history_valid_mask is None
+            else np.asarray(history_valid_mask, dtype=np.int64).reshape(-1)
+        )
+        history_gaps = (
+            np.full(len(ground_truth_history), float(current_delta_t), dtype=np.float64)
+            if history_delta_t is None
+            else np.asarray(history_delta_t, dtype=np.float64).reshape(-1)
+        )
+        if (
+            history_valid.size >= 2
+            and history_gaps.size >= 2
+            and bool(history_valid[0])
+            and bool(history_valid[1])
+        ):
+            gt_previous_xy, _ = physical_motion_targets(
+                ground_truth_history[0],
+                ground_truth_history[1],
+                anchor,
+                max(float(history_gaps[1]), float(eps)),
+                degrees=degrees,
+                eps=eps,
+            )
+            gt_cv_xy = gt_previous_xy * (
+                max(float(current_delta_t), float(eps))
+                / max(float(history_gaps[1]), float(eps))
+            )
+            cv_error = float(np.linalg.norm(target_xy - gt_cv_xy))
+            gt_cv_difficulty = np.float32(
+                2.0 * cv_error / max(float(current_delta_t), float(dt_floor)) ** 2
+            )
+    support_cap_pp = np.asarray(support_cap_pp, dtype=np.float32).reshape(2)
+    support_censored = np.float32(np.any(np.abs(endpoint_xy) > support_cap_pp))
     return {
         "ref_boxs": ref_boxs,
         "target_xy": target_xy,
+        "physical_target_xy": target_xy,
+        "endpoint_target_xy": endpoint_xy,
+        "anchor_drift_xy": anchor_drift_xy,
         "velocity_xy": velocity_xy,
+        "gt_cv_difficulty": gt_cv_difficulty,
+        "support_cap_pp": support_cap_pp,
+        "support_censored": support_censored,
         "anchor": anchor,
     }
 
@@ -290,9 +371,11 @@ def equivalent_local_offsets(boxes, transformed_boxes, degrees=False):
     for box, transformed in zip(boxes, transformed_boxes):
         rotation_inv = yaw_rotation_matrix(-box_yaw(box, degrees), degrees)
         local_translation = rotation_inv @ (
-            np.asarray(transformed.center) - np.asarray(box.center))
+            np.asarray(transformed.center) - np.asarray(box.center)
+        )
         delta_yaw = wrap_yaw(
-            box_yaw(transformed, degrees) - box_yaw(box, degrees), degrees)
+            box_yaw(transformed, degrees) - box_yaw(box, degrees), degrees
+        )
         offsets.append([local_translation[0], local_translation[1], delta_yaw])
     return np.asarray(offsets, dtype=np.float32)
 
@@ -312,7 +395,8 @@ def apply_local_candidate_offset(box, offset, degrees=False):
     transformed.rotate(rotation.inverse)
     delta_rotation = (
         Quaternion(axis=[0, 0, 1], degrees=float(offset[2]))
-        if degrees else Quaternion(axis=[0, 0, 1], radians=float(offset[2]))
+        if degrees
+        else Quaternion(axis=[0, 0, 1], radians=float(offset[2]))
     )
     transformed.rotate(delta_rotation)
     transformed.translate(np.asarray([offset[0], offset[1], 0.0]))
@@ -322,15 +406,16 @@ def apply_local_candidate_offset(box, offset, degrees=False):
 
 
 def build_ct_training_histories(
-        canonical_boxes,
-        candidate_boxes,
-        candidate_offsets,
-        candidate_id,
-        candidate_trajectory_mode,
-        training_mode="canonical",
-        correlation=0.75,
-        recursive_error_scale=1.0,
-        degrees=False):
+    canonical_boxes,
+    candidate_boxes,
+    candidate_offsets,
+    candidate_id,
+    candidate_trajectory_mode,
+    training_mode="canonical",
+    correlation=0.75,
+    recursive_error_scale=1.0,
+    degrees=False,
+):
     """Build motion/search histories without changing canonical supervision.
 
     Motion history stays anchored to the latest canonical box, so its physical
@@ -344,11 +429,11 @@ def build_ct_training_histories(
         raise ValueError("canonical and candidate histories must have equal length")
 
     candidate_trajectory_mode = normalize_candidate_trajectory_mode(
-        candidate_trajectory_mode)
+        candidate_trajectory_mode
+    )
     candidate_offsets = np.asarray(candidate_offsets, dtype=np.float32)
     if candidate_offsets.shape != (len(canonical_boxes), 3):
-        raise ValueError(
-            "candidate offsets must match the historical box sequence")
+        raise ValueError("candidate offsets must match the historical box sequence")
     motion_offsets, search_offsets = build_ct_history_offsets(
         candidate_offsets,
         candidate_id,
@@ -371,8 +456,9 @@ def build_ct_training_histories(
     return motion_boxes, search_boxes
 
 
-def canonical_dynamics_targets(previous_boxes, current_box, current_delta_t,
-                               degrees=False, eps=1e-3):
+def canonical_dynamics_targets(
+    previous_boxes, current_box, current_delta_t, degrees=False, eps=1e-3
+):
     """Build current displacement/velocity labels from the canonical GT path.
 
     Targets are computed before candidate perturbation and expressed in the

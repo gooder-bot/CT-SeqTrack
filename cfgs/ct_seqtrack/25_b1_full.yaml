@@ -7,7 +7,7 @@ ct_recursive_candidate_views: 1
 proposal_inference_mode: observation
 search_v3_use_dynamic_sigma: false
 ct_candidate_policy: 'off'
-checkpoint_monitor: b1_nll/dev
+checkpoint_monitor: b1_physical_rmse/dev
 checkpoint_mode: min
 ct_variant: b1
 ct_time_mode: true

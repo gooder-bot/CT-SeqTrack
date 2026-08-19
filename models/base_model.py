@@ -153,10 +153,26 @@ class BaseModelMF(pl.LightningModule):
         return float(array.reshape(-1)[0])
 
     def _build_ct_joint_diagnostic_row(
-        self, output, data_dict, this_box, reference_box, frame_id
+        self,
+        output,
+        data_dict,
+        this_box,
+        reference_box,
+        frame_id,
+        previous_ground_truth_box=None,
+        older_ground_truth_box=None,
+        previous_ground_truth_delta_t=None,
     ):
         return build_ct_joint_diagnostic_row(
-            self, output, data_dict, this_box, reference_box, frame_id
+            self,
+            output,
+            data_dict,
+            this_box,
+            reference_box,
+            frame_id,
+            previous_ground_truth_box=previous_ground_truth_box,
+            older_ground_truth_box=older_ground_truth_box,
+            previous_ground_truth_delta_t=previous_ground_truth_delta_t,
         )
 
     @staticmethod
@@ -258,6 +274,8 @@ class BaseModelMF(pl.LightningModule):
         recursive_state = None
         for frame_id in range(len(sequence)):
             this_bb = sequence[frame_id]["3d_bbox"]
+            observation_diagnostic = None
+            observation_diagnostic_valid = False
             if frame_id == 0:
                 results_bbs.append(this_bb)
                 recursive_state = RecursiveTrackState(
@@ -282,7 +300,12 @@ class BaseModelMF(pl.LightningModule):
                         raise RuntimeError(
                             "B1 pre-pass support requires a motion predictor"
                         )
-                    motion_prediction = predictor(sequence, frame_id, results_bbs)
+                    motion_prediction = predictor(
+                        sequence,
+                        frame_id,
+                        results_bbs,
+                        recursive_state=recursive_state,
+                    )
                 build_kwargs = {}
                 if motion_prediction is not None:
                     build_kwargs["motion_prediction"] = motion_prediction
@@ -304,18 +327,59 @@ class BaseModelMF(pl.LightningModule):
                         getattr(self.config, "export_proposal_diagnostics", False)
                     ) and (
                         "ct_search_raw_xy" in forward_output
+                        or "motion_prior_xy" in forward_output
                         or bool(getattr(self.config, "use_ct_joint_full", False))
                     ):
                         proposal_diagnostics.append(
                             self._build_ct_joint_diagnostic_row(
-                                forward_output, data_dict, this_bb, ref_bb, frame_id
+                                forward_output,
+                                data_dict,
+                                this_bb,
+                                ref_bb,
+                                frame_id,
+                                previous_ground_truth_box=sequence[frame_id - 1][
+                                    "3d_bbox"
+                                ],
+                                older_ground_truth_box=(
+                                    sequence[frame_id - 2]["3d_bbox"]
+                                    if frame_id >= 2
+                                    else None
+                                ),
+                                previous_ground_truth_delta_t=(
+                                    (
+                                        sequence[frame_id - 1].get("timestamp"),
+                                        sequence[frame_id - 2].get("timestamp"),
+                                    )
+                                    if frame_id >= 2
+                                    and sequence[frame_id - 1].get("timestamp")
+                                    is not None
+                                    and sequence[frame_id - 2].get("timestamp")
+                                    is not None
+                                    else None
+                                ),
                             )
                         )
                     results_bbs.append(candidate_box)
+                    diagnostic_tensor = forward_output.get("ct_b0_history_diagnostic")
+                    diagnostic_valid_tensor = forward_output.get(
+                        "ct_b0_history_diagnostic_valid"
+                    )
+                    if diagnostic_tensor is not None:
+                        observation_diagnostic = (
+                            diagnostic_tensor[0].detach().cpu().numpy()
+                        )
+                    if diagnostic_valid_tensor is not None:
+                        observation_diagnostic_valid = bool(
+                            diagnostic_valid_tensor[0].detach().item() > 0
+                        )
 
             if frame_id > 0:
                 recursive_state.append(
-                    frame_id, results_bbs[-1], sequence[frame_id].get("timestamp")
+                    frame_id,
+                    results_bbs[-1],
+                    sequence[frame_id].get("timestamp"),
+                    observation_diagnostics=observation_diagnostic,
+                    diagnostic_valid=observation_diagnostic_valid,
                 )
             ious.append(
                 estimateOverlap(
@@ -373,6 +437,8 @@ class BaseModelMF(pl.LightningModule):
             and np.isfinite(float(row.get("b1_nll", float("nan"))))
             and np.isfinite(float(row.get("learned_motion_error", float("nan"))))
             and np.isfinite(float(row.get("kinematic_error", float("nan"))))
+            and np.isfinite(float(row.get("b1_endpoint_error", float("nan"))))
+            and np.isfinite(float(row.get("b1_anchor_drift_error", float("nan"))))
         ]
         if b1_rows:
             b1_nll = torch.tensor(
@@ -390,6 +456,16 @@ class BaseModelMF(pl.LightningModule):
                 device=self.device,
                 dtype=torch.float32,
             ).mean()
+            endpoint_mse = torch.tensor(
+                [float(row["b1_endpoint_error"]) ** 2 for row in b1_rows],
+                device=self.device,
+                dtype=torch.float32,
+            ).mean()
+            anchor_drift_mse = torch.tensor(
+                [float(row["b1_anchor_drift_error"]) ** 2 for row in b1_rows],
+                device=self.device,
+                dtype=torch.float32,
+            ).mean()
             self.log(
                 "b1_nll/dev",
                 b1_nll,
@@ -400,6 +476,27 @@ class BaseModelMF(pl.LightningModule):
             self.log(
                 "b1_learned_motion_mse/dev",
                 learned_mse,
+                on_step=False,
+                on_epoch=True,
+                batch_size=len(b1_rows),
+            )
+            self.log(
+                "b1_physical_rmse/dev",
+                torch.sqrt(learned_mse),
+                on_step=False,
+                on_epoch=True,
+                batch_size=len(b1_rows),
+            )
+            self.log(
+                "b1_endpoint_rmse/dev",
+                torch.sqrt(endpoint_mse),
+                on_step=False,
+                on_epoch=True,
+                batch_size=len(b1_rows),
+            )
+            self.log(
+                "b1_anchor_drift_rmse/dev",
+                torch.sqrt(anchor_drift_mse),
                 on_step=False,
                 on_epoch=True,
                 batch_size=len(b1_rows),

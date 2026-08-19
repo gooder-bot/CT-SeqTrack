@@ -12,6 +12,291 @@ def masked_mean(per_sample, valid):
     return (per_sample.reshape(-1) * valid).sum() / torch.clamp(valid.sum(), min=1.0)
 
 
+def _weighted_masked_mean(per_sample, valid, weight=None):
+    valid = valid.to(device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+    if weight is None:
+        weight = torch.ones_like(valid)
+    else:
+        weight = weight.to(device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+    effective = valid * weight
+    return (per_sample.reshape(-1) * effective).sum() / torch.clamp(
+        effective.sum(), min=1.0
+    )
+
+
+def _aligned_absolute_error(mean_xy, target_xy, direction_xy):
+    direction = direction_xy.detach()
+    perpendicular = torch.stack((-direction[:, 1], direction[:, 0]), dim=1)
+    error = target_xy - mean_xy
+    return torch.stack(
+        ((error * direction).sum(dim=1), (error * perpendicular).sum(dim=1)),
+        dim=1,
+    ).abs()
+
+
+def _pinball_loss(quantiles, target):
+    levels = quantiles.new_tensor((0.50, 0.80, 0.95)).view(1, 3, 1)
+    residual = target.unsqueeze(1) - quantiles
+    return torch.maximum(levels * residual, (levels - 1.0) * residual).mean(dim=(1, 2))
+
+
+def _hard_motion_weights(model, data, prefix, valid):
+    key = f"{prefix}_gt_cv_difficulty"
+    if key not in data:
+        return torch.ones_like(valid)
+    difficulty = data[key].to(device=valid.device, dtype=valid.dtype).reshape(-1)
+    q50 = float(model.motion_v3_hard_q50)
+    q90 = float(model.motion_v3_hard_q90)
+    if q90 <= q50:
+        raise ValueError("GT-only hard-motion q90 must be greater than q50")
+    raw = 1.0 + 2.0 * torch.clamp((difficulty - q50) / (q90 - q50), 0.0, 1.0)
+    normalizer = masked_mean(raw, valid).detach().clamp(min=1e-6)
+    return raw / normalizer
+
+
+def _balanced_binary_loss(probability, target, valid):
+    probability = probability.clamp(min=1e-6, max=1.0 - 1e-6)
+    positive = valid * target
+    negative = valid * (1.0 - target)
+    positive_count = positive.sum()
+    negative_count = negative.sum()
+    positive_weight = torch.where(
+        positive_count > 0,
+        0.5 * valid.sum() / positive_count.clamp(min=1.0),
+        valid.new_zeros(()),
+    )
+    negative_weight = torch.where(
+        negative_count > 0,
+        0.5 * valid.sum() / negative_count.clamp(min=1.0),
+        valid.new_zeros(()),
+    )
+    class_weight = target * positive_weight + (1.0 - target) * negative_weight
+    return _weighted_masked_mean(
+        F.binary_cross_entropy(probability, target, reduction="none"),
+        valid,
+        class_weight,
+    )
+
+
+def _ra_pmm_view_loss(model, data, output, prefix, output_prefix, outer_weight):
+    """RA-PMM objective for either the main or a gap auxiliary view."""
+    mean = output[f"{output_prefix}_prior_xy"]
+    target = (
+        data[f"{prefix}_physical_target_xy"]
+        .to(device=mean.device, dtype=mean.dtype)
+        .detach()
+    )
+    if target.requires_grad:
+        raise RuntimeError("B1 physical target must be detached")
+    endpoint_target = (
+        data[f"{prefix}_endpoint_target_xy"]
+        .to(device=mean.device, dtype=mean.dtype)
+        .detach()
+    )
+    anchor_drift = (
+        data[f"{prefix}_anchor_drift_xy"]
+        .to(device=mean.device, dtype=mean.dtype)
+        .detach()
+    )
+    valid = output[f"{output_prefix}_prior_valid"].to(mean.dtype).reshape(-1)
+    if prefix == "motion_main" and "candidate_available" in data:
+        valid = valid * data["candidate_available"].to(
+            device=valid.device, dtype=valid.dtype
+        ).reshape(-1)
+    hard_weight = _hard_motion_weights(model, data, prefix, valid)
+
+    mean_per_sample = F.smooth_l1_loss(mean, target, reduction="none").mean(dim=1)
+    mean_loss = _weighted_masked_mean(mean_per_sample, valid, hard_weight)
+
+    mode_centers = output[f"{output_prefix}_prior_mode_centers_xy"]
+    mode_probability = output[f"{output_prefix}_prior_mode_probabilities"]
+    expert_valid = output[f"{output_prefix}_prior_expert_valid_mask"].bool()
+    expert_error = torch.linalg.norm(target.unsqueeze(1) - mode_centers, dim=2)
+    expert_error = expert_error.masked_fill(~expert_valid, float("inf"))
+    sorted_error, sorted_index = torch.sort(expert_error, dim=1)
+    ratio = sorted_error[:, 0] / (sorted_error[:, 1] + 1e-6)
+    ratio = torch.where(sorted_error[:, 1] <= 1e-6, torch.ones_like(ratio), ratio)
+    mode_confidence = torch.clamp((0.9 - ratio) / 0.1, 0.0, 1.0)
+    distinguishable = torch.isfinite(sorted_error[:, 1]).to(mean.dtype)
+    mode_confidence = mode_confidence * distinguishable
+    log_probability = torch.log(mode_probability.clamp(min=1e-8))
+    top_one = sorted_index[:, 0]
+    hard_ce = -torch.gather(log_probability, 1, top_one.unsqueeze(1)).squeeze(1)
+    valid_expert_count = expert_valid.to(mean.dtype).sum(dim=1).clamp(min=1.0)
+    smooth_ce = (
+        -(log_probability * expert_valid.to(mean.dtype)).sum(dim=1) / valid_expert_count
+    )
+    mode_per_sample = 0.95 * hard_ce + 0.05 * smooth_ce
+    mode_loss = _weighted_masked_mean(
+        mode_per_sample, valid, hard_weight * mode_confidence
+    )
+
+    direction = output[f"{output_prefix}_prior_direction_xy"].detach()
+    perpendicular = torch.stack((-direction[:, 1], direction[:, 0]), dim=1)
+    physics_residual = target - output[f"{output_prefix}_prior_kinematic_xy"].detach()
+    residual_pp = torch.stack(
+        (
+            (physics_residual * direction).sum(dim=1),
+            (physics_residual * perpendicular).sum(dim=1),
+        ),
+        dim=1,
+    )
+    dt = (
+        data.get(f"{prefix}_physical_delta_t", data[f"{prefix}_current_delta_t"])
+        .to(device=mean.device, dtype=mean.dtype)
+        .reshape(-1)
+    )
+    dt_floor = max(float(model.motion_v3_dt_floor), 1e-3)
+    target_acceleration = (
+        2.0 * residual_pp / torch.clamp(dt, min=dt_floor).pow(2).unsqueeze(1)
+    )
+    max_acceleration = float(model.physical_motion_encoder.max_acceleration)
+    target_acceleration = target_acceleration.clamp(
+        min=-max_acceleration, max=max_acceleration
+    ).detach()
+    predicted_acceleration = output[
+        f"{output_prefix}_prior_residual_acceleration_pp"
+    ] * output[f"{output_prefix}_prior_residual_gate"].unsqueeze(1)
+    acc_per_sample = F.smooth_l1_loss(
+        predicted_acceleration, target_acceleration, reduction="none"
+    ).mean(dim=1)
+    acc_norm_loss = _weighted_masked_mean(acc_per_sample, valid, hard_weight)
+    acc_reg_loss = _weighted_masked_mean(
+        output[f"{output_prefix}_prior_residual_acceleration_pp"].pow(2).mean(dim=1),
+        valid,
+    )
+
+    motion_quantiles = output[f"{output_prefix}_prior_motion_quantiles_pp"]
+    motion_residual = _aligned_absolute_error(mean.detach(), target, direction)
+    motion_quantile_loss = _weighted_masked_mean(
+        _pinball_loss(motion_quantiles, motion_residual), valid, hard_weight
+    )
+
+    support_quantiles = output[f"{output_prefix}_prior_support_quantiles_pp"]
+    support_residual = _aligned_absolute_error(
+        mean.detach(), endpoint_target, direction
+    )
+    support_cap = data[f"{prefix}_support_cap_pp"].to(
+        device=mean.device, dtype=mean.dtype
+    )
+    if support_cap.dim() == 1:
+        support_cap = support_cap.unsqueeze(0).expand_as(support_residual)
+    capped_residual = torch.minimum(support_residual, support_cap)
+    recoverable = (support_residual <= support_cap).all(dim=1).to(mean.dtype)
+    boundary_band = (
+        (support_residual >= 0.8 * support_cap).any(dim=1) * (recoverable > 0)
+    ).to(mean.dtype)
+    support_weight = torch.where(
+        recoverable > 0,
+        1.0 + boundary_band,
+        recoverable.new_full(recoverable.shape, 0.25),
+    )
+    support_quantile_loss = _weighted_masked_mean(
+        _pinball_loss(support_quantiles, capped_residual), valid, support_weight
+    )
+    censored_axis = (support_residual > support_cap).to(mean.dtype)
+    censor_per_sample = (
+        F.relu(support_cap - support_quantiles[:, 2]) * censored_axis
+    ).sum(dim=1) / censored_axis.sum(dim=1).clamp(min=1.0)
+    censor_loss = _weighted_masked_mean(censor_per_sample, valid * (1.0 - recoverable))
+    recoverability_probability = output[
+        f"{output_prefix}_prior_recoverability_probability"
+    ]
+    recoverability_loss = _balanced_binary_loss(
+        recoverability_probability, recoverable, valid
+    )
+
+    view_loss = (
+        mean_loss
+        + model.motion_v3_mode_weight * mode_loss
+        + model.motion_v3_acc_norm_weight * acc_norm_loss
+        + model.motion_v3_motion_quantile_weight * motion_quantile_loss
+        + model.motion_v3_support_quantile_weight * support_quantile_loss
+        + model.motion_v3_recoverability_weight * recoverability_loss
+        + model.motion_v3_censor_weight * censor_loss
+        + model.motion_v3_acc_reg_weight * acc_reg_loss
+    )
+    transaction = float(outer_weight) * view_loss
+
+    physical_error = torch.linalg.norm(mean.detach() - target, dim=1)
+    endpoint_error = torch.linalg.norm(mean.detach() - endpoint_target, dim=1)
+    anchor_drift_error = torch.linalg.norm(anchor_drift, dim=1)
+    mode_entropy = -(
+        mode_probability * torch.log(mode_probability.clamp(min=1e-8))
+    ).sum(dim=1)
+    predicted_mode_error = torch.linalg.norm(
+        (mode_probability.unsqueeze(2) * mode_centers).sum(dim=1).detach() - target,
+        dim=1,
+    )
+    oracle_regret = predicted_mode_error - sorted_error[:, 0].detach()
+    selected_mode = torch.argmax(mode_probability.detach(), dim=1)
+    joint_motion_coverage = (
+        (motion_residual <= motion_quantiles[:, 2].detach()).all(dim=1).to(mean.dtype)
+    )
+    joint_support_coverage = (
+        (support_residual <= support_quantiles[:, 2].detach()).all(dim=1).to(mean.dtype)
+    )
+    capped_support_coverage = (
+        (capped_residual <= support_quantiles[:, 2].detach()).all(dim=1).to(mean.dtype)
+    )
+    predicted_unrecoverable = (recoverability_probability.detach() < 0.5).to(mean.dtype)
+
+    stem = "motion_v3" if prefix == "motion_main" else "motion_v3_aux"
+    losses = {
+        f"loss_{stem}_prior": mean_loss,
+        f"loss_{stem}_mode": mode_loss,
+        f"loss_{stem}_acc_norm": acc_norm_loss,
+        f"loss_{stem}_motion_quantile": motion_quantile_loss,
+        f"loss_{stem}_support_quantile": support_quantile_loss,
+        f"loss_{stem}_recoverability": recoverability_loss,
+        f"loss_{stem}_censor": censor_loss,
+        f"loss_{stem}_acc_reg": acc_reg_loss,
+        f"{stem}_physical_rmse": torch.sqrt(masked_mean(physical_error.pow(2), valid)),
+        f"{stem}_endpoint_rmse": torch.sqrt(masked_mean(endpoint_error.pow(2), valid)),
+        f"{stem}_anchor_drift_rmse": torch.sqrt(
+            masked_mean(anchor_drift_error.pow(2), valid)
+        ),
+        f"{stem}_mode_skip_rate": masked_mean(
+            (mode_confidence <= 0).to(mean.dtype), valid
+        ),
+        f"{stem}_mode_entropy": masked_mean(mode_entropy, valid),
+        f"{stem}_oracle_regret": masked_mean(oracle_regret, valid),
+        f"{stem}_motion_joint_q95_coverage": masked_mean(joint_motion_coverage, valid),
+        f"{stem}_support_conditional_q95_coverage": masked_mean(
+            joint_support_coverage, valid * recoverable
+        ),
+        f"{stem}_support_capped_q95_coverage": masked_mean(
+            capped_support_coverage, valid
+        ),
+        f"{stem}_boundary_q95_coverage": masked_mean(
+            joint_support_coverage, valid * boundary_band
+        ),
+        f"{stem}_unrecoverable_recall": masked_mean(
+            predicted_unrecoverable, valid * (1.0 - recoverable)
+        ),
+        f"{stem}_recoverable_rate": masked_mean(recoverable, valid),
+        f"{stem}_dt_floor_rate": masked_mean((dt < dt_floor).to(mean.dtype), valid),
+        f"{stem}_valid_rate": valid.float().mean(),
+    }
+    for expert_index, expert_name in enumerate(("cv", "ca", "ctrv")):
+        losses[f"{stem}_expert_usage_{expert_name}"] = masked_mean(
+            (selected_mode == expert_index).to(mean.dtype), valid
+        )
+    if prefix == "motion_aux" and "motion_aux_query_gap_frames" in data:
+        query_gap = data["motion_aux_query_gap_frames"].to(valid.device).reshape(-1)
+        for gap in model.motion_v3_aux_query_gaps:
+            gap_valid = valid * (query_gap == gap).to(valid.dtype)
+            losses[f"{stem}_acc_norm_gap{gap}"] = masked_mean(acc_per_sample, gap_valid)
+            losses[f"{stem}_acc_count_gap{gap}"] = gap_valid.sum()
+            losses[f"{stem}_acc_grad_proxy_gap{gap}"] = masked_mean(
+                (predicted_acceleration.detach() - target_acceleration)
+                .abs()
+                .mean(dim=1),
+                gap_valid,
+            )
+    return transaction, [transaction], losses
+
+
 def _labels(data):
     with torch.no_grad():
         box_label = data["box_label"]
@@ -114,6 +399,15 @@ def _b0_loss(model, data, output, labels):
 
 
 def _main_prior_loss(model, data, output):
+    if model.motion_v3_ra_pmm:
+        return _ra_pmm_view_loss(
+            model,
+            data,
+            output,
+            "motion_main",
+            "motion",
+            model.motion_v3_prior_weight,
+        )
     target = data["motion_main_target_xy"].to(
         device=output["motion_prior_xy"].device, dtype=output["motion_prior_xy"].dtype
     )
@@ -216,7 +510,17 @@ def _main_prior_loss(model, data, output):
 
 def _auxiliary_prior_loss(model, data, output):
     if not ("motion_aux_prior_xy" in output and "motion_aux_target_xy" in data):
-        return [], {}
+        zero = output["motion_prior_xy"].new_zeros(())
+        return zero, [], {}
+    if model.motion_v3_ra_pmm:
+        return _ra_pmm_view_loss(
+            model,
+            data,
+            output,
+            "motion_aux",
+            "motion_aux",
+            model.motion_v3_aux_prior_weight,
+        )
     target = data["motion_aux_target_xy"].to(
         device=output["motion_aux_prior_xy"].device,
         dtype=output["motion_aux_prior_xy"].dtype,
@@ -282,7 +586,8 @@ def _auxiliary_prior_loss(model, data, output):
                     f"motion_v3_aux_count_gap{gap}": gap_valid.sum(),
                 }
             )
-    return additions, losses
+    transaction = sum(additions[1:], additions[0])
+    return transaction, additions, losses
 
 
 def _box_aware_loss(model, data, output):
@@ -344,9 +649,10 @@ def compute_v25_loss(model, data, output):
         for addition in main_additions:
             loss_total = loss_total + addition
         losses.update(b1_losses)
-        auxiliary_additions, auxiliary_losses = _auxiliary_prior_loss(
-            model, data, output
+        auxiliary_transaction, auxiliary_additions, auxiliary_losses = (
+            _auxiliary_prior_loss(model, data, output)
         )
+        b1_transaction = b1_transaction + auxiliary_transaction
         for addition in auxiliary_additions:
             loss_total = loss_total + addition
         losses.update(auxiliary_losses)

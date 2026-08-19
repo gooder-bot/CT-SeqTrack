@@ -216,6 +216,7 @@ def build_sample_output(context):
     motion_boxs = context["motion_boxs"]
     ct_motion_ref_boxs = context["ct_motion_ref_boxs"]
     motion_main_ref_boxs = context["motion_main_ref_boxs"]
+    online_recursive_state = context.get("online_recursive_state")
     point_timestamps = context["point_timestamps"]
     prev_boxs = context["prev_boxs"]
     prev_points_list = context["prev_points_list"]
@@ -231,12 +232,16 @@ def build_sample_output(context):
     search_v2_point_valid_mask = context["search_v2_point_valid_mask"]
     search_v2_point_source = context["search_v2_point_source"]
     search_v2_sampling = context["search_v2_sampling"]
+    secondary_expanded_search_points = context.get(
+        "secondary_expanded_search_points",
+        np.empty(
+            (0, baseline_search_points.shape[1]), dtype=baseline_search_points.dtype
+        ),
+    )
     this_box = context["this_box"]
     this_points = context["this_points"]
     trajectory_search_points = context["trajectory_search_points"]
-    trajectory_search_point_valid_mask = context[
-        "trajectory_search_point_valid_mask"
-    ]
+    trajectory_search_point_valid_mask = context["trajectory_search_point_valid_mask"]
     trajectory_search_point_source = context["trajectory_search_point_source"]
     trajectory_search_sampling = context["trajectory_search_sampling"]
     joint_extension_sampling = context["joint_extension_sampling"]
@@ -249,6 +254,14 @@ def build_sample_output(context):
             current_sampling_seed if current_sampling_seed is not None else sample_index
         )
         joint_extension_seed = (int(independent_seed_base) * 22695477 + 1) & 0xFFFFFFFF
+        joint_extension_kwargs = {}
+        if len(secondary_expanded_search_points):
+            joint_extension_kwargs = {
+                "secondary_tube_points": secondary_expanded_search_points,
+                "secondary_tube_fraction": float(
+                    search_v2_diagnostics.get("secondary_tube_quota_fraction", 0.0)
+                ),
+            }
         (
             joint_extension_points,
             joint_extension_valid_mask,
@@ -261,6 +274,7 @@ def build_sample_output(context):
             endpoint_quota=int(getattr(config, "ct_endpoint_quota", 128)),
             tube_quota=int(getattr(config, "ct_tube_quota", 128)),
             seed=joint_extension_seed,
+            **joint_extension_kwargs,
         )
         endpoint_quota = int(getattr(config, "ct_endpoint_quota", 128))
         search_v2_points = joint_extension_points[:endpoint_quota]
@@ -601,6 +615,7 @@ def build_sample_output(context):
         )
     )
     motion_main_target_xy = None
+    motion_main_physical = None
     if use_motion_v3:
         motion_main_physical = build_b1_physical_contract(
             canonical_this_box,
@@ -609,6 +624,13 @@ def build_sample_output(context):
             current_delta_t_real,
             degrees=config.degrees,
             eps=1e-3,
+            history_delta_t=delta_t_list,
+            history_valid_mask=valid_mask,
+            dt_floor=float(getattr(config, "motion_v3_dt_floor", 0.05)),
+            support_cap_pp=(
+                float(getattr(config, "motion_v3_support_cap_parallel", 4.0)),
+                float(getattr(config, "motion_v3_support_cap_perpendicular", 3.0)),
+            ),
         )
         if not np.array_equal(motion_main_ref_boxs, motion_main_physical["ref_boxs"]):
             raise RuntimeError("B1 main input and physical-label axes diverged")
@@ -790,6 +812,15 @@ def build_sample_output(context):
                 "search_v3_support_truncated": np.float32(
                     bool(search_v2_diagnostics.get("truncated", False))
                 ),
+                "search_v3_support_saturated": np.float32(
+                    bool(search_v2_diagnostics.get("support_saturated", False))
+                ),
+                "search_v3_top2_tube_active": np.float32(
+                    bool(search_v2_diagnostics.get("top2_tube_active", False))
+                ),
+                "search_v3_secondary_quota_fraction": np.float32(
+                    search_v2_diagnostics.get("secondary_tube_quota_fraction", 0.0)
+                ),
                 "search_v3_support_requested_extent": np.asarray(
                     (
                         search_v2_diagnostics.get("requested_length", 0.0),
@@ -816,6 +847,25 @@ def build_sample_output(context):
             }
         )
     if use_motion_v3:
+        history_observation_diagnostics = np.zeros((num_hist, 6), dtype=np.float32)
+        history_diagnostic_valid_mask = np.zeros(num_hist, dtype=np.int64)
+        if online_recursive_state is not None:
+            history_observation_diagnostics = np.asarray(
+                online_recursive_state.get(
+                    "history_observation_diagnostics", history_observation_diagnostics
+                ),
+                dtype=np.float32,
+            )
+            history_diagnostic_valid_mask = np.asarray(
+                online_recursive_state.get(
+                    "history_diagnostic_valid_mask", history_diagnostic_valid_mask
+                ),
+                dtype=np.int64,
+            )
+            if history_observation_diagnostics.shape != (num_hist, 6):
+                raise ValueError("B1 history diagnostics must have shape [H,6]")
+            if history_diagnostic_valid_mask.shape != (num_hist,):
+                raise ValueError("B1 history diagnostic mask must have shape [H]")
         data_dict.update(
             {
                 "motion_main_ref_boxs": motion_main_ref_boxs.astype("float32"),
@@ -823,7 +873,32 @@ def build_sample_output(context):
                     effective_delta_t_list, dtype=np.float32
                 ),
                 "motion_main_current_delta_t": np.float32(current_delta_t_effective),
+                "motion_main_physical_delta_t": np.float32(current_delta_t_real),
                 "motion_main_valid_mask": np.asarray(valid_mask, dtype=np.int64),
+                "motion_main_history_observation_diagnostics": (
+                    history_observation_diagnostics
+                ),
+                "motion_main_history_diagnostic_valid_mask": (
+                    history_diagnostic_valid_mask
+                ),
+                "motion_main_physical_target_xy": motion_main_physical[
+                    "physical_target_xy"
+                ].astype("float32"),
+                "motion_main_endpoint_target_xy": motion_main_physical[
+                    "endpoint_target_xy"
+                ].astype("float32"),
+                "motion_main_anchor_drift_xy": motion_main_physical[
+                    "anchor_drift_xy"
+                ].astype("float32"),
+                "motion_main_gt_cv_difficulty": np.float32(
+                    motion_main_physical["gt_cv_difficulty"]
+                ),
+                "motion_main_support_cap_pp": motion_main_physical[
+                    "support_cap_pp"
+                ].astype("float32"),
+                "motion_main_support_censored": np.float32(
+                    motion_main_physical["support_censored"]
+                ),
                 "motion_main_target_xy": motion_main_target_xy.astype("float32"),
                 "motion_main_anchor": motion_anchor,
                 "motion_source_anchor": motion_anchor,

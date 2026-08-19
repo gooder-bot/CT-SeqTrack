@@ -107,6 +107,8 @@ def online_motion_prepass_batch(self, raw_state_pairs):
                 getattr(self.config, "dynamics_time_mode", "true"),
             ),
             int(raw["this_frame_id"]),
+            contract.get("history_observation_diagnostics"),
+            contract.get("history_diagnostic_valid_mask"),
         )
         if inputs is None:
             raise RuntimeError(
@@ -119,6 +121,24 @@ def online_motion_prepass_batch(self, raw_state_pairs):
         np.stack([item["valid_mask"] for item in prepass_inputs]),
         np.asarray(
             [item["current_delta_t"] for item in prepass_inputs], dtype=np.float32
+        ),
+        np.stack(
+            [
+                item.get(
+                    "history_observation_diagnostics",
+                    np.zeros((self.hist_num, 6), dtype=np.float32),
+                )
+                for item in prepass_inputs
+            ]
+        ),
+        np.stack(
+            [
+                item.get(
+                    "history_diagnostic_valid_mask",
+                    np.zeros(self.hist_num, dtype=np.float32),
+                )
+                for item in prepass_inputs
+            ]
         ),
     )
     return self._unbatch_motion_prepass_predictions(
@@ -591,8 +611,32 @@ def attach_h3_shadow_labels(self, batch, output):
         state_o = state_before.clone()
         state_s = state_before.clone()
         timestamp = raw["this_frame"].get("timestamp")
-        state_o.append(raw["this_frame_id"], observation_box, timestamp)
-        state_s.append(raw["this_frame_id"], search_box, timestamp)
+        current_diagnostic = output.get("ct_b0_history_diagnostic")
+        current_diagnostic_valid = output.get("ct_b0_history_diagnostic_valid")
+        diagnostic_row = (
+            None
+            if current_diagnostic is None
+            else current_diagnostic[index].detach().cpu().numpy()
+        )
+        diagnostic_valid = (
+            False
+            if current_diagnostic_valid is None
+            else bool(current_diagnostic_valid[index].detach().item() > 0)
+        )
+        state_o.append(
+            raw["this_frame_id"],
+            observation_box,
+            timestamp,
+            observation_diagnostics=diagnostic_row,
+            diagnostic_valid=diagnostic_valid,
+        )
+        state_s.append(
+            raw["this_frame_id"],
+            search_box,
+            timestamp,
+            observation_diagnostics=diagnostic_row,
+            diagnostic_valid=diagnostic_valid,
+        )
         target = np.asarray(raw["this_frame"]["3d_bbox"].center[:2], dtype=np.float64)
         cost_o = float(np.linalg.norm(observation_box.center[:2] - target))
         cost_s = float(np.linalg.norm(search_box.center[:2] - target))
@@ -635,6 +679,26 @@ def attach_h3_shadow_labels(self, batch, output):
                     future_raw["this_frame_id"],
                     world_box,
                     future_raw["this_frame"].get("timestamp"),
+                    observation_diagnostics=(
+                        shadow_output["ct_b0_history_diagnostic"][branch_index]
+                        .detach()
+                        .cpu()
+                        .numpy()
+                        if "ct_b0_history_diagnostic" in shadow_output
+                        else None
+                    ),
+                    diagnostic_valid=(
+                        bool(
+                            shadow_output["ct_b0_history_diagnostic_valid"][
+                                branch_index
+                            ]
+                            .detach()
+                            .item()
+                            > 0
+                        )
+                        if "ct_b0_history_diagnostic_valid" in shadow_output
+                        else False
+                    ),
                 )
                 future_boxes.append(world_box)
             future_target = np.asarray(
@@ -703,10 +767,24 @@ def commit_online_recursive_predictions(self, output):
         final_box = self._local_prediction_to_world(
             output["observation_aux_estimation_boxes"][index], anchor
         )
+        diagnostic_tensor = output.get("ct_b0_history_diagnostic")
+        diagnostic_valid_tensor = output.get("ct_b0_history_diagnostic_valid")
+        observation_diagnostic = (
+            None
+            if diagnostic_tensor is None
+            else diagnostic_tensor[index].detach().cpu().numpy()
+        )
+        diagnostic_valid = (
+            False
+            if diagnostic_valid_tensor is None
+            else bool(diagnostic_valid_tensor[index].detach().item() > 0)
+        )
         commit_canonical_prediction(
             state,
             raw["candidate_id"],
             raw["this_frame_id"],
             final_box,
             raw["this_frame"].get("timestamp"),
+            observation_diagnostics=observation_diagnostic,
+            diagnostic_valid=diagnostic_valid,
         )

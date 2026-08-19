@@ -1,6 +1,8 @@
 """Construction of the formal v25 B0--B3 model graph."""
 
 import copy
+import json
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -50,6 +52,13 @@ def _validate_formal_contract(model):
             model.motion_v3_aux_prior_weight,
             model.motion_v3_nll_weight,
             model.motion_v3_aux_nll_weight,
+            model.motion_v3_mode_weight,
+            model.motion_v3_acc_norm_weight,
+            model.motion_v3_motion_quantile_weight,
+            model.motion_v3_support_quantile_weight,
+            model.motion_v3_recoverability_weight,
+            model.motion_v3_censor_weight,
+            model.motion_v3_acc_reg_weight,
             model.ct_targetness_weight,
             model.ct_vote_weight,
             model.ct_raw_search_weight,
@@ -61,6 +70,13 @@ def _validate_formal_contract(model):
         < 0
     ):
         raise ValueError("formal v25 loss weights must be non-negative")
+    if model.motion_v3_ra_pmm:
+        if model.motion_v3_nll_weight != 0 or model.motion_v3_aux_nll_weight != 0:
+            raise ValueError("RA-PMM disables legacy Gaussian NLL")
+        if model.motion_v3_dt_floor <= 0:
+            raise ValueError("RA-PMM dt floor must be positive")
+        if model.motion_v3_hard_q90 <= model.motion_v3_hard_q50:
+            raise ValueError("RA-PMM hard-motion q90 must exceed q50")
     if not model.motion_v3_aux_query_gaps or any(
         gap <= 0 for gap in model.motion_v3_aux_query_gaps
     ):
@@ -122,6 +138,7 @@ def _initialize_contract_state(model, config):
 
 
 def _initialize_options(model, config):
+    model.motion_v3_ra_pmm = bool(_value(config, "motion_v3_ra_pmm", False))
     model.motion_v3_temporal_backend = (
         str(_value(config, "motion_v3_temporal_backend", "gru")).strip().lower()
     )
@@ -155,6 +172,12 @@ def _initialize_options(model, config):
     model.require_b1_calibration_artifact = bool(
         _value(config, "require_b1_calibration_artifact", False)
     )
+    model.motion_v3_quantile_calibration_path = _value(
+        config, "motion_v3_quantile_calibration_path", None
+    )
+    model.motion_v3_require_quantile_calibration = bool(
+        _value(config, "motion_v3_require_quantile_calibration", False)
+    )
     model.use_b1_prepass_support = bool(_value(config, "use_b1_prepass_support", False))
     model.proposal_inference_mode = (
         str(_value(config, "proposal_inference_mode", "observation")).strip().lower()
@@ -168,6 +191,58 @@ def _initialize_options(model, config):
     model.motion_v3_aux_nll_weight = float(
         _value(config, "motion_v3_aux_nll_weight", model.motion_v3_nll_weight)
     )
+    model.motion_v3_mode_weight = float(_value(config, "motion_v3_mode_weight", 0.2))
+    model.motion_v3_acc_norm_weight = float(
+        _value(config, "motion_v3_acc_norm_weight", 0.1)
+    )
+    model.motion_v3_motion_quantile_weight = float(
+        _value(config, "motion_v3_motion_quantile_weight", 0.1)
+    )
+    model.motion_v3_support_quantile_weight = float(
+        _value(config, "motion_v3_support_quantile_weight", 0.1)
+    )
+    model.motion_v3_recoverability_weight = float(
+        _value(config, "motion_v3_recoverability_weight", 0.1)
+    )
+    model.motion_v3_censor_weight = float(
+        _value(config, "motion_v3_censor_weight", 0.05)
+    )
+    model.motion_v3_acc_reg_weight = float(
+        _value(config, "motion_v3_acc_reg_weight", 0.01)
+    )
+    model.motion_v3_dt_floor = float(_value(config, "motion_v3_dt_floor", 0.05))
+    model.motion_v3_hard_q50 = float(_value(config, "motion_v3_hard_q50", 0.0))
+    model.motion_v3_hard_q90 = float(_value(config, "motion_v3_hard_q90", 1.0))
+    hard_artifact_path = _value(config, "motion_v3_hard_statistics_path", None)
+    require_hard_artifact = bool(
+        _value(config, "motion_v3_require_hard_statistics", False)
+    )
+    model._motion_v3_hard_statistics = None
+    model.motion_v3_enable_ctrv = bool(_value(config, "motion_v3_enable_ctrv", True))
+    if hard_artifact_path:
+        artifact = json.loads(Path(hard_artifact_path).read_text(encoding="utf-8"))
+        if artifact.get("schema") != "ct_seqtrack.gt_hard_motion.v1":
+            raise RuntimeError("unsupported GT-only hard-motion artifact")
+        if artifact.get("uses_checkpoint") is not False:
+            raise RuntimeError("hard-motion statistics may not use a checkpoint")
+        split = str(artifact.get("split", "")).lower()
+        if "train" not in split or any(
+            token in split for token in ("dev", "val", "test")
+        ):
+            raise RuntimeError("hard-motion statistics must come from train GT")
+        if artifact.get("category") != str(_value(config, "category_name", "unknown")):
+            raise RuntimeError("hard-motion artifact category mismatch")
+        statistics = artifact.get("difficulty", {})
+        model.motion_v3_hard_q50 = float(statistics["q50"])
+        model.motion_v3_hard_q90 = float(statistics["q90"])
+        model.motion_v3_dt_floor = float(artifact["dt_floor"])
+        model._motion_v3_hard_statistics = artifact
+        promotion = artifact.get("expert_preflight") or {}
+        if not bool(promotion.get("promote_ctrv_top2", False)):
+            model.motion_v3_enable_ctrv = False
+            config.search_v3_enable_top2_tube = False
+    elif model.motion_v3_ra_pmm and require_hard_artifact:
+        raise RuntimeError("RA-PMM requires a train-GT hard-motion artifact")
     model.motion_v3_aux_query_gaps = tuple(
         int(value) for value in _value(config, "motion_v3_aux_query_gaps", (2, 4))
     )
@@ -268,9 +343,12 @@ def _initialize_plugins(model, config):
                 _value(config, "motion_v3_min_direction_speed", 0.2)
             ),
             shared_kinematic_anchor=(
-                model.use_ct_joint_full
-                and model.ct_enable_shared_motion_anchor
-                and model.ct_enable_dynamic_residual_bound
+                model.motion_v3_ra_pmm
+                or (
+                    model.use_ct_joint_full
+                    and model.ct_enable_shared_motion_anchor
+                    and model.ct_enable_dynamic_residual_bound
+                )
             ),
             max_acceleration=float(_value(config, "ct_motion_max_acceleration", 8.0)),
             max_displacement=float(_value(config, "ct_motion_max_displacement", 12.0)),
@@ -279,6 +357,17 @@ def _initialize_plugins(model, config):
             ),
             temporal_backend=model.motion_v3_temporal_backend,
             cfc_backbone_units=model.motion_v3_cfc_backbone_units,
+            ra_pmm=model.motion_v3_ra_pmm,
+            diagnostic_dim=int(_value(config, "motion_v3_diagnostic_dim", 6)),
+            diagnostic_hidden_dim=int(
+                _value(config, "motion_v3_diagnostic_hidden_dim", 16)
+            ),
+            max_turn_rate=float(_value(config, "motion_v3_max_turn_rate", 1.0)),
+            enable_ctrv=model.motion_v3_enable_ctrv,
+            support_initial_q95=(
+                float(_value(config, "search_v3_fixed_margin_parallel", 2.0)),
+                float(_value(config, "search_v3_fixed_margin_perpendicular", 1.0)),
+            ),
         )
     if not model.use_ct_joint_full:
         return

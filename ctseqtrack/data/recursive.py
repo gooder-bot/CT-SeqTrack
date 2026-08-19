@@ -512,6 +512,8 @@ class RecursiveTrackState:
     first_box: object
     timestamps: dict[int, float | None] = field(default_factory=dict)
     predictions: dict[int, object] = field(default_factory=dict)
+    observation_diagnostics: dict[int, np.ndarray] = field(default_factory=dict)
+    observation_diagnostic_valid: dict[int, bool] = field(default_factory=dict)
     # Training-only rollout metadata.  Inference never calls ``reseed_history``
     # and therefore keeps the original append-only state transition contract.
     rollout_horizon: int | None = None
@@ -521,6 +523,8 @@ class RecursiveTrackState:
     def __post_init__(self):
         self.first_box = copy.deepcopy(self.first_box)
         self.predictions.setdefault(0, copy.deepcopy(self.first_box))
+        self.observation_diagnostics.setdefault(0, np.zeros(6, dtype=np.float32))
+        self.observation_diagnostic_valid.setdefault(0, False)
 
     @property
     def target_size(self):
@@ -529,7 +533,14 @@ class RecursiveTrackState:
     def clone(self):
         return copy.deepcopy(self)
 
-    def append(self, frame_id, box, timestamp=None):
+    def append(
+        self,
+        frame_id,
+        box,
+        timestamp=None,
+        observation_diagnostics=None,
+        diagnostic_valid=False,
+    ):
         frame_id = int(frame_id)
         if frame_id <= 0:
             raise ValueError("recursive predictions may only append frame_id>0")
@@ -540,6 +551,18 @@ class RecursiveTrackState:
             )
         self.predictions[frame_id] = copy.deepcopy(box)
         self.timestamps[frame_id] = timestamp
+        if observation_diagnostics is None:
+            diagnostic = np.zeros(6, dtype=np.float32)
+        else:
+            diagnostic = np.asarray(observation_diagnostics, dtype=np.float32).reshape(
+                -1
+            )
+            if diagnostic.size != 6 or not np.isfinite(diagnostic).all():
+                raise ValueError(
+                    "observation diagnostics must contain six finite values"
+                )
+        self.observation_diagnostics[frame_id] = diagnostic.copy()
+        self.observation_diagnostic_valid[frame_id] = bool(diagnostic_valid)
 
     def reseed_history(
         self, frame_ids, boxes, timestamps=None, *, before_frame_id, rollout_horizon
@@ -574,6 +597,9 @@ class RecursiveTrackState:
                 raise KeyError(f"reseed cannot introduce unseen frame {frame_id}")
             self.predictions[frame_id] = copy.deepcopy(box)
             self.timestamps[frame_id] = timestamp
+            # Re-anchored rows are interventions, not deployed B0 observations.
+            self.observation_diagnostics[frame_id] = np.zeros(6, dtype=np.float32)
+            self.observation_diagnostic_valid[frame_id] = False
         self.rollout_horizon = rollout_horizon
         self.last_reseed_before_frame = before_frame_id
         self.reseed_count += 1
@@ -609,6 +635,23 @@ class RecursiveTrackState:
             "history_timestamps": [
                 self.timestamps.get(int(frame_id)) for frame_id in frame_ids
             ],
+            "history_observation_diagnostics": np.stack(
+                [
+                    self.observation_diagnostics.get(
+                        int(frame_id), np.zeros(6, dtype=np.float32)
+                    )
+                    for frame_id in frame_ids
+                ],
+                axis=0,
+            ).astype(np.float32),
+            "history_diagnostic_valid_mask": np.asarray(
+                [
+                    bool(valid)
+                    and self.observation_diagnostic_valid.get(int(frame_id), False)
+                    for frame_id, valid in zip(frame_ids, valid_mask)
+                ],
+                dtype=np.int64,
+            ),
             "target_size": self.target_size,
             "tracklet_key": self.tracklet_key,
         }
@@ -718,9 +761,23 @@ def apply_training_reanchor(raw, state, horizon, config):
     }
 
 
-def commit_canonical_prediction(state, candidate_id, frame_id, box, timestamp=None):
+def commit_canonical_prediction(
+    state,
+    candidate_id,
+    frame_id,
+    box,
+    timestamp=None,
+    observation_diagnostics=None,
+    diagnostic_valid=False,
+):
     """Commit candidate 0 only; recovery views can never mutate state."""
     if int(candidate_id) != 0:
         return False
-    state.append(frame_id, box, timestamp)
+    state.append(
+        frame_id,
+        box,
+        timestamp,
+        observation_diagnostics=observation_diagnostics,
+        diagnostic_valid=diagnostic_valid,
+    )
     return True

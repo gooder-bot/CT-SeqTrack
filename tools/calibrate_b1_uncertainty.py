@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -160,31 +159,6 @@ def fit_calibration(arrays, min_direction_speed=0.2):
     return result
 
 
-def update_checkpoint(checkpoint_path, output_path, result):
-    try:
-        payload = torch.load(
-            checkpoint_path, map_location="cpu", weights_only=False)
-    except TypeError:
-        payload = torch.load(checkpoint_path, map_location="cpu")
-    state = payload.get("state_dict", payload)
-    matching = [key for key in state if key.endswith(
-        "physical_motion_encoder.log_sigma_calibration")]
-    if len(matching) != 1:
-        raise RuntimeError(
-            "checkpoint must contain exactly one B1 calibration buffer")
-    state[matching[0]] = torch.as_tensor(
-        result["log_scale_parallel_perpendicular"],
-        dtype=state[matching[0]].dtype)
-    if isinstance(payload, dict):
-        payload["b1_uncertainty_calibration"] = dict(result)
-        # Calibration is a post-selection evaluation transform, not an epoch
-        # boundary of the optimizer trajectory.  It must never be resumed as
-        # if it were the original scratch run.
-        payload["ct_posthoc_calibrated"] = True
-        payload["ct_epoch_boundary_complete"] = False
-    torch.save(payload, output_path)
-
-
 def load_and_validate_manifest(input_path, checkpoint_path=None):
     input_path = Path(input_path)
     manifest_path = input_path.with_suffix(
@@ -215,10 +189,11 @@ def load_and_validate_manifest(input_path, checkpoint_path=None):
 
 def main():
     args = parse_args()
-    if bool(args.checkpoint) != bool(args.output_checkpoint):
+    if args.checkpoint or args.output_checkpoint:
         raise ValueError(
-            "--checkpoint and --output-checkpoint must be supplied together")
-    manifest = load_and_validate_manifest(args.input, args.checkpoint)
+            "calibration is artifact-only; writing calibrated checkpoints is forbidden"
+        )
+    manifest = load_and_validate_manifest(args.input)
     arrays = np.load(args.input, allow_pickle=False)
     for key in ("error_xy", "kinematic_error_xy", "direction_xy",
                 "basis_velocity_xy",
@@ -235,10 +210,6 @@ def main():
     Path(args.output).write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
-    if args.checkpoint:
-        update_checkpoint(
-            args.checkpoint, args.output_checkpoint,
-            result)
     print(json.dumps(result["promotion"], sort_keys=True))
 
 

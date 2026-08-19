@@ -40,6 +40,7 @@ def build_v25_input_dict(
 ):  # Note: There may be cases of input with empty point clouds
     assert frame_id > 0, "no need to construct an input_dict at frame 0"
 
+    recursive_state = kwargs.get("recursive_state")
     if (
         bool(getattr(self.config, "use_b1_prepass_support", False))
         and kwargs.get("motion_prediction") is None
@@ -47,9 +48,13 @@ def build_v25_input_dict(
         predictor = getattr(self, "predict_motion_prepass", None)
         if predictor is None:
             raise RuntimeError("B1 pre-pass support requires a motion predictor")
-        kwargs["motion_prediction"] = predictor(sequence, frame_id, results_bbs)
+        kwargs["motion_prediction"] = predictor(
+            sequence,
+            frame_id,
+            results_bbs,
+            recursive_state=recursive_state,
+        )
 
-    recursive_state = kwargs.get("recursive_state")
     use_recursive_contract = bool(
         getattr(self.config, "use_ct_joint_full", False)
     ) or bool(getattr(self.config, "observation_safe_bbox_size", False))
@@ -174,9 +179,9 @@ def build_v25_input_dict(
     )
     baseline_search_points = this_frame_pc.points.T
     expanded_search_points = np.empty(
-        (0, baseline_search_points.shape[1]),
-        dtype=baseline_search_points.dtype,
+        (0, baseline_search_points.shape[1]), dtype=baseline_search_points.dtype
     )
+    secondary_expanded_search_points = np.empty_like(expanded_search_points)
     ct_search_box = None
     ct_search_diagnostics = {
         "valid": False,
@@ -307,6 +312,13 @@ def build_v25_input_dict(
             ),
             max_length=float(search_config_value("max_length", 24.0)),
             max_width=float(search_config_value("max_width", 10.0)),
+            max_margins=(
+                float(getattr(self.config, "motion_v3_support_cap_parallel", 4.0)),
+                float(getattr(self.config, "motion_v3_support_cap_perpendicular", 3.0)),
+            ),
+            enable_top2_tube=bool(
+                getattr(self.config, "search_v3_enable_top2_tube", False)
+            ),
             fallback_max_speed=float(search_config_value("max_speed", 20.0)),
             fallback_max_acceleration=float(
                 search_config_value("max_acceleration", 8.0)
@@ -348,6 +360,12 @@ def build_v25_input_dict(
                     this_pc, ct_search_box, ref_boxs[0], scale=1.0, offset=0.0
                 )
                 expanded_search_points = ct_search_pc.points.T
+                secondary_tube = search_v2_diagnostics.get("_secondary_tube")
+                if secondary_tube is not None:
+                    secondary_pc = points_utils.generate_subwindow_with_aroundboxs(
+                        this_pc, secondary_tube, ref_boxs[0], scale=1.0, offset=0.0
+                    )
+                    secondary_expanded_search_points = secondary_pc.points.T
         else:
             search_v2_box, search_v2_diagnostics = resolve_b1_search_support(
                 ref_boxs,
@@ -508,6 +526,14 @@ def build_v25_input_dict(
     joint_extension_sampling = None
     if use_ct_joint_full:
         joint_extension_seed = (int(current_sampling_seed) * 22695477 + 1) & 0xFFFFFFFF
+        joint_extension_kwargs = {}
+        if len(secondary_expanded_search_points):
+            joint_extension_kwargs = {
+                "secondary_tube_points": secondary_expanded_search_points,
+                "secondary_tube_fraction": float(
+                    search_v2_diagnostics.get("secondary_tube_quota_fraction", 0.0)
+                ),
+            }
         (
             joint_extension_points,
             joint_extension_valid_mask,
@@ -520,6 +546,7 @@ def build_v25_input_dict(
             endpoint_quota=int(getattr(self.config, "ct_endpoint_quota", 128)),
             tube_quota=int(getattr(self.config, "ct_tube_quota", 128)),
             seed=joint_extension_seed,
+            **joint_extension_kwargs,
         )
         joint_extension_sampling.pop("_pool_points", None)
         endpoint_quota = int(getattr(self.config, "ct_endpoint_quota", 128))
@@ -911,6 +938,30 @@ def build_v25_input_dict(
                 "motion_main_delta_t": data_dict["delta_t_effective"],
                 "motion_main_current_delta_t": data_dict["current_delta_t_effective"],
                 "motion_main_valid_mask": data_dict["valid_mask"],
+                "motion_main_history_observation_diagnostics": torch.tensor(
+                    np.asarray(
+                        recursive_contract.get(
+                            "history_observation_diagnostics",
+                            np.zeros((self.hist_num, 6), dtype=np.float32),
+                        )
+                        if recursive_state is not None
+                        else np.zeros((self.hist_num, 6), dtype=np.float32)
+                    )[None, :],
+                    device=self.device,
+                    dtype=torch.float32,
+                ),
+                "motion_main_history_diagnostic_valid_mask": torch.tensor(
+                    np.asarray(
+                        recursive_contract.get(
+                            "history_diagnostic_valid_mask",
+                            np.zeros(self.hist_num, dtype=np.float32),
+                        )
+                        if recursive_state is not None
+                        else np.zeros(self.hist_num, dtype=np.float32)
+                    )[None, :],
+                    device=self.device,
+                    dtype=torch.float32,
+                ),
                 "motion_main_anchor": torch.tensor(
                     coordinate_anchor[None, :], device=self.device, dtype=torch.float32
                 ),
@@ -1082,6 +1133,27 @@ def build_v25_input_dict(
                 ),
                 "search_v3_support_truncated": torch.tensor(
                     [bool(search_v2_diagnostics.get("truncated", False))],
+                    device=self.device,
+                    dtype=torch.float32,
+                ),
+                "search_v3_support_saturated": torch.tensor(
+                    [bool(search_v2_diagnostics.get("support_saturated", False))],
+                    device=self.device,
+                    dtype=torch.float32,
+                ),
+                "search_v3_top2_tube_active": torch.tensor(
+                    [bool(search_v2_diagnostics.get("top2_tube_active", False))],
+                    device=self.device,
+                    dtype=torch.float32,
+                ),
+                "search_v3_secondary_quota_fraction": torch.tensor(
+                    [
+                        float(
+                            search_v2_diagnostics.get(
+                                "secondary_tube_quota_fraction", 0.0
+                            )
+                        )
+                    ],
                     device=self.device,
                     dtype=torch.float32,
                 ),

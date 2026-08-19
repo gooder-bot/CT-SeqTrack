@@ -1,0 +1,12 @@
+# RA-PMM B1 mini backbone arm: GRU. Scratch training only.
+_base_: b1.yaml
+experiment_name: ct25_b1_ra_pmm_gru_mini_scratch_seed42
+motion_v3_temporal_backend: gru
+motion_v3_cfc_backbone_units: 105
+motion_v3_hard_statistics_path: artifacts/b1_hard_motion_car_mini_train.json
+batch_size: 16
+epoch: 60
+workers: 4
+check_val_every_n_epoch: 5
+seed: 42
+save_top_k: 0

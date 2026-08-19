@@ -1,0 +1,9 @@
+# RA-PMM B1 scratch arm. Populate GT-only hard q50/q90 from the server preflight.
+_base_: ../25_b1.yaml
+experiment_name: ct25_b1_ra_pmm_scratch_seed42
+motion_v3_ra_pmm: true
+motion_v3_require_hard_statistics: true
+motion_v3_nll_weight: 0.0
+motion_v3_aux_nll_weight: 0.0
+checkpoint_monitor: b1_physical_rmse/dev
+search_v3_use_dynamic_sigma: true

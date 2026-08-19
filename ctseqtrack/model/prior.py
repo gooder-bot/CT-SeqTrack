@@ -4,6 +4,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 
 from ctseqtrack.model.cfc import FullGatedCfCCell
@@ -11,6 +12,18 @@ from ctseqtrack.model.cfc import FullGatedCfCCell
 
 def wrap_angle(angle):
     return torch.atan2(torch.sin(angle), torch.cos(angle))
+
+
+def _inverse_softplus(value):
+    value = torch.as_tensor(value, dtype=torch.float32)
+    return torch.log(torch.expm1(value.clamp(min=1e-6)))
+
+
+def ordered_positive_quantiles(raw):
+    """Map unconstrained ``[B,3,2]`` values to strict q50/q80/q95."""
+    if raw.dim() != 3 or raw.shape[1:] != (3, 2):
+        raise ValueError("quantile logits must have shape [B,3,2]")
+    return torch.cumsum(F.softplus(raw), dim=1)
 
 
 def motion_aligned_axes(velocity_xy, min_speed=0.2, eps=1e-6):
@@ -147,6 +160,12 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         acceleration_weight=0.5,
         temporal_backend="gru",
         cfc_backbone_units=105,
+        ra_pmm=False,
+        diagnostic_dim=6,
+        diagnostic_hidden_dim=16,
+        max_turn_rate=1.0,
+        enable_ctrv=True,
+        support_initial_q95=(2.0, 1.0),
     ):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
@@ -156,12 +175,18 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.residual_velocity_scale = float(residual_velocity_scale)
         self.motion_aligned_uncertainty = bool(motion_aligned_uncertainty)
         self.min_direction_speed = float(min_direction_speed)
-        self.shared_kinematic_anchor = bool(shared_kinematic_anchor)
+        self.shared_kinematic_anchor = bool(shared_kinematic_anchor or ra_pmm)
+        self.initial_sigma = float(initial_sigma)
         self.max_acceleration = float(max_acceleration)
         self.max_displacement = float(max_displacement)
         self.acceleration_weight = float(acceleration_weight)
         self.temporal_backend = str(temporal_backend).strip().lower()
         self.cfc_backbone_units = int(cfc_backbone_units)
+        self.ra_pmm = bool(ra_pmm)
+        self.diagnostic_dim = int(diagnostic_dim)
+        self.diagnostic_hidden_dim = int(diagnostic_hidden_dim)
+        self.max_turn_rate = float(max_turn_rate)
+        self.enable_ctrv = bool(enable_ctrv)
         if self.hidden_dim <= 0 or self.step_dim <= 0:
             raise ValueError("physical motion encoder dimensions must be positive")
         if self.residual_velocity_scale <= 0:
@@ -180,6 +205,12 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             raise ValueError("B1 temporal backend must be gru or cfc")
         if self.cfc_backbone_units <= 0:
             raise ValueError("CfC backbone units must be positive")
+        if self.ra_pmm and (
+            self.diagnostic_dim <= 0 or self.diagnostic_hidden_dim <= 0
+        ):
+            raise ValueError("RA-PMM diagnostic dimensions must be positive")
+        if self.max_turn_rate <= 0:
+            raise ValueError("RA-PMM maximum turn rate must be positive")
 
         # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
         # query/pair ratio, and transition-valid flag.
@@ -202,16 +233,67 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 hidden_size=self.hidden_dim,
                 backbone_units=self.cfc_backbone_units,
             )
+        if self.ra_pmm:
+            self.diagnostic_projection = nn.Sequential(
+                nn.Linear(self.diagnostic_dim, self.diagnostic_hidden_dim),
+                nn.LayerNorm(self.diagnostic_hidden_dim),
+                nn.ReLU(inplace=True),
+            )
+        context_input_dim = (
+            self.hidden_dim + 2 + (self.diagnostic_hidden_dim if self.ra_pmm else 0)
+        )
         self.context = nn.Sequential(
-            nn.Linear(self.hidden_dim + 2, self.hidden_dim),
+            nn.Linear(context_input_dim, self.hidden_dim),
             nn.ReLU(inplace=True),
         )
         self.velocity_residual_head = nn.Linear(self.hidden_dim, 2)
-        self.log_sigma_head = nn.Linear(self.hidden_dim, 2)
+        if not self.ra_pmm:
+            self.log_sigma_head = nn.Linear(self.hidden_dim, 2)
         nn.init.zeros_(self.velocity_residual_head.weight)
         nn.init.zeros_(self.velocity_residual_head.bias)
-        nn.init.zeros_(self.log_sigma_head.weight)
-        nn.init.constant_(self.log_sigma_head.bias, math.log(initial_sigma))
+        if not self.ra_pmm:
+            nn.init.zeros_(self.log_sigma_head.weight)
+            nn.init.constant_(self.log_sigma_head.bias, math.log(initial_sigma))
+        if self.ra_pmm:
+            self.mode_gate_head = nn.Linear(self.hidden_dim, 3)
+            self.residual_reliability_head = nn.Linear(self.hidden_dim, 1)
+            self.motion_quantile_head = nn.Linear(self.hidden_dim, 6)
+            self.support_quantile_head = nn.Linear(self.hidden_dim, 6)
+            self.recoverability_head = nn.Linear(self.hidden_dim, 1)
+            for head in (
+                self.mode_gate_head,
+                self.velocity_residual_head,
+                self.residual_reliability_head,
+                self.motion_quantile_head,
+                self.support_quantile_head,
+                self.recoverability_head,
+            ):
+                nn.init.zeros_(head.weight)
+                nn.init.zeros_(head.bias)
+            # CV and CA start equally likely; CTRV is initially effectively off.
+            self.mode_gate_head.bias.data[2] = -8.0
+            motion_targets = torch.tensor(
+                ((0.25, 0.15), (0.50, 0.30), (1.00, 0.50)),
+                dtype=self.motion_quantile_head.bias.dtype,
+            )
+            support_q95 = torch.as_tensor(
+                support_initial_q95, dtype=self.support_quantile_head.bias.dtype
+            ).reshape(2)
+            support_targets = torch.stack(
+                (0.25 * support_q95, 0.50 * support_q95, support_q95), dim=0
+            )
+            for head, targets in (
+                (self.motion_quantile_head, motion_targets),
+                (self.support_quantile_head, support_targets),
+            ):
+                increments = torch.cat((targets[:1], targets[1:] - targets[:-1]), dim=0)
+                head.bias.data.copy_(_inverse_softplus(increments).reshape(-1))
+            self.register_buffer(
+                "support_quantile_calibration", torch.zeros(3, 2), persistent=True
+            )
+            self.register_buffer(
+                "motion_quantile_calibration", torch.zeros(3, 2), persistent=True
+            )
         # Historical B1-v3 instances keep this non-persistent.  The new
         # calibrated path stores it in checkpoints without breaking strict
         # loading of old state dictionaries.
@@ -220,6 +302,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             torch.zeros(2),
             persistent=self.motion_aligned_uncertainty,
         )
+
+    @property
+    def residual_acceleration_head(self):
+        """RA-PMM semantic alias without registering a duplicate module."""
+        return self.velocity_residual_head
 
     def set_uncertainty_calibration(self, log_scale):
         value = torch.as_tensor(
@@ -291,6 +378,98 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         )
         return torch.clamp(value, min=self.eps), finite
 
+    def _history_diagnostic_context(
+        self,
+        history_observation_diagnostics,
+        history_diagnostic_valid_mask,
+        batch_size,
+        history_length,
+        reference,
+    ):
+        if not self.ra_pmm:
+            return None
+        if history_observation_diagnostics is None:
+            diagnostics = reference.new_zeros(
+                (batch_size, history_length, self.diagnostic_dim)
+            )
+        else:
+            diagnostics = history_observation_diagnostics.to(
+                device=reference.device, dtype=reference.dtype
+            )
+            if diagnostics.dim() == 2:
+                diagnostics = diagnostics.unsqueeze(0)
+            if diagnostics.shape != (batch_size, history_length, self.diagnostic_dim):
+                raise ValueError(
+                    "history_observation_diagnostics must have shape [B,H,6]"
+                )
+        if history_diagnostic_valid_mask is None:
+            diagnostic_valid = reference.new_zeros((batch_size, history_length))
+        else:
+            diagnostic_valid = history_diagnostic_valid_mask.to(
+                device=reference.device, dtype=reference.dtype
+            )
+            if diagnostic_valid.dim() == 1:
+                diagnostic_valid = diagnostic_valid.unsqueeze(0)
+            if diagnostic_valid.shape != (batch_size, history_length):
+                raise ValueError("history_diagnostic_valid_mask must have shape [B,H]")
+        diagnostic_valid = (diagnostic_valid > 0).to(reference.dtype)
+        embedded = self.diagnostic_projection(torch.nan_to_num(diagnostics))
+        embedded = embedded * diagnostic_valid.unsqueeze(-1)
+        return embedded.sum(dim=1) / torch.clamp(
+            diagnostic_valid.sum(dim=1, keepdim=True), min=1.0
+        )
+
+    def _ra_uncertainty(self, detached_context):
+        motion = ordered_positive_quantiles(
+            self.motion_quantile_head(detached_context).reshape(-1, 3, 2)
+        )
+        motion = motion * torch.exp(
+            self.motion_quantile_calibration.to(
+                device=motion.device, dtype=motion.dtype
+            )
+        ).unsqueeze(0)
+        support = ordered_positive_quantiles(
+            self.support_quantile_head(detached_context).reshape(-1, 3, 2)
+        )
+        support = support * torch.exp(
+            self.support_quantile_calibration.to(
+                device=support.device, dtype=support.dtype
+            )
+        ).unsqueeze(0)
+        return (
+            motion,
+            support,
+            torch.sigmoid(self.recoverability_head(detached_context).squeeze(1)),
+        )
+
+    def set_support_quantile_calibration(self, log_scale):
+        if not self.ra_pmm:
+            raise RuntimeError("support quantile calibration requires RA-PMM")
+        value = torch.as_tensor(
+            log_scale,
+            device=self.support_quantile_calibration.device,
+            dtype=self.support_quantile_calibration.dtype,
+        )
+        if value.numel() == 2:
+            value = value.reshape(1, 2).expand(3, 2)
+        if value.shape != (3, 2) or not bool(torch.isfinite(value).all()):
+            raise ValueError("support calibration must contain [2] or [3,2] values")
+        self.support_quantile_calibration.copy_(value)
+
+    def set_motion_quantile_calibration(self, log_scale):
+        if not self.ra_pmm:
+            raise RuntimeError("motion quantile calibration requires RA-PMM")
+        value = torch.as_tensor(
+            log_scale,
+            device=self.motion_quantile_calibration.device,
+            dtype=self.motion_quantile_calibration.dtype,
+        )
+        if value.numel() == 2:
+            value = value.reshape(1, 2).expand(3, 2)
+        if value.shape != (3, 2) or not bool(torch.isfinite(value).all()):
+            raise ValueError("motion calibration must contain [2] or [3,2] values")
+        self.motion_quantile_calibration.copy_(value)
+
     def _encode_transitions(
         self, projected, chronological_valid, chronological_pair_gap
     ):
@@ -331,6 +510,88 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         )
         _, ordered_hidden = self.gru(packed_projected)
         return ordered_hidden[-1]
+
+    def _analytic_experts(
+        self,
+        base_velocity,
+        older_velocity,
+        older_pair_valid,
+        pair_gap,
+        query_gap,
+        valid,
+    ):
+        """Return bounded CV/CA/CTRV endpoint experts and validity masks."""
+        dtype = base_velocity.dtype
+        acceleration_gap = torch.clamp(
+            0.5
+            * (
+                pair_gap[:, 0]
+                + (pair_gap[:, 1] if pair_gap.shape[1] > 1 else pair_gap[:, 0])
+            ),
+            min=self.eps,
+        )
+        acceleration = (base_velocity - older_velocity) / acceleration_gap.unsqueeze(1)
+        acceleration = acceleration * older_pair_valid.to(dtype).unsqueeze(1)
+        acceleration_norm = torch.linalg.norm(acceleration, dim=1, keepdim=True)
+        acceleration = acceleration * torch.clamp(
+            self.max_acceleration / torch.clamp(acceleration_norm, min=self.eps),
+            max=1.0,
+        )
+        cv = base_velocity * query_gap.unsqueeze(1)
+        ca = cv + 0.5 * acceleration * query_gap.pow(2).unsqueeze(1)
+
+        base_angle = torch.atan2(base_velocity[:, 1], base_velocity[:, 0])
+        older_angle = torch.atan2(older_velocity[:, 1], older_velocity[:, 0])
+        turn_rate = torch.clamp(
+            wrap_angle(base_angle - older_angle) / acceleration_gap,
+            min=-self.max_turn_rate,
+            max=self.max_turn_rate,
+        )
+        speed = torch.linalg.norm(base_velocity, dim=1)
+        theta = turn_rate * query_gap
+        direction, perpendicular, _ = motion_aligned_axes(
+            base_velocity, min_speed=self.min_direction_speed, eps=self.eps
+        )
+        curved_parallel = torch.where(
+            turn_rate.abs() > self.eps,
+            speed
+            * torch.sin(theta)
+            / torch.clamp(turn_rate.abs(), min=self.eps)
+            * torch.sign(turn_rate),
+            speed * query_gap,
+        )
+        # (1-cos(theta))/omega has the correct sign for left/right turns.
+        curved_perpendicular = torch.where(
+            turn_rate.abs() > self.eps,
+            speed
+            * (1.0 - torch.cos(theta))
+            / torch.clamp(turn_rate.abs(), min=self.eps)
+            * torch.sign(turn_rate),
+            torch.zeros_like(speed),
+        )
+        ctrv = direction * curved_parallel.unsqueeze(
+            1
+        ) + perpendicular * curved_perpendicular.unsqueeze(1)
+        experts = torch.stack((cv, ca, ctrv), dim=1)
+        norms = torch.linalg.norm(experts, dim=2, keepdim=True)
+        experts = experts * torch.clamp(
+            self.max_displacement / torch.clamp(norms, min=self.eps), max=1.0
+        )
+        experts = experts * valid[:, None, None]
+        ctrv_valid = (
+            older_pair_valid
+            & (speed >= self.min_direction_speed)
+            & torch.full_like(older_pair_valid, self.enable_ctrv)
+        )
+        expert_valid = torch.stack(
+            (
+                valid > 0,
+                (valid > 0) & older_pair_valid,
+                (valid > 0) & ctrv_valid,
+            ),
+            dim=1,
+        )
+        return experts, expert_valid, acceleration
 
     def kinematic_fallback(self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
         """Parameter-free fallback used by the strict ``-B1`` ablation."""
@@ -408,10 +669,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             self.max_acceleration / torch.clamp(acceleration_norm, min=self.eps),
             max=1.0,
         )
-        kinematic_xy = base_velocity * query_gap.unsqueeze(
-            1
-        ) + self.acceleration_weight * 0.5 * acceleration * query_gap.pow(2).unsqueeze(
-            1
+        cv_xy = base_velocity * query_gap.unsqueeze(1)
+        ca_xy = cv_xy + 0.5 * acceleration * query_gap.pow(2).unsqueeze(1)
+        kinematic_xy = (1.0 - self.acceleration_weight) * cv_xy + (
+            self.acceleration_weight * ca_xy
         )
         displacement_norm = torch.linalg.norm(kinematic_xy, dim=1, keepdim=True)
         kinematic_xy = (
@@ -441,14 +702,26 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             kinematic_xy, min_speed=self.min_direction_speed, eps=self.eps
         )
         log_sigma = torch.log(torch.clamp(envelope, min=0.1))
-        uncertainty = motion_aligned_covariance(
+        uncertainty = self._uncertainty_outputs(
             base_velocity,
             log_sigma,
-            min_speed=self.min_direction_speed,
-            eps=self.eps,
             direction_xy=direction,
         )
         zeros_xy = torch.zeros_like(kinematic_xy)
+        mode_centers = torch.stack((cv_xy, ca_xy, cv_xy), dim=1)
+        mode_probabilities = (
+            ref_boxs.new_tensor((0.5, 0.5, 0.0)).unsqueeze(0).expand(batch_size, -1)
+        )
+        base_quantile = torch.exp(uncertainty["log_sigma_parallel_perp"])
+        motion_quantiles = torch.stack(
+            (0.5 * base_quantile, 0.8 * base_quantile, base_quantile), dim=1
+        )
+        support_q95 = (
+            ref_boxs.new_tensor((2.0, 1.0)).unsqueeze(0).expand(batch_size, -1)
+        )
+        support_quantiles = torch.stack(
+            (0.25 * support_q95, 0.50 * support_q95, support_q95), dim=1
+        )
         gap_ratio = torch.where(
             valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw)
         )
@@ -463,6 +736,22 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             "residual_unit_parallel_perp": zeros_xy,
             "residual_xy": zeros_xy,
             "envelope_parallel_perp": envelope,
+            "mode_centers_xy": mode_centers,
+            "mode_probabilities": mode_probabilities,
+            "motion_quantiles_pp": motion_quantiles,
+            "support_quantiles_pp": support_quantiles,
+            "recoverability_probability": valid,
+            "expert_disagreement": torch.linalg.norm(cv_xy - ca_xy, dim=1),
+            "residual_acceleration_pp": zeros_xy,
+            "residual_gate": ref_boxs.new_zeros((batch_size,)),
+            "expert_valid_mask": torch.stack(
+                (
+                    valid > 0,
+                    older_pair_valid & (valid > 0),
+                    torch.zeros_like(valid).bool(),
+                ),
+                dim=1,
+            ),
             **uncertainty,
             "direction_xy": uncertainty["motion_direction_xy"],
             "valid": valid,
@@ -472,7 +761,15 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             ),
         }
 
-    def forward(self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
+    def forward(
+        self,
+        ref_boxs,
+        delta_t,
+        valid_mask,
+        current_delta_t=None,
+        history_observation_diagnostics=None,
+        history_diagnostic_valid_mask=None,
+    ):
         if ref_boxs.dim() != 3 or ref_boxs.shape[-1] != 4:
             raise ValueError("motion ref_boxs must have shape [B,H,4]")
         batch_size, history_length, _ = ref_boxs.shape
@@ -489,6 +786,13 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         query_gap, query_finite = self._format_query_gap(
             current_delta_t, batch_size, ref_boxs
         )
+        diagnostic_context = self._history_diagnostic_context(
+            history_observation_diagnostics,
+            history_diagnostic_valid_mask,
+            batch_size,
+            history_length,
+            ref_boxs,
+        )
 
         # PyTorch 2.0's Tensor.all accepts one dimension at a time; flattening
         # preserves the per-sample finite check and remains compatible with
@@ -504,10 +808,22 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         zeros_xy = ref_boxs.new_zeros((batch_size, 2))
         zeros_feature = ref_boxs.new_zeros((batch_size, self.hidden_dim))
         initial_log_sigma = ref_boxs.new_full(
-            (batch_size, 2), self.log_sigma_head.bias[0].item()
+            (batch_size, 2), math.log(self.initial_sigma)
         )
         if history_length < 2:
             uncertainty = self._uncertainty_outputs(zeros_xy, initial_log_sigma)
+            if self.ra_pmm:
+                motion_quantiles, support_quantiles, recoverability = (
+                    self._ra_uncertainty(zeros_feature.detach())
+                )
+            else:
+                sigma = torch.exp(uncertainty["log_sigma_parallel_perp"])
+                motion_quantiles = torch.stack((0.5 * sigma, 0.8 * sigma, sigma), dim=1)
+                support_q95 = ref_boxs.new_tensor((2.0, 1.0)).expand(batch_size, 2)
+                support_quantiles = torch.stack(
+                    (0.25 * support_q95, 0.50 * support_q95, support_q95), dim=1
+                )
+                recoverability = ref_boxs.new_zeros((batch_size,))
             return {
                 "feature": zeros_feature,
                 "velocity_xy": zeros_xy,
@@ -518,6 +834,19 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 "residual_unit_parallel_perp": zeros_xy,
                 "residual_xy": zeros_xy,
                 "envelope_parallel_perp": zeros_xy,
+                "mode_centers_xy": ref_boxs.new_zeros((batch_size, 3, 2)),
+                "mode_probabilities": ref_boxs.new_tensor((1.0, 0.0, 0.0)).expand(
+                    batch_size, 3
+                ),
+                "motion_quantiles_pp": motion_quantiles,
+                "support_quantiles_pp": support_quantiles,
+                "recoverability_probability": recoverability,
+                "expert_disagreement": ref_boxs.new_zeros((batch_size,)),
+                "residual_acceleration_pp": zeros_xy,
+                "residual_gate": ref_boxs.new_zeros((batch_size,)),
+                "expert_valid_mask": torch.zeros(
+                    batch_size, 3, device=ref_boxs.device, dtype=torch.bool
+                ),
                 **uncertainty,
                 "direction_xy": uncertainty["motion_direction_xy"],
                 "valid": ref_boxs.new_zeros((batch_size,)),
@@ -572,20 +901,37 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             transition_count, min=1.0
         )
         gap_ratio_raw = query_gap / torch.clamp(nominal_gap, min=self.eps)
-        context = self.context(
-            torch.cat(
-                (
-                    ordered_state,
-                    torch.log1p(query_gap / self.time_scale).unsqueeze(1),
-                    torch.log1p(gap_ratio_raw).unsqueeze(1),
-                ),
-                dim=1,
-            )
-        )
+        context_parts = [
+            ordered_state,
+            torch.log1p(query_gap / self.time_scale).unsqueeze(1),
+            torch.log1p(gap_ratio_raw).unsqueeze(1),
+        ]
+        if diagnostic_context is not None:
+            context_parts.append(diagnostic_context)
+        context = self.context(torch.cat(context_parts, dim=1))
 
         recent_pair_valid = pair_valid[:, 0]
         valid = (recent_pair_valid & finite_row).to(ref_boxs.dtype)
         base_velocity = velocity_xy[:, 0] * valid.unsqueeze(1)
+        mode_centers = torch.stack(
+            (
+                base_velocity * query_gap.unsqueeze(1),
+                base_velocity * query_gap.unsqueeze(1),
+                base_velocity * query_gap.unsqueeze(1),
+            ),
+            dim=1,
+        )
+        mode_probabilities = ref_boxs.new_tensor((1.0, 0.0, 0.0)).expand(batch_size, 3)
+        expert_valid_mask = torch.stack(
+            (valid > 0, torch.zeros_like(valid).bool(), torch.zeros_like(valid).bool()),
+            dim=1,
+        )
+        expert_disagreement = ref_boxs.new_zeros((batch_size,))
+        residual_acceleration_pp = zeros_xy
+        residual_gate = ref_boxs.new_zeros((batch_size,))
+        motion_quantiles = None
+        support_quantiles = None
+        recoverability = ref_boxs.new_zeros((batch_size,))
         if self.shared_kinematic_anchor:
             # The deterministic anchor mirrors ctseqtrack.data.search exactly: the
             # newest velocity is primary and the next valid transition only
@@ -600,44 +946,30 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 if velocity_xy.shape[1] > 1
                 else torch.zeros_like(base_velocity)
             )
-            acceleration_gap = torch.clamp(
-                0.5
-                * (
-                    pair_gap[:, 0]
-                    + (pair_gap[:, 1] if pair_gap.shape[1] > 1 else pair_gap[:, 0])
-                ),
-                min=self.eps,
+            experts, expert_valid_mask, acceleration = self._analytic_experts(
+                base_velocity,
+                older_velocity,
+                older_pair_valid,
+                pair_gap,
+                query_gap,
+                valid,
             )
-            acceleration = (
-                base_velocity - older_velocity
-            ) / acceleration_gap.unsqueeze(1)
-            acceleration = acceleration * older_pair_valid.to(ref_boxs.dtype).unsqueeze(
-                1
-            )
-            acceleration_norm = torch.linalg.norm(acceleration, dim=1, keepdim=True)
-            acceleration = acceleration * torch.clamp(
-                self.max_acceleration / torch.clamp(acceleration_norm, min=self.eps),
-                max=1.0,
-            )
-            kinematic_prior_xy = base_velocity * query_gap.unsqueeze(
-                1
-            ) + self.acceleration_weight * 0.5 * acceleration * query_gap.pow(
-                2
-            ).unsqueeze(
-                1
-            )
-            displacement_norm = torch.linalg.norm(
-                kinematic_prior_xy, dim=1, keepdim=True
-            )
-            kinematic_prior_xy = (
-                kinematic_prior_xy
-                * torch.clamp(
-                    self.max_displacement
-                    / torch.clamp(displacement_norm, min=self.eps),
-                    max=1.0,
+            mode_centers = experts
+            if self.ra_pmm:
+                mode_logits = self.mode_gate_head(context)
+                mode_logits = mode_logits.masked_fill(~expert_valid_mask, -1e4)
+                mode_probabilities = torch.softmax(mode_logits, dim=1)
+                mode_probabilities = mode_probabilities * valid.unsqueeze(1)
+                kinematic_prior_xy = torch.sum(
+                    mode_probabilities.unsqueeze(2) * experts, dim=1
                 )
-                * valid.unsqueeze(1)
-            )
+            else:
+                kinematic_prior_xy = (1.0 - self.acceleration_weight) * experts[
+                    :, 0
+                ] + self.acceleration_weight * experts[:, 1]
+                mode_probabilities = ref_boxs.new_tensor(
+                    (1.0 - self.acceleration_weight, self.acceleration_weight, 0.0)
+                ).expand(batch_size, 3)
 
             velocity_spread = torch.linalg.norm(base_velocity - older_velocity, dim=1)
             velocity_spread = velocity_spread * older_pair_valid.to(ref_boxs.dtype)
@@ -663,29 +995,64 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 base_direction,
             )
             perpendicular = torch.stack((-direction[:, 1], direction[:, 0]), dim=1)
-            residual_unit = torch.tanh(
-                self.velocity_residual_head(context)
-            ) * valid.unsqueeze(1)
-            residual_xy = direction * (
-                residual_unit[:, 0:1] * envelope_parallel.unsqueeze(1)
-            ) + perpendicular * (
-                residual_unit[:, 1:2] * envelope_perpendicular.unsqueeze(1)
-            )
+            if self.ra_pmm:
+                residual_acceleration_pp = (
+                    self.max_acceleration
+                    * torch.tanh(self.residual_acceleration_head(context))
+                    * valid.unsqueeze(1)
+                )
+                residual_gate = (
+                    torch.sigmoid(self.residual_reliability_head(context).squeeze(1))
+                    * valid
+                )
+                residual_unit = residual_acceleration_pp / self.max_acceleration
+                residual_xy = (
+                    0.5
+                    * query_gap.pow(2).unsqueeze(1)
+                    * residual_gate.unsqueeze(1)
+                    * (
+                        direction * residual_acceleration_pp[:, 0:1]
+                        + perpendicular * residual_acceleration_pp[:, 1:2]
+                    )
+                )
+            else:
+                residual_unit = torch.tanh(
+                    self.velocity_residual_head(context)
+                ) * valid.unsqueeze(1)
+                residual_xy = direction * (
+                    residual_unit[:, 0:1] * envelope_parallel.unsqueeze(1)
+                ) + perpendicular * (
+                    residual_unit[:, 1:2] * envelope_perpendicular.unsqueeze(1)
+                )
             prior_xy = (kinematic_prior_xy + residual_xy) * valid.unsqueeze(1)
+            prior_norm = torch.linalg.norm(prior_xy, dim=1, keepdim=True)
+            prior_xy = prior_xy * torch.clamp(
+                self.max_displacement / torch.clamp(prior_norm, min=self.eps), max=1.0
+            )
             predicted_velocity = prior_xy / torch.clamp(
                 query_gap.unsqueeze(1), min=self.eps
             )
 
-            raw_sigma = self.log_sigma_head(context)
-            bounded_sigma = 0.1 + (envelope - 0.1) * torch.sigmoid(raw_sigma)
-            bounded_sigma = torch.clamp(bounded_sigma, min=0.1)
-            raw_log_sigma = torch.log(bounded_sigma)
-            uncertainty = motion_aligned_covariance(
-                base_velocity,
-                raw_log_sigma,
-                min_speed=self.min_direction_speed,
-                eps=self.eps,
-                direction_xy=direction,
+            if self.ra_pmm:
+                motion_quantiles, support_quantiles, recoverability = (
+                    self._ra_uncertainty(context.detach())
+                )
+                gaussian_sigma = motion_quantiles[:, 2] / 1.959963984540054
+                raw_log_sigma = torch.log(torch.clamp(gaussian_sigma, min=0.1))
+            else:
+                raw_sigma = self.log_sigma_head(context)
+                bounded_sigma = 0.1 + (envelope - 0.1) * torch.sigmoid(raw_sigma)
+                bounded_sigma = torch.clamp(bounded_sigma, min=0.1)
+                raw_log_sigma = torch.log(bounded_sigma)
+            uncertainty = self._uncertainty_outputs(
+                base_velocity, raw_log_sigma, direction_xy=direction
+            )
+
+            ranked_modes = torch.argsort(mode_probabilities, dim=1, descending=True)
+            gather_index = ranked_modes[:, :2].unsqueeze(2).expand(-1, -1, 2)
+            top_two = torch.gather(mode_centers, 1, gather_index)
+            expert_disagreement = torch.linalg.norm(
+                top_two[:, 0] - top_two[:, 1], dim=1
             )
         else:
             residual_velocity = self.residual_velocity_scale * torch.tanh(
@@ -722,6 +1089,16 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             uncertainty = self._uncertainty_outputs(
                 base_velocity, raw_log_sigma, direction_xy=direction
             )
+        if motion_quantiles is None:
+            sigma = torch.exp(uncertainty["log_sigma_parallel_perp"])
+            motion_quantiles = torch.stack((0.5 * sigma, 0.8 * sigma, sigma), dim=1)
+            support_q95 = torch.maximum(
+                envelope, ref_boxs.new_tensor((2.0, 1.0)).expand(batch_size, 2)
+            )
+            support_quantiles = torch.stack(
+                (0.25 * support_q95, 0.50 * support_q95, support_q95), dim=1
+            )
+            recoverability = valid
         gap_ratio = torch.where(
             valid > 0, gap_ratio_raw, torch.ones_like(gap_ratio_raw)
         )
@@ -735,6 +1112,15 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             "residual_unit_parallel_perp": residual_unit,
             "residual_xy": residual_xy,
             "envelope_parallel_perp": envelope,
+            "mode_centers_xy": mode_centers,
+            "mode_probabilities": mode_probabilities,
+            "motion_quantiles_pp": motion_quantiles,
+            "support_quantiles_pp": support_quantiles,
+            "recoverability_probability": recoverability,
+            "expert_disagreement": expert_disagreement,
+            "residual_acceleration_pp": residual_acceleration_pp,
+            "residual_gate": residual_gate,
+            "expert_valid_mask": expert_valid_mask,
             **uncertainty,
             "direction_xy": uncertainty["motion_direction_xy"],
             "valid": valid,
@@ -750,5 +1136,6 @@ __all__ = [
     "OrderedPhysicalMotionEncoder",
     "motion_aligned_axes",
     "motion_aligned_covariance",
+    "ordered_positive_quantiles",
     "physical_motion_uncertainty_loss",
 ]

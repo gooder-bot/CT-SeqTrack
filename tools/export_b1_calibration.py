@@ -19,7 +19,12 @@ sys.path.insert(0, str(ROOT))
 from datasets import get_dataset, points_utils  # noqa: E402
 from utils.checkpoint_loading import load_evaluation_weights  # noqa: E402
 from models import get_model  # noqa: E402
-from ctseqtrack.data.recursive import stable_tracklet_partition  # noqa: E402
+from ctseqtrack.data.recursive import (  # noqa: E402
+    build_scene_partition_manifest,
+    scene_partition_identity_sha256,
+    scene_partition_tracklet_ids,
+    stable_tracklet_partition,
+)
 from utils.config import load_yaml_config  # noqa: E402
 from ctseqtrack.runtime.calibration import (  # noqa: E402
     b1_calibration_config_sha256,
@@ -34,8 +39,17 @@ def parse_args():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--split", default="mini_train")
-    parser.add_argument("--partition", choices=("train", "dev", "calibration"),
-                        default="calibration")
+    parser.add_argument(
+        "--partition",
+        choices=(
+            "train",
+            "dev",
+            "calibration",
+            "calibration_select",
+            "calibration_audit",
+        ),
+        default="calibration_select",
+    )
     parser.add_argument("--path")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--max-tracklets", type=int)
@@ -56,22 +70,22 @@ def resolve_device(value):
 def main():
     args = parse_args()
     raw_config = load_yaml_config(args.config)
-    seed = int(args.seed if args.seed is not None
-               else raw_config.get("seed", 42) or 42)
-    raw_config.update({
-        "seed": seed,
-        "test_split": args.split,
-        "preloading": bool(args.preloading),
-        "use_b1motion_v3": True,
-        "use_calibrated_motion_uncertainty": True,
-        "use_motion_v3_legacy_fusion": False,
-        "proposal_inference_mode": "observation",
-    })
+    seed = int(args.seed if args.seed is not None else raw_config.get("seed", 42) or 42)
+    raw_config.update(
+        {
+            "seed": seed,
+            "test_split": args.split,
+            "preloading": bool(args.preloading),
+            "use_b1motion_v3": True,
+            "use_calibrated_motion_uncertainty": True,
+            "use_motion_v3_legacy_fusion": False,
+            "proposal_inference_mode": "observation",
+        }
+    )
     if args.path:
         raw_config["path"] = args.path
     config = EasyDict(raw_config)
-    dataset = get_dataset(
-        config, type="test", split=args.split, protocol_role="test")
+    dataset = get_dataset(config, type="test", split=args.split, protocol_role="test")
     source_dataset = getattr(dataset, "dataset", dataset)
     model = get_model(config.net_model)(config)
     load_evaluation_weights(model, args.checkpoint)
@@ -81,51 +95,96 @@ def main():
         row_limit = min(row_limit, int(args.max_tracklets))
     rows = []
     selected_tracklets = 0
+    scene_manifest = None
+    selected_scene_tracklets = None
+    if args.partition in ("calibration_select", "calibration_audit"):
+        scene_manifest = build_scene_partition_manifest(source_dataset, seed=seed)
+        selected_scene_tracklets = set(
+            scene_partition_tracklet_ids(scene_manifest, args.partition)
+        )
     with torch.inference_mode():
         for tracklet_id in range(row_limit):
             tracklet_key = (
                 source_dataset.get_tracklet_key(tracklet_id)
                 if hasattr(source_dataset, "get_tracklet_key")
-                else f"{args.split}/tracklet/{tracklet_id}")
-            if stable_tracklet_partition(
-                    tracklet_key, seed) != args.partition:
+                else f"{args.split}/tracklet/{tracklet_id}"
+            )
+            selected = (
+                tracklet_id in selected_scene_tracklets
+                if selected_scene_tracklets is not None
+                else stable_tracklet_partition(tracklet_key, seed) == args.partition
+            )
+            if not selected:
                 continue
             selected_tracklets += 1
             sequence = dataset[tracklet_id]
             history = [sequence[0]["3d_bbox"]]
             for frame_id in range(1, len(sequence)):
-                prediction = model.predict_motion_prepass(
-                    sequence, frame_id, history)
+                prediction = model.predict_motion_prepass(sequence, frame_id, history)
                 target_local = points_utils.transform_box(
-                    sequence[frame_id]["3d_bbox"], history[-1])
-                target_xy = np.asarray(
-                    target_local.center[:2], dtype=np.float32)
-                rows.append({
-                    "error_xy": target_xy - np.asarray(
-                        prediction["mu_xy"], dtype=np.float32),
-                    "kinematic_error_xy": target_xy - np.asarray(
-                        prediction["kinematic_prior_xy"], dtype=np.float32),
-                    "velocity_xy": np.asarray(
-                        prediction["velocity_xy"], dtype=np.float32),
-                    "basis_velocity_xy": np.asarray(
-                        prediction["basis_velocity_xy"], dtype=np.float32),
-                    "direction_xy": np.asarray(
-                        prediction["direction_xy"], dtype=np.float32),
-                    "log_sigma_pp": np.asarray(
-                        prediction["log_sigma_parallel_perp"],
-                        dtype=np.float32),
-                    "valid": np.float32(prediction["valid"]),
-                    "gap_ratio": np.float32(prediction["gap_ratio"]),
-                    "tracklet_key": str(tracklet_key),
-                    "frame_id": np.int64(frame_id),
-                })
+                    sequence[frame_id]["3d_bbox"], history[-1]
+                )
+                target_xy = np.asarray(target_local.center[:2], dtype=np.float32)
+                physical_world = np.asarray(
+                    sequence[frame_id]["3d_bbox"].center, dtype=np.float64
+                ) - np.asarray(
+                    sequence[frame_id - 1]["3d_bbox"].center, dtype=np.float64
+                )
+                physical_target_xy = (
+                    np.asarray(history[-1].rotation_matrix, dtype=np.float64).T
+                    @ physical_world
+                )[:2].astype(np.float32)
+                rows.append(
+                    {
+                        "error_xy": physical_target_xy
+                        - np.asarray(prediction["mu_xy"], dtype=np.float32),
+                        "physical_error_xy": physical_target_xy
+                        - np.asarray(prediction["mu_xy"], dtype=np.float32),
+                        "endpoint_error_xy": target_xy
+                        - np.asarray(prediction["mu_xy"], dtype=np.float32),
+                        "anchor_drift_xy": target_xy - physical_target_xy,
+                        "kinematic_error_xy": physical_target_xy
+                        - np.asarray(
+                            prediction["kinematic_prior_xy"], dtype=np.float32
+                        ),
+                        "velocity_xy": np.asarray(
+                            prediction["velocity_xy"], dtype=np.float32
+                        ),
+                        "basis_velocity_xy": np.asarray(
+                            prediction["basis_velocity_xy"], dtype=np.float32
+                        ),
+                        "direction_xy": np.asarray(
+                            prediction["direction_xy"], dtype=np.float32
+                        ),
+                        "log_sigma_pp": np.asarray(
+                            prediction["log_sigma_parallel_perp"], dtype=np.float32
+                        ),
+                        "valid": np.float32(prediction["valid"]),
+                        "gap_ratio": np.float32(prediction["gap_ratio"]),
+                        "motion_quantiles_pp": np.asarray(
+                            prediction.get("motion_quantiles_pp", np.zeros((3, 2))),
+                            dtype=np.float32,
+                        ),
+                        "support_quantiles_pp": np.asarray(
+                            prediction.get("support_quantiles_pp", np.zeros((3, 2))),
+                            dtype=np.float32,
+                        ),
+                        "recoverability_probability": np.float32(
+                            prediction.get("recoverability_probability", 0.0)
+                        ),
+                        "tracklet_key": str(tracklet_key),
+                        "frame_id": np.int64(frame_id),
+                    }
+                )
                 data, reference_box = model.build_input_dict(
-                    sequence, frame_id, history)
+                    sequence, frame_id, history
+                )
                 if torch.sum(data["points"][:, :, :3]) == 0:
                     history.append(reference_box)
                 else:
                     candidate_box, _, _ = model.evaluate_one_sample(
-                        data, ref_box=reference_box)
+                        data, ref_box=reference_box
+                    )
                     history.append(candidate_box)
     if not rows:
         raise RuntimeError("B1 calibration export produced no rows")
@@ -134,21 +193,27 @@ def main():
     np.savez_compressed(
         output,
         error_xy=np.stack([row["error_xy"] for row in rows]),
-        kinematic_error_xy=np.stack([
-            row["kinematic_error_xy"] for row in rows]),
+        physical_error_xy=np.stack([row["physical_error_xy"] for row in rows]),
+        endpoint_error_xy=np.stack([row["endpoint_error_xy"] for row in rows]),
+        anchor_drift_xy=np.stack([row["anchor_drift_xy"] for row in rows]),
+        kinematic_error_xy=np.stack([row["kinematic_error_xy"] for row in rows]),
         velocity_xy=np.stack([row["velocity_xy"] for row in rows]),
-        basis_velocity_xy=np.stack([
-            row["basis_velocity_xy"] for row in rows]),
+        basis_velocity_xy=np.stack([row["basis_velocity_xy"] for row in rows]),
         direction_xy=np.stack([row["direction_xy"] for row in rows]),
         log_sigma_pp=np.stack([row["log_sigma_pp"] for row in rows]),
         valid=np.asarray([row["valid"] for row in rows]),
         gap_ratio=np.asarray([row["gap_ratio"] for row in rows]),
+        motion_quantiles_pp=np.stack([row["motion_quantiles_pp"] for row in rows]),
+        support_quantiles_pp=np.stack([row["support_quantiles_pp"] for row in rows]),
+        recoverability_probability=np.asarray(
+            [row["recoverability_probability"] for row in rows]
+        ),
         tracklet_key=np.asarray([row["tracklet_key"] for row in rows]),
         frame_id=np.asarray([row["frame_id"] for row in rows]),
     )
     manifest = {
         "schema": "ct_seqtrack.b1_calibration.v2",
-        "dataset": str(getattr(config, 'dataset', 'unknown')),
+        "dataset": str(getattr(config, "dataset", "unknown")),
         "split": args.split,
         "partition": args.partition,
         "seed": seed,
@@ -158,10 +223,15 @@ def main():
         "tracklets": selected_tracklets,
         "rows": len(rows),
         "artifact_sha256": sha256_file(output),
+        "scene_partition_identity_sha256": (
+            scene_partition_identity_sha256(scene_manifest, args.partition)
+            if scene_manifest is not None
+            else None
+        ),
     }
     output.with_suffix(output.suffix + ".manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8")
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(manifest, sort_keys=True))
 
 
