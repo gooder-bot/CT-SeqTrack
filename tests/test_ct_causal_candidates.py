@@ -1,14 +1,14 @@
 import pytest
 import torch
 
-from models.ct_v2.motion import OrderedPhysicalMotionEncoder
+from ctseqtrack.model.prior import OrderedPhysicalMotionEncoder
 from utils.ct_history import (
     build_causal_temporal_history_offsets,
     normalize_causal_temporal_gaps,
     select_causal_temporal_candidates,
     select_uniform_temporal_candidates,
 )
-from utils.training_isolation import causal_candidate_weight
+from ctseqtrack.runtime.optimization import causal_candidate_weight
 
 
 def test_complete_temporal_histories_isolate_query_gap():

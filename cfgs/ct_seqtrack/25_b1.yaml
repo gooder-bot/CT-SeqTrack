@@ -1,9 +1,14 @@
-_base_: 25_b0.yaml
-
+# CT-SeqTrack v25 entry. Values not shown are defined in _base/v25_common.yaml.
+_base_: _base/v25_mini.yaml
+num_candidates: 1
+dynamics_time_mode: 'true'
 experiment_name: ct25_b1_scratch_seed42
-ct_variant: b1
+ct_recursive_candidate_views: 1
+proposal_inference_mode: observation
 search_v3_use_dynamic_sigma: false
-search_v3_fixed_margin_parallel: 2.0
-search_v3_fixed_margin_perpendicular: 1.0
+ct_candidate_policy: 'off'
 checkpoint_monitor: b1_nll/dev
 checkpoint_mode: min
+ct_variant: b1
+ct_time_mode: true
+ct_b2_target_bb_scale: 1.0

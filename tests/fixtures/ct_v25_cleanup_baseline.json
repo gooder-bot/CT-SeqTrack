@@ -1,0 +1,34 @@
+{
+  "schema": "ct_seqtrack.v25_cleanup_baseline.v1",
+  "source_commit": "9ed2afc776a852d0f9551db4e61c56cf4c54312c",
+  "recovery_tag": "ctseqtrack-v25-pre-cleanup-9ed2afc",
+  "recovery_tag_object": "282eb31b1aee2779fd022385cb27e610b8f47c92",
+  "external_bundle": {
+    "relative_to_repository": "../CT-SeqTrack-v25-pre-cleanup.bundle",
+    "size_bytes": 3091856873,
+    "verified": true
+  },
+  "resolved_config_fixture": "tests/fixtures/ct_v25_resolved_configs.json",
+  "baseline_local_tests": {
+    "passed": 154,
+    "skipped": 1
+  },
+  "runtime_equivalence_fixture": {
+    "status": "server_required",
+    "local_blocker_recorded_once": "local Python environment lacks the project easydict/runtime stack",
+    "do_not_retry_local_environment_detection": true,
+    "required_arms": ["b0", "b1", "full_minus_b3", "full"],
+    "required_records": [
+      "input_and_data_fields",
+      "b0_b1_b2_b3_intermediate_outputs",
+      "flat_output_shape_dtype",
+      "loss_terms",
+      "state_dict_keys",
+      "optimizer_parameter_ownership",
+      "gradient_ownership",
+      "one_step_parameter_hash",
+      "recursive_state",
+      "global_and_private_rng_state"
+    ]
+  }
+}

@@ -1,8 +1,0 @@
-﻿run_id,run_exists,provenance_present,git_commit,git_dirty,config_path,seed,batch_size,workers,epochs,init_checkpoint,validation_points,checkpoint_count,last_checkpoint_present,status
-SEQTRACK_NEW,True,False,,unknown,,42,16,4,60,,12,6,True,complete_missing_provenance
-SEQTRACK_HIST,True,False,,unknown,,42,16,,60,,12,6,True,complete_missing_provenance
-B0_HIST,True,True,d86990ce5304258822c1748d17f997f6ec003e9c,False,cfgs/ct_v2/01_seqtrack3d_baseline.yaml,42,16,4,60,,12,6,True,complete_comparable_contract
-LEGACY_SEARCH,True,True,a486a3612b6d865bd44a8f14eb63c6e92ae1949f,False,cfgs/ct_v2/05_seqtrack3d_search_only.yaml,42,16,4,60,,12,6,True,complete_comparable_contract
-B2V2_FULL,True,True,a486a3612b6d865bd44a8f14eb63c6e92ae1949f,False,cfgs/ct_v2/03_ct_motion_search_v2.yaml,42,16,4,60,,12,6,True,complete_comparable_contract
-V21_SEARCH,True,True,16c2b8b3719815cbd970e7e59aea204819c2c567,False,cfgs/ct_v2/08_seqtrack3d_search_v21.yaml,42,16,4,60,,12,6,True,complete_comparable_contract
-V21_FULL,True,True,16c2b8b3719815cbd970e7e59aea204819c2c567,False,cfgs/ct_v2/09_ct_motion_search_v21.yaml,42,16,4,60,,12,6,True,complete_comparable_contract

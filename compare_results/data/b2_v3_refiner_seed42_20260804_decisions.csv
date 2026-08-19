@@ -1,7 +1,0 @@
-check,criterion,observed,status,interpretation
-run_identity,"Formal cfg13 V3 refiner, seed42, epoch20 last","cfg13; 25,240 steps; clean commit; strict init",passed,The run is valid and complete.
-refined_vs_motion,Refined error < B1 motion error on valid foreground,2.734 vs 2.905 (-0.170),passed,Search evidence improves the B1 candidate.
-refined_vs_raw,Refined error < raw Search error on valid foreground,"2.734 vs 2.650 (+0.085); cluster CI [+0.038, +0.132]",failed,The fixed B1-centered bound discards raw Search accuracy.
-presence_generalization,Presence separates foreground-present from foreground-absent structural states,AUC 0.497; positive/negative probabilities 0.936/0.877,failed,Presence is nearly random under recursive validation states.
-candidate_promotion,Refined beats both B1 motion and raw Search,"Beats motion, loses to raw Search",failed,Do not promote this checkpoint to final router training.
-final_tracking_gain,Packaged obs_vs_all beats same-checkpoint obs_only,Router and packaged four-mode evaluation not run,not_run,Refiner-stage Success/Precision is observation-only.

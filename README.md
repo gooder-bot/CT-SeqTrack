@@ -18,7 +18,7 @@ extension-only points; B3 may apply a bounded residual only after a matching
 held-out calibration artifact passes the empirical risk gates. Every other case
 returns the B0 observation exactly.
 
-The seed-42 B0 2x2 development study is archived in v24. The new v25 mainline
+The seed-42 B0 2x2 development study is retained in Git history. The v25 mainline
 uses the selected `reseed=true, rngshift=true` optimization protocol in all
 four arms, but every arm still starts from random initialization. This is
 reported as mixed-horizon past-GT re-anchored rollout training; inference never
@@ -30,17 +30,23 @@ causal benefit from physical time or memory.
 
 - `models/ctseqtrack.py`: formal composition root; normalizes the single
   `ct_variant` interface and rejects historical branch switches.
-- `models/ct_v2/pipeline_contracts.py`: internal B0--B3 ownership contracts.
-- `models/ct_v2/evidence_memory.py`: extension-only B2 and action-risk B3.
-- `utils/action_calibration.py`: disjoint scene-level threshold selection and
-  selective closed-loop audit for v25 (plus the archived v24 interface).
-- `utils/acquisition_metrics.py`: checkpoint-free acquisition preflight and
+- `ctseqtrack/contracts.py`: internal B0--B3 ownership contracts.
+- `ctseqtrack/model/`: B1 prior, extension-only B2, calibrated B3, forward and losses.
+- `ctseqtrack/data/`: training/inference sample construction, search geometry,
+  deterministic evidence sampling, and online recursive state.
+- `ctseqtrack/runtime/calibration.py`: disjoint scene-level threshold selection and
+  selective closed-loop audit.
+- `ctseqtrack/runtime/acquisition.py`: checkpoint-free acquisition preflight and
   artifact-derived targetness class weights.
-- `utils/online_contract.py`: scratch/resume and B2-promotion identity checks.
+- `ctseqtrack/runtime/contracts.py`: scratch/resume and B2-promotion identity checks.
+- `ctseqtrack/runtime/checkpointing.py`: optimizer/scaler/RNG and epoch-boundary
+  recursive-state reset contract for exact same-run recovery.
+- `ctseqtrack/runtime/evaluation.py`: the single paper-facing joint-Full
+  diagnostic schema.
 - `tools/compare_ct_module_audits.py`: shared-prefix parameter-hash audit.
 
-The evaluator still receives flat dictionaries. Existing v23 output keys that
-are needed by analysis scripts are compatibility aliases only; they do not
+The evaluator still receives flat dictionaries. Existing compatibility keys
+needed by the v25 analysis scripts are aliases only; they do not
 define additional paper modules.
 
 ## Formal variants
@@ -62,22 +68,13 @@ Configurations are under `cfgs/ct_seqtrack/`:
 - The complete v25 protocol and server workflow are in
   `docs/CTSEQTRACK_V25_PROTOCOL.md`.
 
-The following v24 configurations remain reproducible and unchanged:
-
-- `24_b0.yaml`
-- `24_b1.yaml`
-- `24_full_minus_b3.yaml`
-- `24_full_minus_b3_causal_uniform.yaml`
-- `24_full_minus_b3_presence_c0.yaml`
-- `24_full.yaml`
-- `24_full_cv.yaml`
-- `24_full_minus_b3_cv.yaml`
-- `24_{b1,full}_time_{fixed,shuffled}.yaml`
-- `24_full_minus_b3_time_{fixed,shuffled}.yaml`
-- `24_full_memory_{real,empty,time_misaligned}.yaml`
+Historical v24 and exploratory configurations were removed from the working
+tree after the `ctseqtrack-v25-pre-cleanup-9ed2afc` recovery tag and external
+Git bundle were created. They remain reproducible from Git history without
+coexisting with the paper-facing configuration surface.
 
 All formal arms use `scratch_only`, observation recursive state, strict module
-isolation, and last-epoch checkpoints. `--init_checkpoint` is forbidden.
+isolation, and last-epoch checkpoints. The `--init_checkpoint` entry no longer exists.
 `--checkpoint` is accepted only for an exact same-run epoch-boundary resume or
 for evaluation.
 
@@ -125,7 +122,7 @@ The calibration artifact is bound to the checkpoint SHA256, action-defining
 configuration identity, disjoint selection/audit scene-manifest identities,
 the actual scene populations, score definition, thresholds, and its own content
 hash. Missing, failed, stale, overlapping, or undersized calibration is
-fail-closed. The archived v24 interface retains its tracklet-level manifest.
+fail-closed.
 
 ## Running the staged protocol
 
@@ -142,11 +139,11 @@ Then train each arm independently from scratch. B2 arms require
 promotion manifest. The manifest transfers no weights.
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/24_b0.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/24_b1.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/24_full_minus_b3.yaml \
+python main.py --cfg cfgs/ct_seqtrack/25_b0.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/25_b1.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/25_full_minus_b3.yaml \
   --path DATA_ROOT --acquisition_preflight PREFLIGHT.json
-python main.py --cfg cfgs/ct_seqtrack/24_full.yaml \
+python main.py --cfg cfgs/ct_seqtrack/25_full.yaml \
   --path DATA_ROOT --acquisition_preflight PREFLIGHT.json \
   --b2_method_promotion B2_PROMOTION.json
 ```
@@ -158,7 +155,7 @@ tracklets and calibrate:
 python tools/calibrate_ct_actions.py \
   --rows CALIBRATION_ROWS.jsonl \
   --checkpoint LAST.ckpt \
-  --config cfgs/ct_seqtrack/24_full.yaml \
+  --config cfgs/ct_seqtrack/25_full.yaml \
   --tracklet-manifest CALIBRATION_TRACKLETS.json \
   --output ACTION_CALIBRATION.json
 ```
@@ -167,7 +164,7 @@ Selective evaluation must supply the same checkpoint, artifact, and manifest
 file hash:
 
 ```bash
-python main.py --test --cfg cfgs/ct_seqtrack/24_full.yaml \
+python main.py --test --cfg cfgs/ct_seqtrack/25_full.yaml \
   --checkpoint LAST.ckpt --path DATA_ROOT --proposal-mode selective \
   --ct_action_calibration_path ACTION_CALIBRATION.json \
   --ct_calibration_tracklet_manifest_sha256 MANIFEST_SHA256
@@ -188,6 +185,8 @@ python -m pytest -q
 
 The detailed implementation and claim/evidence map is in
 [`docs/CTSEQTRACK_B0_B3_METHOD.md`](docs/CTSEQTRACK_B0_B3_METHOD.md). The active
-experiment checklist is [`need_to_do.md`](need_to_do.md). Historical designs,
-negative results, and prior reports remain in `compare_results/` and
-`docs/legacy/`; they are not evidence for the current B0--B3 method.
+experiment checklist is [`need_to_do.md`](need_to_do.md). The server-only
+acceptance flow is in
+[`docs/CTSEQTRACK_V25_SERVER_ACCEPTANCE.md`](docs/CTSEQTRACK_V25_SERVER_ACCEPTANCE.md).
+The conservative refactor scope and local verification record are in
+[`docs/CTSEQTRACK_V25_CLEANUP_REPORT.md`](docs/CTSEQTRACK_V25_CLEANUP_REPORT.md).

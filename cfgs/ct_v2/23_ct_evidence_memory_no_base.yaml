@@ -1,4 +1,0 @@
-_base_: 23_ct_evidence_memory.yaml
-
-experiment_name: ct_seqtrack_evidence_memory_v3_no_base
-ct_base_evidence_mode: empty

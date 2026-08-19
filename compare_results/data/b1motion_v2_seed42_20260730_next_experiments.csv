@@ -1,6 +1,0 @@
-order,experiment,change,decision
-1,"E0 same-code B0, seed42, scratch",用当前代码重新训练纯 B0；固定同一初始化、数据选择和 normal cadence。,消除历史 commit/手工 patch 混杂，建立真正对照。
-2,K1 data-shift-only kill test,保留 ordered head，但 adapter_scale=0、search=false；只比较 irregular_probability=0 与 0.35。,直接量化混合 cadence 对 B0 主干的伤害。
-3,K2 adapter-only normal kill test,irregular_probability=0、search=false；normal adapter 从严格 0 开始，只测试带相对范数硬上限的残差。,验证 adapter 是否能在不改数据分布时保持/改善 normal。
-4,K3 paired irregular branch,主监督始终使用连续 B0 view；独立 irregular view 只训练 trajectory/search 与 consistency，不替换主干历史。,保留 irregular 目标，同时避免污染 normal baseline 学习。
-5,Search observability audit,分开记录 trigger、extension point count、GT target recall（仅离线诊断）和 foreground evidence；不要直接降低 min_points。,确认 search 是召回目标还是只扩大背景。

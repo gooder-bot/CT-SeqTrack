@@ -1,9 +1,0 @@
-priority,severity,issue,evidence,consequence,status
-1,P0,训练/推理历史分布错位,训练读取 GT 锚定的 ct_motion_ref_boxs；验证读取 tracker 自身递归 ref_boxs。,历史漂移被解释为物体速度，错误 prior 再写回下一帧。,verified
-2,P0,motion 位于 crop 之后,当前点云先围绕上一预测框裁剪，之后才在 forward 中计算 proposal innovation。,目标已离开 crop 时，motion 无法召回缺失点，只能移动一个缺少观测的 query。,verified
-3,P0,固定 alpha 没有可靠性语义,dynamics_valid 只表示至少存在一条 transition；empty fallback 只检查 crop 中总点数 > 2。,背景点充足、历史已漂移时仍会稳定应用错误修正。,verified
-4,P1,时序顺序被 mean+max pooling 抹除,交换两段 transition 的先后顺序会得到完全相同的 z_dyn 和 displacement。,无法区分加速/减速或转弯趋势，只能识别 transition 集合统计量。,verified
-5,P1,与 SeqTrack3D 已有时序路径重复,baseline 的 coarse motion 已读取四帧点云，Transformer 又读取历史框序列。,信息更少的 history-box expert 强改信息更全的 observation proposal。,verified
-6,P1,缺少 yaw、加速度和不确定性输出,encoder 只预测 3D 线速度；yaw 仍完全来自 observation 分支。,转向和多模态运动无法由 prior 表达，也无法用方差决定何时拒绝 prior。,verified
-7,P1,训练目标允许 observation 与 correction 共适配,innovation 内 stopgrad(d_obs)，但 final 对 observation 的梯度为 1；没有独立 observation proposal loss。,局部 loss 可以降低，同时形成依赖 correction 的 coarse query，推理关闭 alpha 未必完全恢复。,verified
-8,P2,alpha 来自不可迁移的 offline oracle,0.75 近似来自 mini_train、GT history、candidate0、crop-reachable cohort 的平均 oracle α=0.775。,它不代表 recursive validation 下统一最优的全局系数。,verified

@@ -1,4 +1,0 @@
-_base_: 24_full_memory_real.yaml
-
-experiment_name: ct24_full_memory_time_misaligned_scratch_seed42
-ct_memory_mode: time_misaligned

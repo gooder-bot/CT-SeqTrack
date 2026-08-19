@@ -2,13 +2,13 @@
 
 ## 1. 当前状态
 
-v25 已完成代码实现与本地单元测试，但尚未完成真实 nuScenes 训练。因此当前不能声称涨点、稳定增益、SOTA，或物理时间的因果收益。v24 配置、历史结果和报告保持不变；v25 的所有数值必须由新 scene split 下的从头训练重新产生。
+v25 已完成代码实现与本地单元测试，但尚未完成真实 nuScenes 训练。因此当前不能声称涨点、稳定增益、SOTA，或物理时间的因果收益。历史配置和结果已由恢复标签与外部 Git bundle 归档；v25 的所有数值必须由新 scene split 下的从头训练重新产生。
 
 ## 2. 固定训练契约
 
 四臂 `B0 / B1 / Full-B3 / Full` 统一使用：
 
-- 随机初始化，禁止 `--init_checkpoint`；
+- 随机初始化，命令行不再提供 `--init_checkpoint`；
 - rollout horizons `[1,2,4,8]`；
 - `ct_training_reanchor_policy=periodic_past_gt`；
 - `ct_b0_rng_protocol=post_observation_shift_v1`；

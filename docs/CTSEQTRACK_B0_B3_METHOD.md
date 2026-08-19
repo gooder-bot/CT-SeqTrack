@@ -19,7 +19,7 @@ memory 或候选置信度直接误写成可靠性。
 | B2 Evidence Acquirer | `B2EvidenceAcquirer` | raw box、structural availability、presence、targetness、点诊断 |
 | B3 Selective Updater | `B3SelectiveUpdater` | help/harm、expected gains、bounded residual、final box |
 
-`pipeline_contracts.py` 定义内部 typed contracts；外部 flat dictionary 只是 evaluator
+`ctseqtrack/contracts.py` 定义内部 typed contracts；外部 flat dictionary 只是 evaluator
 兼容层。B0 contract 在进入 B1--B3 前 detach，B3 再次 detach 全部上游输入。
 
 ## 3. B1 合同
@@ -46,7 +46,7 @@ B3_mask         = candidate0 only
 
 因此 extension 中无目标的样本仍训练 targetness/background 与 presence-negative。
 c1/c2 由 live B1 endpoint 在 `g∈{2,4,8}` 中无 GT 地选择 boundary/outside gap，
-各自使用完整 `[g,g+1,g+2]` 历史；旧 GT-spatial view 只保留为显式 legacy ablation。
+各自使用完整 `[g,g+1,g+2]` 历史；当前工作树不再保留旧 GT-spatial view。
 `candidate_valid` 是 structural
 availability 与 predicted presence 的合取，而不是“采到了任意扩展点”。
 
@@ -103,19 +103,18 @@ presence 和 `radius(dt)` 有界残差条件。
 共享 prefix 的初始化、step1、step100、epoch-end hash 任一不一致，即判消融不匹配，
 不再解释最终分数。
 
-### 7.1 冻结的 B0 训练协议
+### 7.1 固定的 B0 训练协议（不是参数冻结）
 
-seed42 的 matched 2×2 development study 已归档；经过当前因果性审计，正式四臂固定为
-`ct_recursive_reseed_enabled=false`、`ct_b0_rng_shift_control=false`。正式因果
-实验不再按 `[1, 2, 4, 8]` 有限视野周期用 GT 重写历史；所有 crop/support anchor
-均来自当前 B0 在线递归状态。旧 reseed 仅保留在显式 2×2 诊断配置中；视野内部仍递归写入
-observation，验证和部署不使用 GT re-seed。RNG-shift 只是诊断用的无语义随机数
-消耗，正式配置永久关闭。
+seed42 的 matched 2×2 development study 已归档；正式四臂统一使用选定的
+`ct_recursive_reseed_enabled=true`、`ct_b0_rng_shift_control=true` 协议。训练 rollout
+按 `[1, 2, 4, 8]` horizon 在边界用过去帧 GT 周期重锚，但不得读取当前帧 GT；视野内部
+始终递归写入 candidate0 observation。验证和部署完全在线递归，不使用 GT re-anchor。
+RNG-shift 只统一四臂的随机数消费顺序，不改变模块定义或梯度所有权。
 
 该选择属于优化/数据协议，不是方法贡献。2×2 指标来自 mini_train 的 atomic dev，
 不能与历史 mini_val 数字直接比较，也不能证明涨点或统计稳定。完整结果与
 checkpoint 身份见
-`compare_results/reports/ct24_b0_2x2_seed42_20260818.md`。后续所有 arm 必须重新
+恢复标签 `ctseqtrack-v25-pre-cleanup-9ed2afc`。后续所有 arm 必须重新
 scratch，且不得用本次任一 checkpoint 初始化。
 
 ## 8. Claim--evidence map

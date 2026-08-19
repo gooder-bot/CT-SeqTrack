@@ -1,6 +1,28 @@
-_base_: 25_full.yaml
-
-experiment_name: ct25_full_time_fixed_scratch_seed42
-ct_time_mode: fixed
+# CT-SeqTrack v25 entry. Values not shown are defined in _base/v25_common.yaml.
+_base_: _base/v25_mini.yaml
+num_candidates: 3
 dynamics_time_mode: fixed
-dynamics_fixed_delta_t: 0.5
+experiment_name: ct25_full_time_fixed_scratch_seed42
+ct_recursive_candidate_views: 3
+proposal_inference_mode: observation
+search_v3_use_dynamic_sigma: false
+ct_candidate_policy: causal_b1_boundary
+checkpoint_monitor: success_raw_search/dev
+checkpoint_mode: max
+ct_variant: full
+ct_time_mode: fixed
+ct_b2_target_bb_scale: 1.0
+ct_temporal_candidate_gaps:
+- 2
+- 4
+- 8
+ct_temporal_boundary_band: 0.2
+ct_presence_training_scope: all_candidates
+ct_targetness_class_weight_source: preflight_artifact
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0
+ct_require_action_calibration: true
+ct_action_threshold_selection_path: null
+ct_action_calibration_path: null
+ct_calibration_select_scene_manifest_sha256: null
+ct_calibration_audit_scene_manifest_sha256: null

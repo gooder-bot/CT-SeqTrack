@@ -1,6 +1,0 @@
-_base_: 22_ct_joint_repaired.yaml
-
-experiment_name: ct_seqtrack_joint_repaired_fault_presence_hard
-ct_presence_hard_gate: true
-ct_search_presence_init_probability: 0.1
-

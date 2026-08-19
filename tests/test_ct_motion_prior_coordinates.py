@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from models.ct_v2.pipeline_contracts import (
+from ctseqtrack.contracts import (
     MotionPriorOutput,
     motion_prior_covariance_xy,
     reexpress_motion_prior,

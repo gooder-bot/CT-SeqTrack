@@ -1,5 +1,0 @@
-_base_: 02_ct_motion_legacy_fixed.yaml
-
-experiment_name: ct_motion_search
-use_time_guided_search: true
-ct_search_training_history: correlated_candidate

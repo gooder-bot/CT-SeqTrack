@@ -1,6 +1,0 @@
-order,action,why,gate
-1,Hold router promotion,The mandatory refined-vs-raw candidate gate failed.,Do not train the final router from this refiner.
-2,Run a raw-vs-refined action diagnostic,"Raw Search is the best mean candidate, but the current router cannot execute it.",Export raw Search as a diagnostic action and compare H=3 gains.
-3,Replace fixed B1 clipping with a learned reliability blend,"Among 21 changed valid-foreground rows, clipping harmed 15 and helped 6.",The revised refined candidate must beat both inputs on seed42.
-4,Add recursive hard negatives for presence/evidence,"Train structural validity is about 30.6%, validation only 5.8%; validation presence AUC is 0.497.",Presence/evidence must separate no-foreground structural states on held-out tracklets.
-5,Rerun only the corrected seed42 refiner,The run and initialization are healthy; repeating the same config cannot fix the objective.,"Only after candidate gate passes: round0, provisional router, round1, final router, four modes."

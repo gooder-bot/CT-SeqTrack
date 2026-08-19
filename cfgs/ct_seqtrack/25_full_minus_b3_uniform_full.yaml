@@ -1,11 +1,23 @@
-_base_: 25_full_minus_b3_uniform.yaml
-
+# CT-SeqTrack v25 entry. Values not shown are defined in _base/v25_common.yaml.
+_base_: _base/v25_full.yaml
+num_candidates: 3
+dynamics_time_mode: 'true'
 experiment_name: ct25_full_minus_b3_uniform_full_scratch_seed42
-path: /home/lishengjie/data/nuscenes
-version: v1.0-trainval
-train_split: train_track
-val_split: val
-test_split: val
-batch_size: 16
-workers: 12
-epoch: 60
+ct_recursive_candidate_views: 3
+proposal_inference_mode: raw_search
+search_v3_use_dynamic_sigma: false
+ct_candidate_policy: causal_temporal_uniform
+checkpoint_monitor: success_raw_search/dev
+checkpoint_mode: max
+ct_variant: full_minus_b3
+ct_time_mode: true
+ct_b2_target_bb_scale: 1.0
+ct_temporal_candidate_gaps:
+- 2
+- 4
+- 8
+ct_temporal_boundary_band: 0.2
+ct_presence_training_scope: all_candidates
+ct_targetness_class_weight_source: preflight_artifact
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0

@@ -14,7 +14,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from utils.replay_cache import sha256_file
+from ctseqtrack.runtime.calibration import sha256_file
 
 
 CHI2_THRESHOLDS = {"50": 1.38629436112, "80": 3.21887582487,

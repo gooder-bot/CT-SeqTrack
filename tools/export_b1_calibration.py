@@ -17,11 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset, points_utils  # noqa: E402
-from utils.checkpoint_loading import load_initial_weights  # noqa: E402
+from utils.checkpoint_loading import load_evaluation_weights  # noqa: E402
 from models import get_model  # noqa: E402
-from utils.recursive_state import stable_tracklet_partition  # noqa: E402
+from ctseqtrack.data.recursive import stable_tracklet_partition  # noqa: E402
 from utils.config import load_yaml_config  # noqa: E402
-from utils.replay_cache import (  # noqa: E402
+from ctseqtrack.runtime.calibration import (  # noqa: E402
     b1_calibration_config_sha256,
     sha256_file,
     sha256_json,
@@ -74,7 +74,7 @@ def main():
         config, type="test", split=args.split, protocol_role="test")
     source_dataset = getattr(dataset, "dataset", dataset)
     model = get_model(config.net_model)(config)
-    load_initial_weights(model, args.checkpoint)
+    load_evaluation_weights(model, args.checkpoint)
     model.to(resolve_device(args.device)).eval()
     row_limit = len(dataset)
     if args.max_tracklets is not None:

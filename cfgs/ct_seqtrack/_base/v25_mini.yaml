@@ -1,0 +1,7 @@
+# CT-SeqTrack v25 mini data profile.
+_base_: v25_common.yaml
+path: /home/lishengjie/data/nuscenes-mini
+version: v1.0-mini
+train_split: mini_train
+val_split: mini_val
+test_split: mini_val

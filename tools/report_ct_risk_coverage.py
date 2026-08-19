@@ -5,7 +5,7 @@ import csv
 import json
 from pathlib import Path
 
-from utils.action_calibration import risk_coverage_curve
+from ctseqtrack.runtime.calibration import risk_coverage_curve
 
 
 def main():

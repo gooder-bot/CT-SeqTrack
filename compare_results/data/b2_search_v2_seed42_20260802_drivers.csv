@@ -1,6 +1,0 @@
-﻿priority,finding,evidence,interpretation,confidence
-1,Search evidence is structurally starved,epoch60 valid=23.29%; invalid=76.71%,compact endpoint crop plus extension-only filtering leaves no candidate for most samples,high
-2,The joint gate almost never selects search,"epoch60 argmax rate=0.104%; gate bias=[4.548,0.021,0.097]","observation bias, natural class frequency, and log-confidence penalty jointly suppress the rare class",high
-3,The physical prior learns beyond constant velocity,candidate0/nonzero/gap2/gap4 RMSE improvements=6.60%/12.81%/16.83%/21.58%,motion encoding is not the primary failure point in this run,high
-4,Joint fusion improves one-step training error,observation=0.247m; final=0.236m; relative=4.49%,"a useful correction signal exists, but recursive attribution still requires inference ablations",medium
-5,Current search-error and helpful-precision logs are not decision metrics,search error includes invalid zero proposals; helpful precision is a clamped batch mean from training,validation endpoint conditional metrics and oracle prevalence must be exported,high

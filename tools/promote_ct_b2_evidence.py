@@ -12,8 +12,8 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from utils.online_contract import build_b2_method_contract
-from utils.acquisition_metrics import validate_preflight_artifact
+from ctseqtrack.runtime.contracts import build_b2_method_contract
+from ctseqtrack.runtime.acquisition import validate_preflight_artifact
 
 
 SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v4'

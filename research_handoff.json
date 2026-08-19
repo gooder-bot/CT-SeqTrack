@@ -1,5 +1,5 @@
 {
-  "schema": "ct_seqtrack.research_handoff.v1",
+  "schema": "ct_seqtrack.research_handoff.v25",
   "status": "implementation_complete_experiments_pending",
   "working_title": "Observation-Anchored Evidence Recovery for Irregular-Time 3D Single-Object Tracking",
   "central_claim": "Physical-time-guided extension evidence may apply only a calibrated bounded correction; otherwise the tracker exactly preserves the current observation.",
@@ -33,12 +33,22 @@
   ],
   "primary_files": [
     "models/ctseqtrack.py",
-    "models/ct_v2/pipeline_contracts.py",
-    "models/ct_v2/evidence_memory.py",
-    "utils/action_calibration.py",
-    "utils/acquisition_metrics.py",
-    "utils/online_contract.py",
+    "models/seqtrack3d.py",
+    "ctseqtrack/model/forward.py",
+    "ctseqtrack/model/evidence.py",
+    "ctseqtrack/data/sample_builder.py",
+    "ctseqtrack/data/inference.py",
+    "ctseqtrack/runtime/online.py",
+    "ctseqtrack/runtime/calibration.py",
+    "ctseqtrack/runtime/acquisition.py",
     "docs/CTSEQTRACK_B0_B3_METHOD.md",
+    "docs/CTSEQTRACK_V25_PROTOCOL.md",
+    "docs/CTSEQTRACK_V25_CLEANUP_REPORT.md",
     "need_to_do.md"
-  ]
+  ],
+  "recovery": {
+    "tag": "ctseqtrack-v25-pre-cleanup-9ed2afc",
+    "external_bundle": "../CT-SeqTrack-v25-pre-cleanup.bundle",
+    "git_history_rewritten": false
+  }
 }

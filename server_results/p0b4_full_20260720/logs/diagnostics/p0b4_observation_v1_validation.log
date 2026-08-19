@@ -1,4 +1,0 @@
-summary: /home/lishengjie/study/lcyu/CT-SeqTrack/output/diagnostics/reliability_signals/validation/observation_v1_minitrain_to_minival_summary.json
-calibrator: /home/lishengjie/study/lcyu/CT-SeqTrack/output/diagnostics/reliability_signals/validation/observation_v1_minitrain_to_minival_calibrator.json
-report: /home/lishengjie/study/lcyu/CT-SeqTrack/output/diagnostics/reliability_signals/validation/observation_v1_minitrain_to_minival_report.md
-decision: NO_GO_OBSERVATION_RELIABILITY_VALIDATION

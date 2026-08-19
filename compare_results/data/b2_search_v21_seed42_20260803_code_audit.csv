@@ -1,5 +1,0 @@
-﻿file,symbol,verified_behavior,risk
-models/ct_v2/motion.py,TrajectorySearchEvidenceV21.forward,"Invalid rows have zero pool weights; ESS computes 1/clamp(sum(w^2),1e-6), producing 1e6.",Out-of-range invalid-row statistic
-models/ct_v2/motion.py,AdvantageGatedProposalFusion.forward,Raw search ESS enters the shared gate input without search-valid masking or normalization.,Search invalidity can alter motion gating
-models/seqtrack3d.py,compute_loss / advantage fusion,Fused loss is one-step teacher-forced; step loss is restricted to helpful candidates.,One-step gain does not enforce closed-loop safety
-datasets/sampler.py,source-aware endpoint sampling,B0 1024 points remain intact; endpoint overlap and extension use an independent 128-point branch.,No baseline point-budget regression

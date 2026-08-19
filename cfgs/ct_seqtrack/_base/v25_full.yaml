@@ -1,0 +1,7 @@
+# CT-SeqTrack v25 full data profile.
+_base_: v25_common.yaml
+path: /home/lishengjie/data/nuscenes
+version: v1.0-trainval
+train_split: train_track
+val_split: val
+test_split: val

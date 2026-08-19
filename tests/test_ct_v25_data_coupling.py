@@ -6,18 +6,18 @@ import pytest
 from pyquaternion import Quaternion
 
 from datasets.points_utils import regularize_pc_with_metadata
-from models.ct_variant import configure_ct_variant
-from utils.action_calibration import (
+from ctseqtrack.config import configure_ct_variant
+from ctseqtrack.runtime.calibration import (
     audit_action_thresholds,
     select_action_thresholds,
     validate_action_calibration,
 )
-from utils.acquisition_metrics import build_preflight_artifact
+from ctseqtrack.runtime.acquisition import build_preflight_artifact
 from utils.config import load_yaml_config
-from utils.online_contract import validate_scratch_training_contract
+from ctseqtrack.runtime.contracts import validate_scratch_training_contract
 from utils.sampling_utils import physical_frame_point_seed
-from utils.scene_bootstrap import paired_scene_bootstrap
-from utils.recursive_state import (
+from ctseqtrack.runtime.scene_bootstrap import paired_scene_bootstrap
+from ctseqtrack.data.recursive import (
     RecursiveTrackState,
     apply_training_reanchor,
     build_scene_partition_manifest,
@@ -78,8 +78,7 @@ def _history(ids):
     return {
         "prev_frame_ids": list(ids),
         "prev_frames": {
-            str(-(index + 1)): _frame(frame_id)
-            for index, frame_id in enumerate(ids)
+            str(-(index + 1)): _frame(frame_id) for index, frame_id in enumerate(ids)
         },
     }
 
@@ -89,21 +88,20 @@ def test_scene_manifest_is_reproducible_disjoint_and_mini_is_5_1_1_1():
     first = build_scene_partition_manifest(dataset, seed=42)
     second = build_scene_partition_manifest(dataset, seed=42)
     assert first == second
-    assert [first["partitions"][name]["scene_count"] for name in (
-        "train", "dev", "calibration_select", "calibration_audit"
-    )] == [5, 1, 1, 1]
+    assert [
+        first["partitions"][name]["scene_count"]
+        for name in ("train", "dev", "calibration_select", "calibration_audit")
+    ] == [5, 1, 1, 1]
     scene_partitions = {}
     for row in first["tracklets"]:
-        scene_partitions.setdefault(row["group_key"], set()).add(
-            row["partition"])
+        scene_partitions.setdefault(row["group_key"], set()).add(row["partition"])
     assert all(len(values) == 1 for values in scene_partitions.values())
     assert len(first["content_sha256"]) == 64
 
 
 def test_scene_manifest_rejects_physical_frame_cross_scene_duplication():
     with pytest.raises(ValueError, match="multiple scenes"):
-        build_scene_partition_manifest(
-            SceneDataset(duplicate_cross=True), seed=42)
+        build_scene_partition_manifest(SceneDataset(duplicate_cross=True), seed=42)
 
 
 @pytest.mark.parametrize(
@@ -126,25 +124,25 @@ def test_regularized_point_metadata_sparse_contract(count, expected_unique):
 
 
 def test_b0_scale_and_b2_exact_scale_are_separate_in_sampler():
-    source = (ROOT / "datasets" / "sampler.py").read_text(encoding="utf-8")
-    assert "this_points.T[:3, :], config.bb_scale).astype(int)" in source
+    source = (ROOT / "ctseqtrack" / "data" / "outputs.py").read_text(encoding="utf-8")
+    compact = "".join(source.split())
+    assert "this_points.T[:3,:],config.bb_scale).astype(int)" in compact
     assert "ct_b2_target_bb_scale" in source
-    assert "'ct_base_evidence_labels': b2_base_labels" in source
+    assert '"ct_base_evidence_labels":b2_base_labels' in compact
 
 
 def test_candidate_pool_seeds_depend_only_on_physical_frames():
     config = type("Config", (), {"seed": 42})()
-    current = [
-        physical_frame_point_seed(config, "track/0", 9)
-        for _role in (0, 1, 2)]
+    current = [physical_frame_point_seed(config, "track/0", 9) for _role in (0, 1, 2)]
     history = [
-        physical_frame_point_seed(config, "track/0", 9, 7)
-        for _gap in (1, 2, 4, 8)]
+        physical_frame_point_seed(config, "track/0", 9, 7) for _gap in (1, 2, 4, 8)
+    ]
     assert len(set(current)) == 1
     assert len(set(history)) == 1
     source = (ROOT / "datasets" / "sampler.py").read_text(encoding="utf-8")
     online = source.split("    def _online_raw_view", 1)[1].split(
-        "    def __getitem__", 1)[0]
+        "    def __getitem__", 1
+    )[0]
     assert "physical_frame_point_seed(" in online
 
 
@@ -162,8 +160,7 @@ def test_reanchor_covers_candidate_history_union_and_never_current_gt():
     state = RecursiveTrackState(0, "track/0", DummyBox(100.0))
     for frame_id in range(1, 8):
         state.append(frame_id, DummyBox(100.0 + frame_id), frame_id)
-    config = type("Config", (), {
-        "ct_training_reanchor_policy": "periodic_past_gt"})()
+    config = type("Config", (), {"ct_training_reanchor_policy": "periodic_past_gt"})()
     diagnostics = apply_training_reanchor(raw, state, 1, config)
     expected = [0, 2, 4, 5, 6, 7]
     assert diagnostics["reanchored_frame_ids"] == expected
@@ -174,12 +171,13 @@ def test_reanchor_covers_candidate_history_union_and_never_current_gt():
 
 
 def test_fixed_cv_state_write_uses_prediction_not_current_gt():
-    source = (ROOT / "tools" / "export_ct_acquisition_preflight_rows.py"
-              ).read_text(encoding="utf-8")
+    source = (ROOT / "tools" / "export_ct_acquisition_preflight_rows.py").read_text(
+        encoding="utf-8"
+    )
     export = source.split("def export_partition", 1)[1]
     assert "predicted_box = _fixed_cv_state_box" in export
     assert "state.append(\n                        frame_id, predicted_box" in export
-    assert "raw[\"this_frame\"][\"3d_bbox\"]" not in export
+    assert 'raw["this_frame"]["3d_bbox"]' not in export
     assert "for horizon_index, horizon in enumerate(horizons)" in export
 
 
@@ -198,11 +196,13 @@ def _calibration_rows(partition, thresholds=None):
                 "iou_gain": 0.05,
             }
             if thresholds is not None:
-                row.update({
-                    "rollout_mode": "selective",
-                    "calibrated_presence_threshold": thresholds["presence"],
-                    "calibrated_action_threshold": thresholds["action"],
-                })
+                row.update(
+                    {
+                        "rollout_mode": "selective",
+                        "calibrated_presence_threshold": thresholds["presence"],
+                        "calibrated_action_threshold": thresholds["action"],
+                    }
+                )
             rows.append(row)
     return rows
 
@@ -210,38 +210,61 @@ def _calibration_rows(partition, thresholds=None):
 def test_b3_threshold_selection_and_scene_audit_are_strictly_separate():
     selection = select_action_thresholds(
         _calibration_rows("calibration_select"),
-        "checkpoint", "config", "select-manifest",
-        resamples=20, min_scenes=1, min_actions=1)
+        "checkpoint",
+        "config",
+        "select-manifest",
+        resamples=20,
+        min_scenes=1,
+        min_actions=1,
+    )
     assert selection["passed"]
     audit = audit_action_thresholds(
         _calibration_rows("calibration_audit", selection["thresholds"]),
-        selection, "checkpoint", "config", "select-manifest",
-        "audit-manifest", resamples=20, min_scenes=1, min_actions=1)
+        selection,
+        "checkpoint",
+        "config",
+        "select-manifest",
+        "audit-manifest",
+        resamples=20,
+        min_scenes=1,
+        min_actions=1,
+    )
     assert audit["passed"]
     assert audit["safety_population"] == "calibration_audit_only"
     validate_action_calibration(
-        audit, "checkpoint", "config", "audit-manifest",
-        "select-manifest")
+        audit, "checkpoint", "config", "audit-manifest", "select-manifest"
+    )
     with pytest.raises(ValueError, match="not in calibration_audit"):
         audit_action_thresholds(
             _calibration_rows("calibration_select", selection["thresholds"]),
-            selection, "checkpoint", "config", "select-manifest",
-            "audit-manifest", resamples=5,
-            min_scenes=1, min_actions=1)
-    overlapping = _calibration_rows(
-        "calibration_audit", selection["thresholds"])
+            selection,
+            "checkpoint",
+            "config",
+            "select-manifest",
+            "audit-manifest",
+            resamples=5,
+            min_scenes=1,
+            min_actions=1,
+        )
+    overlapping = _calibration_rows("calibration_audit", selection["thresholds"])
     for row in overlapping:
         row["partition_group_key"] = selection["selection_scene_keys"][0]
     with pytest.raises(ValueError, match="share scenes"):
         audit_action_thresholds(
-            overlapping, selection, "checkpoint", "config",
-            "select-manifest", "audit-manifest", resamples=5,
-            min_scenes=1, min_actions=1)
+            overlapping,
+            selection,
+            "checkpoint",
+            "config",
+            "select-manifest",
+            "audit-manifest",
+            resamples=5,
+            min_scenes=1,
+            min_actions=1,
+        )
 
 
-def test_v25_four_arms_share_selected_protocol_and_v24_is_unchanged():
-    for name in ("25_b0.yaml", "25_b1.yaml",
-                 "25_full_minus_b3.yaml", "25_full.yaml"):
+def test_v25_four_arms_share_selected_protocol_without_legacy_configs():
+    for name in ("25_b0.yaml", "25_b1.yaml", "25_full_minus_b3.yaml", "25_full.yaml"):
         config = load_yaml_config(ROOT / "cfgs" / "ct_seqtrack" / name)
         configure_ct_variant(config)
         validate_scratch_training_contract(config)
@@ -250,11 +273,7 @@ def test_v25_four_arms_share_selected_protocol_and_v24_is_unchanged():
         assert config["ct_recursive_rollout_horizons"] == [1, 2, 4, 8]
         assert config["ct_partition_scheme"] == "scene_v2"
         assert config["ct_initialization_policy"] == "scratch_only"
-    old = load_yaml_config(
-        ROOT / "cfgs" / "ct_seqtrack" / "24_b0.yaml")
-    assert old["ct_recursive_reseed_enabled"] is False
-    assert old["ct_b0_rng_shift_control"] is False
-    assert "ct_training_reanchor_policy" not in old
+    assert not list((ROOT / "cfgs" / "ct_seqtrack").glob("24*.yaml"))
 
 
 def test_tracking_bootstrap_clusters_by_scene_not_tracklet():
@@ -268,14 +287,9 @@ def test_tracking_bootstrap_clusters_by_scene_not_tracklet():
                     "tracklet_key": f"scene-{scene}/track-{tracklet}",
                     "frame_id": frame,
                 }
-                baseline.append({
-                    **identity, "final_iou": 0.4,
-                    "final_distance": 1.0})
-                method.append({
-                    **identity, "final_iou": 0.6,
-                    "final_distance": 0.5})
-    result = paired_scene_bootstrap(
-        baseline, method, resamples=20, seed=4)
+                baseline.append({**identity, "final_iou": 0.4, "final_distance": 1.0})
+                method.append({**identity, "final_iou": 0.6, "final_distance": 0.5})
+    result = paired_scene_bootstrap(baseline, method, resamples=20, seed=4)
     assert result["sampling_unit"] == "scene"
     assert result["scene_count"] == 3
     assert result["paired_delta"]["success"]["lower_95"] > 0
@@ -296,17 +310,21 @@ def test_v25_preflight_class_counts_use_actual_candidate_loss_weights():
             "boundary_ratio": 1.0,
         }
 
-    rows = [row("train", 0, 2), row("train", 1, 4),
-            row("train", 2, 8)]
+    rows = [row("train", 0, 2), row("train", 1, 4), row("train", 2, 8)]
     rows.extend(row("dev", candidate, 1) for candidate in (0, 1, 2))
     artifact = build_preflight_artifact(
         rows,
-        {"acquisition": {
-            "ct_protocol_version": 25,
-            "ct_candidate_policy": "causal_b1_boundary",
-        }},
-        {"manifest": "identity"}, 42,
-        min_target_bearing_rows=1, min_row_retention=0.0)
+        {
+            "acquisition": {
+                "ct_protocol_version": 25,
+                "ct_candidate_policy": "causal_b1_boundary",
+            }
+        },
+        {"manifest": "identity"},
+        42,
+        min_target_bearing_rows=1,
+        min_row_retention=0.0,
+    )
     assert artifact["schema"] == "ct_seqtrack.acquisition_preflight.v4"
     assert artifact["role_weights"] == {"0": 0.5, "1": 0.3, "2": 0.2}
     counts = artifact["role_weighted_class_counts"]

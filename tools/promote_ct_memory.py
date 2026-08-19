@@ -8,7 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from utils.action_calibration import sha256_file
+from ctseqtrack.runtime.calibration import sha256_file
 from utils.memory_promotion import evaluate_memory_promotion
 
 

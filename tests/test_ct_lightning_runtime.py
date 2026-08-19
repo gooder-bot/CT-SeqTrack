@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 pl = pytest.importorskip("pytorch_lightning")
 
-from utils.training_isolation import (  # noqa: E402
+from ctseqtrack.runtime.optimization import (  # noqa: E402
     CheckpointableRNG,
     advance_lightning_manual_transaction,
     capture_global_rng_state,

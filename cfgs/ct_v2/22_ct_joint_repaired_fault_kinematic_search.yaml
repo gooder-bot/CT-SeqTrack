@@ -1,5 +1,0 @@
-_base_: 22_ct_joint_repaired.yaml
-
-experiment_name: ct_seqtrack_joint_repaired_fault_kinematic_search
-use_b1_prepass_support: false
-

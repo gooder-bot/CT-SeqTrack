@@ -1,5 +1,0 @@
-﻿order,experiment,change,decision,gpu_cost
-1,same-checkpoint four-mode inference,full / observation-only / motion-only / search-only on identical endpoints,attribute the full checkpoint gain without retraining,low
-2,endpoint diagnostic export,"candidate errors, validity, confidence, gate probabilities, oracle class, tracklet id",measure conditional search usefulness and paired bootstrap,low
-3,same-commit matched B0,"a486a36, seed42, batch16, workers4, scratch 60 epoch",apply the preregistered +0.5/+1.0 final gate,one 60-epoch run
-4,B2-v2.1 only if search is inactive,all endpoint-crop points + overlap flag; availability/utility split; remove uncalibrated log-confidence penalty,repair coverage and gate learnability without returning to a tube,one bounded kill-test first

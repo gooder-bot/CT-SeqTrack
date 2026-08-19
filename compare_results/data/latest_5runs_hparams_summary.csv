@@ -1,6 +1,0 @@
-run_key,model,cfg,tag,seed,checkpoint,test,epoch,check_val_every_n_epoch
-a3_conf_res_best_e14_retest,A3-conf-res best-e14 retest,cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml,retest_a3_conf_res_precision_best_e14,null,output/20260602-1400-seqtrack3d_nuscenes_a3_order_conf_res_gate-ct_a3_order_conf_res_gate_car_60ep_bs16_gpu3/lightning_logs/version_2/checkpoints/epoch=14-step=18930.ckpt,true,60,1
-a2_order_dyn_seed43,A2-order-dyn seed43,cfgs/seqtrack3d_nuscenes_a2_order_dyn.yaml,ct_a2_order_dyn_car_60ep_bs16_seed43,43,null,false,60,5
-a2_order_dyn_seed44,A2-order-dyn seed44,cfgs/seqtrack3d_nuscenes_a2_order_dyn.yaml,ct_a2_order_dyn_car_60ep_bs16_seed44,44,null,false,60,5
-a2_order_dyn_twc_w001_seed42,A2-order-dyn+TWC w0.01 seed42,cfgs/seqtrack3d_nuscenes_a2_order_dyn_twc_w001.yaml,ct_a2_order_dyn_twc_w001_seed42_car_60ep_gpu0_nowpreload,42,null,false,60,5
-a3_conf_res_rerun_seed42,A3-conf-res rerun seed42,cfgs/seqtrack3d_nuscenes_a3_order_conf_res_gate.yaml,ct_a3_order_conf_res_gate_rerun_seed42_car_60ep_gpu0_nowpreload,42,null,false,60,5

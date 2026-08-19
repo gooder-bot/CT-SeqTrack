@@ -1,11 +1,14 @@
-_base_: 25_b0.yaml
-
+# CT-SeqTrack v25 entry. Values not shown are defined in _base/v25_common.yaml.
+_base_: _base/v25_full.yaml
+num_candidates: 1
+dynamics_time_mode: 'true'
 experiment_name: ct25_b0_full_scratch_seed42
-path: /home/lishengjie/data/nuscenes
-version: v1.0-trainval
-train_split: train_track
-val_split: val
-test_split: val
-batch_size: 16
-workers: 12
-epoch: 60
+ct_recursive_candidate_views: 1
+proposal_inference_mode: observation
+search_v3_use_dynamic_sigma: true
+ct_candidate_policy: 'off'
+checkpoint_monitor: success_raw_search/dev
+checkpoint_mode: max
+ct_variant: b0
+ct_time_mode: true
+ct_b2_target_bb_scale: 1.0
