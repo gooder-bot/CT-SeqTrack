@@ -139,6 +139,31 @@ def test_sample_output_context_is_bound_before_dispatch():
     assert required <= bound, sorted(required - bound)
 
 
+def test_model_helpers_use_explicit_method_binding():
+    for relative in ("models/base_model.py", "models/seqtrack3d.py"):
+        tree = ast.parse(_text(relative))
+        for class_node in (
+            node for node in tree.body if isinstance(node, ast.ClassDef)
+        ):
+            for method in (
+                node
+                for node in class_node.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ):
+                decorators = {
+                    decorator.id
+                    for decorator in method.decorator_list
+                    if isinstance(decorator, ast.Name)
+                }
+                if decorators & {"staticmethod", "classmethod"}:
+                    continue
+                positional = [*method.args.posonlyargs, *method.args.args]
+                assert positional and positional[0].arg == "self", (
+                    f"{relative}:{method.lineno} {class_node.name}.{method.name} "
+                    "must accept self or declare an explicit method decorator"
+                )
+
+
 def test_research_handoff_points_only_to_live_files():
     handoff = json.loads(_text("research_handoff.json"))
     assert handoff["schema"] == "ct_seqtrack.research_handoff.v25"

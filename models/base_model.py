@@ -135,6 +135,7 @@ class BaseModelMF(pl.LightningModule):
 
         return candidate_box, valid_mask, end_points
 
+    @staticmethod
     def _proposal_scalar(mapping, key, default=0.0, column=None):
         value = mapping.get(key)
         if value is None:
