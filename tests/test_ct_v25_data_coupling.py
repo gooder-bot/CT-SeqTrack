@@ -131,6 +131,193 @@ def test_b0_scale_and_b2_exact_scale_are_separate_in_sampler():
     assert '"ct_base_evidence_labels":b2_base_labels' in compact
 
 
+def test_b0_and_b1_sample_outputs_have_complete_support_branch_locals(
+    monkeypatch, request,
+):
+    import importlib
+    import sys
+    import types
+
+    geometry = types.ModuleType("nuscenes.utils.geometry_utils")
+    geometry.points_in_box = (
+        lambda _box, points, _scale=1.0: np.zeros(points.shape[1], dtype=bool)
+    )
+    nuscenes_utils = types.ModuleType("nuscenes.utils")
+    nuscenes_utils.geometry_utils = geometry
+    nuscenes = types.ModuleType("nuscenes")
+    nuscenes.utils = nuscenes_utils
+    monkeypatch.setitem(sys.modules, "nuscenes", nuscenes)
+    monkeypatch.setitem(sys.modules, "nuscenes.utils", nuscenes_utils)
+    monkeypatch.setitem(sys.modules, "nuscenes.utils.geometry_utils", geometry)
+    sample_outputs = importlib.import_module("ctseqtrack.data.outputs")
+    request.addfinalizer(
+        lambda: sys.modules.pop("ctseqtrack.data.outputs", None)
+    )
+
+    point_count = 4
+    history_count = 3
+    empty_support = np.zeros((2, 3), dtype=np.float32)
+    empty_mask = np.zeros((2,), dtype=np.float32)
+    context = {
+        "base_regularized": type(
+            "Regularized", (), {"unique_valid_mask": np.ones(point_count)}
+        )(),
+        "baseline_search_points": np.zeros((point_count, 3), dtype=np.float32),
+        "candidate_id": 0,
+        "candidate_offsets": np.zeros((history_count, 3), dtype=np.float32),
+        "candidate_shared_transform": np.zeros(3, dtype=np.float32),
+        "candidate_shared_world_translation": np.zeros(3, dtype=np.float32),
+        "candidate_trajectory_mode": "shared_se2",
+        "canonical_label_boxs": [DummyBox(index) for index in range(history_count)],
+        "canonical_ref_boxs": np.zeros((history_count, 4), dtype=np.float32),
+        "canonical_this_box": DummyBox(1.0),
+        "causal_temporal_policy": False,
+        "config": type(
+            "Config",
+            (),
+            {
+                "bb_scale": 1.25,
+                "bb_offset": 2.0,
+                "point_sample_size": point_count,
+                "degrees": False,
+                "motion_threshold": 0.15,
+            },
+        )(),
+        "coordinate_anchor": np.zeros(4, dtype=np.float32),
+        "corner_timestamps": np.zeros(history_count, dtype=np.float32),
+        "coordinate_anchor_box": DummyBox(),
+        "ct_search_box": None,
+        "ct_search_diagnostics": {"query_delta_t": 0.5},
+        "ct_search_sampling": {
+            "expansion_sample_count": 0,
+            "expansion_available_count": 0,
+        },
+        "current_sampling_seed": 42,
+        "current_timestamp": 1.0,
+        "data": {},
+        "default_time_step": 0.5,
+        "delta_t_list": [0.5] * history_count,
+        "effective_delta_t_list": [0.5] * history_count,
+        "dynamics_time_mode": "true",
+        "effective_current_timestamp": 1.0,
+        "effective_local_timestamps": np.zeros(history_count, dtype=np.float32),
+        "effective_relative_timestamps": np.zeros(history_count, dtype=np.float32),
+        "expanded_search_points": np.empty((0, 3), dtype=np.float32),
+        "ground_truth_history": [],
+        "history_offsets": None,
+        "main_current_value": 0.0,
+        "main_timestamps": np.zeros(history_count, dtype=np.float32),
+        "local_timestamps": np.zeros(history_count, dtype=np.float32),
+        "motion_boxs": [DummyBox() for _ in range(history_count)],
+        "ct_motion_ref_boxs": np.zeros((history_count, 4), dtype=np.float32),
+        "motion_main_ref_boxs": np.zeros((history_count, 4), dtype=np.float32),
+        "point_timestamps": [0.0] * history_count,
+        "prev_boxs": [DummyBox() for _ in range(history_count)],
+        "prev_points_list": [
+            np.zeros((point_count, 3), dtype=np.float32)
+            for _ in range(history_count)
+        ],
+        "recursive_history": [],
+        "ref_boxs": [DummyBox() for _ in range(history_count)],
+        "relative_timestamps": np.zeros(history_count, dtype=np.float32),
+        "sample_index": 0,
+        "search_v2_box": None,
+        "search_v2_diagnostics": {"query_delta_t": 0.5},
+        "search_v2_endpoint_xy": np.zeros(2, dtype=np.float32),
+        "search_v2_expanded_points": np.empty((0, 3), dtype=np.float32),
+        "search_v2_points": empty_support.copy(),
+        "search_v2_point_valid_mask": empty_mask.copy(),
+        "search_v2_point_source": np.zeros(2, dtype=np.int64),
+        "search_v2_sampling": {
+            "active": False,
+            "available_count": 0,
+            "extension_count": 0,
+            "overlap_count": 0,
+        },
+        "this_box": DummyBox(1.0),
+        "this_points": np.zeros((point_count, 3), dtype=np.float32),
+        "trajectory_search_points": empty_support.copy(),
+        "trajectory_search_point_valid_mask": empty_mask.copy(),
+        "trajectory_search_point_source": np.zeros(2, dtype=np.int64),
+        "trajectory_search_sampling": {
+            "active": False,
+            "sample_count": 0,
+            "available_count": 0,
+        },
+        "joint_extension_sampling": None,
+        "joint_extension_source": None,
+        "use_ct_joint_full": False,
+        "use_motion_v3": False,
+        "valid_mask": [1] * history_count,
+        "b2_v3_history_mode": None,
+        "motion_anchor": np.zeros(4, dtype=np.float32),
+        "motion_aux_contract": None,
+        "num_hist": history_count,
+        "point_sampling_seeds": None,
+        "prev_frame_ids": None,
+        "this_frame_id": 1,
+        "use_search_evidence_v3": False,
+        "use_trajectory_search": False,
+    }
+    monkeypatch.setattr(
+        sample_outputs.geometry_utils,
+        "points_in_box",
+        lambda _box, points, _scale=1.0: np.zeros(points.shape[1], dtype=bool),
+    )
+    monkeypatch.setattr(
+        sample_outputs,
+        "canonical_dynamics_targets",
+        lambda *_args, **_kwargs: (
+            np.zeros(4, dtype=np.float32),
+            np.zeros(4, dtype=np.float32),
+        ),
+    )
+    monkeypatch.setattr(
+        sample_outputs,
+        "anchor_relative_trajectory_targets",
+        lambda *_args, **_kwargs: (
+            np.zeros(4, dtype=np.float32),
+            np.zeros(4, dtype=np.float32),
+        ),
+    )
+    monkeypatch.setattr(sample_outputs, "build_base_output", lambda _context: {})
+    result = sample_outputs.build_sample_output(context)
+    assert result == {"this_frame_id": 1, "current_sampling_seed": 42}
+
+    def fake_joint_extensions(
+        _baseline,
+        _endpoint,
+        _tube,
+        *,
+        endpoint_quota,
+        tube_quota,
+        seed,
+    ):
+        del seed
+        count = endpoint_quota + tube_quota
+        return (
+            np.zeros((count, 3), dtype=np.float32),
+            np.zeros(count, dtype=np.float32),
+            np.zeros(count, dtype=np.int64),
+            {
+                "active": False,
+                "sample_count": 0,
+                "available_count": 0,
+                "endpoint_available_count": 0,
+                "tube_available_count": 0,
+                "_pool_points": np.empty((0, 3), dtype=np.float32),
+            },
+        )
+
+    monkeypatch.setattr(
+        sample_outputs, "sample_joint_novel_extensions", fake_joint_extensions
+    )
+    context["use_ct_joint_full"] = True
+    result = sample_outputs.build_sample_output(context)
+    assert result["ct_extension_points"].shape == (256, 5)
+    assert result["ct_acquisition_sampled_count"] == 0
+
+
 def test_candidate_pool_seeds_depend_only_on_physical_frames():
     config = type("Config", (), {"seed": 42})()
     current = [physical_frame_point_seed(config, "track/0", 9) for _role in (0, 1, 2)]

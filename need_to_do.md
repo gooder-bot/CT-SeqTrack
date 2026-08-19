@@ -13,7 +13,7 @@
 - [x] 中期本地回归为 `154 passed, 1 skipped`。
 - [x] 删除正式数据路径中永远不会执行的旧 contract 分支；保留 v25 真分支。
 - [x] 16 个配置通过适配后逐字段、逐类型等价检查。
-- [x] CfC 接入后的当前测试集为 `117 passed, 1 skipped`；`compileall`、格式、脚本语法、
+- [x] CfC 接入后的当前测试集为 `118 passed, 1 skipped`；`compileall`、格式、脚本语法、
   JSON 和 `git diff --check` 均通过。
 - [x] B1 新增参数量匹配的 full-gated CfC backend、GRU/CfC 双臂配置和联合晋级
   报告工具；未改变 B1 输出、loss、数据链路或 observation-only 最终输出。

@@ -37,6 +37,7 @@ from ctseqtrack.data.search import (
 )
 from utils.sampling_utils import (
     deterministic_candidate_offset,
+    deterministic_point_seed,
     sample_candidate_offset,
 )
 
