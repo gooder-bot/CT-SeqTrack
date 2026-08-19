@@ -6,6 +6,8 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 
+from ctseqtrack.model.cfc import FullGatedCfCCell
+
 
 def wrap_angle(angle):
     return torch.atan2(torch.sin(angle), torch.cos(angle))
@@ -123,10 +125,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
     """Predict candidate-independent xy motion from an ordered box history.
 
     Boxes are supplied newest-to-oldest, matching the tracker contract.  The
-    GRU consumes transitions oldest-to-newest, while a causal latest-velocity
-    extrapolation provides a useful zero-initialized cold start.  Physical time
-    is structural: transition velocities divide by their measured gaps and the
-    predicted rate is integrated over the query gap.
+    The selected temporal backend consumes transitions oldest-to-newest, while
+    a causal latest-velocity extrapolation provides a useful zero-initialized
+    cold start. Physical time is structural: transition velocities divide by
+    their measured gaps and the predicted rate is integrated over the query gap.
     """
 
     def __init__(
@@ -143,6 +145,8 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         max_acceleration=8.0,
         max_displacement=12.0,
         acceleration_weight=0.5,
+        temporal_backend="gru",
+        cfc_backbone_units=105,
     ):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
@@ -156,6 +160,8 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.max_acceleration = float(max_acceleration)
         self.max_displacement = float(max_displacement)
         self.acceleration_weight = float(acceleration_weight)
+        self.temporal_backend = str(temporal_backend).strip().lower()
+        self.cfc_backbone_units = int(cfc_backbone_units)
         if self.hidden_dim <= 0 or self.step_dim <= 0:
             raise ValueError("physical motion encoder dimensions must be positive")
         if self.residual_velocity_scale <= 0:
@@ -170,6 +176,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             )
         if not 0.0 <= self.acceleration_weight <= 1.0:
             raise ValueError("shared-anchor acceleration weight must be in [0,1]")
+        if self.temporal_backend not in ("gru", "cfc"):
+            raise ValueError("B1 temporal backend must be gru or cfc")
+        if self.cfc_backbone_units <= 0:
+            raise ValueError("CfC backbone units must be positive")
 
         # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
         # query/pair ratio, and transition-valid flag.
@@ -178,12 +188,20 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             nn.LayerNorm(self.step_dim),
             nn.ReLU(inplace=True),
         )
-        self.gru = nn.GRU(
-            input_size=self.step_dim,
-            hidden_size=self.hidden_dim,
-            num_layers=1,
-            batch_first=True,
-        )
+        if self.temporal_backend == "gru":
+            # Preserve the historical attribute and state-dict keys exactly.
+            self.gru = nn.GRU(
+                input_size=self.step_dim,
+                hidden_size=self.hidden_dim,
+                num_layers=1,
+                batch_first=True,
+            )
+        else:
+            self.cfc = FullGatedCfCCell(
+                input_size=self.step_dim,
+                hidden_size=self.hidden_dim,
+                backbone_units=self.cfc_backbone_units,
+            )
         self.context = nn.Sequential(
             nn.Linear(self.hidden_dim + 2, self.hidden_dim),
             nn.ReLU(inplace=True),
@@ -272,6 +290,47 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             neginf=self.time_scale,
         )
         return torch.clamp(value, min=self.eps), finite
+
+    def _encode_transitions(
+        self, projected, chronological_valid, chronological_pair_gap
+    ):
+        """Aggregate valid oldest-to-newest transitions with the chosen backend."""
+        if self.temporal_backend == "cfc":
+            hidden = projected.new_zeros((projected.shape[0], self.hidden_dim))
+            normalized_gap = chronological_pair_gap / self.time_scale
+            for index in range(projected.shape[1]):
+                updated = self.cfc(
+                    projected[:, index], hidden, normalized_gap[:, index]
+                )
+                valid = chronological_valid[:, index].unsqueeze(1)
+                hidden = torch.where(valid, updated, hidden)
+            return hidden
+
+        # A zero vector is not a no-op for a GRU with biases. Compact valid
+        # transitions before packing so padded history cannot alter the state.
+        chronological_index = torch.arange(
+            chronological_valid.shape[1],
+            device=chronological_valid.device,
+            dtype=torch.int64,
+        ).unsqueeze(0)
+        compact_key = chronological_index + (
+            (~chronological_valid).to(torch.int64) * chronological_valid.shape[1]
+        )
+        compact_indices = torch.argsort(compact_key, dim=1)
+        compact_projected = torch.gather(
+            projected,
+            dim=1,
+            index=compact_indices.unsqueeze(-1).expand_as(projected),
+        )
+        transition_count = chronological_valid.to(projected.dtype).sum(dim=1)
+        packed_projected = pack_padded_sequence(
+            compact_projected,
+            lengths=torch.clamp(transition_count, min=1).to(torch.long).cpu(),
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        _, ordered_hidden = self.gru(packed_projected)
+        return ordered_hidden[-1]
 
     def kinematic_fallback(self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
         """Parameter-free fallback used by the strict ``-B1`` ablation."""
@@ -501,37 +560,13 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         chronological = torch.flip(step_features, dims=(1,))
         projected = self.step_projection(chronological)
         chronological_valid = torch.flip(pair_valid, dims=(1,))
-        # A zero vector is not a no-op for a GRU with biases.  Compact valid
-        # transitions before packing so padded history cannot alter the state.
         projected = projected * chronological_valid.unsqueeze(-1)
-        # Use unique order-aware keys instead of ``stable=True`` so the
-        # checkpoint remains runnable on the project's PyTorch 1.8 stack.
-        # Valid entries retain their chronological indices; invalid entries
-        # are shifted behind them.  Because every key is unique, an unstable
-        # sort cannot permute valid transitions with equal keys.
-        chronological_index = torch.arange(
-            chronological_valid.shape[1],
-            device=chronological_valid.device,
-            dtype=torch.int64,
-        ).unsqueeze(0)
-        compact_key = chronological_index + (
-            (~chronological_valid).to(torch.int64) * chronological_valid.shape[1]
-        )
-        compact_indices = torch.argsort(compact_key, dim=1)
-        compact_projected = torch.gather(
-            projected,
-            dim=1,
-            index=compact_indices.unsqueeze(-1).expand_as(projected),
-        )
         transition_count = pair_valid_f.sum(dim=1)
-        packed_projected = pack_padded_sequence(
-            compact_projected,
-            lengths=torch.clamp(transition_count, min=1).to(torch.long).cpu(),
-            batch_first=True,
-            enforce_sorted=False,
+        ordered_state = self._encode_transitions(
+            projected,
+            chronological_valid,
+            torch.flip(pair_gap, dims=(1,)),
         )
-        _, ordered_hidden = self.gru(packed_projected)
-        ordered_state = ordered_hidden[-1]
 
         nominal_gap = (pair_gap * pair_valid_f).sum(dim=1) / torch.clamp(
             transition_count, min=1.0

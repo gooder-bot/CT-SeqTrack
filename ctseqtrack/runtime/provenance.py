@@ -116,6 +116,12 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
         ).hexdigest(),
         "resolved_config": resolved_config,
         "seed": getattr(cfg, "seed", None),
+        "motion_v3_temporal_backend": getattr(
+            cfg, "motion_v3_temporal_backend", "gru"
+        ),
+        "motion_v3_cfc_backbone_units": getattr(
+            cfg, "motion_v3_cfc_backbone_units", 105
+        ),
         "checkpoint_path": checkpoint,
         "checkpoint_sha256": sha256_file(checkpoint),
         "checkpoint_rule": (

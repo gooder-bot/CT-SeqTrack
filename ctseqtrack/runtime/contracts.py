@@ -115,6 +115,12 @@ def build_online_resume_contract(config):
         "enable_b1": bool(_get(config, "ct_enable_b1", True)),
         "enable_b2": bool(_get(config, "ct_enable_b2", True)),
         "enable_b3": bool(_get(config, "ct_enable_b3", True)),
+        "motion_v3_temporal_backend": str(
+            _get(config, "motion_v3_temporal_backend", "gru")
+        ),
+        "motion_v3_cfc_backbone_units": int(
+            _get(config, "motion_v3_cfc_backbone_units", 105)
+        ),
         "num_candidates": int(_get(config, "num_candidates", 1)),
         "candidate_views": int(_get(config, "ct_recursive_candidate_views", 1)),
         "tracklet_slots": int(_get(config, "ct_recursive_tracklet_slots", 1)),

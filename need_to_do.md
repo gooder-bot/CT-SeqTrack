@@ -13,10 +13,11 @@
 - [x] 中期本地回归为 `154 passed, 1 skipped`。
 - [x] 删除正式数据路径中永远不会执行的旧 contract 分支；保留 v25 真分支。
 - [x] 16 个配置通过适配后逐字段、逐类型等价检查。
-- [x] 最终当前测试集为 `98 passed, 1 skipped`；`py_compile`、格式、脚本语法、
+- [x] CfC 接入后的当前测试集为 `116 passed, 1 skipped`；`compileall`、格式、脚本语法、
   JSON 和 `git diff --check` 均通过。
-- [x] `HEAD/main/origin/main` 仍为 `9ed2afc`，暂存区为空；未创建提交、未改写
-  历史、未推送。
+- [x] B1 新增参数量匹配的 full-gated CfC backend、GRU/CfC 双臂配置和联合晋级
+  报告工具；未改变 B1 输出、loss、数据链路或 observation-only 最终输出。
+- [x] CfC 改造基于 `334b677`；当前变更未创建提交、未改写历史、未推送。
 
 ## 服务器验收
 
@@ -27,6 +28,8 @@
 - [ ] B3 在 `calibration_select` / `calibration_audit` scene 上两阶段校准。
 - [ ] 同一 Full checkpoint 的 observation/raw/selective 评估。
 - [ ] scene-paired bootstrap、risk--coverage、module hash audit。
+- [ ] GRU-B1 与 CfC-B1 分别完成 2-batch smoke、独立 5 epoch 筛查和从头 60
+  epoch seed42 mini；完成 B0 hash、B1 prior/uncertainty 与 B2 support 联合晋级审计。
 
 服务器命令和应保存证据见
 `docs/CTSEQTRACK_V25_SERVER_ACCEPTANCE.md`。真实数据结果通过前，不声称稳定增益、

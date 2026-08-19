@@ -65,6 +65,8 @@ Configurations are under `cfgs/ct_seqtrack/`:
 - v25 full-data overrides: the corresponding `25_*_full.yaml` files.
 - v25 controls: live selector vs uniform, B2 target scale 1.0 vs 1.25,
   and true/fixed/shuffled physical time.
+- matched B1 temporal-backbone screen: `b1_gru_mini_seed42.yaml` and
+  `b1_cfc_mini_seed42.yaml`.
 - The complete v25 protocol and server workflow are in
   `docs/CTSEQTRACK_V25_PROTOCOL.md`.
 
@@ -86,6 +88,15 @@ B1 consumes recursive history boxes, valid masks, and physical timestamps. It
 predicts a mean, direction, heteroscedastic uncertainty, and CV fallback. Its
 mean is never used as the final box. The first B2 version uses fixed support
 margins; learned sigma remains a B3 feature and an analysis target.
+
+`motion_v3_temporal_backend` selects `gru` or the dependency-free full-gated
+CfC cell. CfC changes only ordered transition aggregation: it receives the
+same projected transition features and the corresponding physical pair gaps,
+while the query gap, kinematic anchor, bounded residual, uncertainty heads,
+losses, and B1 output contract remain shared. The matched CfC width of 105
+gives 74,537 cell parameters versus 74,496 for the GRU. See the
+[CfC paper](https://arxiv.org/abs/2106.13898) and
+[reference implementation](https://github.com/raminmh/CfC/blob/main/torch_cfc.py).
 
 ### B2: identifiable new evidence
 

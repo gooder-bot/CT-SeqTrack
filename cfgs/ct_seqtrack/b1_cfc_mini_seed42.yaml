@@ -1,0 +1,9 @@
+# Matched B1 temporal-backbone screen: full-gated CfC treatment.
+_base_: 25_b1.yaml
+experiment_name: ct25_b1_cfc_scratch_seed42
+motion_v3_temporal_backend: cfc
+motion_v3_cfc_backbone_units: 105
+epoch: 60
+seed: 42
+save_top_k: 0
+

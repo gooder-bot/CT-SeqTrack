@@ -1,4 +1,4 @@
-"""Summarize B1-v24 prior/support diagnostics with registered strata."""
+"""Summarize B1 prior/support diagnostics with registered strata."""
 
 import argparse
 import csv
@@ -17,6 +17,13 @@ def _number(row, key):
     return value
 
 
+def _optional_values(rows, key):
+    if not rows or any(key not in row for row in rows):
+        return None
+    values = np.asarray([_number(row, key) for row in rows], dtype=float)
+    return values if np.isfinite(values).all() else None
+
+
 def load_rows(path):
     path = Path(path)
     if path.suffix.lower() == ".csv":
@@ -32,15 +39,20 @@ def summarize(rows):
         and all(math.isfinite(_number(row, key)) for key in (
             "learned_motion_error", "kinematic_error", "b1_nll")))]
     if not valid:
-        return {"count": 0}
+        return {"count": 0, "valid_rate": 0.0}
 
     def values(key):
         return np.asarray([_number(row, key) for row in valid], dtype=float)
 
     learned = values("learned_motion_error")
     cv = values("kinematic_error")
-    return {
+    coverage = {
+        level: float(values(f"b1_coverage_{level}").mean())
+        for level in ("50", "80", "95")
+    }
+    summary = {
         "count": len(valid),
+        "valid_rate": float(len(valid) / len(rows)),
         "learned_rmse": float(np.sqrt(np.mean(learned ** 2))),
         "cv_rmse": float(np.sqrt(np.mean(cv ** 2))),
         "learned_minus_cv_rmse": float(
@@ -49,11 +61,31 @@ def summarize(rows):
         "target_in_support_recall": float(values(
             "target_in_support").mean()),
         "support_volume": float(values("support_volume").mean()),
-        "coverage": {
-            level: float(values(f"b1_coverage_{level}").mean())
-            for level in ("50", "80", "95")
-        },
+        "coverage": coverage,
+        "coverage_ece": float(np.mean([
+            abs(coverage["50"] - 0.50),
+            abs(coverage["80"] - 0.80),
+            abs(coverage["95"] - 0.95),
+        ])),
     }
+    optional = {
+        "pool_target_count": "pool_target_count",
+        "sampled_target_count": "sampled_target_count",
+        "extension_unique_count": "evidence_extension_unique_count",
+    }
+    for output_key, row_key in optional.items():
+        observed = _optional_values(valid, row_key)
+        if observed is not None:
+            summary[output_key] = float(observed.mean())
+    if summary["support_volume"] > 0:
+        summary["support_recall_per_volume"] = float(
+            summary["target_in_support_recall"] / summary["support_volume"]
+        )
+        if "sampled_target_count" in summary:
+            summary["sampled_targets_per_volume"] = float(
+                summary["sampled_target_count"] / summary["support_volume"]
+            )
+    return summary
 
 
 def stratify(rows, key, bins=3):

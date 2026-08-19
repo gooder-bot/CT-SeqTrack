@@ -76,6 +76,18 @@ def configure_ct_variant(config):
             "fixed or frozen prior modes are not supported"
         )
     set_config(config, "ct_prior_mode", prior_mode)
+    temporal_backend = str(
+        get_config(config, "motion_v3_temporal_backend", "gru")
+    ).strip().lower()
+    if temporal_backend not in ("gru", "cfc"):
+        raise ValueError("motion_v3_temporal_backend must be gru or cfc")
+    cfc_backbone_units = int(
+        get_config(config, "motion_v3_cfc_backbone_units", 105)
+    )
+    if cfc_backbone_units <= 0:
+        raise ValueError("motion_v3_cfc_backbone_units must be positive")
+    set_config(config, "motion_v3_temporal_backend", temporal_backend)
+    set_config(config, "motion_v3_cfc_backbone_units", cfc_backbone_units)
     if variant == "b0":
         # These switches belong to B1/B2 support construction and must not
         # leak into the observation-only arm. Normalizing them here keeps

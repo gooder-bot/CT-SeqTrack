@@ -61,6 +61,16 @@ cfgs/ct_seqtrack/25_full_full.yaml
 25_full_time_shuffled{,_full}.yaml
 ```
 
+B1 GRU/CfC 单 seed mini 筛选：
+
+```text
+cfgs/ct_seqtrack/b1_gru_mini_seed42.yaml
+cfgs/ct_seqtrack/b1_cfc_mini_seed42.yaml
+```
+
+两份配置都继承 `25_b1.yaml`，只允许时序 backend 和实验名不同。训练都从
+epoch 0 随机初始化；CfC checkpoint 不得初始化 GRU，反之亦然。
+
 seed 通过 `--seed 42/43/44` 覆盖；每个 seed 都必须独立从头训练。shuffled 时间控制还必须传入该数据 split 的离线 permutation manifest。
 
 ## 5. 服务器执行顺序
@@ -76,6 +86,50 @@ python main.py \
   --seed 42 \
   --limit_train_batches 2
 ```
+
+### B1 GRU/CfC 筛选
+
+先分别执行有限 smoke；5 epoch 筛查是独立短实验，之后的 60 epoch 正式实验
+必须重新从 epoch 0 开始：
+
+```bash
+DATA_ROOT=/home/lishengjie/data/nuscenes-mini
+
+python main.py --cfg cfgs/ct_seqtrack/b1_gru_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --epoch 1 \
+  --limit_train_batches 2 --limit_val_batches 2 --tag smoke
+python main.py --cfg cfgs/ct_seqtrack/b1_cfc_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --epoch 1 \
+  --limit_train_batches 2 --limit_val_batches 2 --tag smoke
+
+python main.py --cfg cfgs/ct_seqtrack/b1_gru_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --epoch 5 --tag kill5
+python main.py --cfg cfgs/ct_seqtrack/b1_cfc_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --epoch 5 --tag kill5
+
+python main.py --cfg cfgs/ct_seqtrack/b1_gru_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --tag formal60
+python main.py --cfg cfgs/ct_seqtrack/b1_cfc_mini_seed42.yaml \
+  --path "$DATA_ROOT" --seed 42 --tag formal60
+```
+
+分别用两条正式运行的 final/last checkpoint 在同一 `mini_val` 上测试后，执行：
+
+```bash
+python tools/compare_ct_module_audits.py GRU_LAST.ckpt CFC_LAST.ckpt --modules b0
+
+python tools/compare_b1_backbones.py \
+  --gru-proposals GRU/proposal_diagnostics/proposal_endpoints.csv \
+  --cfc-proposals CFC/proposal_diagnostics/proposal_endpoints.csv \
+  --gru-tracking GRU/proposal_diagnostics/tracking_endpoints.csv \
+  --cfc-tracking CFC/proposal_diagnostics/tracking_endpoints.csv \
+  --output artifacts/b1_cfc_vs_gru_seed42.json
+```
+
+比较工具要求逐 scene/tracklet/frame 身份完全一致，报告 B1 mean/CV RMSE、NLL、
+二维 coverage/ECE、时间间隔/稀疏度/recursive-age 分层，以及 B2 support 的目标
+覆盖、目标点数量、unique extension 数量、support volume 和证据效率。只有全部
+promotion gates 与独立 B0 hash 审计同时通过，CfC 才进入后续 Full 筛选。
 
 B2/Full 启动前必须先生成 checkpoint-free preflight：
 

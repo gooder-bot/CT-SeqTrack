@@ -122,6 +122,16 @@ def _initialize_contract_state(model, config):
 
 
 def _initialize_options(model, config):
+    model.motion_v3_temporal_backend = (
+        str(_value(config, "motion_v3_temporal_backend", "gru")).strip().lower()
+    )
+    if model.motion_v3_temporal_backend not in ("gru", "cfc"):
+        raise ValueError("motion_v3_temporal_backend must be gru or cfc")
+    model.motion_v3_cfc_backbone_units = int(
+        _value(config, "motion_v3_cfc_backbone_units", 105)
+    )
+    if model.motion_v3_cfc_backbone_units <= 0:
+        raise ValueError("motion_v3_cfc_backbone_units must be positive")
     model.ct_enable_shared_motion_anchor = bool(
         _value(config, "ct_enable_shared_motion_anchor", True)
     )
@@ -267,6 +277,8 @@ def _initialize_plugins(model, config):
             acceleration_weight=float(
                 _value(config, "ct_motion_acceleration_weight", 0.5)
             ),
+            temporal_backend=model.motion_v3_temporal_backend,
+            cfc_backbone_units=model.motion_v3_cfc_backbone_units,
         )
     if not model.use_ct_joint_full:
         return
