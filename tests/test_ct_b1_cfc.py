@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,18 @@ from utils.config import load_yaml_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_motion_sampler_imports_candidate_trajectory_normalizer():
+    source = (ROOT / "datasets" / "sampler.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = {
+        alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "utils.candidate_utils"
+        for alias in node.names
+    }
+    assert "normalize_candidate_trajectory_mode" in imported
 
 
 def _parameter_count(module):

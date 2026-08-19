@@ -13,6 +13,7 @@ from utils.ct_history import (
     build_irregular_history_offsets,
     normalize_causal_temporal_gaps,
 )
+from utils.candidate_utils import normalize_candidate_trajectory_mode
 
 from datasets.misc_utils import (
     get_history_frame_ids_and_masks,
