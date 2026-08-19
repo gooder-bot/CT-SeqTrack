@@ -157,6 +157,56 @@ def test_ambiguous_experts_skip_mode_classification():
     assert losses["loss_motion_v3_mode"].item() == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize("backend", ("gru", "cfc"))
+def test_invalid_history_batch_cannot_poison_next_ra_pmm_step(backend):
+    encoder = B1PhysicalTimePrior(
+        shared_kinematic_anchor=True,
+        motion_aligned_uncertainty=True,
+        ra_pmm=True,
+        temporal_backend=backend,
+        cfc_backbone_units=105,
+        time_scale=0.5,
+    )
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3)
+    boxes, gaps, _ = _history()
+
+    # A cold-start recursive row has no valid analytic expert.  Its sorted
+    # expert errors are all +inf and must contribute an exact finite zero.
+    invalid_result = encoder(boxes, gaps, torch.zeros(1, 3), torch.tensor([0.5]))
+    invalid_loss, _, invalid_metrics = _ra_pmm_view_loss(
+        _loss_model(encoder),
+        _data(torch.zeros(1, 2), 0.5),
+        _flat_output(invalid_result),
+        "motion_main",
+        "motion",
+        1.0,
+    )
+    assert torch.isfinite(invalid_loss)
+    assert all(torch.isfinite(value) for value in invalid_metrics.values())
+    optimizer.zero_grad()
+    invalid_loss.backward()
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in encoder.parameters()
+    )
+    optimizer.step()
+
+    # The following valid row previously reached BCE with NaN parameters and
+    # raised a CUDA device-side assert on the second batch.
+    valid_result = encoder(boxes, gaps, torch.ones(1, 3), torch.tensor([0.5]))
+    valid_target = valid_result["kinematic_prior_xy"].detach()
+    valid_loss, _, valid_metrics = _ra_pmm_view_loss(
+        _loss_model(encoder),
+        _data(valid_target, 0.5),
+        _flat_output(valid_result),
+        "motion_main",
+        "motion",
+        1.0,
+    )
+    assert torch.isfinite(valid_loss)
+    assert all(torch.isfinite(value) for value in valid_metrics.values())
+
+
 def test_physical_target_is_translation_invariant_but_endpoint_tracks_anchor_drift():
     gt_history = [_Box((0.0, 0.0, 0.0)), _Box((-1.0, 0.0, 0.0))]
     current = _Box((1.0, 0.0, 0.0))

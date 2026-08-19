@@ -9,17 +9,32 @@ from ctseqtrack.model.prior import physical_motion_uncertainty_loss
 
 def masked_mean(per_sample, valid):
     valid = valid.to(device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
-    return (per_sample.reshape(-1) * valid).sum() / torch.clamp(valid.sum(), min=1.0)
+    per_sample = per_sample.reshape(-1)
+    # Invalid recursive rows may legitimately carry undefined diagnostics
+    # (for example an oracle error of +inf when no expert is available).
+    # Multiplying those values by zero is not a mask: IEEE inf*0 and nan*0
+    # remain NaN and would poison the first optimizer step.  Select the safe
+    # branch before multiplying instead.
+    active = valid > 0
+    safe_per_sample = torch.where(active, per_sample, torch.zeros_like(per_sample))
+    safe_valid = torch.where(active, valid, torch.zeros_like(valid))
+    return (safe_per_sample * safe_valid).sum() / torch.clamp(
+        safe_valid.sum(), min=1.0
+    )
 
 
 def _weighted_masked_mean(per_sample, valid, weight=None):
     valid = valid.to(device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+    per_sample = per_sample.reshape(-1)
     if weight is None:
         weight = torch.ones_like(valid)
     else:
         weight = weight.to(device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
-    effective = valid * weight
-    return (per_sample.reshape(-1) * effective).sum() / torch.clamp(
+    active = valid > 0
+    safe_per_sample = torch.where(active, per_sample, torch.zeros_like(per_sample))
+    safe_weight = torch.where(active, weight, torch.zeros_like(weight))
+    effective = valid * safe_weight
+    return (safe_per_sample * effective).sum() / torch.clamp(
         effective.sum(), min=1.0
     )
 
@@ -114,10 +129,23 @@ def _ra_pmm_view_loss(model, data, output, prefix, output_prefix, outer_weight):
     expert_error = torch.linalg.norm(target.unsqueeze(1) - mode_centers, dim=2)
     expert_error = expert_error.masked_fill(~expert_valid, float("inf"))
     sorted_error, sorted_index = torch.sort(expert_error, dim=1)
-    ratio = sorted_error[:, 0] / (sorted_error[:, 1] + 1e-6)
-    ratio = torch.where(sorted_error[:, 1] <= 1e-6, torch.ones_like(ratio), ratio)
+    # Mode supervision is defined only when at least two finite experts are
+    # available.  In particular, early recursive rows can have zero experts;
+    # evaluating inf/inf on those rows creates a NaN even though their B1
+    # validity weight is zero.
+    has_two_finite_experts = torch.isfinite(sorted_error[:, 0]) & torch.isfinite(
+        sorted_error[:, 1]
+    )
+    safe_best = torch.where(
+        has_two_finite_experts, sorted_error[:, 0], torch.zeros_like(sorted_error[:, 0])
+    )
+    safe_second = torch.where(
+        has_two_finite_experts, sorted_error[:, 1], torch.ones_like(sorted_error[:, 1])
+    )
+    ratio = safe_best / (safe_second + 1e-6)
+    ratio = torch.where(safe_second <= 1e-6, torch.ones_like(ratio), ratio)
     mode_confidence = torch.clamp((0.9 - ratio) / 0.1, 0.0, 1.0)
-    distinguishable = torch.isfinite(sorted_error[:, 1]).to(mean.dtype)
+    distinguishable = has_two_finite_experts.to(mean.dtype)
     mode_confidence = mode_confidence * distinguishable
     log_probability = torch.log(mode_probability.clamp(min=1e-8))
     top_one = sorted_index[:, 0]
@@ -228,7 +256,12 @@ def _ra_pmm_view_loss(model, data, output, prefix, output_prefix, outer_weight):
         (mode_probability.unsqueeze(2) * mode_centers).sum(dim=1).detach() - target,
         dim=1,
     )
-    oracle_regret = predicted_mode_error - sorted_error[:, 0].detach()
+    finite_oracle_error = torch.where(
+        torch.isfinite(sorted_error[:, 0]),
+        sorted_error[:, 0],
+        torch.zeros_like(sorted_error[:, 0]),
+    ).detach()
+    oracle_regret = predicted_mode_error - finite_oracle_error
     selected_mode = torch.argmax(mode_probability.detach(), dim=1)
     joint_motion_coverage = (
         (motion_residual <= motion_quantiles[:, 2].detach()).all(dim=1).to(mean.dtype)
