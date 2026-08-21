@@ -1,3 +1,0 @@
-run_id,output_dir,commit,git_clean,seed,batch_size,train_steps,validation_points,final_step,last_checkpoint_sha256,last_matches_epoch59,wall_hours,seconds_per_step,complete
-B0,output/20260725-2326-01_seqtrack3d_baseline-ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16,d86990c,true,42,16,75720,12,75720,ad644ea1bf5c0c513ad049d814d0a212c0383baa1a04af786e352a37f87b972f,true,7.611056,0.361862,true
-B4,output/20260728-1826-07_seqtrack3d_dt_pftc-dt_pftc_true_5f260e7_seed42_60ep_bs16_gpu0,5f260e7,true,42,16,75720,12,75720,e03f1c67e7d45ff1c28b16bc000faabb740bca3fd5f888dd57fc85568154cba9,true,62.738529,2.982854,true

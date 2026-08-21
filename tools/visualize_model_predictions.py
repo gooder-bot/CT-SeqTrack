@@ -10,7 +10,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import yaml
 from easydict import EasyDict
 
 
@@ -20,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from datasets import get_dataset  # noqa: E402
 from datasets import points_utils  # noqa: E402
 from models import get_model  # noqa: E402
+from utils.config import load_yaml_config  # noqa: E402
 from utils.metrics import estimateAccuracy, estimateOverlap  # noqa: E402
 
 
@@ -34,8 +34,7 @@ MODEL_COLORS = [
 
 
 def load_config(path):
-    with open(path, "r") as f:
-        cfg = EasyDict(yaml.load(f, Loader=yaml.FullLoader))
+    cfg = EasyDict(load_yaml_config(path))
     if "preloading" not in cfg:
         cfg.preloading = False
     if "tiny" not in cfg:

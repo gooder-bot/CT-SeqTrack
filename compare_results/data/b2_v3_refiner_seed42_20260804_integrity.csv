@@ -1,2 +1,0 @@
-config,seed,epochs,optimizer_steps,commit,dirty,b1_tensor_count,migrated_tensor_count,missing_frozen_tensor_count,frozen_bitwise_unchanged,migrated_tensor_changed_count,last_checkpoint
-cfgs/ct_v2/13_b2_v3_refiner.yaml,42,20,25240,73d6ce25682c19be6a70fcd95a125874deb306e8,False,14,33,0,True,33,output/20260804-1228-13_b2_v3_refiner-b2_v3_refiner_seed42_20ep_bs16/lightning_logs/version_0/checkpoints/last.ckpt

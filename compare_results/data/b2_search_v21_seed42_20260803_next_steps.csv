@@ -1,6 +1,0 @@
-﻿order,action,change,decision_unlocked,gpu_cost
-1,Stop full v2.1 promotion,Do not run seed43/44 or robustness suites from the current full checkpoint.,Avoid spending compute on a structurally broken fusion path.,none
-2,Run same-checkpoint four-mode inference,"Evaluate obs, obs_motion, obs_search, and full for epoch60 full and search-only checkpoints.","Directly separate B0, motion, search, and interaction effects.",low; inference only
-3,Fix invalid-row evidence statistics,Set ESS and all Search statistics to zero when search_valid is false; normalize ESS by valid_count or log1p before the gate.,Remove the verified 1e6 out-of-range feature and isolate gate calibration.,none for code/tests
-4,Make auxiliary use truly selective,Do not supervise step on only helpful rows while allowing near-cap weights everywhere; add abstention/calibration diagnostics and cap motion more tightly.,Require helpful precision to exceed 70% before recursive use.,short diagnostic training before 60 epochs
-5,Train same-commit matched B0,"Commit 16c2b8b, seed42, batch16, workers4, scratch, 60 epochs.",Establish whether Search-only truly raises the project's B0.,one 60-epoch run

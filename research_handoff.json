@@ -1,6 +1,6 @@
 {
   "schema": "ct_seqtrack.research_handoff.v1",
-  "status": "implementation_complete_experiments_pending",
+  "status": "local_slimming_complete_server_parity_waived",
   "working_title": "Observation-Anchored Evidence Recovery for Irregular-Time 3D Single-Object Tracking",
   "central_claim": "Physical-time-guided extension evidence may apply only a calibrated bounded correction; otherwise the tracker exactly preserves the current observation.",
   "contributions": [
@@ -12,7 +12,7 @@
     {
       "name": "extension_only_evidence",
       "modules": ["B2"],
-      "required_evidence": ["acquisition_preflight", "no_extension_counterfactual", "raw_candidate_headroom"]
+      "required_evidence": ["acquisition_report", "no_extension_counterfactual", "raw_candidate_headroom"]
     },
     {
       "name": "empirical_action_reliability",
@@ -31,6 +31,11 @@
     "Predicted-box membership is not ground-truth foreground.",
     "Calibration is empirical finite-sample control, not a distribution-free guarantee."
   ],
+  "blockers": [
+    "The local machine has no discovered nuScenes data root and lacks the complete Lightning/nuScenes Python environment.",
+    "Server-side real-batch, resume-parity, and visualization checks were explicitly waived for this slimming pass; dormant compatibility branches therefore remain physically present.",
+    "The registered v24 mini and full-nuScenes experiments have not run."
+  ],
   "primary_files": [
     "models/ctseqtrack.py",
     "models/ct_v2/pipeline_contracts.py",
@@ -39,6 +44,10 @@
     "utils/acquisition_metrics.py",
     "utils/online_contract.py",
     "docs/CTSEQTRACK_B0_B3_METHOD.md",
+    "docs/EXPERIMENT_PROTOCOL.md",
+    "docs/FORMAL_TOOLING.md",
+    "docs/HISTORY_EVIDENCE_INDEX.md",
+    "docs/SOURCE_SLIMMING_GATE.md",
     "need_to_do.md"
   ]
 }

@@ -1,6 +1,0 @@
-evidence,file,lines,observation,confidence
-training_rng_order,main.py,557-616,The global seed is set before model construction while the shuffled DataLoader iterator starts inside trainer.fit after model construction,high
-b1_initialization_rng,models/seqtrack3d.py,968-997,OrderedPhysicalMotionEncoder is initialized from the global Torch RNG without fork_rng,high
-joint_initializer_isolation,models/seqtrack3d.py,1021-1059,B2 and B3 initialization uses fork_rng but the preceding B1 initialization does not,high
-b2_off_fallback,models/seqtrack3d.py,2551-2630,With B2 disabled the final CT box is the unchanged observation box,high
-decoder_state_path,models/seqtrack3d.py,2235-2254,Joint requests decoder_state but uses the same delta_motion tensor as observation output,medium

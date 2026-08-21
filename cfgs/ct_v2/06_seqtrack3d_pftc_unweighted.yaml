@@ -1,6 +1,0 @@
-_base_: 01_seqtrack3d_baseline.yaml
-
-experiment_name: seqtrack3d_pftc_unweighted
-use_point_feature_tc: true
-pftc_time_weighting: false
-pftc_weight: 1.0

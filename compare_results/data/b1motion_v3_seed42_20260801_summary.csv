@@ -1,5 +1,0 @@
-﻿run_id,arm,final_success,final_precision,delta_final_success_vs_b0,delta_final_precision_vs_b0,late3_success,late3_precision,delta_late3_success_vs_b0,delta_late3_precision_vs_b0,best_success,best_success_epoch,best_precision,best_precision_epoch,paired_success_at_best_precision
-SEQTRACK,SeqTrack3D plain (original run),50.985779,59.961712,-2.374176,-4.420124,50.107586,58.862877,-2.797228,-4.241425,52.283371,35,65.214447,10,46.090813
-B0,B0 baseline (historical),53.359955,64.381836,0.0,0.0,52.904814,63.104301,0.0,0.0,54.134571,50,64.381836,60,53.359955
-B1V2,B1motion-v2,20.618162,19.830418,-32.741793,-44.551418,21.77717,21.195114,-31.127644,-41.909187,30.195845,5,34.990154,5,30.195845
-B1V3,B1motion-v3,52.655365,61.834793,-0.70459,-2.547043,52.049966,61.20642,-0.854848,-1.897882,52.655365,60,65.555801,30,52.198036

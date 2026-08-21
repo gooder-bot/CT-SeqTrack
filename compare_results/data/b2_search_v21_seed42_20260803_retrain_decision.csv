@@ -1,6 +1,0 @@
-﻿question,evidence,decision,confidence
-Do the two severe regressions have the same root cause?,"Both are amplified by recursive history feedback, but SeqTrack is low without an intervention and lacks provenance; V2.1 full splits from Search-only exactly when fusion ramps on.","No: shared amplifier, different proximate trigger.",high
-Did B0 supervised optimization collapse in V2.1 full?,Epoch60 center/angle/seg/box-cloud losses remain comparable to Search-only despite a 26-38 point validation gap.,No evidence of a B0 training-loss collapse.,high for supervised losses; recursive obs mode pending
-Should current V2.1 full be retrained unchanged?,"Fusion timing, non-selective gate use, 16.9% Motion helpfulness, and the verified invalid-row ESS=1e6 defect are structural risks.",No. First run four-mode inference and repair the gate inputs.,high
-Will a corrected V2.1 full require retraining?,Masking/normalizing gate features and changing abstention or supervision changes the learned routing distribution.,"Yes, retrain corrected full from scratch after a ramp smoke test.",high
-Should Search-only be retrained now?,"Its encoder is materially better than legacy Search; formal gain is blocked by the missing same-commit matched B0, not by a catastrophic collapse.",Not immediately; preserve checkpoint and run obs/obs_search attribution.,medium-high

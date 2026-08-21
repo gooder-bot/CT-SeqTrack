@@ -5,16 +5,11 @@ import pytest
 import torch
 
 from models.ct_variant import configure_ct_variant
-from utils.acquisition_metrics import acquisition_config_identity
 from utils.acquisition_metrics import balanced_targetness_class_weights
-from utils.acquisition_metrics import build_preflight_artifact
-from utils.acquisition_metrics import validate_preflight_artifact
 from utils.online_contract import (
-    build_b2_method_contract,
     build_online_resume_contract,
     require_scratch_initialization,
     validate_scratch_training_contract,
-    validate_b2_method_promotion,
     validate_online_resume_contract,
 )
 from utils.config import load_yaml_config
@@ -27,7 +22,7 @@ from utils.training_isolation import (
     freeze_batchnorm_running_stats,
     update_cumulative_binary_class_balance,
 )
-from tools.build_ct_b2_promotion_metrics import build_metrics, success_auc
+from tools.report_ct_b2 import build_metrics, success_auc
 
 
 def base_config():
@@ -177,7 +172,7 @@ def test_scratch_contract_rejects_finetune_lr_and_wrong_geometry():
 
 def test_b1_and_fixed_cv_ablation_configs_are_independent_scratch_runs():
     b1 = load_yaml_config(
-        ROOT / 'cfgs' / 'ct_v2' / '23_ct_b1_acquisition.yaml')
+        ROOT / 'cfgs' / 'ct_seqtrack' / '24_b1.yaml')
     assert b1['seed'] == 42
     assert b1['checkpoint_monitor'] == 'b1_nll/dev'
     assert b1['checkpoint_mode'] == 'min'
@@ -199,24 +194,6 @@ def test_b1_and_fixed_cv_ablation_configs_are_independent_scratch_runs():
         assert full_control['ct_enable_b3']
         assert full_control['ct_memory_mode'] == mode
         validate_scratch_training_contract(full_control)
-
-
-def test_full_memory_controls_use_the_same_method_only_promotion():
-    source = load_yaml_config(
-        ROOT / 'cfgs' / 'ct_seqtrack' / '24_full_minus_b3.yaml')
-    configure_ct_variant(source)
-    promotion = {
-        "schema": "ct_seqtrack.b2_evidence_promotion.v4",
-        "passed": True,
-        "b2_method_contract": build_b2_method_contract(source),
-    }
-    for name in (
-            '24_full_memory_real.yaml',
-            '24_full_memory_empty.yaml',
-            '24_full_memory_time_misaligned.yaml'):
-        config = load_yaml_config(ROOT / 'cfgs' / 'ct_seqtrack' / name)
-        configure_ct_variant(config)
-        validate_b2_method_promotion(promotion, config)
 
 
 class _Tracker:
@@ -294,113 +271,7 @@ def test_auxiliary_objective_has_no_plugin_gradient_path():
     assert plugin_gradient is None
 
 
-def _row(partition, candidate, pool, sampled, positive=False,
-         fallback=False):
-    return {
-        "partition": partition,
-        "candidate_id": candidate,
-        "pool_target_count": pool,
-        "sampled_target_count": sampled,
-        "extension_pool_count": 10,
-        "available": True,
-        "recovery_positive": positive,
-        "recovery_fallback": fallback,
-    }
-
-
-def _manifest_identity(config):
-    from utils.acquisition_metrics import sha256_json
-    manifest = {
-        "schema": "ct_seqtrack.acquisition_data_manifest.v2",
-        "dataset": config["dataset"],
-        "split": config["train_split"],
-        "path": config["path"],
-        "seed": config["seed"],
-        "checkpoint_loaded": False,
-        "complete": True,
-        "partitions": [
-            {"partition": "train", "tracklet_identity_sha256": "a",
-             "complete": True, "exported_rows": 16,
-             "expected_rows": 16},
-            {"partition": "dev", "tracklet_identity_sha256": "b",
-             "complete": True, "exported_rows": 16,
-             "expected_rows": 16},
-        ],
-    }
-    return {
-        "manifest": manifest,
-        "manifest_sha256": sha256_json(manifest),
-    }
-
-
-def test_preflight_keeps_row_and_point_recall_distinct():
-    rows = [_row("dev", 0, 100, 100)]
-    rows.extend(_row("dev", 0, 1, 0) for _ in range(9))
-    rows.extend([
-        _row("train", 0, 2, 1),
-        _row("train", 0, 0, 0),
-    ])
-    artifact = build_preflight_artifact(
-        rows, {"config": "x"}, {"manifest": "y"}, 42,
-        min_target_bearing_rows=1, min_point_retention=0.1)
-    primary = next(item for item in artifact["groups"]
-                   if item["partition"] == "dev"
-                   and item["candidate_id"] == 0)
-    assert primary["row_recall"] == pytest.approx(0.1)
-    assert primary["point_recall"] == pytest.approx(100 / 109)
-    assert artifact["passed"]
-
-
-def test_preflight_fails_closed_on_zero_eligible_primary_rows():
-    rows = [
-        _row("dev", 0, 0, 0),
-        _row("train", 0, 1, 1),
-        _row("train", 0, 0, 0),
-    ]
-    artifact = build_preflight_artifact(rows, {}, {}, 42)
-    assert not artifact["passed"]
-    assert not artifact["criteria"][
-        "dev_candidate0_target_bearing_extension_nonzero"]
-
-
-def test_preflight_hash_and_sampling_contract_are_fail_closed():
-    rows = [
-        *[_row("dev", 0, 1, 1) for _ in range(100)],
-        _row("train", 0, 1, 1),
-        _row("train", 0, 0, 0),
-    ]
-    config = base_config()
-    artifact = build_preflight_artifact(
-        rows, {
-            "acquisition": acquisition_config_identity(config),
-        }, _manifest_identity(config), 42)
-    validate_preflight_artifact(artifact, config)
-    tampered = copy.deepcopy(artifact)
-    tampered["groups"][0]["row_recall"] = 0.0
-    with pytest.raises(ValueError, match="hash mismatch"):
-        validate_preflight_artifact(tampered, config)
-
-
-def test_preflight_rejects_a_different_dataset_manifest():
-    rows = [
-        *[_row("dev", 0, 1, 1) for _ in range(100)],
-        _row("train", 0, 1, 1),
-        _row("train", 0, 0, 0),
-    ]
-    config = base_config()
-    identity = _manifest_identity(config)
-    identity["manifest"]["dataset"] = "kitti"
-    from utils.acquisition_metrics import sha256_json
-    identity["manifest_sha256"] = sha256_json(identity["manifest"])
-    artifact = build_preflight_artifact(
-        rows, {
-            "acquisition": acquisition_config_identity(config),
-        }, identity, 42)
-    with pytest.raises(ValueError, match="data manifest mismatch"):
-        validate_preflight_artifact(artifact, config)
-
-
-def test_promotion_metrics_require_explicit_unique_dev_candidate0_rows():
+def test_b2_report_requires_explicit_unique_dev_candidate0_rows():
     row = {
         "partition": "dev", "candidate_id": 0,
         "tracklet_id": 0, "frame_id": 1,

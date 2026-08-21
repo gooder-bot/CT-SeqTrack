@@ -1,97 +1,54 @@
 # CT-SeqTrack 服务器路径
 
-本文件记录 CT-SeqTrack 在服务器上的固定数据与依赖源码路径。训练、评测、
-协议构建和数据检查命令应优先引用这里的路径，避免把数据集根目录与 Python
-包源码目录混用。
+本文件只记录正式 v24 实验需要的服务器路径。历史 KITTI/HTV/M2 路径已移出活动文档。
 
-## 路径清单
+## nuScenes mini
 
-| 用途 | 服务器路径 | 传给 `--path` |
-| --- | --- | --- |
-| KITTI Tracking `training` 根目录 | `/home/lishengjie/data/cxtrack/training/` | 是 |
-| nuScenes mini 数据根目录 | `/home/lishengjie/data/nuscenes-mini/` | 是 |
-| nuScenes Python 包源码目录 | `/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/` | 否 |
-
-### KITTI Tracking
-
-`datasets/kitti_mf.py` 同时接受包含 `training/` 的父目录和 `training/` 本身。
-服务器上的规范写法使用直接数据根目录：
-
-```bash
---path /home/lishengjie/data/cxtrack/training
-```
-
-该目录下应直接存在：
+数据根：
 
 ```text
-label_02/
-velodyne/
-calib/
+/home/lishengjie/data/nuscenes-mini
 ```
 
-父目录 `/home/lishengjie/data/cxtrack/` 也能被当前加载器自动解析，但新命令和
-实验记录统一保存直接的 `training/` 路径，减少歧义。
-
-### nuScenes mini
-
-`datasets/nuscenes_lidar_mf.py` 会把配置中的 `path` 原样传给
-`NuScenes(version=..., dataroot=path)`。服务器命令应使用：
+运行时传入：
 
 ```bash
 --path /home/lishengjie/data/nuscenes-mini
 ```
 
-mini 配置必须同时使用 `version: v1.0-mini`；数据根目录应包含
-`v1.0-mini/` 以及对应的 `samples/`、`sweeps/` 等目录。
+配置必须使用 `version: v1.0-mini`，并确认数据根包含 `v1.0-mini/`、
+`samples/` 和 `sweeps/`。
 
-### nuScenes Python 包源码
+## 完整 nuScenes
 
-项目代码通过 `from nuscenes...` 导入 nuScenes devkit。服务器上已有的包源码是：
+完整数据根必须在服务器运行前显式确认，并通过 `--path DATA_ROOT` 覆盖配置。
+不得把 mini 路径用于 `24_*_nuscenes_full.yaml`。
+
+## Python 环境
+
+服务器现有 nuScenes Python 包源曾位于：
 
 ```text
-/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+/home/lishengjie/code/SparseFusion-main/nuscenes
 ```
 
-这个目录不是数据集根目录，不能传给 `--path`。如果当前 Python 环境没有安装
-`nuscenes-devkit`，应把包目录的父目录加入 `PYTHONPATH`：
+该路径是 Python 包父目录，不是数据根，不能传给 `--path`。若环境未安装
+`nuscenes-devkit`，可使用：
 
 ```bash
 export CTSEQ_NUSCENES_PYTHON_ROOT=/home/lishengjie/code/SparseFusion-main/nuscenes
 export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 ```
 
-## 推荐的服务器环境变量
+## 正式启动前检查
 
 ```bash
-export CTSEQ_KITTI_ROOT=/home/lishengjie/data/cxtrack/training
-export CTSEQ_NUSCENES_MINI_ROOT=/home/lishengjie/data/nuscenes-mini
-export CTSEQ_NUSCENES_PYTHON_ROOT=/home/lishengjie/code/SparseFusion-main/nuscenes
-export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+python tools/verify_ct_slimming.py verify
+python -m pytest -q
+python main.py --cfg cfgs/ct_seqtrack/24_b0.yaml --path DATA_ROOT --help
 ```
 
-示例：
-
-```bash
-# nuScenes-mini：当前 ct_v2 入口
-python tools/ct_v2/run.py train \
-  --variant baseline \
-  --path "$CTSEQ_NUSCENES_MINI_ROOT"
-
-# KITTI Tracking：直接 main.py 入口
-python main.py \
-  --cfg cfgs/seqtrack3d_kitti.yaml \
-  --path "$CTSEQ_KITTI_ROOT" \
-  --seed 42
-```
-
-在启动长实验前可检查路径和 Python 导入：
-
-```bash
-test -d "$CTSEQ_KITTI_ROOT/label_02"
-test -d "$CTSEQ_KITTI_ROOT/velodyne"
-test -d "$CTSEQ_KITTI_ROOT/calib"
-test -d "$CTSEQ_NUSCENES_MINI_ROOT/v1.0-mini"
-test -f "$CTSEQ_NUSCENES_PYTHON_ROOT/nuscenes/__init__.py"
-python -c "from nuscenes.nuscenes import NuScenes; print('nuscenes import: OK')"
-```
-
+完整环境中的真实 batch 前向/反向、100-step resume 等价和点/框可视化仍是
+推荐验收项；用户已明确跳过本轮服务器 smoke，因此不把它们记为已通过，也不再
+阻止四臂命令交付。若之后执行，这些工程验收 checkpoint 必须丢弃，正式运行仍从
+epoch0 开始。

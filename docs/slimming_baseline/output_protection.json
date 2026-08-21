@@ -1,0 +1,9 @@
+{
+  "exists": true,
+  "file_count": 6717,
+  "git_ignored": true,
+  "inventory_sha256_path_size_mtime": "be2d17737572c1d434f1e3cc9b52d165ff3166f37f20ef348741b9973de66df9",
+  "policy": "do_not_delete_move_rename_or_write",
+  "protected_path": "D:\\desktop\\research\\CT-SeqTrack\\output",
+  "total_bytes": 30696368958
+}

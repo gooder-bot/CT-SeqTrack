@@ -8,7 +8,6 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
 from easydict import EasyDict
 
 
@@ -16,14 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset  # noqa: E402
+from utils.config import load_yaml_config  # noqa: E402
 
 
 FRAME_COLORS = ["#2f6fbe", "#d08c2f", "#7a5195", "#5aa469", "#999999"]
 
 
 def load_config(path):
-    with open(path, "r") as f:
-        cfg = EasyDict(yaml.load(f, Loader=yaml.FullLoader))
+    cfg = EasyDict(load_yaml_config(path))
     if "preloading" not in cfg:
         cfg.preloading = False
     if "tiny" not in cfg:

@@ -1,0 +1,5 @@
+{
+  "reason": "ModuleNotFoundError: No module named 'easydict'",
+  "required_action": "Run again in the complete Lightning/nuScenes environment before physically deleting dormant source branches.",
+  "status": "blocked"
+}

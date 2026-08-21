@@ -1,2 +1,0 @@
-window,shared_steps,different_steps,different_fraction,mean_absolute_loss_difference,first_differing_step,interpretation
-first 10 training epochs (effective M3 weight = 0),12621,12612,0.9992869027810791,0.19621694349027002,9,Same nominal seed is not bitwise deterministic; single-seed B−C is not a strict causal estimate.

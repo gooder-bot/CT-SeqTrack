@@ -1,5 +1,0 @@
-run_id,run_label,integrity_status,evidence_class,git_commit,git_dirty,seed,training_exit_code,console_finished,success_points,precision_points,loss_points,checkpoint_bytes,checkpoint_sha256,checkpoint_epoch_zero_based,checkpoint_global_step,checkpoint_tensor_count,manifest_present,manifest_entries,manifest_matched,manifest_missing,manifest_mismatched
-A1,A1 historical baseline,PASS,legacy reference,,,42,,,12,12,75720,44833232,a2fbffb1e5acae37adab3cb858e864857cc1d6c2231f9e0848df719614f24a82,59,75720,320,False,0,0,0,0
-R1,R1 A1-init M2,PASS,clean provenance,473738fa2cf3def246e4e6b1bce35d8692c416c7,False,42,0.0,True,12,12,75720,46303644,362b3314ad056f289509818606af30fcc43d2331eb9156405ed2727bfe49658f,59,75720,334,True,35,35,0,0
-R2,R2 scratch M2,PASS,clean provenance,473738fa2cf3def246e4e6b1bce35d8692c416c7,False,42,0.0,True,12,12,75720,46303452,00a10b88b6a33c77ba26b2b8f064992e0d8eddd3a92ba33b42021274ea5e48ae,59,75720,334,False,0,0,0,0
-R3,R3 scratch W0,PASS,clean provenance,473738fa2cf3def246e4e6b1bce35d8692c416c7,False,42,0.0,True,12,12,75720,44833236,d1ce4ea8cbe86263197d3d934548f6e72d5f57cccb6472b26012d0dfc7334280,59,75720,320,False,0,0,0,0

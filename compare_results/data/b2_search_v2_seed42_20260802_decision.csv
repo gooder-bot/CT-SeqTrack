@@ -1,5 +1,0 @@
-﻿question,criterion,observed,decision
-legacy search-only vs strongest B0 guardrail,epoch60 and late-3 should not regress,final -3.705 S / -7.990 P,FAIL; legacy search path remains rejected
-B2-v2 full epoch60 promotion,+0.5 Success and +1.0 Precision vs matched B0,+0.772 S / +0.373 P vs historical B0,"HOLD; Success passes, Precision fails, and same-commit B0 is missing"
-B2-v2 late-3 stability,both metrics not below B0,+1.557 S / +2.909 P,PASS against historical B0
-search contribution established,new search-only ablation or material conditional gate use,legacy-only ablation; full search argmax selection approximately 0.10% at epoch60,NOT ESTABLISHED

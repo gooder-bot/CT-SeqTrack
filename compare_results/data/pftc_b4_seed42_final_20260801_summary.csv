@@ -1,3 +1,0 @@
-run_id,arm,commit,final_success,final_precision,delta_success_vs_b0,delta_precision_vs_b0,best_success,best_success_epoch,best_precision,best_precision_epoch,late3_success,late3_precision,post35_success,post35_precision,decision
-B0,B0 historical baseline,d86990c,53.359955,64.381836,0.000000,0.000000,54.134571,50,64.381836,60,52.904814,63.104301,52.686727,62.971919,reference_only
-B4,Delta-t PFTC,5f260e7,51.189278,60.886215,-2.170677,-3.495621,52.727573,35,63.869797,20,51.397886,60.617798,51.459885,60.469730,no_go_current_implementation

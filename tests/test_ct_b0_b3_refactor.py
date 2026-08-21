@@ -76,45 +76,9 @@ def test_candidate1_control_changes_only_b0_view_protocol():
                 if key not in ignored})
 
 
-def test_b0_2x2_configs_are_matched_except_registered_factors():
-    expected = {
-        "24_b0_2x2_reseed0_rngshift0.yaml": (False, False),
-        "24_b0_2x2_reseed0_rngshift1.yaml": (False, True),
-        "24_b0_2x2_reseed1_rngshift0.yaml": (True, False),
-        "24_b0_2x2_reseed1_rngshift1.yaml": (True, True),
-    }
-    reference = None
-    ignored = {
-        "experiment_name", "ct_recursive_reseed_enabled",
-        "ct_b0_rng_shift_control",
-    }
-    for name, factors in expected.items():
-        config = load_yaml_config(ROOT / "cfgs" / "ct_seqtrack" / name)
-        configure_ct_variant(config)
-        assert config["ct_variant"] == "b0"
-        assert config["seed"] == 42
-        assert config["batch_size"] == 16
-        assert config["epoch"] == 60
-        assert config["workers"] == 4
-        assert config["check_val_every_n_epoch"] == 5
-        assert (
-            bool(config["ct_recursive_reseed_enabled"]),
-            bool(config["ct_b0_rng_shift_control"]),
-        ) == factors
-        matched = {
-            key: value for key, value in config.items()
-            if key not in ignored
-        }
-        if reference is None:
-            reference = matched
-        else:
-            assert matched == reference
-
-
 def test_b0_normalization_removes_inherited_b1_b2_runtime_switches():
     config = load_yaml_config(
-        ROOT / "cfgs" / "ct_seqtrack" /
-        "24_b0_2x2_reseed0_rngshift0.yaml")
+        ROOT / "cfgs" / "ct_seqtrack" / "24_b0.yaml")
     configure_ct_variant(config)
     assert not config["use_b1motion_v3"]
     assert not config["ct_enable_b1"]

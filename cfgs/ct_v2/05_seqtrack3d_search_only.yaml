@@ -1,9 +1,0 @@
-_base_: 01_seqtrack3d_baseline.yaml
-
-experiment_name: seqtrack3d_search_only
-
-# Data-side ablation: keep the exact B0 network and add only the bounded
-# time-guided search tube with the same fixed 1024-point, 75/25 budget as B2.
-use_time_guided_search: true
-ct_history_training_mode: correlated_candidate
-ct_search_training_history: correlated_candidate

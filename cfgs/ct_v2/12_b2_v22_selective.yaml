@@ -1,9 +1,0 @@
-_base_: 11_b2_v22_refiner.yaml
-
-experiment_name: b2_v22_signed_horizon_selective
-
-# This config is evaluated only after package_selective_checkpoint.py injects
-# a calibration-passed router.  Candidate producers remain frozen.
-proposal_inference_mode: full_selective
-signed_router_enabled_scale: 1.0
-export_proposal_diagnostics: true

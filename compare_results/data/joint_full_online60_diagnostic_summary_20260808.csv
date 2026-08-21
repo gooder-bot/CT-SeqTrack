@@ -1,4 +1,0 @@
-run,final_success,final_precision,best_success,best_success_epoch,best_precision,best_precision_epoch,last3_success_mean,last3_precision_mean,search_support_all_pct,search_support_tail10_pct,proposal_invalid_tail10_pct,predicted_displacement_tail10_m,extension_points_tail10,presence_probability_max,search_effective_pct,evidence_valid_pct,search_applied_pct,query_gate_auroc_all,alpha_positive_mean_tail10,alpha_negative_mean_tail10,b1_kinematic_rmse_m,b1_prior_rmse_m,shadow_forwards_per_step,candidate_state_consistency_pct
-Full,48.3031,55.9811,52.1475,35,64.0552,30,46.6946,56.5443,1.9610,1.0570,90.7310,0.097589,2.6970,0.1082,0,0,0,0.499864,0.01222,0.01285,38.711,38.707,0.03758,100
--B3,48.7246,62.6599,50.1708,55,63.3139,30,47.9930,61.7636,1.5556,0.2953,96.9269,0.081136,1.0082,0.0912,0,0,0,,,,38.706,38.710,0,100
-B2-only,51.1228,62.7180,51.6824,55,65.0363,20,49.0758,61.7321,1.3745,0.0534,99.4971,0.067655,0.0949,0.0990,0,0,0,,,,,,0,100

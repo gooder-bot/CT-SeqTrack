@@ -1,7 +1,6 @@
-"""M1 geometry checks with an optional real-loader integration pass."""
+"""Formal four-view B0 geometry checks with an optional real-loader pass."""
 
 import argparse
-import copy
 import random
 import sys
 from pathlib import Path
@@ -21,6 +20,7 @@ from utils.candidate_utils import (  # noqa: E402
     equivalent_local_offsets,
     normalize_candidate_trajectory_mode,
 )
+from utils.config import load_yaml_config  # noqa: E402
 
 
 class Box:
@@ -142,12 +142,10 @@ def deterministic_sample(sampler, index, seed):
 
 
 def run_loader_check(args):
-    import yaml
     from easydict import EasyDict
     from datasets import get_dataset
 
-    with open(args.cfg, "r") as handle:
-        cfg = EasyDict(yaml.load(handle, Loader=yaml.FullLoader))
+    cfg = EasyDict(load_yaml_config(args.cfg))
     cfg.preloading = False
     cfg.tiny = False
     cfg.candidate_trajectory_mode = "shared_se2"
@@ -188,27 +186,7 @@ def run_loader_check(args):
             raise AssertionError(
                 "shared SE(2) did not preserve the anchor-normalized reference trajectory")
 
-    if args.twc:
-        twc_cfg = copy.deepcopy(cfg)
-        twc_cfg.use_twc = True
-        twc_cfg.twc_candidate_zero_only = False
-        twc_sampler = get_dataset(twc_cfg, type=twc_cfg.train_type, split=split)
-        for candidate_id in (1, 2, 3):
-            twc_index = choose_full_history_index(
-                twc_sampler, twc_cfg.hist_num, candidate_id)
-            paired = deterministic_sample(
-                twc_sampler, twc_index, args.seed + candidate_id)
-            view_a, view_b = paired["view_a"], paired["view_b"]
-            for key in ("candidate_shared_transform", "coordinate_anchor"):
-                if not np.array_equal(view_a[key], view_b[key]):
-                    raise AssertionError(
-                        f"candidate{candidate_id} TWC views do not share {key}")
-            if not np.allclose(
-                    view_a["ref_boxs"][0], view_b["ref_boxs"][0],
-                    atol=2e-6, rtol=0.0):
-                raise AssertionError(
-                    f"candidate{candidate_id} TWC views do not share the nearest anchor")
-    print("M1 shared world-SE(2) real-loader checks: PASS")
+    print("formal B0 shared world-SE(2) real-loader checks: PASS")
 
 
 def main():
@@ -218,13 +196,12 @@ def main():
     parser.add_argument("--version")
     parser.add_argument("--split")
     parser.add_argument("--seed", type=int, default=20260721)
-    parser.add_argument("--twc", action="store_true")
     args = parser.parse_args()
     assert normalize_candidate_trajectory_mode("legacy") == "independent"
     assert normalize_candidate_trajectory_mode("shared-world-se2") == "shared_se2"
     run_case(degrees=False)
     run_case(degrees=True)
-    print("M1 shared world-SE(2) dataset-free checks: PASS")
+    print("formal B0 shared world-SE(2) dataset-free checks: PASS")
     if args.cfg:
         run_loader_check(args)
 

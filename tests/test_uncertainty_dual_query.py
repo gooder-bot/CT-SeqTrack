@@ -30,7 +30,6 @@ from tools.calibrate_b1_uncertainty import (
 from utils.config import load_yaml_config
 from utils.replay_cache import (
     b1_calibration_config_sha256,
-    b2_candidate_config_sha256,
     sha256_file,
 )
 
@@ -96,52 +95,21 @@ class TransformerDecoderStateTest(unittest.TestCase):
 
 class PhysicalMotionUncertaintyTest(unittest.TestCase):
     def test_formal_configs_share_the_b1_calibration_contract(self):
-        root = Path(__file__).resolve().parents[1] / "cfgs" / "ct_v2"
+        root = Path(__file__).resolve().parents[1] / "cfgs" / "ct_seqtrack"
         formal_names = (
-            "15_b1_calibrated.yaml",
-            "16_b2_asymmetric_dual_query.yaml",
-            "17_b1_b2_replay_support.yaml",
-            "18_b1_b2_b3_selective.yaml",
+            "24_b1.yaml",
+            "24_full_minus_b3.yaml",
+            "24_full.yaml",
         )
         configs = {
             name: load_yaml_config(root / name) for name in formal_names}
         hashes = {
-            b1_calibration_config_sha256(configs[name]) for name in (
-                "15_b1_calibrated.yaml",
-                "17_b1_b2_replay_support.yaml",
-                "18_b1_b2_b3_selective.yaml",
-            )}
+            b1_calibration_config_sha256(configs[name])
+            for name in formal_names}
         self.assertEqual(len(hashes), 1)
         self.assertTrue(all(
             config.get("observation_safe_bbox_size") is True
             for config in configs.values()))
-
-    def test_b2_candidate_contract_bridges_dynamic_config17_to_config18(self):
-        root = Path(__file__).resolve().parents[1] / "cfgs" / "ct_v2"
-        config17 = load_yaml_config(
-            root / "17_b1_b2_replay_support.yaml")
-        config18 = load_yaml_config(
-            root / "18_b1_b2_b3_selective.yaml")
-        config17.update({
-            "search_v3_use_dynamic_sigma": True,
-            "require_b1_calibration_passed": True,
-            "use_recursive_replay_cache": True,
-            "recursive_replay_cache_dir": "machine-specific/cache",
-            "b1_calibration_artifact_path": "machine-specific/b1.json",
-        })
-        self.assertEqual(
-            b2_candidate_config_sha256(config17),
-            b2_candidate_config_sha256(config18))
-        fixed17 = dict(config17)
-        fixed17["search_v3_use_dynamic_sigma"] = False
-        self.assertNotEqual(
-            b2_candidate_config_sha256(fixed17),
-            b2_candidate_config_sha256(config18))
-        no_geometry17 = dict(config17)
-        no_geometry17["use_uncertainty_geometry"] = False
-        self.assertNotEqual(
-            b2_candidate_config_sha256(no_geometry17),
-            b2_candidate_config_sha256(config18))
 
     def _history(self, stationary=False):
         boxes = torch.zeros(2, 3, 4)

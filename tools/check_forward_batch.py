@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import yaml
 from easydict import EasyDict
 from torch.utils.data import DataLoader
 
@@ -14,11 +13,11 @@ sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset  # noqa: E402
 from models import get_model  # noqa: E402
+from utils.config import load_yaml_config  # noqa: E402
 
 
 def load_config(path):
-    with open(path, "r") as f:
-        cfg = EasyDict(yaml.load(f, Loader=yaml.FullLoader))
+    cfg = EasyDict(load_yaml_config(path))
     if "preloading" not in cfg:
         cfg.preloading = False
     if "tiny" not in cfg:

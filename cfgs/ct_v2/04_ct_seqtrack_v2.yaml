@@ -1,5 +1,0 @@
-_base_: 03_ct_motion_search.yaml
-
-experiment_name: ct_seqtrack_v2
-ct_fusion_mode: adaptive
-

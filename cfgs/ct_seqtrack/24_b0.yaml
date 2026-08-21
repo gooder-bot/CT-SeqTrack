@@ -1,4 +1,4 @@
-_base_: ../ct_v2/23_ct_evidence_memory.yaml
+_base_: 24_formal_base.yaml
 
 experiment_name: ct24_b0_scratch_seed42
 net_model: ctseqtrack

@@ -1,7 +1,0 @@
-﻿check,criterion,observed,status,interpretation
-NEW_B1_historical_b0_gain,+0.5 Success and +1.0 Precision at epoch60,-0.042 S / -1.809 P,failed,Historical guardrail only; a same-commit B0 is still missing.
-NEW_SEARCH_historical_b0_gain,+0.5 Success and +1.0 Precision at epoch60,-2.053 S / -4.566 P,failed,Historical guardrail only; a same-commit B0 is still missing.
-NEW_FULL_historical_b0_gain,+0.5 Success and +1.0 Precision at epoch60,-26.606 S / -37.505 P,failed,Historical guardrail only; a same-commit B0 is still missing.
-b2_v3_identity,Config13 refiner checkpoint with V3 path enabled,All three runs use configs 02/08/09; V3 flags are false.,failed,"These are precursor/ablation runs, not B2-v3."
-offline_to_closed_loop_transfer,Offline candidate improvement transfers to tracking,NEW_FULL epoch60 offline final error 0.230 vs observation 0.248; tracking 26.754/26.876.,failed,One-step training diagnostics do not transfer under recursive rollout; this is the distribution-shift failure V3 targets.
-b2_v3_promotion_gate,Candidate RMSE + calibration + mini_val obs_vs_all gate,"No config13 epoch20 diagnostics, rollout router, packaged checkpoint, or four-mode metrics exist.",not_run,B2-v3 success cannot yet be evaluated.

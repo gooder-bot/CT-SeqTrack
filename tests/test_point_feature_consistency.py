@@ -284,22 +284,21 @@ def test_feature_pointnet_optional_output_is_point_aligned_and_inert():
     assert model.seq_per_point[2][0].weight.grad is None
 
 
-def test_pftc_config_defaults_and_b0_derivatives():
+def test_b4_configs_are_isolated_from_point_feature_path():
     base = load_yaml_config(
-        ROOT / "cfgs/ct_v2/nuscenes_mini_base.yaml")
-    unweighted = load_yaml_config(
-        ROOT / "cfgs/ct_v2/06_seqtrack3d_pftc_unweighted.yaml")
-    weighted = load_yaml_config(
-        ROOT / "cfgs/ct_v2/07_seqtrack3d_dt_pftc.yaml")
+        ROOT / "cfgs/ct_v2/01_seqtrack3d_baseline.yaml")
+    alignment = load_yaml_config(
+        ROOT / "cfgs/ct_v2/19_b4_decoder_alignment.yaml")
+    anticollapse = load_yaml_config(
+        ROOT / "cfgs/ct_v2/20_b4_decoder_anticollapse.yaml")
     assert base["use_point_feature_tc"] is False
     assert base["pftc_distance_threshold"] == 0.3
     assert base["pftc_min_correspondences"] == 3
-    assert unweighted["use_point_feature_tc"] is True
-    assert unweighted["pftc_time_weighting"] is False
-    assert weighted["use_point_feature_tc"] is True
-    assert weighted["pftc_time_weighting"] is True
-    assert not weighted["use_ct_v2"]
-    assert not weighted["use_dynamics_encoder"]
+    assert alignment["use_b4_paired_views"] is True
+    assert alignment["use_decoder_token_consistency"] is True
+    assert alignment["use_point_feature_tc"] is False
+    assert anticollapse["decoder_tc_variance_weight"] == 1.0
+    assert anticollapse["decoder_tc_covariance_weight"] == 0.04
 
 
 def test_pftc_loss_has_no_state_and_consumes_no_initialization_rng():

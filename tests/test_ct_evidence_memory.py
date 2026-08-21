@@ -21,9 +21,6 @@ from utils.training_isolation import (
     capture_training_transaction_state,
     isolated_constructor_rng,
 )
-from tools.promote_ct_b2_evidence import evaluate as evaluate_b2_promotion
-
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -360,24 +357,9 @@ class RecoveryAndIsolationContractTest(unittest.TestCase):
 
         assert_training_transaction_equal(run(False), run(True))
 
-    def test_recovery_matrix_and_v3_config_contracts(self):
-        names = {
-            '23_b0_candidate0_reseed.yaml': (True, False),
-            '23_b0_candidate0_no_reseed.yaml': (False, False),
-            '23_b0_candidate0_reseed_rng_shift.yaml': (True, True),
-            '23_b0_candidate0_no_reseed_rng_shift.yaml': (False, True),
-        }
-        for name, expected in names.items():
-            config = load_yaml_config(ROOT / 'cfgs' / 'ct_v2' / name)
-            self.assertEqual(config['num_candidates'], 1)
-            self.assertEqual(config['ct_recursive_candidate_views'], 1)
-            self.assertEqual(config['ct_recursive_tracklet_slots'], 16)
-            self.assertEqual(
-                (config['ct_recursive_reseed_enabled'],
-                 config['ct_b0_rng_shift_control']), expected)
-            self.assertFalse(config['use_ct_joint_full'])
+    def test_formal_v3_config_contracts(self):
         v3 = load_yaml_config(
-            ROOT / 'cfgs' / 'ct_v2' / '23_ct_evidence_memory.yaml')
+            ROOT / 'cfgs' / 'ct_seqtrack' / '24_b0.yaml')
         self.assertEqual(v3['ct_joint_contract_version'], 3)
         self.assertTrue(v3['ct_separate_optimizers'])
         self.assertEqual(v3['batch_size'], 16)
@@ -389,41 +371,5 @@ class RecoveryAndIsolationContractTest(unittest.TestCase):
         self.assertFalse(v3['require_b1_calibration_artifact'])
         self.assertEqual(v3['ct_search_feature_dim'], 64)
         self.assertEqual(v3['ct_memory_attention_dropout'], 0.0)
-        for seed in (43, 44):
-            repeated = load_yaml_config(
-                ROOT / 'cfgs' / 'ct_v2'
-                / f'23_b0_candidate0_no_reseed_seed{seed}.yaml')
-            self.assertEqual(repeated['seed'], seed)
-            self.assertFalse(repeated['ct_recursive_reseed_enabled'])
-
-    def test_b3_promotion_is_fail_closed(self):
-        metrics = {
-            'acquisition_row_recall': 0.55,
-            'acquisition_point_recall': 0.55,
-            'acquisition_eligible_rows': 100,
-            'raw_helpful_precision': 0.80,
-            'raw_harmful_rate': 0.04,
-            'raw_action_count': 100,
-            'raw_action_rate': 0.1,
-            'raw_center_gain': 0.1,
-            'raw_iou_gain': 0.01,
-            'raw_oracle_center_headroom': 0.2,
-            'raw_oracle_iou_headroom': 0.02,
-        }
-        criteria, passed = evaluate_b2_promotion(metrics)
-        self.assertTrue(passed)
-        self.assertTrue(all(criteria.values()))
-        metrics['raw_harmful_rate'] = 0.051
-        _, passed = evaluate_b2_promotion(metrics)
-        self.assertFalse(passed)
-        metrics['raw_harmful_rate'] = float('nan')
-        with self.assertRaisesRegex(ValueError, 'finite'):
-            evaluate_b2_promotion(metrics)
-        metrics['raw_harmful_rate'] = -0.01
-        with self.assertRaisesRegex(ValueError, r'\[0, 1\]'):
-            evaluate_b2_promotion(metrics)
-        metrics['raw_harmful_rate'] = 0.04
-
-
 if __name__ == '__main__':
     unittest.main()
