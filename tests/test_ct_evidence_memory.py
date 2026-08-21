@@ -399,6 +399,7 @@ class RecoveryAndIsolationContractTest(unittest.TestCase):
     def test_b3_promotion_is_fail_closed(self):
         metrics = {
             'acquisition_row_recall': 0.55,
+            'acquisition_point_recall': 0.55,
             'acquisition_eligible_rows': 100,
             'raw_helpful_precision': 0.80,
             'raw_harmful_rate': 0.04,

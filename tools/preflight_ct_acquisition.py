@@ -83,7 +83,7 @@ def main():
         manifest_path.read_text(encoding="utf-8"))
     if (not isinstance(data_manifest, dict)
             or data_manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v1"
+            != "ct_seqtrack.acquisition_data_manifest.v2"
             or data_manifest.get("checkpoint_loaded") is not False
             or data_manifest.get("complete") is not True):
         raise ValueError(

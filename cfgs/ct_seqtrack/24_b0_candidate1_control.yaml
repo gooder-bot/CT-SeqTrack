@@ -1,0 +1,8 @@
+_base_: 24_b0.yaml
+
+experiment_name: ct24_b0_candidate1_control_scratch_seed42
+num_candidates: 1
+ct_recursive_candidate_views: 1
+ct_b0_candidate_views: 1
+ct_b0_candidate_weights: [1.0]
+ct_b2_candidate_views: 1

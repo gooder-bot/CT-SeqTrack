@@ -55,7 +55,8 @@ def rotating_rollout_horizon(horizons, slot, epoch, slots):
 
 
 def build_recursive_input_contract(
-        state, frame_id, hist_num, config, candidate_id=0, offsets=None):
+        state, frame_id, hist_num, config, candidate_id=0, offsets=None,
+        epoch=0):
     """Pure state-derived input contract shared by training and inference."""
     frame_id = int(frame_id)
     hist_num = int(hist_num)
@@ -73,7 +74,14 @@ def build_recursive_input_contract(
     frame_ids = [max(0, frame_id - offset) for offset in offsets]
     valid_mask = [int(frame_id - offset >= 0) for offset in offsets]
     state_contract = state.history_contract(frame_ids, valid_mask)
-    seed_parts = (state.tracklet_key, frame_id, candidate_id)
+    # Auxiliary augmentation identity includes epoch.  Candidate0 preserves
+    # the pre-decoupling point-sampling identity so canonical hashes remain
+    # comparable across arms and against the baseline implementation.  The
+    # base seed is incorporated by the deterministic helpers themselves.
+    seed_parts = (
+        (state.tracklet_key, frame_id, candidate_id)
+        if candidate_id == 0 else
+        (state.tracklet_key, int(epoch), frame_id, candidate_id))
     return {
         **state_contract,
         "history_frame_ids": frame_ids,

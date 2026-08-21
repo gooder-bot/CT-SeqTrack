@@ -4,9 +4,16 @@ experiment_name: ct24_full_minus_b3_scratch_seed42
 ct_variant: full_minus_b3
 num_candidates: 4
 ct_recursive_candidate_views: 4
+ct_b0_candidate_views: 4
+ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b2_candidate_views: 1
+ct_recovery_candidate_policy: "off"
 ct_auxiliary_microbatch_size: 16
 ct_memory_mode: none
-ct_targetness_class_weight_source: preflight_artifact
+# Cumulative candidate0 point counts use the same inverse-frequency formula
+# as preflight.  The standalone artifact is analysis-only and never gates or
+# changes scratch training.
+ct_targetness_class_weight_source: online_canonical_preflight
 ct_targetness_positive_weight: 1.0
 ct_targetness_negative_weight: 1.0
 proposal_inference_mode: raw_search

@@ -149,6 +149,37 @@ def candidate_stratified_mean(values, valid, candidate_ids):
     return total / max(total_branch_weight, 1e-12)
 
 
+def update_cumulative_binary_class_balance(
+        positive_count, negative_count, positive_weight, negative_weight,
+        batch_positive, batch_negative):
+    """Update scalar class-count buffers with preflight-equivalent weights."""
+    buffers = (positive_count, negative_count, positive_weight, negative_weight)
+    if any(not torch.is_tensor(value) or value.numel() != 1
+           for value in buffers):
+        raise ValueError("binary class-balance state must contain scalar tensors")
+    batch_positive = torch.as_tensor(
+        batch_positive, device=positive_count.device,
+        dtype=positive_count.dtype)
+    batch_negative = torch.as_tensor(
+        batch_negative, device=negative_count.device,
+        dtype=negative_count.dtype)
+    if (not bool(torch.isfinite(batch_positive).item())
+            or not bool(torch.isfinite(batch_negative).item())
+            or bool((batch_positive < 0).item())
+            or bool((batch_negative < 0).item())):
+        raise ValueError("binary class-balance increments must be finite and non-negative")
+    with torch.no_grad():
+        positive_count.add_(batch_positive)
+        negative_count.add_(batch_negative)
+        ready = bool((positive_count > 0).item()) and bool(
+            (negative_count > 0).item())
+        if ready:
+            total = positive_count + negative_count
+            positive_weight.copy_(total / (2.0 * positive_count))
+            negative_weight.copy_(total / (2.0 * negative_count))
+    return positive_weight, negative_weight
+
+
 class CheckpointableRNG(nn.Module):
     """A private CPU/CUDA RNG stream that restores the caller's stream."""
 

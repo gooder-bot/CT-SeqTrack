@@ -315,7 +315,7 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         promotion = payload.get('ct_b2_promotion')
         if (not isinstance(promotion, dict)
                 or promotion.get('schema')
-                != 'ct_seqtrack.b2_evidence_promotion.v3'
+                != 'ct_seqtrack.b2_evidence_promotion.v4'
                 or not bool(promotion.get('passed'))):
             raise RuntimeError(
                 "contract-v3 B3 initialization requires a promoted B2 "
@@ -397,18 +397,23 @@ def validate_candidate0_b0_initialization(checkpoint_path):
         return getattr(saved, key, default)
 
     requirements = {
-        'num_candidates': int(value('num_candidates', -1)) == 1,
+        'num_candidates': int(value('num_candidates', -1)) == 4,
         'candidate_views': int(value(
-            'ct_recursive_candidate_views', -1)) == 1,
+            'ct_recursive_candidate_views', -1)) == 4,
+        'b0_candidate_views': int(value(
+            'ct_b0_candidate_views', -1)) == 4,
+        'b2_candidate_views': int(value(
+            'ct_b2_candidate_views', -1)) == 1,
+        'recovery_policy_off': str(value(
+            'ct_recovery_candidate_policy', '')) == 'off',
         'tracklet_slots': int(value(
             'ct_recursive_tracklet_slots', -1)) == 16,
-        'no_reseed': not bool(value(
-            'ct_recursive_reseed_enabled', True)),
+        'reseed': bool(value('ct_recursive_reseed_enabled', False)),
         'b1_disabled': not bool(value('ct_enable_b1', True)),
         'b2_disabled': not bool(value('ct_enable_b2', True)),
         'b3_disabled': not bool(value('ct_enable_b3', True)),
         'joint_full_disabled': not bool(value('use_ct_joint_full', True)),
-        'rng_shift_disabled': not bool(value(
+        'rng_shift_enabled': bool(value(
             'ct_b0_rng_shift_control', False)),
     }
     lineage = value('ct_candidate0_b0_source')
@@ -422,8 +427,8 @@ def validate_candidate0_b0_initialization(checkpoint_path):
                     if not passed)
     if failed and not lineage_valid:
         raise RuntimeError(
-            "contract-v3 initialization is not a canonical candidate0-only "
-            "no-reseed B0 checkpoint: " + ", ".join(failed))
+            "contract-v4 initialization is not a decoupled candidate4 B0 "
+            "checkpoint: " + ", ".join(failed))
     if payload.get('b2_v3_init') is not None:
         raise RuntimeError(
             "contract-v3 refuses an old B2-v3 composed checkpoint")
@@ -482,10 +487,10 @@ def parse_config():
         help='model-only initialization; does not restore optimizer/trainer state')
     parser.add_argument(
         '--b2_method_promotion', type=str, default=None,
-        help='passed v2 method manifest required to start scratch Full')
+        help='optional v4 B2 analysis manifest; never gates scratch Full')
     parser.add_argument(
         '--acquisition_preflight', type=str, default=None,
-        help='passed checkpoint-free preflight v2 required for B2 training')
+        help='optional checkpoint-free preflight v3 analysis artifact')
     parser.add_argument(
         '--ct_action_calibration_path', type=str,
         default=argparse.SUPPRESS,
@@ -693,49 +698,26 @@ if cfg.test and cfg.checkpoint is not None:
     if source_checkpoint.get('epoch') is not None:
         cfg.ct_source_checkpoint_epoch = int(
             source_checkpoint['epoch']) + 1
-if (not cfg.test
-        and int(getattr(cfg, 'ct_joint_contract_version', 1)) >= 3
-        and bool(getattr(cfg, 'ct_enable_b2', False))):
-    if cfg.checkpoint is not None:
-        try:
-            preflight_resume = torch.load(
-                cfg.checkpoint, map_location='cpu', weights_only=False)
-        except TypeError:
-            preflight_resume = torch.load(
-                cfg.checkpoint, map_location='cpu')
-        preflight = preflight_resume.get('ct_acquisition_preflight')
-    else:
-        if not cfg.acquisition_preflight:
-            raise ValueError(
-                'contract-v3 B2/Full requires --acquisition_preflight '
-                'before training starts')
-        preflight = json.loads(Path(
+if (not cfg.test and cfg.acquisition_preflight):
+    try:
+        optional_preflight = json.loads(Path(
             cfg.acquisition_preflight).read_text(encoding='utf-8'))
-    cfg.ct_acquisition_preflight_manifest = validate_preflight_artifact(
-        preflight, cfg)
-    class_weights = cfg.ct_acquisition_preflight_manifest[
-        'targetness_class_weights']
-    cfg.ct_targetness_positive_weight = float(class_weights['positive'])
-    cfg.ct_targetness_negative_weight = float(class_weights['negative'])
-if (not cfg.test and bool(getattr(cfg, 'ct_enable_b3', False))
-        and str(getattr(cfg, 'ct_initialization_policy', 'legacy'))
-        == 'scratch_only'):
-    if cfg.checkpoint is not None:
-        try:
-            scratch_resume = torch.load(
-                cfg.checkpoint, map_location='cpu', weights_only=False)
-        except TypeError:
-            scratch_resume = torch.load(cfg.checkpoint, map_location='cpu')
-        method_promotion = scratch_resume.get('ct_b2_method_promotion')
-    else:
-        if not cfg.b2_method_promotion:
-            raise ValueError(
-                'scratch Full requires --b2_method_promotion; the manifest '
-                'qualifies the B2 method but supplies no weights')
-        method_promotion = json.loads(Path(
+        cfg.ct_acquisition_preflight_manifest = validate_preflight_artifact(
+            optional_preflight, cfg)
+    except Exception as exc:
+        print(
+            '[CT analysis warning] optional acquisition preflight was ignored: '
+            f'{exc}', file=sys.stderr)
+if (not cfg.test and cfg.b2_method_promotion):
+    try:
+        optional_promotion = json.loads(Path(
             cfg.b2_method_promotion).read_text(encoding='utf-8'))
-    cfg.ct_b2_method_promotion_manifest = validate_b2_method_promotion(
-        method_promotion, cfg)
+        cfg.ct_b2_method_promotion_manifest = validate_b2_method_promotion(
+            optional_promotion, cfg)
+    except Exception as exc:
+        print(
+            '[CT analysis warning] optional B2 promotion was ignored: '
+            f'{exc}', file=sys.stderr)
 if (bool(getattr(cfg, 'ct_online_recursive_training', False))
         and not cfg.test):
     if cfg.init_checkpoint is not None:

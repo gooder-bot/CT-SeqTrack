@@ -3,7 +3,8 @@ _base_: 22_ct_joint_repaired.yaml
 experiment_name: ct_seqtrack_evidence_memory_v3
 seed: 42
 ct_joint_contract_version: 3
-ct_recursive_reseed_enabled: false
+ct_recursive_reseed_enabled: true
+ct_b0_rng_shift_control: true
 ct_enable_b3: false
 ct_b2_promotion_passed: false
 use_calibrated_motion_uncertainty: true
@@ -11,13 +12,16 @@ search_v3_use_dynamic_sigma: true
 require_b1_calibration_artifact: false
 require_b1_calibration_passed: false
 
-# Candidate0 is the only B0 transaction.  Candidate1--3 are plugin-only
-# auxiliary views and are weighted 1/6 each versus candidate0's 1/2.
+# Candidate0 is the only canonical B1/B2/B3 and state-commit view.
+# Candidate1--3 terminate after B0 and contribute only to the B0 objective.
 num_candidates: 4
 ct_recursive_candidate_views: 4
+ct_b0_candidate_views: 4
+ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b2_candidate_views: 1
 ct_recursive_tracklet_slots: 16
 ct_auxiliary_microbatch_size: 16
-ct_recovery_candidate_policy: weak_miss_control
+ct_recovery_candidate_policy: "off"
 ct_router_shadow_slots_per_event: 1
 ct_separate_optimizers: true
 ct_b0_lr: 0.0001

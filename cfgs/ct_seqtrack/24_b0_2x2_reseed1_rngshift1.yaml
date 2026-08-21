@@ -1,10 +1,16 @@
 _base_: 24_b0.yaml
 
 experiment_name: ct24_b0_2x2_reseed1_rngshift1_seed42
+ct_protocol_status: historical_2x2_do_not_run
 seed: 42
 batch_size: 16
 epoch: 60
 workers: 4
 check_val_every_n_epoch: 5
+# Frozen historical 2x2 protocol (candidate1); do not use as the proposed arm.
+num_candidates: 1
+ct_recursive_candidate_views: 1
+ct_b0_candidate_views: 1
+ct_b0_candidate_weights: [1.0]
 ct_recursive_reseed_enabled: true
 ct_b0_rng_shift_control: true

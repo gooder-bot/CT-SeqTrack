@@ -8,7 +8,31 @@ import math
 from pathlib import Path
 
 
-PREFLIGHT_SCHEMA = "ct_seqtrack.acquisition_preflight.v2"
+PREFLIGHT_SCHEMA = "ct_seqtrack.acquisition_preflight.v3"
+
+
+def balanced_targetness_class_weights(positive_points, negative_points):
+    """Return the preflight inverse-frequency weights for two point classes.
+
+    A missing class keeps the neutral 1:1 objective until both classes have
+    actually been observed.  This makes the same calculation safe for the
+    cumulative canonical training stream without turning data availability
+    into a launch gate.
+    """
+    positive_points = float(positive_points)
+    negative_points = float(negative_points)
+    if not (math.isfinite(positive_points)
+            and math.isfinite(negative_points)):
+        raise ValueError("targetness class counts must be finite")
+    if positive_points < 0.0 or negative_points < 0.0:
+        raise ValueError("targetness class counts must be non-negative")
+    if positive_points <= 0.0 or negative_points <= 0.0:
+        return {"positive": 1.0, "negative": 1.0}
+    class_total = positive_points + negative_points
+    return {
+        "positive": class_total / (2.0 * positive_points),
+        "negative": class_total / (2.0 * negative_points),
+    }
 
 
 def acquisition_config_identity(config):
@@ -26,6 +50,8 @@ def acquisition_config_identity(config):
         "use_b1_prepass_support", "use_calibrated_motion_uncertainty",
         "use_trajectory_search", "use_b1motion_v3",
         "ct_joint_contract_version", "ct_recursive_candidate_views",
+        "ct_b0_candidate_views", "ct_b0_candidate_weights",
+        "ct_b2_candidate_views",
         "ct_recursive_tracklet_slots", "ct_recursive_rollout_horizons",
         "ct_recursive_reseed_enabled", "ct_partition_seed",
         "ct_router_partition", "ct_auxiliary_microbatch_size",
@@ -142,7 +168,7 @@ def summarize_acquisition_rows(rows):
 def build_preflight_artifact(
         rows, config_identity, data_manifest_identity, seed,
         primary_partition="dev", min_target_bearing_rows=100,
-        min_row_retention=0.5):
+        min_point_retention=0.5):
     groups = summarize_acquisition_rows(rows)
 
     def group(partition, candidate_id):
@@ -151,8 +177,7 @@ def build_preflight_artifact(
                      and item["candidate_id"] == candidate_id), None)
 
     primary = group(str(primary_partition), 0)
-    weak = group("train", 1)
-    strict = group("train", 2)
+    train_canonical = group("train", 0)
     train_positive = sum(
         item["sampled_target_count"] for item in groups
         if item["partition"] == "train")
@@ -171,24 +196,17 @@ def build_preflight_artifact(
         "dev_candidate0_target_bearing_rows_at_least_minimum": bool(
             primary and primary["eligible_rows"]
             >= int(min_target_bearing_rows)),
-        "dev_candidate0_row_retention_at_least_minimum": bool(
-            primary and primary["row_recall"] is not None
-            and primary["row_recall"] >= float(min_row_retention)),
-        "train_candidate1_recovery_positive_nonzero": bool(
-            weak and weak["recovery_positive_rows"] > 0),
-        "train_candidate2_strict_recovery_positive_nonzero": bool(
-            strict and strict["recovery_positive_rows"] > 0),
+        "dev_candidate0_point_retention_at_least_minimum": bool(
+            primary and primary["point_recall"] is not None
+            and primary["point_recall"] >= float(min_point_retention)),
+        "train_candidate0_present": train_canonical is not None,
         "train_targetness_positive_nonzero": train_positive > 0,
         "train_targetness_negative_nonzero": train_negative > 0,
     }
-    class_total = train_positive + train_negative
+    balanced_weights = balanced_targetness_class_weights(
+        train_positive, train_negative)
     targetness_class_weights = {
-        "positive": (
-            class_total / (2.0 * train_positive)
-            if train_positive > 0 else 0.0),
-        "negative": (
-            class_total / (2.0 * train_negative)
-            if train_negative > 0 else 0.0),
+        **balanced_weights,
         "positive_points": train_positive,
         "negative_points": train_negative,
     }
@@ -203,7 +221,7 @@ def build_preflight_artifact(
         },
         "requirements": {
             "min_target_bearing_rows": int(min_target_bearing_rows),
-            "min_row_retention": float(min_row_retention),
+            "min_point_retention": float(min_point_retention),
         },
         "config": config_identity,
         "data_manifest": data_manifest_identity,
@@ -228,7 +246,7 @@ def validate_preflight_artifact(artifact, config):
     if (not isinstance(artifact, dict)
             or artifact.get("schema") != PREFLIGHT_SCHEMA
             or not bool(artifact.get("passed"))):
-        raise ValueError("training requires a passed acquisition preflight v2")
+        raise ValueError("analysis requires a passed acquisition preflight v3")
     expected_hash = sha256_json({
         "schema": PREFLIGHT_SCHEMA,
         "seed": artifact.get("seed"),
@@ -251,7 +269,8 @@ def validate_preflight_artifact(artifact, config):
             "acquisition preflight primary population must be dev candidate0")
     requirements = artifact.get("requirements", {})
     if (int(requirements.get("min_target_bearing_rows", -1)) < 100
-            or float(requirements.get("min_row_retention", -1.0)) < 0.5):
+            or float(requirements.get(
+                "min_point_retention", -1.0)) < 0.5):
         raise ValueError(
             "acquisition preflight requirements are weaker than the formal "
             "100-row/50%-retention gate")
@@ -263,7 +282,7 @@ def validate_preflight_artifact(artifact, config):
     manifest = manifest_identity.get("manifest")
     if (not isinstance(manifest, dict)
             or manifest.get("schema")
-            != "ct_seqtrack.acquisition_data_manifest.v1"
+            != "ct_seqtrack.acquisition_data_manifest.v2"
             or manifest.get("checkpoint_loaded") is not False
             or manifest.get("complete") is not True):
         raise ValueError(

@@ -113,6 +113,31 @@ class RecursiveTrackStateTest(unittest.TestCase):
         np.testing.assert_array_equal(
             first["point_sampling_seeds"], second["point_sampling_seeds"])
 
+    def test_auxiliary_seed_includes_epoch_but_canonical_seed_is_stable(self):
+        class Config:
+            seed = 17
+            degrees = True
+
+        state = RecursiveTrackState(3, "track/3", DummyBox())
+        state.append(1, DummyBox(1.0), timestamp=0.5)
+        canonical_a = build_recursive_input_contract(
+            state, 2, 3, Config(), candidate_id=0, epoch=0)
+        canonical_b = build_recursive_input_contract(
+            state, 2, 3, Config(), candidate_id=0, epoch=9)
+        np.testing.assert_array_equal(
+            canonical_a["point_sampling_seeds"],
+            canonical_b["point_sampling_seeds"])
+        auxiliary_a = build_recursive_input_contract(
+            state, 2, 3, Config(), candidate_id=2, epoch=0)
+        auxiliary_b = build_recursive_input_contract(
+            state, 2, 3, Config(), candidate_id=2, epoch=9)
+        self.assertFalse(np.array_equal(
+            auxiliary_a["candidate_shared_transform"],
+            auxiliary_b["candidate_shared_transform"]))
+        self.assertFalse(np.array_equal(
+            auxiliary_a["point_sampling_seeds"],
+            auxiliary_b["point_sampling_seeds"]))
+
     def test_only_candidate_zero_can_write_canonical_state(self):
         state = RecursiveTrackState(3, "track/3", DummyBox())
         self.assertFalse(commit_canonical_prediction(
@@ -404,7 +429,8 @@ class OnlineRecursiveBatchSamplerTest(unittest.TestCase):
         replayed = next(iter(sampler))
         self.assertEqual(first, replayed)
         self.assertEqual(len(first), 64)
-        self.assertEqual(sum(row[5] == 0 for row in first), 16)
+        for view_id in range(4):
+            self.assertEqual(sum(row[5] == view_id for row in first), 16)
 
 
 if __name__ == "__main__":

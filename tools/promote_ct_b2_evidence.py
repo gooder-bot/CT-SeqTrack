@@ -1,4 +1,4 @@
-"""Attach a fail-closed B2 promotion record to a contract-v3 checkpoint."""
+"""Build an optional post-run B2 analysis record and checkpoint copy."""
 
 import argparse
 import hashlib
@@ -16,8 +16,8 @@ from utils.online_contract import build_b2_method_contract
 from utils.acquisition_metrics import validate_preflight_artifact
 
 
-SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v3'
-PREFLIGHT_SCHEMA = 'ct_seqtrack.acquisition_preflight.v2'
+SCHEMA = 'ct_seqtrack.b2_evidence_promotion.v4'
+PREFLIGHT_SCHEMA = 'ct_seqtrack.acquisition_preflight.v3'
 
 
 def sha256_file(path):
@@ -31,6 +31,7 @@ def sha256_file(path):
 def evaluate(metrics):
     required = (
         'acquisition_row_recall',
+        'acquisition_point_recall',
         'acquisition_eligible_rows',
         'raw_helpful_precision',
         'raw_harmful_rate',
@@ -56,7 +57,8 @@ def evaluate(metrics):
             raise ValueError(
                 f'B2 promotion metric {key} must be finite')
     for key in (
-            'acquisition_row_recall', 'raw_helpful_precision',
+            'acquisition_row_recall', 'acquisition_point_recall',
+            'raw_helpful_precision',
             'raw_harmful_rate', 'raw_action_rate'):
         if not 0.0 <= values[key] <= 1.0:
             raise ValueError(
@@ -68,8 +70,8 @@ def evaluate(metrics):
     criteria = {
         'acquisition_eligible_rows_ge_100': values[
             'acquisition_eligible_rows'] >= 100.0,
-        'dev_candidate0_acquisition_row_recall_ge_0.50': values[
-            'acquisition_row_recall'] >= 0.50,
+        'dev_candidate0_acquisition_point_recall_ge_0.50': values[
+            'acquisition_point_recall'] >= 0.50,
         'raw_helpful_precision_ge_0.75': values[
             'raw_helpful_precision'] >= 0.75,
         'raw_harmful_rate_le_0.05': values[
@@ -94,7 +96,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument(
         '--manifest-output',
-        help='Optional method-only JSON manifest for scratch Full startup')
+        help='Optional method-only JSON manifest for post-run analysis')
     args = parser.parse_args()
     checkpoint_path = Path(args.checkpoint).resolve()
     metrics_path = Path(args.metrics).resolve()
@@ -110,7 +112,7 @@ def main():
             or not bool(preflight.get('passed'))
             or not preflight.get('statistics_sha256')):
         raise RuntimeError(
-            'B2 promotion requires a passed acquisition preflight v2')
+            'B2 promotion requires a passed acquisition preflight v3')
     manifest = preflight.get('data_manifest', {}).get('manifest', {})
     dev_identity = next((
         item for item in manifest.get('partitions', [])

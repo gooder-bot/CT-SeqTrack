@@ -94,6 +94,8 @@ from models.ct_v2.pipeline_contracts import (
     MotionPriorOutput,
     EvidenceOutput,
     DecisionOutput,
+    reexpress_motion_prior,
+    validate_motion_prior_support_alignment,
 )
 from utils.replay_cache import (
     B0_STATE_PREFIXES,
@@ -115,25 +117,21 @@ from utils.training_isolation import (
     freeze_batchnorm_running_stats,
     isolated_constructor_rng,
     restore_global_rng_state,
+    update_cumulative_binary_class_balance,
 )
 from utils.online_contract import (
     build_online_resume_contract,
     online_candidate_state_consistent,
-    validate_b2_method_promotion,
 )
 from utils.metrics import estimateOverlap
 from utils.action_calibration import require_selective_calibration
-from utils.acquisition_metrics import validate_preflight_artifact
 from utils.recursive_state import (
     build_recursive_input_contract,
     commit_canonical_prediction,
     RecursiveTrackState,
     rotating_rollout_horizon,
 )
-from utils.sampling_utils import (
-    deterministic_recovery_candidate_offset,
-    stable_uint32_seed,
-)
+from utils.sampling_utils import stable_uint32_seed
 
 # import vis_tool as vt
 
@@ -192,6 +190,56 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'ct_manual_amp_enabled', False))
         self.ct_b0_rng_shift_control = bool(getattr(
             config, 'ct_b0_rng_shift_control', False))
+        self.ct_b0_candidate_views = int(getattr(
+            config, 'ct_b0_candidate_views', 1))
+        self.ct_b0_candidate_weights = tuple(float(value) for value in getattr(
+            config, 'ct_b0_candidate_weights', [1.0]))
+        self.ct_b2_candidate_views = int(getattr(
+            config, 'ct_b2_candidate_views', 1))
+        if self.ct_b0_candidate_views <= 0:
+            raise ValueError("ct_b0_candidate_views must be positive")
+        if len(self.ct_b0_candidate_weights) != self.ct_b0_candidate_views:
+            raise ValueError(
+                "ct_b0_candidate_weights must match ct_b0_candidate_views")
+        if (any(value < 0.0 for value in self.ct_b0_candidate_weights)
+                or not math.isclose(
+                    sum(self.ct_b0_candidate_weights), 1.0,
+                    rel_tol=0.0, abs_tol=5e-6)):
+            raise ValueError(
+                "ct_b0_candidate_weights must be non-negative and sum to 1")
+        if self.ct_b2_candidate_views != 1:
+            raise ValueError("CT-SeqTrack B2 accepts exactly one canonical view")
+        self.ct_targetness_class_weight_source = str(getattr(
+            config, 'ct_targetness_class_weight_source',
+            'online_canonical_preflight')).strip().lower()
+        initial_positive_weight = float(getattr(
+            config, 'ct_targetness_positive_weight', 1.0))
+        initial_negative_weight = float(getattr(
+            config, 'ct_targetness_negative_weight', 1.0))
+        if (self.ct_joint_contract_version >= 3 and self.ct_enable_b2
+                and self.ct_targetness_class_weight_source
+                != 'online_canonical_preflight'):
+            raise ValueError(
+                "contract-v3 B2 targetness balancing must use the cumulative "
+                "canonical training population")
+        if (not math.isfinite(initial_positive_weight)
+                or not math.isfinite(initial_negative_weight)
+                or initial_positive_weight <= 0.0
+                or initial_negative_weight <= 0.0):
+            raise ValueError("initial targetness class weights must be positive")
+        if self.ct_joint_contract_version >= 3 and self.ct_enable_b2:
+            self.register_buffer(
+                'ct_targetness_running_positive_points',
+                torch.zeros((), dtype=torch.float64))
+            self.register_buffer(
+                'ct_targetness_running_negative_points',
+                torch.zeros((), dtype=torch.float64))
+            self.register_buffer(
+                'ct_targetness_running_positive_weight',
+                torch.tensor(initial_positive_weight, dtype=torch.float64))
+            self.register_buffer(
+                'ct_targetness_running_negative_weight',
+                torch.tensor(initial_negative_weight, dtype=torch.float64))
         if self.ct_separate_optimizers:
             self.automatic_optimization = False
         self.ct_plugin_rng = (
@@ -202,8 +250,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.ct_auxiliary_rng = (
             CheckpointableRNG(
                 int(getattr(config, 'seed', 42) or 42) + 24002)
-            if (self.use_ct_joint_full
-                and self.ct_joint_contract_version >= 3) else None)
+            if (self.ct_joint_contract_version >= 3
+                and self.ct_b0_candidate_views > 1) else None)
         self.ct_memory_control_rng = (
             CheckpointableRNG(
                 int(getattr(config, 'seed', 42) or 42) + 24003)
@@ -1650,10 +1698,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'exact online resume requires '
                     'ct_seqtrack.global_rng.v1')
             self._ct_pending_global_rng_state = copy.deepcopy(rng_state)
-        if (self.ct_joint_contract_version >= 3 and self.ct_enable_b2
-                and self.ct_initialization_policy == 'scratch_only'):
-            self._ct_acquisition_preflight = validate_preflight_artifact(
-                checkpoint.get('ct_acquisition_preflight'), self.config)
+        optional_preflight = checkpoint.get('ct_acquisition_preflight')
+        if isinstance(optional_preflight, dict):
+            self._ct_acquisition_preflight = copy.deepcopy(optional_preflight)
         if self.ct_separate_optimizers:
             self._ct_pending_scaler_state = copy.deepcopy(
                 checkpoint.get('ct_isolated_scalers'))
@@ -1665,19 +1712,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             promotion = checkpoint.get('ct_b2_promotion')
             if (not isinstance(promotion, dict)
                     or promotion.get('schema')
-                    != 'ct_seqtrack.b2_evidence_promotion.v3'
+                    != 'ct_seqtrack.b2_evidence_promotion.v4'
                     or not bool(promotion.get('passed'))):
                 raise RuntimeError(
                     "contract-v3 B3 requires a promoted B2 checkpoint")
             self._ct_b2_promotion = copy.deepcopy(promotion)
+        optional_method_promotion = checkpoint.get('ct_b2_method_promotion')
+        if isinstance(optional_method_promotion, dict):
+            self._ct_b2_method_promotion = copy.deepcopy(
+                optional_method_promotion)
         if (self.ct_joint_contract_version >= 3 and self.ct_enable_b3
                 and self.ct_initialization_policy == 'scratch_only'):
-            self._ct_b2_method_promotion = validate_b2_method_promotion(
-                checkpoint.get('ct_b2_method_promotion'), self.config)
             final_promotion = checkpoint.get('ct_b2_promotion')
             if (isinstance(final_promotion, dict)
                     and final_promotion.get('schema')
-                    == 'ct_seqtrack.b2_evidence_promotion.v3'
+                    == 'ct_seqtrack.b2_evidence_promotion.v4'
                     and bool(final_promotion.get('passed'))):
                 self._ct_b2_promotion = copy.deepcopy(final_promotion)
         calibration = checkpoint.get('b1_uncertainty_calibration')
@@ -1833,6 +1882,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'seed': int(getattr(self.config, 'seed', 42) or 42),
                 'epoch': int(self.current_epoch) + 1,
                 'populations': acquisition,
+                'targetness_balance': {
+                    'source': self.ct_targetness_class_weight_source,
+                    'positive_points': float(getattr(
+                        self, 'ct_targetness_running_positive_points',
+                        torch.zeros(())).detach().cpu()),
+                    'negative_points': float(getattr(
+                        self, 'ct_targetness_running_negative_points',
+                        torch.zeros(())).detach().cpu()),
+                    'positive_weight': float(getattr(
+                        self, 'ct_targetness_running_positive_weight',
+                        torch.ones(())).detach().cpu()),
+                    'negative_weight': float(getattr(
+                        self, 'ct_targetness_running_negative_weight',
+                        torch.ones(())).detach().cpu()),
+                },
             }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
         if self.b2_v3_freeze_candidate_producers:
             self._verify_b2_v3_frozen_hashes()
@@ -1850,6 +1914,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             epoch_metrics.update({
                 f'{name}_auroc': metrics['auroc'],
                 f'{name}_auprc': metrics['auprc'],
+                f'{name}_ap': metrics['auprc'],
+                f'{name}_ece': metrics['ece'],
                 f'{name}_positive_mean': metrics['positive_mean'],
                 f'{name}_negative_mean': metrics['negative_mean'],
                 f'{name}_positive_count': metrics['positive_count'],
@@ -1929,9 +1995,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'positive_rate': float(targets[selected].mean())
                 if selected.any() else 0.0,
             })
+        sample_count = max(int(scores.size), 1)
+        ece = float(sum(
+            item['count'] / sample_count
+            * abs(item['confidence'] - item['positive_rate'])
+            for item in calibration))
         return {
             'auroc': auroc,
             'auprc': auprc,
+            'ece': ece,
             'positive_mean': float(scores[targets].mean())
             if positive_count else 0.0,
             'negative_mean': float(scores[~targets].mean())
@@ -2389,7 +2461,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_base_evidence_points', 'ct_base_evidence_valid_mask',
             'ct_extension_points', 'ct_extension_valid_mask',
             'ct_extension_source', 'search_v3_query_delta_t',
-            'search_v3_gap_ratio', 'ref_boxs', 'bbox_size', 'valid_mask')
+            'search_v3_gap_ratio', 'search_v3_support_anchor_xy',
+            'motion_source_anchor', 'coordinate_anchor',
+            'ref_boxs', 'bbox_size', 'valid_mask')
         missing = [key for key in required if key not in input_dict]
         if missing:
             raise KeyError(
@@ -2458,13 +2532,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             recursive_age = recursive_age.to(
                 device=current_base_features.device,
                 dtype=current_base_features.dtype)
-        prior_contract = MotionPriorOutput(
+        canonical_prior_contract = MotionPriorOutput(
             center_xy=main_motion['prior_xy'].detach(),
             direction_xy=main_motion['motion_direction_xy'].detach(),
             log_sigma=main_motion['log_sigma_parallel_perp'].detach(),
             valid=main_motion['valid'].detach(),
             source=input_dict['search_v3_prior_source_id'].to(
                 current_base_features.device).detach(),
+        )
+        prior_contract = reexpress_motion_prior(
+            canonical_prior_contract,
+            input_dict['motion_source_anchor'],
+            input_dict['coordinate_anchor'],
+            degrees=bool(getattr(self.config, 'degrees', False)),
+        )
+        support_alignment_error = validate_motion_prior_support_alignment(
+            prior_contract,
+            input_dict['search_v3_support_anchor_xy'],
+            tolerance=1e-3,
         )
         with self.ct_plugin_rng.fork(current_base_features.device):
             joint_output = self.ct_joint_search_refiner(
@@ -2609,6 +2694,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         joint_output.update({
             'ct_final_box': final_box,
             'candidate_valid': joint_output['ct_search_candidate_valid'],
+            'ct_b1_candidate_center_xy': prior_contract.center_xy,
+            'ct_b1_candidate_direction_xy': prior_contract.direction_xy,
+            'ct_b1_support_alignment_error': support_alignment_error,
             'ct_search_geometry_valid': input_dict[
                 'ct_search_geometry_valid'].to(
                     device=current_base_features.device,
@@ -2674,6 +2762,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def configure_optimizers(self):
         if not self.ct_separate_optimizers:
             return super().configure_optimizers()
+        if self.ct_initialization_policy == 'scratch_only':
+            enabled_plugins = {
+                'b1': self.ct_enable_b1,
+                'b2': self.ct_enable_b2,
+                'b3': self.ct_enable_b3,
+            }
+            frozen_active = []
+            for name, parameter in self.named_parameters():
+                if self._ct_any_plugin_parameter(name):
+                    active = enabled_plugins[self._ct_plugin_group(name)]
+                else:
+                    active = True
+                if active and not parameter.requires_grad:
+                    frozen_active.append(name)
+            if frozen_active:
+                raise RuntimeError(
+                    "scratch-only CT forbids frozen active parameters: "
+                    + ", ".join(sorted(frozen_active)))
         named = [
             (name, parameter) for name, parameter in self.named_parameters()
             if parameter.requires_grad]
@@ -2748,6 +2854,51 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
              'name': f'scheduler_{name}'}
             for name, scheduler in zip(self._ct_optimizer_names, schedulers)]
 
+    @staticmethod
+    def _b0_auxiliary_batch(input_dict):
+        """Return whether a homogeneous microbatch is B0 auxiliary-only."""
+        value = input_dict.get('ct_b0_auxiliary_only')
+        if value is None:
+            return False
+        tensor = torch.as_tensor(value).reshape(-1).to(torch.bool)
+        if not bool(torch.all(tensor == tensor[0])):
+            raise RuntimeError(
+                "canonical and auxiliary B0 rows must use separate forwards")
+        return bool(tensor[0].item())
+
+    @staticmethod
+    def _finalize_observation_output(
+            input_dict, output_dict, aux_box, observation_aux_box,
+            updated_aux_box, seg_logits, motion_pred, updated_ref_boxs,
+            obs_aux):
+        """Populate the stable B0 output interface for full and aux paths."""
+        output_dict["estimation_boxes"] = aux_box
+        output_dict.update({
+            "seg_logits": seg_logits,
+            "motion_pred": motion_pred,
+            'observation_aux_estimation_boxes': observation_aux_box,
+            'aux_estimation_boxes': updated_aux_box,
+            'ref_boxs': input_dict['ref_boxs'],
+            'valid_mask': input_dict["valid_mask"],
+            'updated_ref_boxs': updated_ref_boxs,
+        })
+        output_dict.update(obs_aux)
+        for key in (
+                "ct_search_used",
+                "ct_search_expansion_ratio",
+                "ct_search_baseline_points",
+                "ct_search_expansion_points",
+                "ct_search_query_delta_t",
+                "ct_search_predicted_displacement",
+                "trajectory_search_valid",
+                "trajectory_search_gap_ratio",
+                "trajectory_search_sigma_parallel",
+                "trajectory_search_sigma_perpendicular",
+                "search_has_usable_points"):
+            if key in input_dict:
+                output_dict[key] = input_dict[key]
+        return output_dict
+
     def forward(self, input_dict):
         """
         Args:
@@ -2781,6 +2932,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             }
             return paired_output
 
+        b0_auxiliary_only = self._b0_auxiliary_batch(input_dict)
         output_dict = {}
         points = self.encode_point_time(input_dict["points"])
         x = points.transpose(1, 2)
@@ -3075,7 +3227,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         collect_b2_point_features = bool(
             self.use_ct_joint_full
             and self.ct_joint_contract_version >= 3
-            and self.ct_enable_b2)
+            and self.ct_enable_b2
+            and not b0_auxiliary_only)
         collect_point_aligned_features = bool(
             collect_pftc_features or collect_b2_point_features)
         feature_result = self.feature_pointnet(
@@ -3139,17 +3292,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 input_dict["valid_mask"])  #B*4*4
             observation_query = None
 
-        if (self.training and self.ct_b0_rng_shift_control
-                and not self.ct_enable_b2):
-            # Diagnostic-only reproduction of CT21's post-observation random
-            # draw.  It changes only the subsequent global stream, never the
-            # observation computed in this step.
+        if self.training and self.ct_b0_rng_shift_control:
+            # All arms consume the same post-observation B0 stream shift.
+            # Plugin and auxiliary work use independent checkpointable RNGs.
             torch.rand((B,), device=feature.device)
 
         updated_ref_boxs = delta_motion[:,:HL,:]
         updated_aux_box =  delta_motion[:,-1,:]
 
         observation_aux_box = updated_aux_box
+        if b0_auxiliary_only:
+            return self._finalize_observation_output(
+                input_dict, output_dict, aux_box, observation_aux_box,
+                observation_aux_box, seg_logits, motion_pred,
+                updated_ref_boxs, obs_aux)
         if self.use_b1motion_v3:
             required_motion_keys = (
                 'motion_main_ref_boxs',
@@ -4253,33 +4409,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             })
 
 
-        output_dict["estimation_boxes"] = aux_box
-        output_dict.update({"seg_logits": seg_logits,
-                            "motion_pred": motion_pred,
-                            'observation_aux_estimation_boxes':
-                                observation_aux_box,
-                            'aux_estimation_boxes': updated_aux_box,
-                            'ref_boxs': input_dict['ref_boxs'],
-                            'valid_mask':input_dict["valid_mask"],
-                            'updated_ref_boxs':updated_ref_boxs,
-                            })
-        output_dict.update(obs_aux)
-        for key in (
-                "ct_search_used",
-                "ct_search_expansion_ratio",
-                "ct_search_baseline_points",
-                "ct_search_expansion_points",
-                "ct_search_query_delta_t",
-                "ct_search_predicted_displacement",
-                "trajectory_search_valid",
-                "trajectory_search_gap_ratio",
-                "trajectory_search_sigma_parallel",
-                "trajectory_search_sigma_perpendicular",
-                "search_has_usable_points"):
-            if key in input_dict:
-                output_dict[key] = input_dict[key]
-
-        return output_dict
+        return self._finalize_observation_output(
+            input_dict, output_dict, aux_box, observation_aux_box,
+            updated_aux_box, seg_logits, motion_pred, updated_ref_boxs,
+            obs_aux)
 
     def _compute_pair_validity(self, output_a, output_b, data_a, data_b):
         box_a = output_a["aux_estimation_boxes"]
@@ -4488,6 +4621,35 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "paired views are reserved for B4 decoder consistency; the "
             "legacy symmetric consistency objective was removed")
 
+    def _ct_online_targetness_class_weights(
+            self, extension_labels, extension_valid):
+        """Update the cumulative canonical preflight and return its weights.
+
+        This is the same inverse-frequency calculation used by the standalone
+        preflight artifact, but it is accumulated inside the actual scratch
+        experiment.  Missing classes keep the neutral configured prior and
+        never block B2/Full startup.
+        """
+        if self.training:
+            positive_points = (
+                extension_labels.detach().to(torch.float64)
+                * extension_valid.detach().to(torch.float64)).sum()
+            negative_points = (
+                (1.0 - extension_labels.detach().to(torch.float64))
+                * extension_valid.detach().to(torch.float64)).sum()
+            update_cumulative_binary_class_balance(
+                self.ct_targetness_running_positive_points,
+                self.ct_targetness_running_negative_points,
+                self.ct_targetness_running_positive_weight,
+                self.ct_targetness_running_negative_weight,
+                positive_points, negative_points)
+        return (
+            self.ct_targetness_running_positive_weight.to(
+                device=extension_labels.device, dtype=extension_labels.dtype),
+            self.ct_targetness_running_negative_weight.to(
+                device=extension_labels.device, dtype=extension_labels.dtype),
+        )
+
     def _compute_ct_contract_v3_loss(self, data, output, target_xy):
         """B2 acquisition and detached B3 action-risk objectives."""
         dtype = output['ct_search_targetness_logits'].dtype
@@ -4506,6 +4668,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 target_xy.shape[0], device=device, dtype=torch.long)
         else:
             candidate_id = candidate_id.to(device=device).reshape(-1)
+        b0_view_id = data.get('b0_view_id', candidate_id)
+        b0_view_id = b0_view_id.to(device=device).reshape(-1)
+        if bool(torch.any(b0_view_id != 0)):
+            raise RuntimeError(
+                "B2/B3 loss accepts the canonical B0 view only")
         canonical_row = (candidate_id == 0).to(dtype)
 
         def weighted_mean(values, valid=None):
@@ -4517,10 +4684,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output['ct_search_targetness_logits'],
             extension_labels,
             reduction='none')
-        positive_weight = float(getattr(
-            self.config, 'ct_targetness_positive_weight', 1.0))
-        negative_weight = float(getattr(
-            self.config, 'ct_targetness_negative_weight', 1.0))
+        positive_weight, negative_weight = (
+            self._ct_online_targetness_class_weights(
+                extension_labels, extension_valid))
         targetness_error = targetness_error * (
             extension_labels * positive_weight
             + (1.0 - extension_labels) * negative_weight)
@@ -4557,8 +4723,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         extension_presence_error = F.binary_cross_entropy_with_logits(
             output['ct_b2_extension_presence_logit'],
             extension_presence_target, reduction='none')
-        # GT-guided auxiliary crops train acquisition only; presence is a
-        # deployment-distribution quantity and therefore candidate0-only.
+        # Presence is learned on the same canonical on-policy population used
+        # by every other B2 term.  Spatial recovery candidates are forbidden.
         loss_base_presence = weighted_mean(
             base_presence_error, canonical_row)
         loss_extension_presence = weighted_mean(
@@ -4716,6 +4882,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 base_presence_target.mean(),
             'ct_b2_extension_presence_target_rate':
                 extension_presence_target.mean(),
+            'ct_targetness_positive_points_cumulative':
+                self.ct_targetness_running_positive_points.to(
+                    device=device, dtype=dtype),
+            'ct_targetness_negative_points_cumulative':
+                self.ct_targetness_running_negative_points.to(
+                    device=device, dtype=dtype),
+            'ct_targetness_positive_weight': positive_weight,
+            'ct_targetness_negative_weight': negative_weight,
             'ct_acquisition_base_presence_rate': (
                 base_target_count > 0).to(dtype).mean(),
             'ct_acquisition_expansion_coverage_rate': (
@@ -4897,6 +5071,33 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         b1_transaction_loss = loss_total.new_zeros(())
         b2_transaction_loss = loss_total.new_zeros(())
         b3_transaction_loss = loss_total.new_zeros(())
+        if self._b0_auxiliary_batch(data):
+            # Formal auxiliary views terminate at B0.  Keep the complete
+            # observation objective, including the box-aware head, without
+            # touching any B1/B2/B3 loss or diagnostic path.
+            if self.use_dynamics_encoder or self.use_point_feature_tc:
+                raise RuntimeError(
+                    "B0 candidate decoupling requires formal CT B0 heads")
+            if self.box_aware:
+                prev_bc = torch.flatten(
+                    data['prev_bc'], start_dim=1, end_dim=2)
+                bc_label = torch.cat([prev_bc, data['this_bc']], dim=1)
+                loss_bc = F.smooth_l1_loss(output['pred_bc'], bc_label)
+                weighted_bc = loss_bc * self.config.bc_weight
+                loss_total = loss_total + weighted_bc
+                b0_transaction_loss = b0_transaction_loss + weighted_bc
+                loss_dict.update({
+                    'loss_total': loss_total,
+                    'loss_bc': loss_bc,
+                })
+            loss_dict.update({
+                'loss_b0_transaction': b0_transaction_loss,
+                'loss_b1_transaction': b1_transaction_loss,
+                'loss_b2_transaction': b2_transaction_loss,
+                'loss_b3_transaction': b3_transaction_loss,
+                'loss_plugin_transaction': loss_total.new_zeros(()),
+            })
+            return loss_dict
         if self.use_dynamics_encoder and "velocity_pred" in output and "velocity_label" in data:
             velocity_label = (
                 data.get("trajectory_velocity_label", data["velocity_label"])
@@ -6654,7 +6855,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'recovery_positive_rows': 0.0,
                 'recovery_fallback_rows': 0.0,
             }
-            for population in ('candidate0', 'auxiliary_train')}
+            for population in ('candidate0',)}
         if bool(getattr(
                 self.config, 'ct_online_recursive_training', False)):
             self._ct_recursive_states = {}
@@ -6771,7 +6972,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         for raw, state in raw_state_pairs:
             contract = build_recursive_input_contract(
                 state, raw['this_frame_id'], len(raw['prev_frame_ids']),
-                self.config, candidate_id=0, offsets=raw['history_offsets'])
+                self.config, candidate_id=0, offsets=raw['history_offsets'],
+                epoch=raw.get('online_epoch', 0))
             history_boxes = state.history_boxes(
                 contract['history_frame_ids'],
                 contract['history_valid_mask'].tolist())
@@ -6818,29 +7020,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         contract = build_recursive_input_contract(
             state, raw['this_frame_id'], len(raw['prev_frame_ids']),
             self.config, candidate_id=raw['candidate_id'],
-            offsets=raw['history_offsets'])
+            offsets=raw['history_offsets'],
+            epoch=raw.get('online_epoch', 0))
         if (contract['history_frame_ids'] != list(raw['prev_frame_ids'])
                 or contract['history_valid_mask'].tolist()
                 != list(raw['valid_mask'])):
             raise RuntimeError("raw/state recursive history contract mismatch")
         candidate_id = int(raw['candidate_id'])
-        if (str(getattr(
-                self.config, 'ct_recovery_candidate_policy', 'off'))
-                == 'weak_miss_control' and candidate_id in (1, 2)):
-            anchor_box = state.history_boxes(
-                contract['history_frame_ids'],
-                contract['history_valid_mask'].tolist())[0]
-            contract['candidate_shared_transform'] = (
-                deterministic_recovery_candidate_offset(
-                    candidate_id, self.config, anchor_box,
-                    raw['this_frame']['3d_bbox'],
-                    state.tracklet_key, raw['this_frame_id']))
+        recovery_policy = str(getattr(
+            self.config, 'ct_recovery_candidate_policy', 'off')).strip().lower()
+        if recovery_policy != 'off':
+            raise RuntimeError(
+                "formal online training forbids GT-guided recovery candidates")
+        b0_view_id = int(raw.get('b0_view_id', candidate_id))
+        b0_auxiliary_only = bool(raw.get(
+            'ct_b0_auxiliary_only', b0_view_id != 0))
+        if b0_auxiliary_only != (b0_view_id != 0):
+            raise RuntimeError("b0_view_id/auxiliary marker mismatch")
         payload['online_recursive_state'] = contract
         payload['candidate_shared_transform'] = contract[
             'candidate_shared_transform']
         payload['point_sampling_seeds'] = contract['point_sampling_seeds']
         payload['current_sampling_seed'] = contract[
             'current_sampling_seed']
+        payload['ct_observation_only'] = b0_auxiliary_only
         if motion_prediction is not None:
             payload['motion_prediction'] = motion_prediction
         if 'motion_aux_frame_ids' in raw:
@@ -6848,7 +7051,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 state, raw['this_frame_id'],
                 len(raw['motion_aux_frame_ids']), self.config,
                 candidate_id=raw['candidate_id'],
-                offsets=raw['motion_aux_offsets'])
+                offsets=raw['motion_aux_offsets'],
+                epoch=raw.get('online_epoch', 0))
             if (aux_contract['history_frame_ids']
                     != list(raw['motion_aux_frame_ids'])
                     or aux_contract['history_valid_mask'].tolist()
@@ -6888,6 +7092,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_crop_target_points': np.float32(np.sum(current_labels > 0)),
             'ct_candidate_state_consistency': np.float32(
                 candidate_consistent),
+            'b0_view_id': np.int64(b0_view_id),
+            'ct_b0_auxiliary_only': np.float32(b0_auxiliary_only),
         })
         return processed
 
@@ -7201,8 +7407,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 totals[target] += float(value.detach().cpu().item())
 
     def _ct_isolated_optimizer_step(
-            self, loss_dict, auxiliary_b2_gradients=None):
+            self, loss_dict, auxiliary_gradients=None):
         """Execute one disjoint transaction per active B0--B3 module."""
+        auxiliary_gradients = auxiliary_gradients or {}
         self._ensure_ct_scalers()
         optimizers = self.optimizers(use_pl_optimizer=False)
         if not isinstance(optimizers, (list, tuple)):
@@ -7222,21 +7429,23 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 in self._ct_named_parameters_by_module[name]]
             parameters_by_module[name] = parameters
             weight = float(loss_dict.get(
-                'ct_canonical_b2_weight', 1.0)) if name == 'b2' else 1.0
+                f'ct_canonical_{name}_weight', 1.0))
             scaled_loss = self._ct_scalers[name].scale(
                 weight * loss_dict[loss_key[name]])
             gradients = torch.autograd.grad(
                 scaled_loss, parameters, retain_graph=False,
                 allow_unused=True)
-            if name == 'b2' and auxiliary_b2_gradients is not None:
-                if len(auxiliary_b2_gradients) != len(gradients):
+            module_auxiliary = auxiliary_gradients.get(name)
+            if module_auxiliary is not None:
+                if len(module_auxiliary) != len(gradients):
                     raise RuntimeError(
-                        "auxiliary/B2 gradient cardinality mismatch")
+                        f"auxiliary/{name.upper()} gradient cardinality "
+                        "mismatch")
                 gradients = tuple(
                     auxiliary if canonical is None else canonical
                     if auxiliary is None else canonical + auxiliary
                     for canonical, auxiliary in zip(
-                        gradients, auxiliary_b2_gradients))
+                        gradients, module_auxiliary))
             gradients_by_module[name] = gradients
             self._assign_parameter_gradients(parameters, gradients)
 
@@ -7305,50 +7514,46 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             name: float(torch.as_tensor(value).detach().cpu())
             for name, value in norms.items()}
 
-    def _ct_auxiliary_microbatch_gradients(self, auxiliary_batch):
-        """Backpropagate three 16-row candidate branches one at a time.
-
-        Each complete candidate view has paper-contract weight ``1/6``.  The
-        graph is released before the next view, while the scaled native
-        gradients are accumulated for the isolated plugin transaction.
-        """
+    def _ct_b0_auxiliary_microbatch_gradients(self, auxiliary_batch):
+        """Accumulate weighted B0-only gradients from auxiliary views."""
         self._ensure_ct_scalers()
         microbatch_size = int(getattr(
             self.config, 'ct_auxiliary_microbatch_size', 16))
-        candidate_ids = auxiliary_batch['candidate_id'].reshape(-1)
-        expected_ids = tuple(range(
-            1, int(getattr(
-                self.config, 'ct_recursive_candidate_views', 4))))
-        b2_named = self._ct_named_parameters_by_module.get('b2', [])
-        if not b2_named:
-            raise RuntimeError("auxiliary acquisition requires active B2")
-        b2_parameters = [parameter for _, parameter in b2_named]
-        accumulated = [None for _ in b2_parameters]
-        losses = []
-        metrics = {}
+        view_ids = auxiliary_batch['b0_view_id'].reshape(-1)
+        expected_ids = tuple(range(1, self.ct_b0_candidate_views))
+        b0_named = self._ct_named_parameters_by_module.get('b0', [])
+        if not b0_named:
+            raise RuntimeError("B0 auxiliary views require an active B0")
+        if self.ct_auxiliary_rng is None:
+            raise RuntimeError("B0 auxiliary RNG is unavailable")
+        b0_parameters = [parameter for _, parameter in b0_named]
+        accumulated = [None for _ in b0_parameters]
+        weighted_losses = []
+        per_view_losses = {}
         with self.ct_auxiliary_rng.fork(self.device):
             with freeze_batchnorm_running_stats(self):
-                for candidate_id in expected_ids:
-                    row_mask = candidate_ids == candidate_id
+                for view_id in expected_ids:
+                    row_mask = view_ids == view_id
                     row_count = int(row_mask.sum().item())
                     if row_count != microbatch_size:
                         raise RuntimeError(
-                            "contract-v3 requires one complete 16-row "
-                            f"auxiliary view; candidate{candidate_id} has "
+                            "candidate-decoupled training requires one "
+                            f"complete auxiliary B0 view; view{view_id} has "
                             f"{row_count} rows")
                     candidate_batch = self._slice_batch_rows(
                         auxiliary_batch, row_mask)
+                    if not self._b0_auxiliary_batch(candidate_batch):
+                        raise RuntimeError(
+                            "auxiliary B0 microbatch is not marked B0-only")
                     candidate_output = self(candidate_batch)
-                    target_xy = candidate_batch['box_label'][:, :2].to(
-                        device=candidate_output['ct_b2_raw_box'].device,
-                        dtype=candidate_output['ct_b2_raw_box'].dtype)
-                    candidate_loss = self._compute_ct_contract_v3_loss(
-                        candidate_batch, candidate_output, target_xy)
-                    weighted_loss = (
-                        candidate_loss['loss_ct_b2_total'] / 6.0)
-                    scaled_loss = self._ct_scalers['b2'].scale(weighted_loss)
+                    candidate_loss = self.compute_loss(
+                        candidate_batch, candidate_output)
+                    view_loss = candidate_loss['loss_b0_transaction']
+                    view_weight = self.ct_b0_candidate_weights[view_id]
+                    weighted_loss = view_weight * view_loss
+                    scaled_loss = self._ct_scalers['b0'].scale(weighted_loss)
                     gradients = torch.autograd.grad(
-                        scaled_loss, b2_parameters,
+                        scaled_loss, b0_parameters,
                         retain_graph=False, allow_unused=True)
                     for index, gradient in enumerate(gradients):
                         if gradient is None:
@@ -7356,31 +7561,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         accumulated[index] = (
                             gradient if accumulated[index] is None
                             else accumulated[index] + gradient)
-                    losses.append(
-                        candidate_loss['loss_ct_b2_total'].detach())
-                    for key, value in candidate_loss.items():
-                        metrics.setdefault(key, []).append(value.detach())
-        if len(losses) != 3:
+                    weighted_losses.append(weighted_loss.detach())
+                    per_view_losses[f'loss_b0_view{view_id}'] = (
+                        view_loss.detach())
+        if len(weighted_losses) != len(expected_ids):
             raise RuntimeError(
-                "contract-v3 requires candidates 1, 2 and 3")
-        aggregated = {
-            key: (torch.stack(values).sum()
-                  if key.endswith(('_count', '_sum'))
-                  else torch.stack(values).mean())
-            for key, values in metrics.items()}
-        eligible = aggregated['ct_acquisition_eligible_row_count']
-        retained = aggregated['ct_acquisition_retained_row_count']
-        pool_targets = aggregated['ct_acquisition_pool_target_sum']
-        sampled_targets = aggregated['ct_acquisition_sampled_target_sum']
-        aggregated['ct_acquisition_row_recall'] = (
-            retained / eligible.clamp_min(1.0))
-        aggregated['ct_acquisition_point_recall'] = (
-            sampled_targets / pool_targets.clamp_min(1.0))
-        aggregated['ct_acquisition_target_recall'] = aggregated[
-            'ct_acquisition_row_recall']
-        aggregated['loss_ct_b2_total'] = torch.stack(losses).mean()
-        aggregated['loss_ct_plugin_total'] = aggregated[
-            'loss_ct_b2_total']
+                "missing one or more auxiliary B0 candidate views")
+        aggregated = dict(per_view_losses)
+        aggregated['loss_b0_weighted_auxiliary'] = torch.stack(
+            weighted_losses).sum()
         return tuple(accumulated), aggregated
 
     def training_step(self, batch, batch_idx):
@@ -7403,13 +7592,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             torch.cuda.synchronize(self.device)
         online_step_start = time.perf_counter() if online_batch else None
         auxiliary_batch = None
-        auxiliary_b2_gradients = None
+        auxiliary_gradients = {}
         if online_batch:
             batch = self._prepare_online_recursive_batch(batch)
             if (self.ct_joint_contract_version >= 3
-                    and 'candidate_id' in batch):
-                candidate_ids = batch['candidate_id'].reshape(-1)
-                canonical_rows = candidate_ids == 0
+                    and 'b0_view_id' in batch):
+                b0_view_ids = batch['b0_view_id'].reshape(-1)
+                canonical_rows = b0_view_ids == 0
                 auxiliary_rows = ~canonical_rows
                 canonical_count = int(canonical_rows.sum().item())
                 auxiliary_count = int(auxiliary_rows.sum().item())
@@ -7417,12 +7606,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     self.config, 'batch_size', 16))
                 expected_auxiliary = expected_canonical * (
                     int(getattr(
-                        self.config, 'ct_recursive_candidate_views', 4)) - 1)
+                        self.config, 'ct_b0_candidate_views', 1)) - 1)
                 if (canonical_count != expected_canonical
                         or auxiliary_count != expected_auxiliary):
                     raise RuntimeError(
-                        'contract-v3 batch must contain exactly '
-                        f'{expected_canonical} candidate0 and '
+                        'candidate-decoupled batch must contain exactly '
+                        f'{expected_canonical} canonical B0 rows and '
                         f'{expected_auxiliary} auxiliary rows; observed '
                         f'{canonical_count}+{auxiliary_count}')
                 if bool(auxiliary_rows.any()):
@@ -7434,9 +7623,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     self._ct_online_batch_context = [
                         item for item, keep in zip(
                             full_context, canonical_selector) if keep]
-                    if not bool((batch['candidate_id'] == 0).all()):
+                    if not bool((batch['b0_view_id'] == 0).all()):
                         raise RuntimeError(
-                            "B0 transaction contains an auxiliary candidate")
+                            "canonical transaction contains an auxiliary B0 view")
         amp_enabled = bool(
             self.ct_separate_optimizers
             and self.ct_manual_amp_enabled
@@ -7453,32 +7642,27 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self._ct_record_acquisition_supply(
                     loss_dict, 'candidate0')
             if auxiliary_batch is not None:
-                canonical_b2_transaction = loss_dict[
-                    'loss_b2_transaction']
-                auxiliary_b2_gradients, auxiliary_loss = (
-                    self._ct_auxiliary_microbatch_gradients(
+                auxiliary_b0_gradients, auxiliary_loss = (
+                    self._ct_b0_auxiliary_microbatch_gradients(
                         auxiliary_batch))
-                self._ct_record_acquisition_supply(
-                    auxiliary_loss, 'auxiliary_train')
-                canonical_b2 = loss_dict['loss_ct_b2_total']
-                combined_b2 = (
-                    0.5 * canonical_b2.detach()
-                    + 0.5 * auxiliary_loss[
-                        'loss_ct_b2_total'].detach())
+                auxiliary_gradients['b0'] = auxiliary_b0_gradients
+                canonical_b0 = loss_dict['loss_b0_transaction']
+                canonical_weight = self.ct_b0_candidate_weights[0]
+                combined_b0 = (
+                    canonical_weight * canonical_b0.detach()
+                    + auxiliary_loss[
+                        'loss_b0_weighted_auxiliary'].detach())
                 loss_dict['loss_total'] = (
-                    loss_dict['loss_total'] - canonical_b2
-                    + combined_b2)
-                loss_dict['loss_ct_b2_total'] = combined_b2
-                loss_dict['loss_ct_plugin_total'] = (
-                    combined_b2 + loss_dict['loss_ct_b3_total'])
-                loss_dict['loss_ct_b2_candidate0'] = canonical_b2
-                loss_dict['loss_ct_b2_auxiliary'] = auxiliary_loss[
-                    'loss_ct_b2_total']
+                    loss_dict['loss_total'] - canonical_b0
+                    + combined_b0)
+                loss_dict['loss_b0_candidate0'] = canonical_b0.detach()
+                loss_dict['loss_b0_auxiliary'] = auxiliary_loss[
+                    'loss_b0_weighted_auxiliary']
                 for key, value in auxiliary_loss.items():
-                    if key != 'loss_ct_plugin_total':
-                        loss_dict[f'{key}_auxiliary'] = value
-                loss_dict['loss_b2_transaction'] = canonical_b2_transaction
-                loss_dict['ct_canonical_b2_weight'] = 0.5
+                    if key != 'loss_b0_weighted_auxiliary':
+                        loss_dict[key] = value
+                loss_dict['ct_canonical_b0_weight'] = canonical_b0.new_tensor(
+                    canonical_weight)
         self._accumulate_joint_binary_rows(batch, output)
         loss = loss_dict['loss_total']
         if online_batch:
@@ -7536,6 +7720,6 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         if self.ct_separate_optimizers:
             self._ct_isolated_optimizer_step(
-                loss_dict, auxiliary_b2_gradients)
+                loss_dict, auxiliary_gradients)
             return loss.detach()
         return loss

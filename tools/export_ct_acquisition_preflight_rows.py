@@ -2,9 +2,8 @@
 """Export checkpoint-free fixed-CV acquisition rows for preflight.
 
 Past GT boxes are used only as the observed history of this geometry audit.
-Current GT labels candidate0 target retention and, for candidate1/2 only,
-constructs the declared recovery role before counting retention.  No B0/B1
-model, checkpoint, learned score or router is loaded.
+Current GT labels canonical target retention only.  No spatial candidate,
+B0/B1 model, checkpoint, learned score or router is loaded.
 """
 
 from __future__ import annotations
@@ -29,24 +28,14 @@ from utils.recursive_state import (
     RecursiveTrackState,
     build_recursive_input_contract,
 )
-from utils.sampling_utils import deterministic_recovery_candidate_offset
-
-
 def process_raw(raw, state, config):
     contract = build_recursive_input_contract(
         state, raw["this_frame_id"], len(raw["prev_frame_ids"]), config,
-        candidate_id=raw["candidate_id"], offsets=raw["history_offsets"])
+        candidate_id=raw["candidate_id"], offsets=raw["history_offsets"],
+        epoch=raw.get("online_epoch", 0))
     candidate_id = int(raw["candidate_id"])
-    if (str(getattr(config, "ct_recovery_candidate_policy", "off"))
-            == "weak_miss_control" and candidate_id in (1, 2)):
-        anchor = state.history_boxes(
-            contract["history_frame_ids"],
-            contract["history_valid_mask"].tolist())[0]
-        contract["candidate_shared_transform"] = (
-            deterministic_recovery_candidate_offset(
-                candidate_id, config, anchor,
-                raw["this_frame"]["3d_bbox"],
-                state.tracklet_key, raw["this_frame_id"]))
+    if candidate_id != 0:
+        raise RuntimeError("B2 preflight accepts canonical candidate0 only")
     payload = {
         key: value for key, value in raw.items()
         if key not in ("online_recursive_raw", "online_epoch",
@@ -101,6 +90,8 @@ def export_partition(dataset, config, partition, max_batches):
         if max_batches is not None and batch_index >= max_batches:
             break
         raw_items = [dataset[index] for index in indices]
+        raw_items = [
+            raw for raw in raw_items if int(raw["candidate_id"]) == 0]
         groups = {}
         for raw in raw_items:
             key = str(raw["tracklet_key"])
@@ -113,10 +104,6 @@ def export_partition(dataset, config, partition, max_batches):
                 states[key] = state
             row = process_raw(raw, state, config)
             row["partition"] = partition
-            if partition == "dev" and row["candidate_id"] != 0:
-                continue
-            if partition == "train" and row["candidate_id"] == 0:
-                continue
             rows.append(row)
             groups.setdefault((key, int(raw["this_frame_id"])), raw)
         # Geometry preflight has no tracker weights.  Once this query has
@@ -141,9 +128,7 @@ def export_partition(dataset, config, partition, max_batches):
     identity_sha256 = hashlib.sha256(json.dumps(
         tracklet_identity, sort_keys=True, separators=(",", ":"),
         ensure_ascii=False).encode("utf-8")).hexdigest()
-    rows_per_batch = (
-        sampler.slots if partition == "dev"
-        else sampler.slots * max(sampler.candidate_views - 1, 0))
+    rows_per_batch = sampler.slots
     expected_rows = len(sampler) * rows_per_batch
     return rows, {
         "partition": partition,
@@ -204,16 +189,14 @@ def main():
         "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
         encoding="utf-8")
     manifest = {
-        "schema": "ct_seqtrack.acquisition_data_manifest.v1",
+        "schema": "ct_seqtrack.acquisition_data_manifest.v2",
         "dataset": str(config.dataset),
         "split": str(config.train_split),
         "path": str(config.path),
         "seed": int(config.seed or 42),
         "history_source": "past_observation_gt_fixed_cv_geometry_audit",
         "current_gt_role": {
-            "candidate0": "target-count-label-only",
-            "candidate1_2": "train-only-recovery-role-and-target-count",
-            "candidate3": "target-count-label-only",
+            "candidate0": "canonical-target-count-label-only",
         },
         "checkpoint_loaded": False,
         "complete": bool(all(item["complete"] for item in partitions)),

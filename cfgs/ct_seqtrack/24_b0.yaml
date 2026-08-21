@@ -9,8 +9,13 @@ ct_memory_mode: none
 ct_training_state_policy: observation
 ct_module_isolation: strict
 ct_initialization_policy: scratch_only
-num_candidates: 1
-ct_recursive_candidate_views: 1
-ct_recursive_reseed_enabled: false
+num_candidates: 4
+ct_recursive_candidate_views: 4
+ct_b0_candidate_views: 4
+ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b2_candidate_views: 1
+ct_recovery_candidate_policy: "off"
+ct_recursive_reseed_enabled: true
+ct_b0_rng_shift_control: true
 proposal_inference_mode: observation
 save_top_k: 0

@@ -43,6 +43,7 @@ from utils.candidate_utils import (
     equivalent_local_offsets,
     normalize_candidate_trajectory_mode,
     physical_motion_targets,
+    reexpress_motion_prediction,
     shared_se2_world_translation,
     validate_shared_se2_transform,
 )
@@ -1008,6 +1009,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             support_prediction = dict(replay_b1)
             support_prediction.setdefault(
                 'current_delta_t', recursive_replay['current_delta_t'])
+        if (joint_contract_v2 and isinstance(support_prediction, dict)
+                and bool(support_prediction.get('valid', False))):
+            support_prediction = reexpress_motion_prediction(
+                support_prediction, motion_anchor_box, ref_boxs[0])
         support_kwargs = dict(
             prediction=support_prediction,
             use_b1_prepass=use_prepass_support,
@@ -1256,7 +1261,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             )
     joint_extension_sampling = None
     joint_extension_source = None
-    if use_ct_joint_full and joint_contract_v3:
+    if use_search_evidence_v3 and joint_contract_v3:
         independent_seed_base = (
             current_sampling_seed
             if current_sampling_seed is not None else sample_index)
@@ -1356,7 +1361,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     new_support_valid = bool(
         joint_support['extension_count'] >= 1
         and joint_support['extension_voxels'] >= 1)
-    if use_ct_joint_full and joint_contract_v3:
+    if use_search_evidence_v3 and joint_contract_v3:
         # Availability is a deterministic structural contract: valid B1
         # geometry plus at least one finite novel extension point.  No GT
         # label, learned score, density heuristic or utility estimate enters.
@@ -1659,7 +1664,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             candidate_shared_transform, dtype=np.float32),
         'candidate_shared_world_translation': candidate_shared_world_translation,
     }
-    if use_ct_joint_full and joint_contract_v3:
+    if use_search_evidence_v3 and joint_contract_v3:
         extension_points = np.concatenate(
             (search_v2_points, trajectory_search_points), axis=0)
         extension_labels = np.concatenate((
@@ -1902,6 +1907,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'motion_main_target_xy': motion_main_target_xy.astype('float32'),
             'motion_main_anchor': (
                 motion_anchor if joint_contract_v2 else coordinate_anchor),
+            'motion_source_anchor': (
+                motion_anchor if joint_contract_v2 else coordinate_anchor),
         })
         if motion_aux_contract is not None:
             data_dict.update(motion_aux_contract)
@@ -2138,6 +2145,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     self.config, 'ct_recursive_candidate_views', 4)):
                 raise ValueError(
                     "num_candidates must match ct_recursive_candidate_views")
+            if int(self.num_candidates) != int(getattr(
+                    self.config, 'ct_b0_candidate_views', 1)):
+                raise ValueError(
+                    "num_candidates must match ct_b0_candidate_views")
         self.trajectory_training_irregular_probability = float(getattr(
             self.config, 'trajectory_training_irregular_probability', 0.0))
         self.trajectory_training_query_gaps = [
@@ -2322,7 +2333,11 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
         tracklet_key = (
             self.dataset.get_tracklet_key(tracklet_id)
             if hasattr(self.dataset, 'get_tracklet_key') else str(tracklet_id))
-        seed_parts = (tracklet_key, int(this_frame_id), int(candidate_id))
+        seed_parts = (
+            (tracklet_key, int(this_frame_id), int(candidate_id))
+            if int(candidate_id) == 0 else
+            (tracklet_key, int(epoch), int(this_frame_id),
+             int(candidate_id)))
         raw = {
             'online_recursive_raw': True,
             'online_epoch': int(epoch),
@@ -2332,6 +2347,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             'prev_frames': create_history_frame_dict(prev_frames),
             'this_frame': this_frame,
             'candidate_id': int(candidate_id),
+            'b0_view_id': int(candidate_id),
+            'ct_b0_auxiliary_only': bool(int(candidate_id) != 0),
             'valid_mask': list(valid_mask),
             'prev_frame_ids': list(prev_frame_ids),
             'this_frame_id': int(this_frame_id),

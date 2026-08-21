@@ -40,6 +40,40 @@ def test_four_formal_arms_are_single_variant_scratch_configs():
         assert config["ct_training_state_policy"] == "observation"
         assert config["ct_module_isolation"] == "strict"
         assert config["save_top_k"] == 0
+        assert config["num_candidates"] == 4
+        assert config["ct_recursive_candidate_views"] == 4
+        assert config["ct_b0_candidate_views"] == 4
+        assert config["ct_b0_candidate_weights"] == [
+            0.5, 0.1666667, 0.1666667, 0.1666667]
+        assert config["ct_b2_candidate_views"] == 1
+        assert config["ct_recovery_candidate_policy"] == "off"
+        assert config["ct_recursive_reseed_enabled"] is True
+        assert config["ct_b0_rng_shift_control"] is True
+        if variant in ("full_minus_b3", "full"):
+            assert config["ct_targetness_class_weight_source"] == (
+                "online_canonical_preflight")
+            assert config["ct_targetness_positive_weight"] == 1.0
+            assert config["ct_targetness_negative_weight"] == 1.0
+
+
+def test_candidate1_control_changes_only_b0_view_protocol():
+    proposed = load_yaml_config(
+        ROOT / "cfgs" / "ct_seqtrack" / "24_b0.yaml")
+    control = load_yaml_config(
+        ROOT / "cfgs" / "ct_seqtrack" /
+        "24_b0_candidate1_control.yaml")
+    assert control["num_candidates"] == 1
+    assert control["ct_recursive_candidate_views"] == 1
+    assert control["ct_b0_candidate_views"] == 1
+    assert control["ct_b0_candidate_weights"] == [1.0]
+    ignored = {
+        "experiment_name", "num_candidates", "ct_recursive_candidate_views",
+        "ct_b0_candidate_views", "ct_b0_candidate_weights",
+    }
+    assert ({key: value for key, value in proposed.items()
+             if key not in ignored}
+            == {key: value for key, value in control.items()
+                if key not in ignored})
 
 
 def test_b0_2x2_configs_are_matched_except_registered_factors():
@@ -120,10 +154,20 @@ def test_every_formal_config_satisfies_normalized_scratch_contract():
 
     for path in sorted((ROOT / "cfgs" / "ct_seqtrack").glob("*.yaml")):
         config = load_yaml_config(path)
+        if config.get("ct_protocol_status") == "historical_2x2_do_not_run":
+            continue
         configure_ct_variant(config)
         if config["ct_time_mode"] == "shuffled":
             config["dynamics_time_manifest"] = "frozen-manifest.json"
         validate_scratch_training_contract(config)
+
+
+def test_preflight_and_b2_promotion_are_not_startup_requirements():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "requires --acquisition_preflight" not in source
+    assert "scratch Full requires --b2_method_promotion" not in source
+    assert "optional acquisition preflight was ignored" in source
+    assert "optional B2 promotion was ignored" in source
 
 
 def test_memory_promotion_requires_both_paired_controls():

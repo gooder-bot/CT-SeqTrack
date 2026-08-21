@@ -39,13 +39,13 @@ B2 raw center 由 extension 点的 targetness-weighted votes 构造。base 和 m
 
 ```text
 targetness_mask = every valid extension point
-raw/vote_mask   = candidate0 or auxiliary row with target in extension
+raw/vote_mask   = canonical candidate0 with target in extension
 presence_mask   = candidate0 only
 B3_mask         = candidate0 only
 ```
 
-因此 extension 中无目标的样本只提供 presence-negative；GT-guided auxiliary view
-不能污染 presence、utility、B3 或递归状态。`candidate_valid` 是 structural
+因此 extension 中无目标的 canonical 样本只提供 presence-negative；空间 recovery
+candidate 已从正式路径删除。`candidate_valid` 是 structural
 availability 与 predicted presence 的合取，而不是“采到了任意扩展点”。
 
 no-extension 条件下 raw candidate 精确退回 observation；若未来修改重新允许 base
@@ -88,7 +88,7 @@ presence 和 `radius(dt)` 有界残差条件。
 
 - B0 只收 observation loss；
 - B1 只收 candidate0 mean/NLL；
-- B2 收 candidate0 evidence 与 auxiliary acquisition；
+- B2 只收 candidate0 on-policy evidence；
 - B3 只收 candidate0 H1/H3 action-risk labels；
 - B2/B3 只做 shadow 学习，canonical recursive state 永远写 observation；
 - 每模块独立 optimizer/scaler/scheduler/clip/step/hash。
@@ -101,7 +101,7 @@ presence 和 `radius(dt)` 有界残差条件。
 | 候选主张 | 最低证据 | 失败后的处理 |
 |---|---|---|
 | observation-preserving recovery | exact fallback 测试 + action rows | 必须修复，不能降级措辞 |
-| extension-only evidence 有效 | preflight、no-extension、raw gain/oracle headroom | 停止 B3 |
+| extension-only evidence 有效 | acquisition、target-bearing、retention、no-extension、raw gain/oracle headroom | final/late-3 后如实报告负结果 |
 | selective update 安全且有益 | calibration gate、risk--coverage、center/IoU 单侧 CI | Full 退回 observation |
 | physical time 有贡献 | true > fixed/shuffled，跨 cadence | 删除因果措辞 |
 | memory metadata 有贡献 | real > empty/time-misaligned，paired CI | `memory=none` |

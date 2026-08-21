@@ -1,0 +1,5 @@
+_base_: 24_full_minus_b3.yaml
+
+experiment_name: ct24_full_minus_b3_nuscenes_full_scratch_seed42
+train_split: train_track
+val_split: val

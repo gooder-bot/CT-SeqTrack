@@ -95,7 +95,7 @@ def configure_ct_variant(config):
     # Dataset construction currently consumes this compatibility key.  It is
     # assigned here before dataloaders are built, not deferred to model init.
     set_config(config, "dynamics_time_mode", time_mode)
-    if variant == "b0":
-        set_config(config, "num_candidates", 1)
-        set_config(config, "ct_recursive_candidate_views", 1)
+    # Candidate count is a B0 augmentation protocol, not a B2 switch.  Keep
+    # the explicit YAML value so B0 control (view1) and proposed (view4) can
+    # be compared without changing the module graph.
     return config

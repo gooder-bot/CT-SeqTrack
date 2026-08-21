@@ -7,7 +7,7 @@ import copy
 import numpy as np
 
 
-ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v3"
+ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v5"
 
 
 def online_candidate_state_consistent(processed, target_size):
@@ -50,8 +50,6 @@ def _normal(value):
 def build_online_resume_contract(config):
     """Build the complete identity of one resumable online experiment."""
     base_lr = float(_get(config, "lr", 1e-4))
-    preflight = _get(config, "ct_acquisition_preflight_manifest", {})
-    method_promotion = _get(config, "ct_b2_method_promotion_manifest", {})
     fields = {
         "experiment_name": str(_get(config, "experiment_name", "")),
         "net_model": str(_get(config, "net_model", "seqtrack3d")),
@@ -80,6 +78,12 @@ def build_online_resume_contract(config):
         "num_candidates": int(_get(config, "num_candidates", 1)),
         "candidate_views": int(_get(
             config, "ct_recursive_candidate_views", 1)),
+        "b0_candidate_views": int(_get(
+            config, "ct_b0_candidate_views", 1)),
+        "b0_candidate_weights": tuple(float(value) for value in _get(
+            config, "ct_b0_candidate_weights", [1.0])),
+        "b2_candidate_views": int(_get(
+            config, "ct_b2_candidate_views", 1)),
         "tracklet_slots": int(_get(
             config, "ct_recursive_tracklet_slots", 1)),
         "rollout_horizons": tuple(int(value) for value in _get(
@@ -141,12 +145,6 @@ def build_online_resume_contract(config):
             config, "ct_targetness_positive_weight", 1.0)),
         "targetness_negative_weight": float(_get(
             config, "ct_targetness_negative_weight", 1.0)),
-        "acquisition_preflight_statistics_sha256": (
-            preflight.get("statistics_sha256")
-            if isinstance(preflight, dict) else None),
-        "b2_method_source_checkpoint_sha256": (
-            method_promotion.get("source_checkpoint_sha256")
-            if isinstance(method_promotion, dict) else None),
     }
     return {"schema": ONLINE_RESUME_SCHEMA, "fields": fields}
 
@@ -202,16 +200,18 @@ def require_scratch_initialization(config, init_checkpoint):
 def validate_scratch_training_contract(config):
     """Reject launches that silently leave the matched-scratch regime.
 
-    Epoch count and seed are intentionally not fixed here: five-epoch kill
-    tests and the pre-registered 42/43/44 replications are all legal.  The
-    optimizer, update topology, data geometry and epoch-0 module availability
-    are invariant across those runs.
+    Epoch count and seed are intentionally not fixed here: the registered
+    42/43/44 replications are all legal.  The optimizer, update topology, data
+    geometry and epoch-0 module availability are invariant across those runs.
     """
     policy = str(_get(
         config, "ct_initialization_policy",
         _get(config, "ct_b0_initialization_policy", "legacy")))
     if policy != "scratch_only":
         return
+    if str(_get(config, "ct_protocol_status", "formal")) != "formal":
+        raise ValueError(
+            "historical diagnostic config is not a runnable formal protocol")
     if not bool(_get(config, "ct_online_recursive_training", False)):
         raise ValueError(
             "scratch-only v23 requires online recursive training")
@@ -251,6 +251,10 @@ def validate_scratch_training_contract(config):
     require_equal("batch_size", 16, 1)
     require_equal("ct_recursive_tracklet_slots", 16, 1)
     require_equal("ct_recursive_rollout_horizons", [1, 2, 4, 8], [1])
+    require_equal("ct_recursive_reseed_enabled", True, False)
+    require_equal("ct_b0_rng_shift_control", True, False)
+    require_equal("ct_b2_candidate_views", 1, 1)
+    require_equal("ct_recovery_candidate_policy", "off", "off")
 
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))
@@ -274,17 +278,29 @@ def validate_scratch_training_contract(config):
                         f"scratch {module_name.upper()} requires "
                         f"ct_{module_name}_lr=1e-4")
 
-    if b2:
-        require_equal("num_candidates", 4, 1)
-        require_equal("ct_recursive_candidate_views", 4, 1)
+    variant = str(_get(config, "ct_variant", "legacy")).strip().lower()
+    b0_views = int(_get(config, "ct_b0_candidate_views", 1))
+    allowed_b0_views = (1, 4) if variant == "b0" else (4,)
+    if b0_views not in allowed_b0_views:
+        errors.append(
+            f"ct_b0_candidate_views={b0_views!r} "
+            f"(expected one of {allowed_b0_views!r})")
+    require_equal("num_candidates", b0_views, 1)
+    require_equal("ct_recursive_candidate_views", b0_views, 1)
+    expected_weights = (
+        [1.0] if b0_views == 1
+        else [0.5, 0.1666667, 0.1666667, 0.1666667])
+    require_equal("ct_b0_candidate_weights", expected_weights, [1.0])
+    if b0_views > 1:
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
-        require_equal(
-            "ct_recovery_candidate_policy", "weak_miss_control", "off")
+    if b2:
         if not bool(_get(config, "export_proposal_diagnostics", False)):
             errors.append("B2 requires export_proposal_diagnostics=true")
-    else:
-        require_equal("num_candidates", 1, 1)
-        require_equal("ct_recursive_candidate_views", 1, 1)
+        require_equal(
+            "ct_targetness_class_weight_source",
+            "online_canonical_preflight", "online_canonical_preflight")
+        require_equal("ct_targetness_positive_weight", 1.0, 1.0)
+        require_equal("ct_targetness_negative_weight", 1.0, 1.0)
 
     if errors:
         raise ValueError(
@@ -292,7 +308,7 @@ def validate_scratch_training_contract(config):
 
 
 def build_b2_method_contract(config):
-    """Fields that must match when a qualified B2 method enters Full."""
+    """Fields that must match for optional B2 method comparison."""
     resume = build_online_resume_contract(config)["fields"]
     # Memory and no-extension/base-evidence modes are independent controls,
     # not part of B2 acquisition promotion.  Likewise Full-B3 promotes the
@@ -303,7 +319,8 @@ def build_b2_method_contract(config):
         "time_manifest", "training_state_policy",
         "module_isolation",
         "joint_contract_version", "enable_b1", "enable_b2",
-        "num_candidates", "candidate_views", "tracklet_slots",
+        "num_candidates", "candidate_views", "b0_candidate_views",
+        "b0_candidate_weights", "b2_candidate_views", "tracklet_slots",
         "rollout_horizons", "reseed_enabled", "partition",
         "partition_seed", "optimizer", "base_lr", "b0_lr", "b1_lr",
         "b2_lr", "b3_lr", "plugin_lr",
@@ -312,7 +329,6 @@ def build_b2_method_contract(config):
         "plugin_gradient_clip", "canonical_batch_size",
         "auxiliary_microbatch_size", "initialization_policy",
         "recovery_candidate_policy",
-        "acquisition_preflight_statistics_sha256",
         "targetness_class_weight_source", "targetness_positive_weight",
         "targetness_negative_weight",
     )
@@ -322,9 +338,9 @@ def build_b2_method_contract(config):
 def validate_b2_method_promotion(promotion, config):
     if (not isinstance(promotion, dict)
             or promotion.get("schema")
-            != "ct_seqtrack.b2_evidence_promotion.v3"
+            != "ct_seqtrack.b2_evidence_promotion.v4"
             or not bool(promotion.get("passed"))):
-        raise ValueError("Full scratch requires a passed B2 method manifest v3")
+        raise ValueError("B2 method analysis requires a passed manifest v4")
     observed = promotion.get("b2_method_contract")
     expected = build_b2_method_contract(config)
     if not isinstance(observed, dict):
