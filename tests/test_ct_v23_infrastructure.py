@@ -1,6 +1,7 @@
 import copy
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
@@ -20,6 +21,7 @@ from utils.training_isolation import (
     advance_lightning_manual_transaction,
     candidate_stratified_mean,
     freeze_batchnorm_running_stats,
+    partition_candidate_view_items,
     update_cumulative_binary_class_balance,
 )
 from tools.report_ct_b2 import build_metrics, success_auc
@@ -241,7 +243,44 @@ def test_three_auxiliary_microbatches_match_one_48_row_transaction():
             values, valid[rows], candidate_ids[rows]) / 6.0
     micro_gradient = torch.autograd.grad(micro_loss, micro_parameter)[0]
     assert torch.equal(full_loss, micro_loss)
-    assert torch.equal(full_gradient, micro_gradient)
+    # The two graphs are mathematically identical, but autograd accumulates
+    # the 48-row and 3x16-row reductions in a different floating-point order.
+    # That order may differ by a few ULPs across PyTorch/CPU builds.
+    torch.testing.assert_close(
+        full_gradient, micro_gradient, rtol=1e-6, atol=1e-7)
+
+
+def test_candidate_views_partition_before_heterogeneous_dict_collation():
+    processed = []
+    context = []
+    for view_id in range(4):
+        for row_id in range(16):
+            item = {
+                'b0_view_id': np.int64(view_id),
+                'points': np.full((2, 3), row_id, dtype=np.float32),
+            }
+            if view_id == 0:
+                item['ct_base_evidence_points'] = np.full(
+                    (4, 3), row_id, dtype=np.float32)
+            processed.append(item)
+            context.append((view_id, row_id))
+
+    with pytest.raises(KeyError, match="ct_base_evidence_points"):
+        torch.utils.data.default_collate(processed)
+
+    canonical, auxiliary, canonical_context, auxiliary_context = (
+        partition_candidate_view_items(
+            processed, context, canonical_batch_size=16,
+            candidate_views=4))
+
+    canonical_batch = torch.utils.data.default_collate(canonical)
+    auxiliary_batch = torch.utils.data.default_collate(auxiliary)
+    assert canonical_batch['points'].shape == (16, 2, 3)
+    assert canonical_batch['ct_base_evidence_points'].shape == (16, 4, 3)
+    assert auxiliary_batch['points'].shape == (48, 2, 3)
+    assert 'ct_base_evidence_points' not in auxiliary_batch
+    assert canonical_context == [(0, row_id) for row_id in range(16)]
+    assert auxiliary_context[0] == (1, 0)
 
 
 def test_auxiliary_batchnorm_buffers_freeze_but_affine_gradient_flows():

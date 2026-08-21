@@ -116,6 +116,7 @@ from utils.training_isolation import (
     capture_global_rng_state,
     freeze_batchnorm_running_stats,
     isolated_constructor_rng,
+    partition_candidate_view_items,
     restore_global_rng_state,
     update_cumulative_binary_class_balance,
 )
@@ -7137,19 +7138,43 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 motion_prediction=group['motion_prediction'],
                 state_diagnostics=group['diagnostics']))
             context.append({'raw': raw, 'state': state})
+        auxiliary_batch = None
+        if self.ct_joint_contract_version >= 3:
+            (
+                processed, auxiliary_processed,
+                context, _auxiliary_context,
+            ) = partition_candidate_view_items(
+                processed, context,
+                canonical_batch_size=int(getattr(
+                    self.config, 'batch_size', 16)),
+                candidate_views=int(getattr(
+                    self.config, 'ct_b0_candidate_views', 1)))
+            if auxiliary_processed:
+                auxiliary_batch = default_collate(auxiliary_processed)
         batch = default_collate(processed)
-        batch_size = len(raw_items)
-        batch['ct_h3_gain'] = torch.zeros(batch_size, dtype=torch.float32)
-        batch['ct_h3_center_gain'] = torch.zeros(
-            batch_size, dtype=torch.float32)
-        batch['ct_h3_iou_gain'] = torch.zeros(
-            batch_size, dtype=torch.float32)
-        batch['ct_h3_valid'] = torch.zeros(batch_size, dtype=torch.float32)
-        batch['ct_shadow_forward_count'] = torch.tensor(0.0)
-        batch['ct_shadow_time_ms'] = torch.tensor(0.0)
-        batch['ct_shadow_peak_memory_mb'] = torch.tensor(0.0)
+
+        def attach_shadow_diagnostics(target, batch_size):
+            target['ct_h3_gain'] = torch.zeros(
+                batch_size, dtype=torch.float32)
+            target['ct_h3_center_gain'] = torch.zeros(
+                batch_size, dtype=torch.float32)
+            target['ct_h3_iou_gain'] = torch.zeros(
+                batch_size, dtype=torch.float32)
+            target['ct_h3_valid'] = torch.zeros(
+                batch_size, dtype=torch.float32)
+            target['ct_shadow_forward_count'] = torch.tensor(0.0)
+            target['ct_shadow_time_ms'] = torch.tensor(0.0)
+            target['ct_shadow_peak_memory_mb'] = torch.tensor(0.0)
+
+        attach_shadow_diagnostics(batch, len(processed))
+        if auxiliary_batch is not None:
+            attach_shadow_diagnostics(
+                auxiliary_batch, len(auxiliary_processed))
+            auxiliary_batch = self._move_batch_to_device(
+                auxiliary_batch, self.device)
         self._ct_online_batch_context = context
-        return self._move_batch_to_device(batch, self.device)
+        batch = self._move_batch_to_device(batch, self.device)
+        return batch, auxiliary_batch
 
     def _local_prediction_to_world(self, local_box, anchor_box):
         values = local_box.detach().cpu().numpy().reshape(-1)[:4]
@@ -7594,38 +7619,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         auxiliary_batch = None
         auxiliary_gradients = {}
         if online_batch:
-            batch = self._prepare_online_recursive_batch(batch)
+            batch, auxiliary_batch = self._prepare_online_recursive_batch(
+                batch)
             if (self.ct_joint_contract_version >= 3
-                    and 'b0_view_id' in batch):
-                b0_view_ids = batch['b0_view_id'].reshape(-1)
-                canonical_rows = b0_view_ids == 0
-                auxiliary_rows = ~canonical_rows
-                canonical_count = int(canonical_rows.sum().item())
-                auxiliary_count = int(auxiliary_rows.sum().item())
-                expected_canonical = int(getattr(
-                    self.config, 'batch_size', 16))
-                expected_auxiliary = expected_canonical * (
-                    int(getattr(
-                        self.config, 'ct_b0_candidate_views', 1)) - 1)
-                if (canonical_count != expected_canonical
-                        or auxiliary_count != expected_auxiliary):
-                    raise RuntimeError(
-                        'candidate-decoupled batch must contain exactly '
-                        f'{expected_canonical} canonical B0 rows and '
-                        f'{expected_auxiliary} auxiliary rows; observed '
-                        f'{canonical_count}+{auxiliary_count}')
-                if bool(auxiliary_rows.any()):
-                    full_context = list(self._ct_online_batch_context)
-                    auxiliary_batch = self._slice_batch_rows(
-                        batch, auxiliary_rows)
-                    batch = self._slice_batch_rows(batch, canonical_rows)
-                    canonical_selector = canonical_rows.detach().cpu().tolist()
-                    self._ct_online_batch_context = [
-                        item for item, keep in zip(
-                            full_context, canonical_selector) if keep]
-                    if not bool((batch['b0_view_id'] == 0).all()):
-                        raise RuntimeError(
-                            "canonical transaction contains an auxiliary B0 view")
+                    and not bool((batch['b0_view_id'] == 0).all())):
+                raise RuntimeError(
+                    "canonical transaction contains an auxiliary B0 view")
         amp_enabled = bool(
             self.ct_separate_optimizers
             and self.ct_manual_amp_enabled

@@ -149,6 +149,50 @@ def candidate_stratified_mean(values, valid, candidate_ids):
     return total / max(total_branch_weight, 1e-12)
 
 
+def partition_candidate_view_items(
+        processed, context, canonical_batch_size, candidate_views):
+    """Split heterogeneous candidate views before PyTorch dict collation.
+
+    Canonical rows may carry B1--B3 evidence fields that are deliberately
+    absent from the B0-only auxiliary rows.  ``default_collate`` cannot
+    collate those two schemas together, so preserve row order within each
+    transaction and validate the existing 1 + (views - 1) contract first.
+    """
+    if len(processed) != len(context):
+        raise RuntimeError(
+            "processed online rows and recursive contexts must align")
+    canonical_items = []
+    auxiliary_items = []
+    canonical_context = []
+    auxiliary_context = []
+    for item, item_context in zip(processed, context):
+        if 'b0_view_id' not in item:
+            raise RuntimeError(
+                "candidate-decoupled online row lacks b0_view_id")
+        view_id_values = np.asarray(item['b0_view_id']).reshape(-1)
+        if view_id_values.size != 1:
+            raise RuntimeError("b0_view_id must be scalar per online row")
+        if int(view_id_values[0]) == 0:
+            canonical_items.append(item)
+            canonical_context.append(item_context)
+        else:
+            auxiliary_items.append(item)
+            auxiliary_context.append(item_context)
+
+    expected_canonical = int(canonical_batch_size)
+    expected_auxiliary = expected_canonical * (int(candidate_views) - 1)
+    if (len(canonical_items) != expected_canonical
+            or len(auxiliary_items) != expected_auxiliary):
+        raise RuntimeError(
+            'candidate-decoupled batch must contain exactly '
+            f'{expected_canonical} canonical B0 rows and '
+            f'{expected_auxiliary} auxiliary rows; observed '
+            f'{len(canonical_items)}+{len(auxiliary_items)}')
+    return (
+        canonical_items, auxiliary_items,
+        canonical_context, auxiliary_context)
+
+
 def update_cumulative_binary_class_balance(
         positive_count, negative_count, positive_weight, negative_weight,
         batch_positive, batch_negative):
