@@ -114,6 +114,7 @@ from utils.training_isolation import (
     assert_disjoint_parameter_sets,
     candidate_stratified_mean,
     capture_global_rng_state,
+    contract_v3_action_probability,
     freeze_batchnorm_running_stats,
     isolated_constructor_rng,
     partition_candidate_view_items,
@@ -2022,6 +2023,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._ct_epoch_binary_rows = {
                 'presence': [], 'alpha': [], 'alpha_uplift': []}
         if self.ct_joint_contract_version >= 3:
+            action_probability = contract_v3_action_probability(
+                output, self.ct_enable_b3)
             labels = data['ct_extension_labels'].detach()
             point_valid = data['ct_extension_valid_mask'].detach()
             support_valid = output['ct_b2_available'].detach().reshape(-1)
@@ -2050,13 +2053,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 (gain < -self.ct_router_help_margin) | ~presence_target)
             utility_valid = (support_valid > 0) & (helpful | harmful)
             if bool(utility_valid.any()):
-                self._ct_epoch_binary_rows['alpha'].append((
-                    torch.sigmoid(output['ct_b2_utility_logit'].detach())[
-                        utility_valid].float().cpu().numpy(),
-                    helpful[utility_valid].float().cpu().numpy(),
-                ))
                 self._ct_epoch_binary_rows['alpha_uplift'].append(
                     gain[utility_valid].float().cpu().numpy())
+                if action_probability is not None:
+                    if action_probability.shape != support_valid.shape:
+                        raise RuntimeError(
+                            "ct_b3_action_score must align with canonical "
+                            "B2 rows")
+                    self._ct_epoch_binary_rows['alpha'].append((
+                        action_probability[
+                            utility_valid].float().cpu().numpy(),
+                        helpful[utility_valid].float().cpu().numpy(),
+                    ))
             return
         endpoint_labels = data['search_v3_point_labels'].detach()
         tube_labels = data['trajectory_search_point_labels'].detach().reshape(

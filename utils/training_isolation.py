@@ -193,6 +193,24 @@ def partition_candidate_view_items(
         canonical_context, auxiliary_context)
 
 
+def contract_v3_action_probability(output, b3_enabled):
+    """Return the B3-owned deployment score for epoch calibration metrics.
+
+    Contract-v3 B2 intentionally has no utility head.  B2-only runs therefore
+    have no action probability, while Full must expose the score produced by
+    ``B3SelectiveUpdater``.
+    """
+    if not bool(b3_enabled):
+        return None
+    if 'ct_b3_action_score' not in output:
+        raise RuntimeError(
+            "contract-v3 Full output lacks ct_b3_action_score")
+    score = output['ct_b3_action_score']
+    if not torch.is_tensor(score):
+        raise TypeError("ct_b3_action_score must be a tensor")
+    return score.detach().reshape(-1)
+
+
 def update_cumulative_binary_class_balance(
         positive_count, negative_count, positive_weight, negative_weight,
         batch_positive, batch_negative):

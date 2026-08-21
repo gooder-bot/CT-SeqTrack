@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 from utils.training_isolation import (
     advance_lightning_manual_transaction,
     candidate_stratified_mean,
+    contract_v3_action_probability,
     freeze_batchnorm_running_stats,
     partition_candidate_view_items,
     update_cumulative_binary_class_balance,
@@ -281,6 +282,20 @@ def test_candidate_views_partition_before_heterogeneous_dict_collation():
     assert 'ct_base_evidence_points' not in auxiliary_batch
     assert canonical_context == [(0, row_id) for row_id in range(16)]
     assert auxiliary_context[0] == (1, 0)
+
+
+def test_contract_v3_action_score_is_owned_only_by_b3():
+    # B1+B2 has no utility/action head and must still collect B2 metrics.
+    assert contract_v3_action_probability({}, b3_enabled=False) is None
+
+    score = torch.tensor([0.1, 0.8])
+    selected = contract_v3_action_probability(
+        {'ct_b3_action_score': score}, b3_enabled=True)
+    assert torch.equal(selected, score)
+    assert not selected.requires_grad
+
+    with pytest.raises(RuntimeError, match="ct_b3_action_score"):
+        contract_v3_action_probability({}, b3_enabled=True)
 
 
 def test_auxiliary_batchnorm_buffers_freeze_but_affine_gradient_flows():
