@@ -7,7 +7,7 @@ import copy
 import numpy as np
 
 
-ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v5"
+ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
 
 
 def online_candidate_state_consistent(processed, target_size):
@@ -70,6 +70,20 @@ def build_online_resume_contract(config):
             config, "ct_joint_contract_version", 1)),
         "online_recursive_training": bool(_get(
             config, "ct_online_recursive_training", False)),
+        "training_topology": str(_get(
+            config, "ct_training_topology", "legacy")),
+        "b0_training_protocol": str(_get(
+            config, "ct_b0_training_protocol", "legacy")),
+        "b0_candidate_mode": str(_get(
+            config, "ct_b0_candidate_mode", "legacy")),
+        "b0_steps_per_epoch": int(_get(
+            config, "ct_b0_steps_per_epoch", 0) or 0),
+        "mechanism_stream": str(_get(
+            config, "ct_mechanism_stream", "legacy")),
+        "mechanism_passes_per_epoch": int(_get(
+            config, "ct_mechanism_passes_per_epoch", 0) or 0),
+        "mechanism_b0_view": str(_get(
+            config, "ct_mechanism_b0_view", "legacy")),
         "use_ct_joint_full": bool(_get(
             config, "use_ct_joint_full", False)),
         "enable_b1": bool(_get(config, "ct_enable_b1", True)),
@@ -251,8 +265,16 @@ def validate_scratch_training_contract(config):
     require_equal("batch_size", 16, 1)
     require_equal("ct_recursive_tracklet_slots", 16, 1)
     require_equal("ct_recursive_rollout_horizons", [1, 2, 4, 8], [1])
-    require_equal("ct_recursive_reseed_enabled", True, False)
-    require_equal("ct_b0_rng_shift_control", True, False)
+    require_equal("ct_training_topology", "dual_stream", "legacy")
+    require_equal("ct_b0_training_protocol", "seqtrack_d86990c", "legacy")
+    require_equal("ct_b0_candidate_mode", "independent", "legacy")
+    require_equal("candidate_trajectory_mode", "independent", "legacy")
+    require_equal("ct_b0_steps_per_epoch", 1262, 0)
+    require_equal("ct_mechanism_stream", "online_recursive", "legacy")
+    require_equal("ct_mechanism_passes_per_epoch", 1, 0)
+    require_equal("ct_mechanism_b0_view", "canonical_only", "legacy")
+    require_equal("ct_recursive_reseed_enabled", False, False)
+    require_equal("ct_b0_rng_shift_control", False, False)
     require_equal("ct_b2_candidate_views", 1, 1)
     require_equal("ct_recovery_candidate_policy", "off", "off")
 
@@ -278,19 +300,13 @@ def validate_scratch_training_contract(config):
                         f"scratch {module_name.upper()} requires "
                         f"ct_{module_name}_lr=1e-4")
 
-    variant = str(_get(config, "ct_variant", "legacy")).strip().lower()
     b0_views = int(_get(config, "ct_b0_candidate_views", 1))
-    allowed_b0_views = (1, 4) if variant == "b0" else (4,)
-    if b0_views not in allowed_b0_views:
-        errors.append(
-            f"ct_b0_candidate_views={b0_views!r} "
-            f"(expected one of {allowed_b0_views!r})")
+    if b0_views != 4:
+        errors.append("ct_b0_candidate_views must be 4")
     require_equal("num_candidates", b0_views, 1)
     require_equal("ct_recursive_candidate_views", b0_views, 1)
-    expected_weights = (
-        [1.0] if b0_views == 1
-        else [0.5, 0.1666667, 0.1666667, 0.1666667])
-    require_equal("ct_b0_candidate_weights", expected_weights, [1.0])
+    require_equal(
+        "ct_b0_candidate_weights", [0.25, 0.25, 0.25, 0.25], [1.0])
     if b0_views > 1:
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
     if b2:
@@ -317,7 +333,9 @@ def build_b2_method_contract(config):
     keys = (
         "net_model", "prior_mode", "time_mode", "fixed_delta_t",
         "time_manifest", "training_state_policy",
-        "module_isolation",
+        "module_isolation", "training_topology", "b0_training_protocol",
+        "b0_candidate_mode", "b0_steps_per_epoch", "mechanism_stream",
+        "mechanism_passes_per_epoch", "mechanism_b0_view",
         "joint_contract_version", "enable_b1", "enable_b2",
         "num_candidates", "candidate_views", "b0_candidate_views",
         "b0_candidate_weights", "b2_candidate_views", "tracklet_slots",

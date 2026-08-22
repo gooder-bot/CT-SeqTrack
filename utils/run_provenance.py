@@ -72,7 +72,7 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
         resolved_config, sort_keys=True, separators=(",", ":"), default=str)
     payload = {
         "schema": "ct_seqtrack.run_provenance",
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": mode,
         "git": git_state(root),
         "config_path": str(cfg_path),
@@ -86,12 +86,35 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
         "init_checkpoint_path": init_checkpoint,
         "init_checkpoint_sha256": sha256_file(init_checkpoint),
         "checkpoint_rule": (
-            "train: final/last is primary; precision/test top-k is diagnostic only"
+            "train: final/last and late-3 are primary; mini_val is never "
+            "used to select different best epochs across arms"
             if mode == "train" else
             "test: use the explicitly supplied frozen checkpoint; no threshold retuning"
         ),
         "datasets": {
             name: dataset_provenance(dataset) for name, dataset in datasets.items()
+        },
+        "training_streams": {
+            "topology": getattr(cfg, "ct_training_topology", None),
+            "observation_source": "train",
+            "mechanism_source": (
+                "mechanism" if "mechanism" in datasets else None),
+            "observation_steps_per_epoch": getattr(
+                cfg, "ct_observation_steps_per_epoch_observed", None),
+            "mechanism_steps_per_epoch": getattr(
+                cfg, "ct_mechanism_steps_per_epoch_observed", None),
+            "b0_optimizer_steps_per_epoch": getattr(
+                cfg, "ct_observation_steps_per_epoch_observed", None),
+            "mechanism_passes_per_epoch": getattr(
+                cfg, "ct_mechanism_passes_per_epoch", None),
+            "mechanism_partition": getattr(
+                cfg, "ct_router_partition", None),
+            "mechanism_tracklets": getattr(
+                cfg, "ct_mechanism_tracklets_observed", None),
+            "mechanism_prediction_frames": getattr(
+                cfg, "ct_mechanism_prediction_frames_observed", None),
+            "mechanism_selection_sha256": getattr(
+                cfg, "ct_mechanism_selection_sha256", None),
         },
     }
     path = output_dir / "run_provenance.json"

@@ -1599,6 +1599,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             digest.update(tensor.numpy().tobytes())
         return digest.hexdigest()
 
+    def _ct_module_parameter_hash(self, module_name):
+        digest = hashlib.sha256()
+        parameters = getattr(
+            self, '_ct_named_parameters_by_module', {}).get(module_name, ())
+        for parameter_name, parameter in sorted(parameters):
+            tensor = parameter.detach().cpu().contiguous()
+            digest.update(parameter_name.encode('utf-8'))
+            digest.update(str(tensor.dtype).encode('ascii'))
+            digest.update(str(tuple(tensor.shape)).encode('ascii'))
+            digest.update(tensor.numpy().tobytes())
+        return digest.hexdigest()
+
     @torch.no_grad()
     def _verify_b2_v3_frozen_hashes(self):
         if sorted(self._b2_v3_frozen_reference_hashes) != sorted(
@@ -1684,8 +1696,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'last_gradient_norm': dict(getattr(
                     self, '_ct_last_gradient_norm', {})),
             }
+            checkpoint['ct_b0_prefix_hashes'] = copy.deepcopy(getattr(
+                self, '_ct_b0_prefix_hashes', {}))
 
     def on_load_checkpoint(self, checkpoint):
+        self._ct_b0_prefix_hashes = copy.deepcopy(
+            checkpoint.get('ct_b0_prefix_hashes', {}))
         if (bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
                 and not bool(getattr(self.config, 'test', False))):
@@ -1845,6 +1861,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if getattr(
                         self, f'_ct_{name}_updated_this_epoch', False):
                     scheduler.step()
+        if self.ct_separate_optimizers and 'b0' in getattr(
+                self, '_ct_optimizer_names', ()):
+            trace = getattr(self, '_ct_b0_prefix_hashes', {})
+            trace[f'epoch_{int(self.current_epoch) + 1:03d}'] = (
+                self._ct_module_parameter_hash('b0'))
+            self._ct_b0_prefix_hashes = trace
         self._ct_epoch_boundary_complete = True
         acquisition = getattr(self, '_ct_epoch_acquisition_totals', {})
         for population, totals in acquisition.items():
@@ -6870,11 +6892,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._ct_recursive_states = {}
             self._ct_online_batch_context = []
             train_loader = getattr(self.trainer, 'train_dataloader', None)
-            batch_sampler = getattr(train_loader, 'batch_sampler', None)
-            if hasattr(batch_sampler, 'set_epoch'):
-                batch_sampler.set_epoch(int(self.current_epoch))
+            if hasattr(train_loader, 'set_epoch'):
+                train_loader.set_epoch(int(self.current_epoch))
+            else:
+                batch_sampler = getattr(train_loader, 'batch_sampler', None)
+                if hasattr(batch_sampler, 'set_epoch'):
+                    batch_sampler.set_epoch(int(self.current_epoch))
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        if (isinstance(batch, dict)
+                and batch.get('ct_stream_schema')
+                == 'ct_seqtrack.dual_stream.v1'):
+            return {
+                'ct_stream_schema': batch['ct_stream_schema'],
+                'observation': self._move_batch_to_device(
+                    batch['observation'], device),
+                # Raw nuScenes objects are deliberately processed only after
+                # the current observation optimizer step has completed.
+                'mechanism': batch.get('mechanism'),
+            }
         if (isinstance(batch, list) and batch
                 and isinstance(batch[0], dict)
                 and batch[0].get('online_recursive_raw', False)):
@@ -7148,15 +7184,28 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             context.append({'raw': raw, 'state': state})
         auxiliary_batch = None
         if self.ct_joint_contract_version >= 3:
-            (
-                processed, auxiliary_processed,
-                context, _auxiliary_context,
-            ) = partition_candidate_view_items(
-                processed, context,
-                canonical_batch_size=int(getattr(
-                    self.config, 'batch_size', 16)),
-                candidate_views=int(getattr(
-                    self.config, 'ct_b0_candidate_views', 1)))
+            dual_stream = str(getattr(
+                self.config, 'ct_training_topology', 'legacy')).strip().lower()
+            if dual_stream == 'dual_stream':
+                auxiliary_processed = []
+                if (len(processed) != int(getattr(
+                        self.config, 'batch_size', 16))
+                        or any(int(np.asarray(
+                            item['b0_view_id']).reshape(-1)[0]) != 0
+                               for item in processed)):
+                    raise RuntimeError(
+                        'dual-stream mechanism transaction must contain one '
+                        'canonical B0 row per tracklet slot')
+            else:
+                (
+                    processed, auxiliary_processed,
+                    context, _auxiliary_context,
+                ) = partition_candidate_view_items(
+                    processed, context,
+                    canonical_batch_size=int(getattr(
+                        self.config, 'batch_size', 16)),
+                    candidate_views=int(getattr(
+                        self.config, 'ct_b0_candidate_views', 1)))
             if auxiliary_processed:
                 auxiliary_batch = default_collate(auxiliary_processed)
         batch = default_collate(processed)
@@ -7440,7 +7489,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 totals[target] += float(value.detach().cpu().item())
 
     def _ct_isolated_optimizer_step(
-            self, loss_dict, auxiliary_gradients=None):
+            self, loss_dict, auxiliary_gradients=None,
+            active_modules=None, advance_transaction=True):
         """Execute one disjoint transaction per active B0--B3 module."""
         auxiliary_gradients = auxiliary_gradients or {}
         self._ensure_ct_scalers()
@@ -7448,6 +7498,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if not isinstance(optimizers, (list, tuple)):
             optimizers = [optimizers]
         names = list(self._ct_optimizer_names)
+        if ('b0' in names
+                and not hasattr(self, '_ct_b0_prefix_hashes')):
+            self._ct_b0_prefix_hashes = {
+                'initial': self._ct_module_parameter_hash('b0')}
+        active_modules = (
+            set(names) if active_modules is None else set(active_modules))
+        unknown = active_modules - set(names)
+        if unknown:
+            raise RuntimeError(
+                'optimizer transaction names are not configured: '
+                + ', '.join(sorted(unknown)))
         if len(optimizers) != len(names):
             raise RuntimeError("optimizer/module cardinality mismatch")
         optimizer_map = dict(zip(names, optimizers))
@@ -7456,6 +7517,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         gradients_by_module = {}
         parameters_by_module = {}
         for name, optimizer in optimizer_map.items():
+            if name not in active_modules:
+                continue
             optimizer.zero_grad(set_to_none=True)
             parameters = [
                 parameter for _, parameter
@@ -7483,8 +7546,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._assign_parameter_gradients(parameters, gradients)
 
         norms = {}
-        stepped = {}
+        stepped = {name: False for name in names}
         for name, optimizer in optimizer_map.items():
+            if name not in active_modules:
+                continue
             scaler = self._ct_scalers[name]
             scaler.unscale_(optimizer)
             clip = float(getattr(
@@ -7501,6 +7566,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if stepped[name]:
                 getattr(self, f'ct_{name}_update_step').add_(1)
                 setattr(self, f'_ct_{name}_updated_this_epoch', True)
+                if name == 'b0':
+                    update_step = int(self.ct_b0_update_step.item())
+                    if update_step in (1, 100):
+                        self._ct_b0_prefix_hashes[f'step_{update_step}'] = (
+                            self._ct_module_parameter_hash('b0'))
         if stepped.get('b0'):
             self._ct_b0_updated_this_epoch = True
         plugin_stepped = any(
@@ -7517,12 +7587,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if stepped[name]:
                     scheduler.step()
         trainer = getattr(self, '_trainer', None)
-        if trainer is not None:
+        if trainer is not None and advance_transaction:
             advance_lightning_manual_transaction(trainer)
         for name in names:
+            norm = norms.get(name, torch.zeros((), device=self.device))
             loss_dict.update({
                 f'ct_{name}_unscaled_grad_norm': torch.as_tensor(
-                    norms[name], device=self.device),
+                    norm, device=self.device),
                 f'ct_{name}_amp_scale': torch.tensor(
                     float(self._ct_scalers[name].get_scale()),
                     device=self.device),
@@ -7617,6 +7688,53 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         Returns:
 
         """
+        if (isinstance(batch, dict)
+                and batch.get('ct_stream_schema')
+                == 'ct_seqtrack.dual_stream.v1'):
+            if getattr(self, '_ct_inside_dual_stream', False):
+                raise RuntimeError('nested dual-stream transaction')
+            self._ct_inside_dual_stream = True
+            saved_routing = (
+                self.use_ct_joint_full, self.use_b1motion_v3,
+                self.ct_enable_b1, self.ct_enable_b2, self.ct_enable_b3)
+            try:
+                # The observation transaction is behavior-identical to the
+                # clean SeqTrack B0: plugins are absent from its graph and B0
+                # owns the only logical Lightning step.
+                self.use_ct_joint_full = False
+                self.use_b1motion_v3 = False
+                self.ct_enable_b1 = False
+                self.ct_enable_b2 = False
+                self.ct_enable_b3 = False
+                self._ct_transaction_modules = {'b0'}
+                self._ct_advance_transaction = True
+                observation_loss = self.training_step(
+                    batch['observation'], batch_idx)
+            finally:
+                (
+                    self.use_ct_joint_full, self.use_b1motion_v3,
+                    self.ct_enable_b1, self.ct_enable_b2, self.ct_enable_b3,
+                ) = saved_routing
+
+            mechanism_batch = batch.get('mechanism')
+            if mechanism_batch is not None:
+                rng_state = capture_global_rng_state()
+                try:
+                    self._ct_transaction_modules = {
+                        name for name in ('b1', 'b2', 'b3')
+                        if name in getattr(self, '_ct_optimizer_names', ())}
+                    self._ct_advance_transaction = False
+                    self._ct_mechanism_transaction = True
+                    with freeze_batchnorm_running_stats(self):
+                        self.training_step(mechanism_batch, batch_idx)
+                finally:
+                    restore_global_rng_state(rng_state)
+                    self._ct_mechanism_transaction = False
+            self._ct_transaction_modules = None
+            self._ct_advance_transaction = True
+            self._ct_inside_dual_stream = False
+            return observation_loss
+
         online_batch = (
             isinstance(batch, list) and batch
             and isinstance(batch[0], dict)
@@ -7691,25 +7809,26 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             metric_batch = batch
             metric_output = output
 
-        # log
+        # log; mechanism-only forwards must not pollute B0 accuracy meters.
         log_batch_size = int(metric_batch['seg_label'].shape[0])
-        seg_acc = self.seg_acc(torch.argmax(metric_output['seg_logits'], dim=1, keepdim=False),
-                               metric_batch['seg_label'])
-        self.log('seg_acc_background/train', seg_acc[0], on_step=True,
-                 on_epoch=True, prog_bar=False, logger=True,
-                 batch_size=log_batch_size)
-        self.log('seg_acc_foreground/train', seg_acc[1], on_step=True,
-                 on_epoch=True, prog_bar=False, logger=True,
-                 batch_size=log_batch_size)
-        if self.use_motion_cls:
-            motion_acc = self.motion_acc(torch.argmax(metric_output['motion_cls'], dim=1, keepdim=False),
-                                         metric_batch['motion_state_label'][:,0]) # 0 represents motion relative to the first historical box
-            self.log('motion_acc_static/train', motion_acc[0], on_step=True,
+        if not getattr(self, '_ct_mechanism_transaction', False):
+            seg_acc = self.seg_acc(torch.argmax(metric_output['seg_logits'], dim=1, keepdim=False),
+                                   metric_batch['seg_label'])
+            self.log('seg_acc_background/train', seg_acc[0], on_step=True,
                      on_epoch=True, prog_bar=False, logger=True,
                      batch_size=log_batch_size)
-            self.log('motion_acc_dynamic/train', motion_acc[1], on_step=True,
+            self.log('seg_acc_foreground/train', seg_acc[1], on_step=True,
                      on_epoch=True, prog_bar=False, logger=True,
                      batch_size=log_batch_size)
+            if self.use_motion_cls:
+                motion_acc = self.motion_acc(torch.argmax(metric_output['motion_cls'], dim=1, keepdim=False),
+                                             metric_batch['motion_state_label'][:,0]) # 0 represents motion relative to the first historical box
+                self.log('motion_acc_static/train', motion_acc[0], on_step=True,
+                         on_epoch=True, prog_bar=False, logger=True,
+                         batch_size=log_batch_size)
+                self.log('motion_acc_dynamic/train', motion_acc[1], on_step=True,
+                         on_epoch=True, prog_bar=False, logger=True,
+                         batch_size=log_batch_size)
 
         log_dict = {k: v.item() for k, v in loss_dict.items()}
 
@@ -7727,6 +7846,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         if self.ct_separate_optimizers:
             self._ct_isolated_optimizer_step(
-                loss_dict, auxiliary_gradients)
+                loss_dict, auxiliary_gradients,
+                active_modules=getattr(
+                    self, '_ct_transaction_modules', None),
+                advance_transaction=getattr(
+                    self, '_ct_advance_transaction', True))
             return loss.detach()
         return loss

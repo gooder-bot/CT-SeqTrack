@@ -16,11 +16,13 @@
 本轮不再执行 candidate1/candidate4 选择。四个正式实验统一固定为：
 
 ```text
-B0: 4 views
-  view0: canonical B0 -> B1 -> B2 -> B3 -> observation state commit
-  view1: jitter B0 -> stop
-  view2: jitter B0 -> stop
-  view3: jitter B0 -> stop
+B0 observation stream: full mini_train, 4 independent candidates
+  each candidate is a normal SeqTrack sample in the shuffled batch
+  B0 updates once per batch (1262 steps/epoch; 75720 steps/60 epochs)
+
+Mechanism stream: online-recursive train partition
+  canonical endpoint only -> B1 -> B2 -> B3 -> observation state commit
+  one complete mechanism pass is embedded uniformly per epoch
 
 B2: 1 view
   只读取 canonical view0；不把三个 B0 辅助视图送入 B2
@@ -29,7 +31,7 @@ B2: 1 view
 B0 目标保持：
 
 ```text
-L_B0 = 0.5 * L_view0 + (L_view1 + L_view2 + L_view3) / 6
+L_B0 = (L_candidate0 + L_candidate1 + L_candidate2 + L_candidate3) / 4
 ```
 
 固定配置字段为：
@@ -38,9 +40,16 @@ L_B0 = 0.5 * L_view0 + (L_view1 + L_view2 + L_view3) / 6
 num_candidates: 4
 ct_recursive_candidate_views: 4
 ct_b0_candidate_views: 4
-ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b0_candidate_weights: [0.25, 0.25, 0.25, 0.25]
 ct_b2_candidate_views: 1
 ct_recovery_candidate_policy: "off"
+ct_training_topology: dual_stream
+ct_b0_training_protocol: seqtrack_d86990c
+ct_b0_candidate_mode: independent
+ct_b0_steps_per_epoch: 1262
+ct_mechanism_stream: online_recursive
+ct_mechanism_passes_per_epoch: 1
+ct_mechanism_b0_view: canonical_only
 ```
 
 `24_b0_candidate1_control.yaml` 仅作为保留的协议对照配置，不属于当前四臂正式实验，也不能初始化其他实验。

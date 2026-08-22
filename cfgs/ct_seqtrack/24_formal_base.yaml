@@ -8,24 +8,31 @@ bb_offset: 2
 bb_scale: 1.25
 bc_weight: 1
 box_aware: true
-candidate_trajectory_mode: shared_se2
+candidate_trajectory_mode: independent
 category_name: Car
 center_weight: 2
 checkpoint_mode: max
-checkpoint_monitor: success_raw_search/dev
+checkpoint_monitor: success/mini_val
 coordinate_mode: velodyne
 ct_acquisition_calibration_status: training_uncalibrated_fixed_q90
 ct_auxiliary_microbatch_size: 16
+ct_training_topology: dual_stream
+ct_b0_training_protocol: seqtrack_d86990c
+ct_b0_candidate_mode: independent
+ct_b0_steps_per_epoch: 1262
+ct_mechanism_stream: online_recursive
+ct_mechanism_passes_per_epoch: 1
+ct_mechanism_b0_view: canonical_only
 ct_b0_candidate_views: 4
 ct_b0_candidate_weights:
-- 0.5
-- 0.1666667
-- 0.1666667
-- 0.1666667
+- 0.25
+- 0.25
+- 0.25
+- 0.25
 ct_b0_gradient_clip_val: 0.0
 ct_b0_initialization_policy: scratch_only
 ct_b0_lr: 0.0001
-ct_b0_rng_shift_control: true
+ct_b0_rng_shift_control: false
 ct_b2_candidate_views: 1
 ct_b2_promotion_passed: false
 ct_base_evidence_mode: full
@@ -78,7 +85,7 @@ ct_query_motion_dropout: 0.0
 ct_raw_search_weight: 1.0
 ct_recovery_candidate_policy: 'off'
 ct_recursive_candidate_views: 4
-ct_recursive_reseed_enabled: true
+ct_recursive_reseed_enabled: false
 ct_recursive_rollout_horizons:
 - 1
 - 2

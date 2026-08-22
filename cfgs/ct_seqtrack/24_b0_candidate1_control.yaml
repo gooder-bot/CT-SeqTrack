@@ -1,6 +1,7 @@
 _base_: 24_b0.yaml
 
 experiment_name: ct24_b0_candidate1_control_scratch_seed42
+ct_protocol_status: historical_2x2_do_not_run
 num_candidates: 1
 ct_recursive_candidate_views: 1
 ct_b0_candidate_views: 1

@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,6 +12,9 @@ from models.ct_v2.pipeline_contracts import (
     validate_motion_prior_support_alignment,
 )
 from utils.candidate_utils import reexpress_motion_prediction
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class Anchor:
@@ -41,6 +45,19 @@ def test_motion_prior_identity_is_bitwise_exact():
     assert torch.equal(converted.center_xy, prior.center_xy)
     assert torch.equal(converted.direction_xy, prior.direction_xy)
     assert converted.log_sigma is prior.log_sigma
+
+
+def test_online_evaluator_exports_shared_contract_v3_anchor():
+    source = (ROOT / "models" / "base_model.py").read_text(
+        encoding="utf-8")
+    online_contract = source.split(
+        'if bool(getattr(self.config, "use_b1motion_v3", False)):', 1
+    )[1].split(
+        'if (use_trajectory_search or bool(getattr(', 1
+    )[0]
+    assert '"motion_main_anchor": online_motion_anchor' in online_contract
+    assert '"motion_source_anchor": online_motion_anchor' in online_contract
+    assert '"coordinate_anchor": online_motion_anchor' in online_contract
 
 
 def test_motion_prior_se2_reexpression_and_inverse_round_trip():

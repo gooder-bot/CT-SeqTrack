@@ -5,6 +5,7 @@ Modified by Aron Lin at Jun 1  09:42:22 CST 2023
 """
 import pytorch_lightning as pl
 import argparse
+import copy
 
 # import pytorch_lightning.utilities.distributed
 import torch
@@ -27,6 +28,11 @@ from datasets.sampler import (
     OnlineRecursiveBatchSampler,
     PartitionedTestTrackingSampler,
     online_recursive_collate,
+)
+from utils.dual_stream import DualStreamLoader
+from utils.training_isolation import (
+    capture_global_rng_state,
+    restore_global_rng_state,
 )
 from models import get_model
 from models.ct_variant import configure_ct_variant
@@ -756,16 +762,26 @@ except KeyError:
 
 if not cfg.test:
     # dataset and dataloader
+    dual_stream = str(getattr(
+        cfg, 'ct_training_topology', 'legacy')).strip().lower() == 'dual_stream'
+    observation_cfg = copy.deepcopy(cfg)
+    if dual_stream:
+        # Restore the clean d86990c B0 transaction without changing the model
+        # or the causal B1--B3 data contract.  This copy is dataset-only.
+        observation_cfg.ct_variant = 'b0'
+        configure_ct_variant(observation_cfg)
+        observation_cfg.ct_online_recursive_training = False
+        observation_cfg.candidate_trajectory_mode = 'independent'
+        observation_cfg.num_candidates = 4
+        observation_cfg.ct_b0_candidate_views = 4
+        observation_cfg.ct_recursive_candidate_views = 4
     train_data = get_dataset(
-        cfg, type=cfg.train_type, split=cfg.train_split, protocol_role='train')
-    if bool(getattr(cfg, 'ct_online_recursive_training', False)):
-        # Keep mini_val untouched.  Joint checkpoint selection uses only the
-        # atomic dev partition of mini_train.
-        val_data = PartitionedTestTrackingSampler(
-            train_data.dataset, config=cfg, partition='dev')
-    else:
-        val_data = get_dataset(
-            cfg, type='test', split=cfg.val_split, protocol_role='val')
+        observation_cfg, type=observation_cfg.train_type,
+        split=observation_cfg.train_split, protocol_role='train')
+    # Paper-facing tracking metrics always use the untouched validation split.
+    # Atomic mini_train/dev remains a mechanism-analysis partition only.
+    val_data = get_dataset(
+        cfg, type='test', split=cfg.val_split, protocol_role='val')
     loader_seed = int(cfg.seed or 42)
     loader_generator = torch.Generator()
     loader_generator.manual_seed(loader_seed + 31001)
@@ -775,7 +791,67 @@ if not cfg.test:
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-    if bool(getattr(cfg, 'ct_online_recursive_training', False)):
+    mechanism_data = None
+    mechanism_loader = None
+    mechanism_enabled = dual_stream and any(bool(getattr(
+        cfg, f'ct_enable_{name}', False)) for name in ('b1', 'b2', 'b3'))
+    mechanism_setup_rng = (
+        capture_global_rng_state() if mechanism_enabled else None)
+    if mechanism_enabled:
+        mechanism_cfg = copy.deepcopy(cfg)
+        mechanism_cfg.num_candidates = 1
+        mechanism_cfg.ct_recursive_candidate_views = 1
+        mechanism_cfg.ct_b0_candidate_views = 1
+        mechanism_cfg.ct_b0_candidate_weights = [1.0]
+        mechanism_cfg.candidate_trajectory_mode = 'shared_se2'
+        mechanism_data = get_dataset(
+            mechanism_cfg, type=mechanism_cfg.train_type,
+            split=mechanism_cfg.train_split, protocol_role='train')
+        tracklet_slots = int(getattr(
+            mechanism_cfg, 'ct_recursive_tracklet_slots', 16))
+        if int(mechanism_cfg.batch_size) != tracklet_slots:
+            raise ValueError(
+                "dual-stream mechanism batch_size must equal tracklet slots")
+        mechanism_batch_sampler = OnlineRecursiveBatchSampler(
+            mechanism_data,
+            slots=tracklet_slots,
+            candidate_views=1,
+            seed=loader_seed,
+            partition_seed=int(getattr(
+                mechanism_cfg, 'ct_partition_seed', 42)),
+            partition=str(getattr(
+                mechanism_cfg, 'ct_router_partition', 'train')),
+            shadow_interval=int(getattr(
+                mechanism_cfg, 'ct_router_shadow_interval', 2)),
+            shadow_slots_per_event=int(getattr(
+                mechanism_cfg, 'ct_router_shadow_slots_per_event', 1)),
+            shadow_enabled=bool(getattr(
+                mechanism_cfg, 'ct_enable_b3', False)),
+        )
+        cfg.ct_mechanism_tracklets_observed = len(
+            mechanism_batch_sampler.tracklet_ids)
+        cfg.ct_mechanism_prediction_frames_observed = int(
+            mechanism_batch_sampler.prediction_frames)
+        cfg.ct_mechanism_selection_sha256 = hashlib.sha256(
+            json.dumps(
+                mechanism_batch_sampler.tracklet_ids,
+                separators=(',', ':')).encode('utf-8')).hexdigest()
+        mechanism_generator = torch.Generator()
+        mechanism_generator.manual_seed(loader_seed + 41001)
+        mechanism_loader = DataLoader(
+            mechanism_data,
+            batch_sampler=mechanism_batch_sampler,
+            num_workers=cfg.workers,
+            collate_fn=online_recursive_collate,
+            pin_memory=False,
+            worker_init_fn=seed_loader_worker,
+            generator=mechanism_generator,
+        )
+        # Dataset/sampler construction is not allowed to move the model's
+        # initialization RNG relative to the B0-only arm.
+        restore_global_rng_state(mechanism_setup_rng)
+
+    if bool(getattr(cfg, 'ct_online_recursive_training', False)) and not dual_stream:
         if int(getattr(cfg, 'ct_router_horizon', 3)) != 3:
             raise ValueError("online Joint Full currently requires H=3")
         tracklet_slots = int(getattr(
@@ -819,12 +895,31 @@ if not cfg.test:
             num_workers=cfg.workers, shuffle=True, drop_last=True,
             pin_memory=True, worker_init_fn=seed_loader_worker,
             generator=loader_generator)
+    observation_steps_per_epoch = len(train_loader)
+    mechanism_steps_per_epoch = (
+        len(mechanism_loader) if mechanism_loader is not None else 0)
+    if dual_stream:
+        expected_b0_steps = int(getattr(cfg, 'ct_b0_steps_per_epoch', 0) or 0)
+        if (str(getattr(cfg, 'version', '')) == 'v1.0-mini'
+                and expected_b0_steps
+                and observation_steps_per_epoch != expected_b0_steps):
+            raise ValueError(
+                'dual-stream B0 step contract mismatch: '
+                f'observed {observation_steps_per_epoch}, '
+                f'expected {expected_b0_steps}')
+        cfg.ct_observation_steps_per_epoch_observed = observation_steps_per_epoch
+        cfg.ct_mechanism_steps_per_epoch_observed = mechanism_steps_per_epoch
+    if mechanism_loader is not None:
+        train_loader = DualStreamLoader(train_loader, mechanism_loader)
     val_loader = DataLoader(val_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
+    provenance_datasets = {"train": train_data, "val": val_data}
+    if mechanism_data is not None:
+        provenance_datasets["mechanism"] = mechanism_data
     write_run_provenance(
-        run_root_dir, cfg, {"train": train_data, "val": val_data},
+        run_root_dir, cfg, provenance_datasets,
         mode="train", root=project_root)
     checkpoint_callback = ModelCheckpoint(
-        monitor=str(getattr(cfg, 'checkpoint_monitor', 'precision/test')),
+        monitor=str(getattr(cfg, 'checkpoint_monitor', 'precision/mini_val')),
         mode=str(getattr(cfg, 'checkpoint_mode', 'max')),
         save_last=True,
         save_top_k=cfg.save_top_k)
@@ -835,7 +930,8 @@ if not cfg.test:
     # cross-rank state coordinator exists, multi-device DDP would duplicate
     # tracklets and let the canonical histories silently diverge.
     trainer_devices = (
-        1 if bool(getattr(cfg, 'ct_online_recursive_training', False)) else -1)
+        1 if (dual_stream or bool(getattr(
+            cfg, 'ct_online_recursive_training', False))) else -1)
     trainer = pl.Trainer(devices=trainer_devices, accelerator='auto', max_epochs=cfg.epoch,
                          callbacks=[checkpoint_callback,learningrate_callback],
                          default_root_dir=run_root_dir,

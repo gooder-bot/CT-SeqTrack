@@ -5,7 +5,7 @@ ct_variant: full_minus_b3
 num_candidates: 4
 ct_recursive_candidate_views: 4
 ct_b0_candidate_views: 4
-ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b0_candidate_weights: [0.25, 0.25, 0.25, 0.25]
 ct_b2_candidate_views: 1
 ct_recovery_candidate_policy: "off"
 ct_auxiliary_microbatch_size: 16
@@ -17,5 +17,5 @@ ct_targetness_class_weight_source: online_canonical_preflight
 ct_targetness_positive_weight: 1.0
 ct_targetness_negative_weight: 1.0
 proposal_inference_mode: raw_search
-checkpoint_monitor: success_raw_search/dev
+checkpoint_monitor: success_raw_search/mini_val
 checkpoint_mode: max

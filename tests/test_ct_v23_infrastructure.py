@@ -34,6 +34,14 @@ def base_config():
         "seed": 42,
         "ct_joint_contract_version": 3,
         "ct_online_recursive_training": True,
+        "ct_training_topology": "dual_stream",
+        "ct_b0_training_protocol": "seqtrack_d86990c",
+        "ct_b0_candidate_mode": "independent",
+        "candidate_trajectory_mode": "independent",
+        "ct_b0_steps_per_epoch": 1262,
+        "ct_mechanism_stream": "online_recursive",
+        "ct_mechanism_passes_per_epoch": 1,
+        "ct_mechanism_b0_view": "canonical_only",
         "use_ct_joint_full": True,
         "ct_enable_b1": True,
         "ct_enable_b2": True,
@@ -41,13 +49,12 @@ def base_config():
         "num_candidates": 4,
         "ct_recursive_candidate_views": 4,
         "ct_b0_candidate_views": 4,
-        "ct_b0_candidate_weights": [
-            0.5, 0.1666667, 0.1666667, 0.1666667],
+        "ct_b0_candidate_weights": [0.25, 0.25, 0.25, 0.25],
         "ct_b2_candidate_views": 1,
         "ct_recursive_tracklet_slots": 16,
         "ct_recursive_rollout_horizons": [1, 2, 4, 8],
-        "ct_recursive_reseed_enabled": True,
-        "ct_b0_rng_shift_control": True,
+        "ct_recursive_reseed_enabled": False,
+        "ct_b0_rng_shift_control": False,
         "ct_router_partition": "train",
         "ct_partition_seed": 42,
         "optimizer": "Adam",
@@ -124,7 +131,7 @@ def test_old_candidate_semantics_resume_schema_is_rejected():
         "ct_global_rng_state": {
             "schema": "ct_seqtrack.global_rng.v1"},
     }
-    with pytest.raises(ValueError, match="online_resume_contract.v5"):
+    with pytest.raises(ValueError, match="online_resume_contract.v6"):
         validate_online_resume_contract(checkpoint, config)
 
 
@@ -177,7 +184,7 @@ def test_b1_and_fixed_cv_ablation_configs_are_independent_scratch_runs():
     b1 = load_yaml_config(
         ROOT / 'cfgs' / 'ct_seqtrack' / '24_b1.yaml')
     assert b1['seed'] == 42
-    assert b1['checkpoint_monitor'] == 'b1_nll/dev'
+    assert b1['checkpoint_monitor'] == 'b1_nll/mini_val'
     assert b1['checkpoint_mode'] == 'min'
     assert b1['ct_initialization_policy'] == 'scratch_only'
     fixed_cv = load_yaml_config(

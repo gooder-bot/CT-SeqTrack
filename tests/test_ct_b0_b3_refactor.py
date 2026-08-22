@@ -40,15 +40,24 @@ def test_four_formal_arms_are_single_variant_scratch_configs():
         assert config["ct_training_state_policy"] == "observation"
         assert config["ct_module_isolation"] == "strict"
         assert config["save_top_k"] == 0
+        if variant == "b0":
+            assert config["checkpoint_monitor"] == "success/mini_val"
         assert config["num_candidates"] == 4
         assert config["ct_recursive_candidate_views"] == 4
         assert config["ct_b0_candidate_views"] == 4
         assert config["ct_b0_candidate_weights"] == [
-            0.5, 0.1666667, 0.1666667, 0.1666667]
+            0.25, 0.25, 0.25, 0.25]
+        assert config["ct_training_topology"] == "dual_stream"
+        assert config["ct_b0_training_protocol"] == "seqtrack_d86990c"
+        assert config["ct_b0_candidate_mode"] == "independent"
+        assert config["ct_b0_steps_per_epoch"] == 1262
+        assert config["ct_mechanism_stream"] == "online_recursive"
+        assert config["ct_mechanism_passes_per_epoch"] == 1
+        assert config["ct_mechanism_b0_view"] == "canonical_only"
         assert config["ct_b2_candidate_views"] == 1
         assert config["ct_recovery_candidate_policy"] == "off"
-        assert config["ct_recursive_reseed_enabled"] is True
-        assert config["ct_b0_rng_shift_control"] is True
+        assert config["ct_recursive_reseed_enabled"] is False
+        assert config["ct_b0_rng_shift_control"] is False
         if variant in ("full_minus_b3", "full"):
             assert config["ct_targetness_class_weight_source"] == (
                 "online_canonical_preflight")
@@ -56,9 +65,7 @@ def test_four_formal_arms_are_single_variant_scratch_configs():
             assert config["ct_targetness_negative_weight"] == 1.0
 
 
-def test_candidate1_control_changes_only_b0_view_protocol():
-    proposed = load_yaml_config(
-        ROOT / "cfgs" / "ct_seqtrack" / "24_b0.yaml")
+def test_candidate1_control_is_retained_as_non_runnable_history():
     control = load_yaml_config(
         ROOT / "cfgs" / "ct_seqtrack" /
         "24_b0_candidate1_control.yaml")
@@ -66,14 +73,7 @@ def test_candidate1_control_changes_only_b0_view_protocol():
     assert control["ct_recursive_candidate_views"] == 1
     assert control["ct_b0_candidate_views"] == 1
     assert control["ct_b0_candidate_weights"] == [1.0]
-    ignored = {
-        "experiment_name", "num_candidates", "ct_recursive_candidate_views",
-        "ct_b0_candidate_views", "ct_b0_candidate_weights",
-    }
-    assert ({key: value for key, value in proposed.items()
-             if key not in ignored}
-            == {key: value for key, value in control.items()
-                if key not in ignored})
+    assert control["ct_protocol_status"] == "historical_2x2_do_not_run"
 
 
 def test_b0_normalization_removes_inherited_b1_b2_runtime_switches():
@@ -132,6 +132,22 @@ def test_preflight_and_b2_promotion_are_not_startup_requirements():
     assert "scratch Full requires --b2_method_promotion" not in source
     assert "optional acquisition preflight was ignored" in source
     assert "optional B2 promotion was ignored" in source
+
+
+def test_dual_stream_restores_a_b0_only_dataset_config_and_prefix_audit():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    model_source = (ROOT / "models" / "seqtrack3d.py").read_text(
+        encoding="utf-8")
+    assert "observation_cfg.ct_variant = 'b0'" in main_source
+    assert "configure_ct_variant(observation_cfg)" in main_source
+    assert "capture_global_rng_state() if mechanism_enabled" in main_source
+    assert "restore_global_rng_state(mechanism_setup_rng)" in main_source
+    assert "ct_b0_prefix_hashes" in model_source
+    assert "update_step in (1, 100)" in model_source
+    smoke_source = (ROOT / "tools" / "check_train_steps.py").read_text(
+        encoding="utf-8")
+    assert "0.25, 0.25, 0.25, 0.25" in smoke_source
+    assert "0.5, 0.1666667" not in smoke_source
 
 
 def test_memory_promotion_requires_both_paired_controls():

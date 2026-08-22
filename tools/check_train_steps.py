@@ -52,8 +52,9 @@ def validate_config(path: Path) -> dict:
             + json.dumps(mismatches, ensure_ascii=False, sort_keys=True)
         )
     if list(config.get("ct_b0_candidate_weights", [])) != [
-            0.5, 0.1666667, 0.1666667, 0.1666667]:
-        raise ValueError("formal B0 four-view weights are not frozen")
+            0.25, 0.25, 0.25, 0.25]:
+        raise ValueError(
+            "formal d86990c B0 candidate weights are not equal")
     return config
 
 

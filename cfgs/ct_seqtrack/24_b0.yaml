@@ -12,10 +12,10 @@ ct_initialization_policy: scratch_only
 num_candidates: 4
 ct_recursive_candidate_views: 4
 ct_b0_candidate_views: 4
-ct_b0_candidate_weights: [0.5, 0.1666667, 0.1666667, 0.1666667]
+ct_b0_candidate_weights: [0.25, 0.25, 0.25, 0.25]
 ct_b2_candidate_views: 1
 ct_recovery_candidate_policy: "off"
-ct_recursive_reseed_enabled: true
-ct_b0_rng_shift_control: true
+ct_recursive_reseed_enabled: false
+ct_b0_rng_shift_control: false
 proposal_inference_mode: observation
 save_top_k: 0

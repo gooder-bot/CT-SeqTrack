@@ -1220,7 +1220,7 @@ class BaseModelMF(pl.LightningModule):
                 row = dict(row)
                 row["tracklet_id"] = int(batch_idx)
                 row["epoch"] = epoch_number
-                row["partition"] = "dev"
+                row["partition"] = "mini_val"
                 self._v3_validation_proposal_diagnostics.append(row)
         end_time = time.time()
         runtime = end_time-start_time
@@ -1231,8 +1231,8 @@ class BaseModelMF(pl.LightningModule):
         self.success_step(torch.tensor(ious, device=self.device))
         self.prec_step(torch.tensor(distances, device=self.device))
 
-        self.log('success/test', self.success, on_epoch=True)
-        self.log('precision/test', self.prec, on_epoch=True)
+        self.log('success/mini_val', self.success, on_epoch=True)
+        self.log('precision/mini_val', self.prec, on_epoch=True)
         proposal_rows = getattr(self, '_proposal_sequence_diagnostics', [])
         b1_rows = [
             row for row in proposal_rows
@@ -1256,13 +1256,13 @@ class BaseModelMF(pl.LightningModule):
                  for row in b1_rows],
                 device=self.device, dtype=torch.float32).mean()
             self.log(
-                'b1_nll/dev', b1_nll, on_step=False, on_epoch=True,
+                'b1_nll/mini_val', b1_nll, on_step=False, on_epoch=True,
                 batch_size=len(b1_rows))
             self.log(
-                'b1_learned_motion_mse/dev', learned_mse,
+                'b1_learned_motion_mse/mini_val', learned_mse,
                 on_step=False, on_epoch=True, batch_size=len(b1_rows))
             self.log(
-                'b1_kinematic_mse/dev', kinematic_mse,
+                'b1_kinematic_mse/mini_val', kinematic_mse,
                 on_step=False, on_epoch=True, batch_size=len(b1_rows))
         if (hasattr(self, 'ct_observation_success') and proposal_rows
                 and all('observation_iou' in row
@@ -1275,18 +1275,18 @@ class BaseModelMF(pl.LightningModule):
                 [float(row['raw_search_iou']) for row in proposal_rows],
                 device=self.device)
             # Tracking initializes frame 0 from GT.  Include that endpoint so
-            # observation/raw-search dev Success is directly comparable with
-            # matched B0 success/test and with the official sequence metric.
+            # observation/raw-search mini_val Success is directly comparable
+            # with matched B0 and with the official sequence metric.
             frame0_iou = observation_ious.new_ones((1,))
             observation_ious = torch.cat((frame0_iou, observation_ious))
             raw_search_ious = torch.cat((frame0_iou, raw_search_ious))
             self.ct_observation_success(observation_ious)
             self.ct_raw_search_success(raw_search_ious)
             self.log(
-                'success_observation/dev', self.ct_observation_success,
+                'success_observation/mini_val', self.ct_observation_success,
                 on_epoch=True, batch_size=len(proposal_rows) + 1)
             self.log(
-                'success_raw_search/dev', self.ct_raw_search_success,
+                'success_raw_search/mini_val', self.ct_raw_search_success,
                 on_epoch=True, batch_size=len(proposal_rows) + 1)
 
         self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
@@ -1299,7 +1299,7 @@ class BaseModelMF(pl.LightningModule):
         self.prec_step.reset()
 
     def on_validation_epoch_end(self):
-        self.logger.experiment.add_scalars('metrics/test',
+        self.logger.experiment.add_scalars('metrics/mini_val',
                                     {'success': self.success.compute(),
                                         'precision': self.prec.compute(),},
                                     global_step=self.global_step)
@@ -2294,15 +2294,22 @@ class MotionBaseModelMF(BaseModelMF):
             # Online history is already recursive and expressed in the latest
             # predicted anchor.  Expose an explicit motion contract rather than
             # reusing legacy dynamics fields with different target semantics.
+            online_motion_anchor = torch.tensor(
+                coordinate_anchor[None, :],
+                device=self.device, dtype=torch.float32)
             data_dict.update({
                 "motion_main_ref_boxs": data_dict["ref_boxs"],
                 "motion_main_delta_t": data_dict["delta_t_effective"],
                 "motion_main_current_delta_t": data_dict[
                     "current_delta_t_effective"],
                 "motion_main_valid_mask": data_dict["valid_mask"],
-                "motion_main_anchor": torch.tensor(
-                    coordinate_anchor[None, :],
-                    device=self.device, dtype=torch.float32),
+                "motion_main_anchor": online_motion_anchor,
+                # The online B1 prior and B2 support are expressed in the same
+                # latest recursive crop frame.  Keep both contract-v3 names as
+                # references to the exact same tensor so identity conversion is
+                # bitwise and the two coordinate systems cannot drift apart.
+                "motion_source_anchor": online_motion_anchor,
+                "coordinate_anchor": online_motion_anchor,
             })
             if use_search_evidence_v3:
                 # Both branches own references to the same online recursive
