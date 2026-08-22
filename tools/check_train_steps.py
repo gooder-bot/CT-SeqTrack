@@ -100,7 +100,10 @@ def main() -> None:
     )
     parser.add_argument("--cfg", type=Path, required=True)
     parser.add_argument("--path", default=None)
-    parser.add_argument("--steps", type=int, default=1)
+    parser.add_argument(
+        "--steps", type=int, default=8,
+        help=("bounded observation steps; use at least 8 for dual-stream "
+              "plugin arms so the first scheduled mechanism transaction runs"))
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--preloading", action="store_true")

@@ -7056,6 +7056,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
     def _process_online_raw(
             self, raw, state, motion_prediction=None, state_diagnostics=None):
+        # The public/formal config describes the restored independent B0
+        # observation stream.  Online recursive mechanism crops retain the
+        # coherent shared-SE(2) contract and must not accidentally be parsed
+        # with the observation candidate mode.
+        processing_config = getattr(
+            self, '_ct_mechanism_processing_config', None)
+        if processing_config is None:
+            processing_config = copy.deepcopy(self.config)
+            processing_config.candidate_trajectory_mode = 'shared_se2'
+            processing_config.num_candidates = 1
+            processing_config.ct_recursive_candidate_views = 1
+            processing_config.ct_b0_candidate_views = 1
+            processing_config.ct_b0_candidate_weights = [1.0]
+            self._ct_mechanism_processing_config = processing_config
         payload = {
             key: value for key, value in raw.items()
             if key not in (
@@ -7064,7 +7078,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         }
         contract = build_recursive_input_contract(
             state, raw['this_frame_id'], len(raw['prev_frame_ids']),
-            self.config, candidate_id=raw['candidate_id'],
+            processing_config, candidate_id=raw['candidate_id'],
             offsets=raw['history_offsets'],
             epoch=raw.get('online_epoch', 0))
         if (contract['history_frame_ids'] != list(raw['prev_frame_ids'])
@@ -7094,7 +7108,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if 'motion_aux_frame_ids' in raw:
             aux_contract = build_recursive_input_contract(
                 state, raw['this_frame_id'],
-                len(raw['motion_aux_frame_ids']), self.config,
+                len(raw['motion_aux_frame_ids']), processing_config,
                 candidate_id=raw['candidate_id'],
                 offsets=raw['motion_aux_offsets'],
                 epoch=raw.get('online_epoch', 0))
@@ -7105,7 +7119,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise RuntimeError(
                     "raw/state auxiliary history contract mismatch")
             payload['online_motion_aux_state'] = aux_contract
-        processed = motion_processing_mf(payload, self.config)
+        processed = motion_processing_mf(payload, processing_config)
         candidate_consistent = online_candidate_state_consistent(
             processed, contract['target_size'])
         if not candidate_consistent:

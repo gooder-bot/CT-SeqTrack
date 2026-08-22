@@ -144,10 +144,15 @@ def test_dual_stream_restores_a_b0_only_dataset_config_and_prefix_audit():
     assert "restore_global_rng_state(mechanism_setup_rng)" in main_source
     assert "ct_b0_prefix_hashes" in model_source
     assert "update_step in (1, 100)" in model_source
+    assert "_ct_mechanism_processing_config" in model_source
+    assert "processing_config.candidate_trajectory_mode = 'shared_se2'" in (
+        model_source)
+    assert "motion_processing_mf(payload, processing_config)" in model_source
     smoke_source = (ROOT / "tools" / "check_train_steps.py").read_text(
         encoding="utf-8")
     assert "0.25, 0.25, 0.25, 0.25" in smoke_source
     assert "0.5, 0.1666667" not in smoke_source
+    assert '"--steps", type=int, default=8' in smoke_source
 
 
 def test_memory_promotion_requires_both_paired_controls():
