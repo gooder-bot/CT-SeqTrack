@@ -31,6 +31,7 @@ from utils.sampling_utils import (
     sample_candidate_offset,
     sample_point_sampling_seed,
     deterministic_candidate_offset,
+    deterministic_candidate_retry_index,
     deterministic_point_seed,
     prune_seqtrack_observation_payload,
     stable_uint32_seed,
@@ -2410,8 +2411,23 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 raise TypeError(
                     "online recursive sampler requires structured batch indices")
             return self._online_raw_view(*index)
+        retry_attempt = 0
+        expected_candidate_id = None
+        if isinstance(index, tuple):
+            if (len(index) != 4
+                    or index[0] != 'ct_stateless_observation_retry'):
+                raise TypeError(
+                    "observation sampler received an invalid structured index")
+            _, index, retry_attempt, expected_candidate_id = index
+            index = int(index)
+            retry_attempt = int(retry_attempt)
+            expected_candidate_id = int(expected_candidate_id)
         anno_id = self.get_anno_index(index)
-        candidate_id = self.get_candidate_index(index) 
+        candidate_id = self.get_candidate_index(index)
+        if (expected_candidate_id is not None
+                and int(candidate_id) != expected_candidate_id):
+            raise RuntimeError(
+                "stateless observation retry changed candidate_id")
         try:
             tracklet_id, this_frame_id = self._locate_tracklet(anno_id)
             frame_ids = (0, this_frame_id)
@@ -2501,12 +2517,25 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 candidate_id, offsets,
                 motion_aux_offsets=motion_aux_offsets,
                 sample_index=anno_id)
-        except AssertionError:
+        except AssertionError as error:
             if str(getattr(
                     self.config, 'ct_observation_rng_mode', 'legacy'
                     )).strip().lower() == 'stateless_seqtrack':
-                retry_rng = np.random.default_rng(stable_uint32_seed(
+                max_attempts = int(getattr(
+                    self.config, 'ct_observation_retry_max_attempts', 64))
+                if max_attempts <= 0:
+                    raise ValueError(
+                        "ct_observation_retry_max_attempts must be positive")
+                if retry_attempt >= max_attempts:
+                    raise RuntimeError(
+                        "stateless observation retry exhausted "
+                        f"{max_attempts} attempts for candidate{candidate_id}"
+                    ) from error
+                retry_index = deterministic_candidate_retry_index(
+                    index, len(self), int(self.num_candidates),
                     int(getattr(self.config, 'seed', 42) or 42),
-                    'observation-retry', self.epoch, int(index)))
-                return self[int(retry_rng.integers(0, len(self)))]
+                    self.epoch, retry_attempt)
+                return self[(
+                    'ct_stateless_observation_retry', retry_index,
+                    retry_attempt + 1, int(candidate_id))]
             return self[torch.randint(0, len(self), size=(1,)).item()]

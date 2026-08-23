@@ -17,6 +17,7 @@ from utils.online_contract import (
 from utils.sampling_utils import (
     StatelessCandidateBatchSampler,
     deterministic_candidate_offset,
+    deterministic_candidate_retry_index,
     deterministic_point_seed,
     prune_seqtrack_observation_payload,
 )
@@ -122,6 +123,24 @@ def test_stateless_candidate_and_point_roles_are_identity_stable():
         deterministic_point_seed(config, "history", 7))
     assert deterministic_point_seed(config, "history", 7) != (
         deterministic_point_seed(config, "current", 7))
+
+
+def test_stateless_retry_changes_annotation_but_preserves_candidate_branch():
+    initial = [5 * 4 + candidate_id for candidate_id in range(4)]
+    first = [
+        deterministic_candidate_retry_index(
+            index, dataset_length=64, candidate_views=4,
+            seed=42, epoch=3, attempt=0)
+        for index in initial]
+    replay = [
+        deterministic_candidate_retry_index(
+            index, dataset_length=64, candidate_views=4,
+            seed=42, epoch=3, attempt=0)
+        for index in initial]
+
+    assert first == replay
+    assert [index % 4 for index in first] == [0, 1, 2, 3]
+    assert all(index // 4 != 5 for index in first)
 
 
 def test_b0_candidate_loss_is_half_canonical_half_auxiliary():

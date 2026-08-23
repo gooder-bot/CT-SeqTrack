@@ -144,6 +144,30 @@ def deterministic_point_seed(config, *seed_parts):
     return stable_uint32_seed(base_seed, "points", *seed_parts)
 
 
+def deterministic_candidate_retry_index(
+        index, dataset_length, candidate_views, seed, epoch, attempt):
+    """Choose another annotation without moving the candidate branch."""
+    index = int(index)
+    dataset_length = int(dataset_length)
+    candidate_views = int(candidate_views)
+    attempt = int(attempt)
+    if candidate_views <= 0 or dataset_length <= 0:
+        raise ValueError("retry dataset and candidate counts must be positive")
+    if dataset_length % candidate_views:
+        raise ValueError(
+            "retry dataset length must be divisible by candidate views")
+    annotation_count = dataset_length // candidate_views
+    candidate_id = index % candidate_views
+    annotation_id = index // candidate_views
+    rng = np.random.default_rng(stable_uint32_seed(
+        int(seed), "observation-retry", int(epoch), index,
+        candidate_id, attempt))
+    retry_annotation_id = int(rng.integers(0, annotation_count))
+    if annotation_count > 1 and retry_annotation_id == annotation_id:
+        retry_annotation_id = (retry_annotation_id + 1) % annotation_count
+    return retry_annotation_id * candidate_views + candidate_id
+
+
 def sample_candidate_offset(candidate_id, config):
     if int(candidate_id) == 0:
         return np.zeros(3, dtype=np.float32)
