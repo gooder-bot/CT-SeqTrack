@@ -30,6 +30,7 @@ from datasets.sampler import (
     online_recursive_collate,
 )
 from utils.dual_stream import DualStreamLoader
+from utils.sampling_utils import StatelessCandidateBatchSampler
 from utils.training_isolation import (
     capture_global_rng_state,
     restore_global_rng_state,
@@ -741,7 +742,11 @@ if (bool(getattr(cfg, 'ct_online_recursive_training', False))
     if cfg.checkpoint is not None:
         validate_online_resume_checkpoint(cfg.checkpoint, cfg)
 if cfg.seed is not None:
-    seed_everything(cfg.seed)
+    seed_everything(
+        cfg.seed,
+        workers=str(getattr(
+            cfg, 'ct_observation_rng_mode', 'legacy')).strip().lower()
+        == 'stateless_seqtrack')
     
 env_cp = os.environ.copy()
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -765,9 +770,12 @@ if not cfg.test:
     dual_stream = str(getattr(
         cfg, 'ct_training_topology', 'legacy')).strip().lower() == 'dual_stream'
     observation_cfg = copy.deepcopy(cfg)
+    safe_auto = str(getattr(
+        cfg, 'ct_runtime_protocol', 'legacy')).strip().lower() == (
+            'safe_seqtrack_auto_v1')
     if dual_stream:
-        # Restore the clean d86990c B0 transaction without changing the model
-        # or the causal B1--B3 data contract.  This copy is dataset-only.
+        # Build the observation-only SeqTrack transaction without changing
+        # the causal B1--B3 mechanism contract.  This copy is dataset-only.
         observation_cfg.ct_variant = 'b0'
         configure_ct_variant(observation_cfg)
         observation_cfg.ct_online_recursive_training = False
@@ -775,6 +783,8 @@ if not cfg.test:
         observation_cfg.num_candidates = 4
         observation_cfg.ct_b0_candidate_views = 4
         observation_cfg.ct_recursive_candidate_views = 4
+        if safe_auto:
+            observation_cfg.ct_observation_payload_mode = 'seqtrack_core'
     train_data = get_dataset(
         observation_cfg, type=observation_cfg.train_type,
         split=observation_cfg.train_split, protocol_role='train')
@@ -890,11 +900,30 @@ if not cfg.test:
             generator=loader_generator,
         )
     else:
-        train_loader = DataLoader(
-            train_data, batch_size=cfg.batch_size,
-            num_workers=cfg.workers, shuffle=True, drop_last=True,
-            pin_memory=True, worker_init_fn=seed_loader_worker,
-            generator=loader_generator)
+        observation_batch_sampler = None
+        if safe_auto:
+            observation_batch_sampler = StatelessCandidateBatchSampler(
+                train_data,
+                batch_size=int(cfg.batch_size),
+                candidate_views=int(getattr(
+                    cfg, 'ct_b0_candidate_views', 4)),
+                seed=loader_seed,
+                drop_last=True,
+            )
+        if observation_batch_sampler is not None:
+            train_loader = DataLoader(
+                train_data,
+                batch_sampler=observation_batch_sampler,
+                num_workers=cfg.workers,
+                pin_memory=True,
+                worker_init_fn=seed_loader_worker,
+                generator=loader_generator)
+        else:
+            train_loader = DataLoader(
+                train_data, batch_size=cfg.batch_size,
+                num_workers=cfg.workers, shuffle=True, drop_last=True,
+                pin_memory=True, worker_init_fn=seed_loader_worker,
+                generator=loader_generator)
     observation_steps_per_epoch = len(train_loader)
     mechanism_steps_per_epoch = (
         len(mechanism_loader) if mechanism_loader is not None else 0)
@@ -909,9 +938,20 @@ if not cfg.test:
                 f'expected {expected_b0_steps}')
         cfg.ct_observation_steps_per_epoch_observed = observation_steps_per_epoch
         cfg.ct_mechanism_steps_per_epoch_observed = mechanism_steps_per_epoch
-    if mechanism_loader is not None:
-        train_loader = DualStreamLoader(train_loader, mechanism_loader)
-    val_loader = DataLoader(val_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
+    if mechanism_loader is not None or safe_auto:
+        train_loader = DualStreamLoader(
+            train_loader, mechanism_loader,
+            schema=(
+                'ct_seqtrack.train.v2' if safe_auto
+                else 'ct_seqtrack.dual_stream.v1'),
+            isolate_mechanism_rng=safe_auto)
+    validation_generator = torch.Generator()
+    validation_generator.manual_seed(loader_seed + 51001)
+    val_loader = DataLoader(
+        val_data, batch_size=1, num_workers=cfg.workers,
+        collate_fn=lambda x: x, pin_memory=True,
+        worker_init_fn=seed_loader_worker,
+        generator=validation_generator)
     provenance_datasets = {"train": train_data, "val": val_data}
     if mechanism_data is not None:
         provenance_datasets["mechanism"] = mechanism_data
@@ -935,6 +975,7 @@ if not cfg.test:
     trainer = pl.Trainer(devices=trainer_devices, accelerator='auto', max_epochs=cfg.epoch,
                          callbacks=[checkpoint_callback,learningrate_callback],
                          default_root_dir=run_root_dir,
+                         precision=int(getattr(cfg, 'precision', 32)),
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,
                          num_sanity_val_steps=0,
                           # Contract-v3 owns unscale/clip/step per optimizer;

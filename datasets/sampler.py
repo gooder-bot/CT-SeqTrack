@@ -32,6 +32,8 @@ from utils.sampling_utils import (
     sample_point_sampling_seed,
     deterministic_candidate_offset,
     deterministic_point_seed,
+    prune_seqtrack_observation_payload,
+    stable_uint32_seed,
 )
 from utils.candidate_utils import (
     anchor_relative_trajectory_targets,
@@ -60,6 +62,7 @@ from utils.ct_search import (
     stratified_search_sample,
     useful_search_coverage_need,
 )
+
 from utils.replay_cache import RecursiveReplayCache, replay_config_sha256
 from utils.recursive_state import (
     OnlineRecursiveBatchSampler,
@@ -1947,6 +1950,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                           'this_bc': this_bc.astype('float32'),
                           'candidate_bc': candidate_bc.astype('float32')})
 
+    if str(getattr(
+            config, 'ct_observation_payload_mode', 'legacy'
+            )).strip().lower() == 'seqtrack_core':
+        data_dict = prune_seqtrack_observation_payload(data_dict)
+
     return data_dict
 
 
@@ -1961,6 +1969,7 @@ class PointTrackingSampler(torch.utils.data.Dataset):
         self.config = config
         self.random_sample = random_sample
         self.num_candidates = getattr(config, 'num_candidates', 1)
+        self.epoch = 0
         if getattr(self.config, "use_augmentation", False):
             print('using augmentation')
             self.transform = points_utils.apply_augmentation
@@ -1972,6 +1981,10 @@ class PointTrackingSampler(torch.utils.data.Dataset):
             for i in range(dataset.get_num_tracklets()):
                 num_frames_total += dataset.get_num_frames_tracklet(i)
                 self.tracklet_start_ids.append(num_frames_total)
+
+    def set_epoch(self, epoch):
+        """Select the stateless observation RNG domain for one epoch."""
+        self.epoch = int(epoch)
 
     def get_anno_index(self, index):
         return index // self.num_candidates 
@@ -2450,10 +2463,50 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             else:
                 offsets = self._sample_history_offsets()
                 motion_aux_offsets = None
-            return self._build_view(tracklet_id, this_frame_id, first_frame, this_frame,
-                                    candidate_id, offsets,
-                                    motion_aux_offsets=motion_aux_offsets,
-                                    sample_index=anno_id)
+            if str(getattr(
+                    self.config, 'ct_observation_rng_mode', 'legacy'
+                    )).strip().lower() == 'stateless_seqtrack':
+                prev_frame_ids, _ = get_history_frame_ids_and_masks(
+                    this_frame_id, self.dataset.hist_num, offsets=offsets)
+                tracklet_key = (
+                    self.dataset.get_tracklet_key(tracklet_id)
+                    if hasattr(self.dataset, 'get_tracklet_key')
+                    else str(tracklet_id))
+                candidate_offset_map = {
+                    int(frame_id): deterministic_candidate_offset(
+                        candidate_id, self.config, 'observation', self.epoch,
+                        tracklet_key, int(this_frame_id), int(frame_id))
+                    for frame_id in prev_frame_ids
+                }
+                point_sampling_seed_map = {
+                    int(frame_id): deterministic_point_seed(
+                        self.config, 'observation', self.epoch, tracklet_key,
+                        int(this_frame_id), int(candidate_id), 'history',
+                        int(frame_id))
+                    for frame_id in prev_frame_ids
+                }
+                current_sampling_seed = deterministic_point_seed(
+                    self.config, 'observation', self.epoch, tracklet_key,
+                    int(this_frame_id), int(candidate_id), 'current')
+                return self._build_view(
+                    tracklet_id, this_frame_id, first_frame, this_frame,
+                    candidate_id, offsets,
+                    candidate_offset_map=candidate_offset_map,
+                    point_sampling_seed_map=point_sampling_seed_map,
+                    current_sampling_seed=current_sampling_seed,
+                    motion_aux_offsets=motion_aux_offsets,
+                    sample_index=anno_id)
+            return self._build_view(
+                tracklet_id, this_frame_id, first_frame, this_frame,
+                candidate_id, offsets,
+                motion_aux_offsets=motion_aux_offsets,
+                sample_index=anno_id)
         except AssertionError:
-            # return 1
+            if str(getattr(
+                    self.config, 'ct_observation_rng_mode', 'legacy'
+                    )).strip().lower() == 'stateless_seqtrack':
+                retry_rng = np.random.default_rng(stable_uint32_seed(
+                    int(getattr(self.config, 'seed', 42) or 42),
+                    'observation-retry', self.epoch, int(index)))
+                return self[int(retry_rng.integers(0, len(self)))]
             return self[torch.randint(0, len(self), size=(1,)).item()]

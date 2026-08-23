@@ -1,0 +1,9 @@
+_base_: 25_full_minus_b3.yaml
+
+experiment_name: ct25_safe_full_scratch_seed42
+ct_variant: full
+ct_require_action_calibration: true
+ct_action_calibration_path: null
+ct_calibration_tracklet_manifest_sha256: null
+proposal_inference_mode: observation
+

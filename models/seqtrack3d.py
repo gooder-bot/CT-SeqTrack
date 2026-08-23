@@ -117,9 +117,11 @@ from utils.training_isolation import (
     contract_v3_action_probability,
     freeze_batchnorm_running_stats,
     isolated_constructor_rng,
+    partition_named_parameter_groups,
     partition_candidate_view_items,
     restore_global_rng_state,
     update_cumulative_binary_class_balance,
+    weighted_candidate_sum,
 )
 from utils.online_contract import (
     build_online_resume_contract,
@@ -188,6 +190,26 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "contract-v3 B3 requires ct_b2_promotion_passed=True")
         self.ct_separate_optimizers = bool(getattr(
             config, 'ct_separate_optimizers', False))
+        self.ct_runtime_protocol = str(getattr(
+            config, 'ct_runtime_protocol', 'legacy')).strip().lower()
+        self.ct_optimizer_topology = str(getattr(
+            config, 'ct_optimizer_topology',
+            'isolated_manual' if self.ct_separate_optimizers
+            else 'legacy_single')).strip().lower()
+        self.ct_unified_auto = (
+            self.ct_runtime_protocol == 'safe_seqtrack_auto_v1'
+            and self.ct_optimizer_topology == 'unified_auto')
+        self.ct_cuda_stage_audit = bool(getattr(
+            config, 'ct_cuda_stage_audit', False))
+        self._ct_cuda_stage_current = {}
+        self._ct_cuda_stage_max = {}
+        self.ct_observation_fingerprint_steps = int(getattr(
+            config, 'ct_observation_fingerprint_steps', 0))
+        self._ct_observation_batch_fingerprints = []
+        if self.ct_unified_auto and self.ct_separate_optimizers:
+            raise ValueError(
+                "safe unified automatic optimization cannot enable "
+                "ct_separate_optimizers")
         self.ct_manual_amp_enabled = bool(getattr(
             config, 'ct_manual_amp_enabled', False))
         self.ct_b0_rng_shift_control = bool(getattr(
@@ -244,6 +266,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 torch.tensor(initial_negative_weight, dtype=torch.float64))
         if self.ct_separate_optimizers:
             self.automatic_optimization = False
+        elif self.ct_unified_auto:
+            self.automatic_optimization = True
         self.ct_plugin_rng = (
             CheckpointableRNG(
                 int(getattr(config, 'seed', 42) or 42) + 24001)
@@ -253,6 +277,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             CheckpointableRNG(
                 int(getattr(config, 'seed', 42) or 42) + 24002)
             if (self.ct_joint_contract_version >= 3
+                and not self.ct_unified_auto
                 and self.ct_b0_candidate_views > 1) else None)
         self.ct_memory_control_rng = (
             CheckpointableRNG(
@@ -264,7 +289,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self._ct_b0_scaler = None
         self._ct_plugin_scaler = None
         self._ct_pending_scaler_state = None
-        if self.ct_separate_optimizers:
+        if self.ct_separate_optimizers or self.ct_unified_auto:
             for module_name in ('b0', 'b1', 'b2', 'b3'):
                 self.register_buffer(
                     f'ct_{module_name}_update_step',
@@ -1579,6 +1604,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._b2_v3_verified_dual_query_gradient = False
 
     def on_after_backward(self):
+        self._ct_record_cuda_stage('backward')
         if (not self.b2_v3_freeze_candidate_producers
                 or not self.use_asymmetric_dual_query
                 or bool(getattr(
@@ -1665,14 +1691,23 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             checkpoint['ct_isolated_scalers'] = {
                 name: scaler.state_dict()
                 for name, scaler in self._ct_scalers.items()}
+        if self.ct_separate_optimizers or self.ct_unified_auto:
             optimizer_lrs = {}
             trainer_optimizers = list(getattr(
                 getattr(self, '_trainer', None), 'optimizers', []))
-            for name, optimizer in zip(
-                    getattr(self, '_ct_optimizer_names', ()),
-                    trainer_optimizers):
-                optimizer_lrs[name] = [
-                    float(group['lr']) for group in optimizer.param_groups]
+            if self.ct_unified_auto and trainer_optimizers:
+                optimizer_lrs = {
+                    str(group.get('name', f'group_{index}')):
+                    [float(group['lr'])]
+                    for index, group in enumerate(
+                        trainer_optimizers[0].param_groups)}
+            else:
+                for name, optimizer in zip(
+                        getattr(self, '_ct_optimizer_names', ()),
+                        trainer_optimizers):
+                    optimizer_lrs[name] = [
+                        float(group['lr'])
+                        for group in optimizer.param_groups]
             module_hashes = {}
             for name, parameters in getattr(
                     self, '_ct_named_parameters_by_module', {}).items():
@@ -1685,8 +1720,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     digest.update(tensor.numpy().tobytes())
                 module_hashes[name] = digest.hexdigest()
             checkpoint['ct_module_audit'] = {
-                'schema': 'ct_seqtrack.module_audit.v1',
+                'schema': 'ct_seqtrack.module_audit.v2',
                 'epoch': int(getattr(self, 'current_epoch', 0)),
+                'runtime_protocol': self.ct_runtime_protocol,
+                'optimizer_topology': self.ct_optimizer_topology,
+                'parameter_groups': list(getattr(
+                    self, '_ct_optimizer_names', ())),
                 'parameter_sha256': module_hashes,
                 'optimizer_lr': optimizer_lrs,
                 'update_steps': {
@@ -1698,10 +1737,39 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             }
             checkpoint['ct_b0_prefix_hashes'] = copy.deepcopy(getattr(
                 self, '_ct_b0_prefix_hashes', {}))
+            checkpoint['ct_cuda_stage_audit'] = copy.deepcopy(getattr(
+                self, '_ct_cuda_stage_max', {}))
+            checkpoint['ct_observation_batch_fingerprints'] = copy.deepcopy(
+                getattr(self, '_ct_observation_batch_fingerprints', []))
+            resolved = json.dumps(
+                dict(self.config), sort_keys=True,
+                separators=(',', ':'), default=str)
+            checkpoint['ct_runtime_identity'] = {
+                'schema': 'ct_seqtrack.runtime_identity.v1',
+                'runtime_protocol': self.ct_runtime_protocol,
+                'resolved_config_sha256': hashlib.sha256(
+                    resolved.encode('utf-8')).hexdigest(),
+                'observation_rng_mode': str(getattr(
+                    self.config, 'ct_observation_rng_mode', 'legacy')),
+                'validation_rng_mode': str(getattr(
+                    self.config, 'ct_validation_rng_mode', 'legacy')),
+                'candidate_policy': str(getattr(
+                    self.config, 'ct_candidate_policy', 'legacy')),
+                'candidate_weights': list(self.ct_b0_candidate_weights),
+                'rng_manifest': {
+                    'seed': int(getattr(self.config, 'seed', 42) or 42),
+                    'epoch': int(getattr(self, 'current_epoch', 0)),
+                    'roles': [
+                        'observation-shuffle', 'candidate', 'points',
+                        'validation'],
+                },
+            }
 
     def on_load_checkpoint(self, checkpoint):
         self._ct_b0_prefix_hashes = copy.deepcopy(
             checkpoint.get('ct_b0_prefix_hashes', {}))
+        self._ct_observation_batch_fingerprints = copy.deepcopy(
+            checkpoint.get('ct_observation_batch_fingerprints', []))
         if (bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
                 and not bool(getattr(self.config, 'test', False))):
@@ -1840,7 +1908,47 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'b2_v3_frozen_reference_hashes')
             if stored_hashes is not None:
                 self._b2_v3_frozen_reference_hashes = dict(stored_hashes)
+    def on_before_optimizer_step(self, optimizer):
+        if self.ct_unified_auto:
+            active = set()
+            norms = {}
+            for name, named_parameters in getattr(
+                    self, '_ct_named_parameters_by_module', {}).items():
+                gradients = [
+                    parameter.grad.detach()
+                    for _, parameter in named_parameters
+                    if parameter.grad is not None]
+                if gradients:
+                    active.add(name)
+                    norms[name] = float(torch.linalg.vector_norm(torch.stack([
+                        torch.linalg.vector_norm(value)
+                        for value in gradients])).detach().cpu())
+            self._ct_pending_auto_updates = active
+            self._ct_last_gradient_norm = norms
+
     def on_train_batch_end(self, outputs, batch, batch_idx):
+        if self.ct_unified_auto:
+            active = set(getattr(
+                self, '_ct_pending_auto_updates', set()))
+            for name in active:
+                getattr(self, f'ct_{name}_update_step').add_(1)
+                setattr(self, f'_ct_{name}_updated_this_epoch', True)
+            if active & {'b1', 'b2', 'b3'}:
+                self.ct_plugin_update_step.add_(1)
+                self._ct_plugin_updated_this_epoch = True
+            if 'b0' in active:
+                update_step = int(self.ct_b0_update_step.item())
+                if update_step in (1, 100):
+                    self._ct_b0_prefix_hashes[f'step_{update_step}'] = (
+                        self._ct_module_parameter_hash('b0'))
+            self._ct_pending_auto_updates = set()
+            self._ct_record_cuda_stage('step')
+            for stage, values in self._ct_cuda_stage_current.items():
+                for name, value in values.items():
+                    self.log(
+                        f'ct_cuda/{stage}_{name}', value,
+                        on_step=True, on_epoch=False,
+                        prog_bar=False, logger=True)
         if self.b2_v3_freeze_candidate_producers:
             verified = int(getattr(
                 self, '_b2_v3_verified_optimizer_steps', 0))
@@ -1861,7 +1969,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if getattr(
                         self, f'_ct_{name}_updated_this_epoch', False):
                     scheduler.step()
-        if self.ct_separate_optimizers and 'b0' in getattr(
+        if (self.ct_separate_optimizers or self.ct_unified_auto) and 'b0' in getattr(
                 self, '_ct_optimizer_names', ()):
             trace = getattr(self, '_ct_b0_prefix_hashes', {})
             trace[f'epoch_{int(self.current_epoch) + 1:03d}'] = (
@@ -2624,11 +2732,62 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             },
         )
         raw_box = evidence_contract.raw_box
+        candidate_available = joint_output[
+            'ct_search_candidate_valid'].reshape(batch_size)
+        router_availability = evidence_contract.structural_available
+        candidate_source = torch.where(
+            candidate_available > 0,
+            torch.full_like(candidate_available, 2.0),
+            torch.zeros_like(candidate_available))
+        candidate_policy = str(getattr(
+            self.config, 'ct_candidate_policy', 'b2_raw')).strip().lower()
+        if candidate_policy == 'prior_backoff':
+            dt = input_dict['search_v3_query_delta_t'].to(
+                current_base_features.device).reshape(batch_size).clamp(
+                    min=0.0)
+            radius = torch.clamp(
+                float(getattr(self.config, 'ct_router_radius_base', 0.5))
+                + float(getattr(
+                    self.config, 'ct_router_radius_per_second', 0.5)) * dt,
+                max=float(getattr(
+                    self.config, 'ct_router_radius_max', 2.0)))
+            prior_residual = (
+                prior_contract.center_xy - observation_box[:, :2])
+            prior_norm = torch.linalg.norm(prior_residual, dim=1)
+            prior_scale = torch.clamp(
+                radius / prior_norm.clamp_min(1e-6), max=1.0)
+            prior_box = observation_box.clone()
+            prior_box[:, :2] = (
+                observation_box[:, :2]
+                + prior_residual * prior_scale.unsqueeze(1))
+            use_b2 = candidate_available > 0
+            use_b1 = (~use_b2) & (prior_contract.valid.reshape(-1) > 0)
+            raw_box = torch.where(
+                use_b2.unsqueeze(1), raw_box,
+                torch.where(
+                    use_b1.unsqueeze(1), prior_box, observation_box))
+            candidate_available = (use_b2 | use_b1).to(
+                observation_box.dtype)
+            router_availability = candidate_available
+            candidate_source = torch.where(
+                use_b2, torch.full_like(candidate_available, 2.0),
+                torch.where(
+                    use_b1, torch.ones_like(candidate_available),
+                    torch.zeros_like(candidate_available)))
+        elif candidate_policy != 'b2_raw':
+            raise ValueError(
+                "ct_candidate_policy must be b2_raw or prior_backoff")
+        joint_output.update({
+            'ct_policy_candidate_box': raw_box,
+            'ct_policy_candidate_valid': candidate_available,
+            # 0=observation fallback, 1=B1 backoff, 2=B2 raw evidence.
+            'ct_policy_candidate_source_id': candidate_source,
+        })
         if self.ct_enable_b3:
             final_box, router_output = self.ct_joint_router(
                 observation_box=observation_box,
                 raw_box=raw_box,
-                availability=evidence_contract.structural_available,
+                availability=router_availability,
                 base_evidence=joint_output['ct_b2_base_evidence'],
                 extension_evidence=joint_output['ct_b2_extension_evidence'],
                 base_presence_probability=joint_output[
@@ -2687,8 +2846,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'ct_router_logit': zeros,
                 'ct_router_gate': zeros,
                 'ct_router_applied_gate': zeros,
-                'ct_router_evidence_valid': joint_output[
-                    'ct_search_candidate_valid'],
+                'ct_router_evidence_valid': candidate_available,
                 'ct_router_bounded_residual_xy': bounded_residual,
                 'ct_router_residual_xy': residual,
                 'ct_router_radius': radius,
@@ -2702,7 +2860,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 final_box = observation_box
             elif mode == 'raw_search':
                 final_box = torch.where(
-                    joint_output['ct_search_candidate_valid'].reshape(
+                    candidate_available.reshape(
                         batch_size, 1).to(torch.bool),
                     raw_box, observation_box)
             elif (self.ct_enable_b3 and mode in (
@@ -2724,7 +2882,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         joint_output.update(router_output)
         joint_output.update({
             'ct_final_box': final_box,
-            'candidate_valid': joint_output['ct_search_candidate_valid'],
+            'candidate_valid': candidate_available,
             'ct_b1_candidate_center_xy': prior_contract.center_xy,
             'ct_b1_candidate_direction_xy': prior_contract.direction_xy,
             'ct_b1_support_alignment_error': support_alignment_error,
@@ -2791,7 +2949,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "'adamonecycle'.")
 
     def configure_optimizers(self):
-        if not self.ct_separate_optimizers:
+        if not (self.ct_separate_optimizers or self.ct_unified_auto):
             return super().configure_optimizers()
         if self.ct_initialization_policy == 'scratch_only':
             enabled_plugins = {
@@ -2814,32 +2972,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         named = [
             (name, parameter) for name, parameter in self.named_parameters()
             if parameter.requires_grad]
-        b0_named = [
-            item for item in named
-            if not self._ct_any_plugin_parameter(item[0])]
-        if not b0_named:
-            raise RuntimeError("strict isolation requires non-empty B0")
-        module_named = {'b0': b0_named}
         enabled = {
             'b1': self.ct_enable_b1,
             'b2': self.ct_enable_b2,
             'b3': self.ct_enable_b3,
         }
-        for group_name in ('b1', 'b2', 'b3'):
-            group = [
-                item for item in named
-                if (self._ct_any_plugin_parameter(item[0])
-                    and self._ct_plugin_group(item[0]) == group_name)]
-            if enabled[group_name]:
-                if not group:
-                    raise RuntimeError(
-                        f"strict isolation requires non-empty {group_name}")
-                module_named[group_name] = group
-        all_parameters = []
-        for group in module_named.values():
-            parameters = [parameter for _, parameter in group]
-            assert_disjoint_parameter_sets(all_parameters, parameters)
-            all_parameters.extend(parameters)
+        module_named = partition_named_parameter_groups(
+            named, self._ct_any_plugin_parameter,
+            self._ct_plugin_group, enabled)
         self._ct_named_parameters_by_module = module_named
         self._ct_optimizer_names = list(module_named)
         self._ct_b0_named_parameters = module_named['b0']
@@ -2853,6 +2993,37 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.config, f'ct_{name}_lr',
                 self.config.lr if name == 'b0' else plugin_lr))
             for name in module_named}
+        if self.ct_unified_auto:
+            if self.config.optimizer.lower() != 'adam':
+                raise ValueError(
+                    "safe_seqtrack_auto_v1 requires Adam with StepLR")
+            parameter_groups = [
+                {
+                    'params': [
+                        parameter for _, parameter in module_named[name]],
+                    'lr': learning_rates[name],
+                    'name': name,
+                }
+                for name in self._ct_optimizer_names
+            ]
+            optimizer = torch.optim.Adam(
+                parameter_groups,
+                lr=float(self.config.lr),
+                weight_decay=float(self.config.wd),
+                betas=(0.5, 0.999), eps=1e-6)
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=self.config.lr_decay_step,
+                gamma=self.config.lr_decay_rate)
+            self._ct_b0_prefix_hashes = {
+                'initial': self._ct_module_parameter_hash('b0')}
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': {
+                    'scheduler': scheduler,
+                    'interval': 'epoch',
+                    'name': 'scheduler_unified_auto',
+                },
+            }
         optimizers = [
             self._build_isolated_optimizer(
                 [parameter for _, parameter in module_named[name]],
@@ -2964,6 +3135,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             return paired_output
 
         b0_auxiliary_only = self._b0_auxiliary_batch(input_dict)
+        observation_only_forward = bool(getattr(
+            self, '_ct_observation_only_forward', False))
         output_dict = {}
         points = self.encode_point_time(input_dict["points"])
         x = points.transpose(1, 2)
@@ -3332,7 +3505,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         updated_aux_box =  delta_motion[:,-1,:]
 
         observation_aux_box = updated_aux_box
-        if b0_auxiliary_only:
+        if b0_auxiliary_only or observation_only_forward:
             return self._finalize_observation_output(
                 input_dict, output_dict, aux_box, observation_aux_box,
                 observation_aux_box, seg_logits, motion_pred,
@@ -6900,10 +7073,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     batch_sampler.set_epoch(int(self.current_epoch))
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        cuda_audit = (
+            self.ct_cuda_stage_audit
+            and torch.device(device).type == 'cuda')
+        if cuda_audit:
+            self._ct_cuda_stage_current = {}
+            torch.cuda.reset_peak_memory_stats(device)
         if (isinstance(batch, dict)
-                and batch.get('ct_stream_schema')
-                == 'ct_seqtrack.dual_stream.v1'):
-            return {
+                and batch.get('ct_stream_schema') in (
+                    'ct_seqtrack.dual_stream.v1',
+                    'ct_seqtrack.train.v2')):
+            transferred = {
                 'ct_stream_schema': batch['ct_stream_schema'],
                 'observation': self._move_batch_to_device(
                     batch['observation'], device),
@@ -6911,14 +7091,74 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 # the current observation optimizer step has completed.
                 'mechanism': batch.get('mechanism'),
             }
-        if (isinstance(batch, list) and batch
+        elif (isinstance(batch, list) and batch
                 and isinstance(batch[0], dict)
                 and batch[0].get('online_recursive_raw', False)):
             # Raw nuScenes PointCloud/Box objects must remain on CPU until the
             # state-aware crop is built inside training_step.
-            return batch
-        return super().transfer_batch_to_device(
-            batch, device, dataloader_idx)
+            transferred = batch
+        else:
+            transferred = super().transfer_batch_to_device(
+                batch, device, dataloader_idx)
+        if cuda_audit:
+            self._ct_record_cuda_stage('batch_transfer', device=device)
+        return transferred
+
+    def _ct_record_cuda_stage(self, stage, device=None):
+        if not self.ct_cuda_stage_audit or not torch.cuda.is_available():
+            return
+        device = torch.device(self.device if device is None else device)
+        if device.type != 'cuda':
+            return
+        values = {
+            'allocated_mb': (
+                torch.cuda.memory_allocated(device) / (1024.0 ** 2)),
+            'reserved_mb': (
+                torch.cuda.memory_reserved(device) / (1024.0 ** 2)),
+            'peak_allocated_mb': (
+                torch.cuda.max_memory_allocated(device) / (1024.0 ** 2)),
+            'peak_reserved_mb': (
+                torch.cuda.max_memory_reserved(device) / (1024.0 ** 2)),
+        }
+        current = self._ct_cuda_stage_current.setdefault(stage, {})
+        lifetime = self._ct_cuda_stage_max.setdefault(stage, {})
+        for name, value in values.items():
+            current[name] = max(float(value), float(current.get(name, 0.0)))
+            lifetime[name] = max(float(value), float(lifetime.get(name, 0.0)))
+
+    def _ct_record_observation_batch_fingerprint(self, batch):
+        limit = int(self.ct_observation_fingerprint_steps)
+        rows = self._ct_observation_batch_fingerprints
+        if limit <= 0 or len(rows) >= limit:
+            return
+        digest = hashlib.sha256()
+
+        def update(path, value):
+            digest.update(str(path).encode('utf-8'))
+            if torch.is_tensor(value):
+                tensor = value.detach().cpu().contiguous()
+                digest.update(str(tensor.dtype).encode('ascii'))
+                digest.update(str(tuple(tensor.shape)).encode('ascii'))
+                digest.update(tensor.numpy().tobytes())
+            elif isinstance(value, np.ndarray):
+                array = np.ascontiguousarray(value)
+                digest.update(str(array.dtype).encode('ascii'))
+                digest.update(str(tuple(array.shape)).encode('ascii'))
+                digest.update(array.tobytes())
+            elif isinstance(value, dict):
+                for key in sorted(value):
+                    update(f'{path}/{key}', value[key])
+            elif isinstance(value, (tuple, list)):
+                for index, item in enumerate(value):
+                    update(f'{path}/{index}', item)
+            else:
+                digest.update(repr(value).encode('utf-8'))
+
+        update('observation', batch)
+        rows.append({
+            'observation_step': len(rows) + 1,
+            'sha256': digest.hexdigest(),
+        })
 
     @staticmethod
     def _move_batch_to_device(value, device):
@@ -7690,6 +7930,170 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             weighted_losses).sum()
         return tuple(accumulated), aggregated
 
+    def _ct_candidate_weighted_observation_loss(
+            self, batch, output, loss_dict):
+        """Apply the registered 1/2 + 3x1/6 B0 branch objective."""
+        candidate_id = batch.get('candidate_id')
+        if candidate_id is None:
+            raise RuntimeError(
+                "safe B0 observation batch lacks candidate_id")
+        candidate_id = candidate_id.to(
+            device=output['aux_estimation_boxes'].device).reshape(-1)
+        expected = tuple(range(self.ct_b0_candidate_views))
+        observed = tuple(sorted(
+            int(value) for value in torch.unique(candidate_id).tolist()))
+        if observed != expected:
+            raise RuntimeError(
+                "safe B0 batch must contain every candidate view exactly "
+                f"once as a branch; observed {observed}")
+        counts = [int((candidate_id == view_id).sum().item())
+                  for view_id in expected]
+        if len(set(counts)) != 1:
+            raise RuntimeError(
+                "safe B0 batch must be candidate-balanced; observed "
+                + ",".join(str(value) for value in counts))
+        branch_losses = []
+        for view_id, weight in enumerate(self.ct_b0_candidate_weights):
+            rows = candidate_id == view_id
+            branch_batch = self._slice_batch_rows(batch, rows)
+            branch_output = self._slice_batch_rows(output, rows)
+            branch_loss = self.compute_loss(
+                branch_batch, branch_output)['loss_b0_transaction']
+            branch_losses.append(branch_loss)
+            loss_dict[f'loss_b0_view{view_id}'] = branch_loss.detach()
+        weighted = weighted_candidate_sum(
+            branch_losses, self.ct_b0_candidate_weights)
+        loss_dict['loss_total'] = weighted
+        loss_dict['loss_b0_transaction'] = weighted
+        loss_dict['ct_canonical_b0_weight'] = weighted.new_tensor(
+            self.ct_b0_candidate_weights[0])
+        return weighted
+
+    def _forward_safe_mechanism(self, batch):
+        """Build detached B0 contracts, then train the canonical plugins."""
+        previous = bool(getattr(
+            self, '_ct_observation_only_forward', False))
+        self._ct_observation_only_forward = True
+        try:
+            with torch.no_grad():
+                observation_output = self(batch)
+        finally:
+            self._ct_observation_only_forward = previous
+
+        required_motion = (
+            'motion_main_ref_boxs', 'motion_main_delta_t',
+            'motion_main_current_delta_t', 'motion_main_valid_mask')
+        missing = [key for key in required_motion if key not in batch]
+        if missing:
+            raise KeyError(
+                "safe mechanism input is missing: " + ", ".join(missing))
+        motion_ref = batch['motion_main_ref_boxs']
+        if bool(getattr(self.config, 'shuffle_b1_signal', False)):
+            motion_ref = torch.flip(motion_ref, dims=(1,))
+        if not self.ct_enable_b1:
+            main_motion = self.physical_motion_encoder.kinematic_fallback(
+                motion_ref, batch['motion_main_delta_t'],
+                batch['motion_main_valid_mask'],
+                batch['motion_main_current_delta_t'])
+        else:
+            main_motion = self.physical_motion_encoder(
+                motion_ref, batch['motion_main_delta_t'],
+                batch['motion_main_valid_mask'],
+                batch['motion_main_current_delta_t'])
+        if 'replay_b1_contract_present' in batch:
+            present = batch['replay_b1_contract_present'].to(
+                device=main_motion['mu_xy'].device).reshape(-1) > 0.5
+            for motion_key, replay_key in (
+                    ('mu_xy', 'replay_b1_mu_xy'),
+                    ('direction_xy', 'replay_b1_direction_xy'),
+                    ('log_sigma_parallel_perp',
+                     'replay_b1_log_sigma_parallel_perp'),
+                    ('gap_ratio', 'replay_b1_gap_ratio'),
+                    ('valid', 'replay_b1_valid')):
+                if replay_key not in batch:
+                    raise RuntimeError(
+                        f"recursive replay is missing {replay_key}")
+                actual = main_motion[motion_key][present]
+                expected = batch[replay_key].to(
+                    device=actual.device, dtype=actual.dtype)[present]
+                expected = expected.reshape_as(actual)
+                if not torch.allclose(
+                        actual, expected, atol=1e-5, rtol=1e-5):
+                    max_error = torch.max(torch.abs(
+                        actual - expected)).detach().cpu().item()
+                    raise RuntimeError(
+                        "recursive replay B1 mismatch for "
+                        f"{motion_key}: max_error={max_error:.3e}")
+        if bool(getattr(self.config, 'force_b1_invalid', False)):
+            main_motion = dict(main_motion)
+            main_motion['valid'] = torch.zeros_like(main_motion['valid'])
+            main_motion['source_id'] = torch.zeros_like(
+                main_motion['source_id'])
+        origin_xy = batch['motion_main_ref_boxs'][:, 0, :2].to(
+            device=main_motion['prior_xy'].device,
+            dtype=main_motion['prior_xy'].dtype)
+        observation_output.update({
+            'motion_prior_xy': main_motion['prior_xy'],
+            'motion_prior_origin_xy': origin_xy,
+            'motion_prior_proposal_xy': main_motion['prior_xy'],
+            'motion_prior_basis_velocity_xy': main_motion[
+                'basis_velocity_xy'],
+            'motion_prior_velocity_xy': main_motion['velocity_xy'],
+            'motion_prior_kinematic_xy': main_motion['kinematic_prior_xy'],
+            'motion_prior_residual_xy': main_motion['residual_xy'],
+            'motion_prior_residual_unit_parallel_perp': main_motion[
+                'residual_unit_parallel_perp'],
+            'motion_prior_envelope_parallel_perp': main_motion[
+                'envelope_parallel_perp'],
+            'motion_prior_valid': main_motion['valid'],
+            'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],
+            'motion_prior_log_sigma_parallel_perp': main_motion[
+                'log_sigma_parallel_perp'],
+            'motion_prior_covariance_xy': main_motion['covariance_xy'],
+            'motion_prior_direction_xy': main_motion[
+                'motion_direction_xy'],
+            'motion_prior_source_id': main_motion['source_id'],
+            'motion_prior_gap_ratio': main_motion['gap_ratio'],
+        })
+        if self.ct_enable_b1 and 'motion_aux_ref_boxs' in batch:
+            aux_motion = self.physical_motion_encoder(
+                batch['motion_aux_ref_boxs'], batch['motion_aux_delta_t'],
+                batch['motion_aux_valid_mask'],
+                batch['motion_aux_current_delta_t'])
+            observation_output.update({
+                'motion_aux_prior_xy': aux_motion['prior_xy'],
+                'motion_aux_prior_velocity_xy': aux_motion['velocity_xy'],
+                'motion_aux_prior_kinematic_xy': aux_motion[
+                    'kinematic_prior_xy'],
+                'motion_aux_prior_valid': aux_motion['valid'],
+                'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
+                'motion_aux_prior_log_sigma_xy': aux_motion['log_sigma_xy'],
+                'motion_aux_prior_log_sigma_parallel_perp': aux_motion[
+                    'log_sigma_parallel_perp'],
+                'motion_aux_prior_direction_xy': aux_motion[
+                    'motion_direction_xy'],
+            })
+
+        observation_box = observation_output[
+            'observation_aux_estimation_boxes']
+        if self.ct_enable_b2:
+            batch_size = int(batch['points'].shape[0])
+            frame_count = int(batch['valid_mask'].shape[1]) + 1
+            chunk_size = int(batch['points'].shape[1]) // frame_count
+            history_valid_ratio = batch['motion_main_valid_mask'].to(
+                device=observation_box.device,
+                dtype=observation_box.dtype).mean(dim=1)
+            final_box = self._forward_ct_contract_v3(
+                batch, observation_output, observation_box,
+                observation_output['obs_stats'], main_motion,
+                history_valid_ratio, batch_size, frame_count, chunk_size,
+                coarse_box=observation_output['estimation_boxes'])
+        else:
+            final_box = observation_box
+        observation_output['aux_estimation_boxes'] = final_box
+        observation_output['ct_final_box'] = final_box
+        return observation_output
+
     def training_step(self, batch, batch_idx):
         """
         Args:
@@ -7703,8 +8107,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         """
         if (isinstance(batch, dict)
-                and batch.get('ct_stream_schema')
-                == 'ct_seqtrack.dual_stream.v1'):
+                and batch.get('ct_stream_schema') in (
+                    'ct_seqtrack.dual_stream.v1',
+                    'ct_seqtrack.train.v2')):
             if getattr(self, '_ct_inside_dual_stream', False):
                 raise RuntimeError('nested dual-stream transaction')
             self._ct_inside_dual_stream = True
@@ -7712,6 +8117,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.use_ct_joint_full, self.use_b1motion_v3,
                 self.ct_enable_b1, self.ct_enable_b2, self.ct_enable_b3)
             try:
+                if self.ct_unified_auto:
+                    self._ct_record_observation_batch_fingerprint(
+                        batch['observation'])
                 # The observation transaction is behavior-identical to the
                 # clean SeqTrack B0: plugins are absent from its graph and B0
                 # owns the only logical Lightning step.
@@ -7721,6 +8129,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.ct_enable_b2 = False
                 self.ct_enable_b3 = False
                 self._ct_transaction_modules = {'b0'}
+                self._ct_auto_return_modules = {'b0'}
                 self._ct_advance_transaction = True
                 observation_loss = self.training_step(
                     batch['observation'], batch_idx)
@@ -7737,16 +8146,31 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     self._ct_transaction_modules = {
                         name for name in ('b1', 'b2', 'b3')
                         if name in getattr(self, '_ct_optimizer_names', ())}
+                    self._ct_auto_return_modules = set(
+                        self._ct_transaction_modules)
                     self._ct_advance_transaction = False
                     self._ct_mechanism_transaction = True
-                    with freeze_batchnorm_running_stats(self):
-                        self.training_step(mechanism_batch, batch_idx)
+                    self._ct_safe_mechanism_forward = self.ct_unified_auto
+                    with freeze_batchnorm_running_stats(
+                            self,
+                            excluded_prefixes=(
+                                'physical_motion_encoder',
+                                'ct_joint_search_refiner',
+                                'ct_joint_router')):
+                        mechanism_loss = self.training_step(
+                            mechanism_batch, batch_idx)
                 finally:
                     restore_global_rng_state(rng_state)
                     self._ct_mechanism_transaction = False
+                    self._ct_safe_mechanism_forward = False
+            else:
+                mechanism_loss = None
             self._ct_transaction_modules = None
+            self._ct_auto_return_modules = None
             self._ct_advance_transaction = True
             self._ct_inside_dual_stream = False
+            if self.ct_unified_auto and mechanism_loss is not None:
+                return observation_loss + mechanism_loss
             return observation_loss
 
         online_batch = (
@@ -7773,10 +8197,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             torch.autocast(device_type='cuda', dtype=torch.float16)
             if amp_enabled else contextlib.nullcontext())
         with autocast_context:
-            output = self(batch)
+            output = (
+                self._forward_safe_mechanism(batch)
+                if getattr(self, '_ct_safe_mechanism_forward', False)
+                else self(batch))
+            self._ct_record_cuda_stage('forward')
             if online_batch:
                 self._attach_h3_shadow_labels(batch, output)
             loss_dict = self.compute_loss(batch, output)
+            if (self.ct_unified_auto and not online_batch
+                    and getattr(self, '_ct_auto_return_modules', None)
+                    == {'b0'}):
+                self._ct_candidate_weighted_observation_loss(
+                    batch, output, loss_dict)
             if online_batch:
                 self._ct_record_acquisition_supply(
                     loss_dict, 'candidate0')
@@ -7802,8 +8235,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         loss_dict[key] = value
                 loss_dict['ct_canonical_b0_weight'] = canonical_b0.new_tensor(
                     canonical_weight)
+            self._ct_record_cuda_stage('loss')
         self._accumulate_joint_binary_rows(batch, output)
         loss = loss_dict['loss_total']
+        if self.ct_unified_auto:
+            active_modules = getattr(
+                self, '_ct_auto_return_modules', None)
+            if active_modules:
+                loss = sum(
+                    (loss_dict[f'loss_{name}_transaction']
+                     for name in ('b0', 'b1', 'b2', 'b3')
+                     if name in active_modules),
+                    output['aux_estimation_boxes'].new_zeros(()))
+                loss_dict['loss_total'] = loss
         if online_batch:
             if self.device.type == 'cuda':
                 torch.cuda.synchronize(self.device)

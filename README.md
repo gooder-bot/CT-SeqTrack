@@ -11,7 +11,7 @@ SeqTrack / B0 Observation
 ```
 
 B4 is retained as an isolated experiment and is disabled in every formal
-configuration. The new v24 method has not completed its registered mini or
+configuration. The Safe-SeqTrack v25 method has not completed its registered mini or
 full-nuScenes experiments, so this repository does not currently claim a gain,
 stability, SOTA, or a causal benefit from physical time or memory.
 
@@ -52,8 +52,10 @@ names. Required compatibility aliases remain part of the public runtime.
 | `full_minus_b3` | B0+B1+B2 | raw B2 search output |
 | `full` | B0+B1+B2+B3 | observation until calibrated selective evaluation |
 
-The active mini configs are under `cfgs/ct_seqtrack/`; the corresponding
-`24_*_nuscenes_full.yaml` files are used only after mini validation. B4 keeps
+The active mini configs are `25_b0.yaml`, `25_b1.yaml`,
+`25_full_minus_b3.yaml` and `25_full.yaml`; the corresponding
+`25_*_nuscenes_full.yaml` files are used only after mini validation. The v24
+configs and outputs are frozen failure evidence and cannot resume into v25. B4 keeps
 `cfgs/ct_v2/19_b4_decoder_alignment.yaml` and
 `20_b4_decoder_anticollapse.yaml`.
 
@@ -90,6 +92,7 @@ Engineering checkpoints are discarded and may not initialize formal runs.
 
 Detailed method and evidence boundaries:
 
+- [Safe-SeqTrack v25 runtime protocol](docs/SAFE_SEQTRACK_V25_PROTOCOL.md)
 - [B0--B3 method](docs/CTSEQTRACK_B0_B3_METHOD.md)
 - [formal experiment protocol](docs/EXPERIMENT_PROTOCOL.md)
 - [formal tooling](docs/FORMAL_TOOLING.md)

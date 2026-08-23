@@ -7,7 +7,8 @@ import copy
 import numpy as np
 
 
-ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
+ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v7"
+LEGACY_ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
 
 
 def online_candidate_state_consistent(processed, target_size):
@@ -50,6 +51,12 @@ def _normal(value):
 def build_online_resume_contract(config):
     """Build the complete identity of one resumable online experiment."""
     base_lr = float(_get(config, "lr", 1e-4))
+    runtime_protocol = str(_get(
+        config, "ct_runtime_protocol", "legacy")).strip().lower()
+    schema = (
+        ONLINE_RESUME_SCHEMA
+        if runtime_protocol == "safe_seqtrack_auto_v1"
+        else LEGACY_ONLINE_RESUME_SCHEMA)
     fields = {
         "experiment_name": str(_get(config, "experiment_name", "")),
         "net_model": str(_get(config, "net_model", "seqtrack3d")),
@@ -65,6 +72,27 @@ def build_online_resume_contract(config):
             config, "ct_training_state_policy", "legacy")),
         "module_isolation": str(_get(
             config, "ct_module_isolation", "legacy")),
+        "runtime_protocol": runtime_protocol,
+        "optimizer_topology": str(_get(
+            config, "ct_optimizer_topology", "isolated_manual")),
+        "observation_rng_mode": str(_get(
+            config, "ct_observation_rng_mode", "legacy")),
+        "validation_rng_mode": str(_get(
+            config, "ct_validation_rng_mode", "legacy")),
+        "batch_schema": str(_get(
+            config, "ct_batch_schema", "ct_seqtrack.dual_stream.v1")),
+        "candidate_policy": str(_get(
+            config, "ct_candidate_policy", "legacy")),
+        "b0_loss_reduction": str(_get(
+            config, "ct_b0_loss_reduction", "batch_mean")),
+        "mechanism_shadow_b0_no_grad": bool(_get(
+            config, "ct_mechanism_shadow_b0_no_grad", False)),
+        "cuda_stage_audit": bool(_get(
+            config, "ct_cuda_stage_audit", False)),
+        "observation_fingerprint_steps": int(_get(
+            config, "ct_observation_fingerprint_steps", 0)),
+        "evaluator_identity": str(_get(
+            config, "ct_evaluator_identity", "legacy")),
         "seed": int(_get(config, "seed", 42) or 42),
         "joint_contract_version": int(_get(
             config, "ct_joint_contract_version", 1)),
@@ -160,7 +188,7 @@ def build_online_resume_contract(config):
         "targetness_negative_weight": float(_get(
             config, "ct_targetness_negative_weight", 1.0)),
     }
-    return {"schema": ONLINE_RESUME_SCHEMA, "fields": fields}
+    return {"schema": schema, "fields": fields}
 
 
 def validate_online_resume_contract(checkpoint, config):
@@ -170,11 +198,11 @@ def validate_online_resume_contract(checkpoint, config):
         hyper_parameters = checkpoint.get("hyper_parameters", {})
         saved_config = hyper_parameters.get("config", hyper_parameters)
         observed = build_online_resume_contract(saved_config)
-    if observed.get("schema") != ONLINE_RESUME_SCHEMA:
+    expected = build_online_resume_contract(config)
+    if observed.get("schema") != expected["schema"]:
         raise ValueError(
             "online resume checkpoint does not carry "
-            f"{ONLINE_RESUME_SCHEMA}")
-    expected = build_online_resume_contract(config)
+            f"{expected['schema']}")
     mismatches = {}
     observed_fields = observed.get("fields", {})
     for key, expected_value in expected["fields"].items():
@@ -231,6 +259,9 @@ def validate_scratch_training_contract(config):
             "scratch-only v23 requires online recursive training")
 
     errors = []
+    runtime_protocol = str(_get(
+        config, "ct_runtime_protocol", "legacy")).strip().lower()
+    safe_auto = runtime_protocol == "safe_seqtrack_auto_v1"
 
     if str(_get(config, "net_model", "seqtrack3d")) == "ctseqtrack":
         if str(_get(config, "ct_training_state_policy", "")) != "observation":
@@ -266,10 +297,16 @@ def validate_scratch_training_contract(config):
     require_equal("ct_recursive_tracklet_slots", 16, 1)
     require_equal("ct_recursive_rollout_horizons", [1, 2, 4, 8], [1])
     require_equal("ct_training_topology", "dual_stream", "legacy")
-    require_equal("ct_b0_training_protocol", "seqtrack_d86990c", "legacy")
+    require_equal(
+        "ct_b0_training_protocol",
+        "safe_seqtrack_auto_v1" if safe_auto else "seqtrack_d86990c",
+        "legacy")
     require_equal("ct_b0_candidate_mode", "independent", "legacy")
     require_equal("candidate_trajectory_mode", "independent", "legacy")
-    require_equal("ct_b0_steps_per_epoch", 1262, 0)
+    expected_b0_steps = (
+        1262 if str(_get(config, "version", "v1.0-mini")) == "v1.0-mini"
+        else 0)
+    require_equal("ct_b0_steps_per_epoch", expected_b0_steps, 0)
     require_equal("ct_mechanism_stream", "online_recursive", "legacy")
     require_equal("ct_mechanism_passes_per_epoch", 1, 0)
     require_equal("ct_mechanism_b0_view", "canonical_only", "legacy")
@@ -277,6 +314,28 @@ def validate_scratch_training_contract(config):
     require_equal("ct_b0_rng_shift_control", False, False)
     require_equal("ct_b2_candidate_views", 1, 1)
     require_equal("ct_recovery_candidate_policy", "off", "off")
+    if safe_auto:
+        require_equal("ct_optimizer_topology", "unified_auto", "legacy")
+        require_equal(
+            "ct_observation_rng_mode", "stateless_seqtrack", "legacy")
+        require_equal(
+            "ct_validation_rng_mode", "stateless_tracklet_frame", "legacy")
+        require_equal(
+            "ct_batch_schema", "ct_seqtrack.train.v2", "legacy")
+        require_equal("ct_candidate_policy", "b2_raw", "legacy")
+        require_equal(
+            "ct_b0_loss_reduction", "candidate_weighted", "batch_mean")
+        require_equal("ct_mechanism_shadow_b0_no_grad", True, False)
+        require_equal("ct_cuda_stage_audit", True, False)
+        require_equal("ct_observation_fingerprint_steps", 100, 0)
+        if bool(_get(config, "ct_separate_optimizers", True)):
+            errors.append(
+                "safe_seqtrack_auto_v1 requires one automatic optimizer")
+        for module_name in ("b0", "b1", "b2", "b3"):
+            if float(_get(
+                    config, f"ct_{module_name}_lr", base_lr)) != 1e-4:
+                errors.append(
+                    f"safe_seqtrack_auto_v1 requires ct_{module_name}_lr=1e-4")
 
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))
@@ -287,7 +346,8 @@ def validate_scratch_training_contract(config):
             "B3 scratch Full requires B2 and either learned B1 or fixed CV "
             "from epoch 0")
     if b1 or b2 or b3:
-        if not bool(_get(config, "ct_separate_optimizers", False)):
+        if (not safe_auto
+                and not bool(_get(config, "ct_separate_optimizers", False))):
             errors.append("enabled plugins require separate optimizers")
         if plugin_lr != 1e-4:
             errors.append("scratch plugins require ct_plugin_lr=1e-4")
@@ -306,7 +366,10 @@ def validate_scratch_training_contract(config):
     require_equal("num_candidates", b0_views, 1)
     require_equal("ct_recursive_candidate_views", b0_views, 1)
     require_equal(
-        "ct_b0_candidate_weights", [0.25, 0.25, 0.25, 0.25], [1.0])
+        "ct_b0_candidate_weights",
+        ([0.5, 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0]
+         if safe_auto else [0.25, 0.25, 0.25, 0.25]),
+        [1.0])
     if b0_views > 1:
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
     if b2:
@@ -333,7 +396,13 @@ def build_b2_method_contract(config):
     keys = (
         "net_model", "prior_mode", "time_mode", "fixed_delta_t",
         "time_manifest", "training_state_policy",
-        "module_isolation", "training_topology", "b0_training_protocol",
+        "module_isolation", "runtime_protocol", "optimizer_topology",
+        "observation_rng_mode", "validation_rng_mode", "batch_schema",
+        "candidate_policy", "b0_loss_reduction",
+        "mechanism_shadow_b0_no_grad", "cuda_stage_audit",
+        "observation_fingerprint_steps",
+        "evaluator_identity",
+        "training_topology", "b0_training_protocol",
         "b0_candidate_mode", "b0_steps_per_epoch", "mechanism_stream",
         "mechanism_passes_per_epoch", "mechanism_b0_view",
         "joint_contract_version", "enable_b1", "enable_b2",

@@ -10,11 +10,58 @@ import torch
 from torch import nn
 
 
+def partition_named_parameter_groups(
+        named_parameters, is_plugin_parameter, plugin_group, enabled_plugins):
+    """Build the ordered B0 -> B1 -> B2 -> B3 optimizer ownership map."""
+    named_parameters = list(named_parameters)
+    groups = {
+        "b0": [item for item in named_parameters
+               if not is_plugin_parameter(item[0])],
+    }
+    if not groups["b0"]:
+        raise RuntimeError("strict isolation requires non-empty B0")
+    for group_name in ("b1", "b2", "b3"):
+        group = [
+            item for item in named_parameters
+            if (is_plugin_parameter(item[0])
+                and plugin_group(item[0]) == group_name)]
+        if enabled_plugins[group_name]:
+            if not group:
+                raise RuntimeError(
+                    f"strict isolation requires non-empty {group_name}")
+            groups[group_name] = group
+    seen = set()
+    for group in groups.values():
+        for _, parameter in group:
+            identity = id(parameter)
+            if identity in seen:
+                raise RuntimeError("optimizer parameter groups overlap")
+            seen.add(identity)
+    return groups
+
+
+def weighted_candidate_sum(branch_losses, weights):
+    """Combine differentiable per-candidate losses with explicit weights."""
+    branch_losses = list(branch_losses)
+    weights = tuple(float(weight) for weight in weights)
+    if not branch_losses or len(branch_losses) != len(weights):
+        raise ValueError("candidate losses and weights must be non-empty/equal")
+    weighted = branch_losses[0].new_zeros(())
+    for branch_loss, weight in zip(branch_losses, weights):
+        weighted = weighted + weight * branch_loss
+    return weighted
+
+
 @contextmanager
-def freeze_batchnorm_running_stats(module):
-    """Use stored BN statistics while retaining affine gradients."""
+def freeze_batchnorm_running_stats(module, excluded_prefixes=()):
+    """Use stored BN statistics, optionally excluding named subtrees."""
+    excluded_prefixes = tuple(
+        str(prefix).rstrip(".") for prefix in excluded_prefixes)
     states = []
-    for child in module.modules():
+    for name, child in module.named_modules():
+        if any(name == prefix or name.startswith(prefix + ".")
+               for prefix in excluded_prefixes):
+            continue
         if isinstance(child, nn.modules.batchnorm._BatchNorm):
             states.append((child, child.training))
             child.eval()

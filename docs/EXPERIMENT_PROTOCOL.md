@@ -2,6 +2,21 @@
 
 本文档是 mini、完整 nuScenes、校准和消融实验的唯一协议来源。README 只提供入口，`need_to_do.md` 只记录状态。
 
+> 2026-08-24 起，论文正式训练协议升级为 Safe-SeqTrack v25。
+> `25_b0/b1/full_minus_b3/full*.yaml` 是新的可运行配置；本文后面的
+> v24 内容作为冻结失败证据保留，不得初始化或续训 v25。v25 的完整
+> 运行合同见 [SAFE_SEQTRACK_V25_PROTOCOL.md](SAFE_SEQTRACK_V25_PROTOCOL.md)。
+
+v25 固定 B0 四候选损失
+`0.5*L0 + (L1+L2+L3)/6`。只有 observation stream 使用四候选；
+mechanism stream、B1、B2、B3 始终只读取 canonical candidate0。
+v25 使用无状态 observation RNG、`ct_seqtrack.train.v2` envelope、一个
+带 B0/B1/B2/B3 命名参数组的 Adam 和 Lightning automatic optimization。
+所有实验仍从 epoch 0 随机初始化，启用模块不冻结，首帧尺寸和预测框
+递归历史的无泄露合同不变。
+
+以下 v24 章节不再定义当前可运行协议。
+
 ## 1. 不可变训练合同
 
 - 所有实验从 epoch 0 随机初始化，各臂独立训练。

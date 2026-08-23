@@ -15,7 +15,16 @@
 
 所有接收 `--cfg` 的保留工具都通过 `utils.config.load_yaml_config` 解析 `_base_`，与 `main.py` 的 resolved-config 语义一致。
 
-`check_train_steps.py` 保留有限步、损失/梯度和工程 checkpoint 检查能力，但不能把一次短跑解释为完整的 epoch-boundary resume 等价证明。用户本轮跳过服务器 smoke，这些项目保持“未执行”。
+`check_train_steps.py` 同时识别只读 v24 和 Safe-SeqTrack v25。v25 manifest 会记录 runtime protocol、单优化器拓扑、observation RNG 和精确的 B0 candidate 权重。用 `--steps 100` 分别运行四臂后，checkpoint 中的 `ct_b0_prefix_hashes` 必须在 initial、step1、step100 一致；`ct_cuda_stage_audit` 会保存 batch transfer、forward、loss、backward、step 的 allocated/reserved/peak。一次短跑仍不能替代 epoch-boundary resume 等价证明。
+
+服务器 disposable smoke 示例：
+
+```bash
+python tools/check_train_steps.py --cfg cfgs/ct_seqtrack/25_b0.yaml --path /home/lishengjie/data/nuscenes-mini --steps 100 --artifact-dir artifacts/ct_checks/v25_b0_100
+python tools/compare_ct_module_audits.py artifacts/ct_checks/v25_b0_100/checkpoints/last.ckpt artifacts/ct_checks/v25_b1_100/checkpoints/last.ckpt artifacts/ct_checks/v25_full_minus_b3_100/checkpoints/last.ckpt artifacts/ct_checks/v25_full_100/checkpoints/last.ckpt --modules b0
+```
+
+实际 checkpoint 路径以 Lightning 在对应 artifact 目录中的输出为准；smoke checkpoint 只用于审计，之后删除，不能初始化正式实验。
 
 旧 M/TWC/CRPA/Search/Gate/replay、旧报告生成器、preflight 和 promotion 脚本不属于当前工具闭包。需要审计原实现时，从 `001951a:<path>` 只读恢复。
 

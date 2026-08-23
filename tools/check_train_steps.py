@@ -1,7 +1,7 @@
 """Run a bounded CT-SeqTrack training transaction through ``main.py``.
 
 This checker deliberately reuses the production dataloader, online recursive
-state, Lightning hooks and isolated optimizers.  It does not implement a
+state, Lightning hooks and the configured optimizer topology.  It does not implement a
 second approximation of the training step and never writes to the protected
 local ``output/`` directory.
 """
@@ -13,6 +13,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,10 +53,21 @@ def validate_config(path: Path) -> dict:
             "formal candidate contract mismatch: "
             + json.dumps(mismatches, ensure_ascii=False, sort_keys=True)
         )
-    if list(config.get("ct_b0_candidate_weights", [])) != [
-            0.25, 0.25, 0.25, 0.25]:
+    safe_auto = (
+        str(config.get("ct_runtime_protocol", "")).strip().lower()
+        == "safe_seqtrack_auto_v1")
+    expected_weights = (
+        [0.5, 1 / 6, 1 / 6, 1 / 6]
+        if safe_auto else [0.25, 0.25, 0.25, 0.25])
+    observed_weights = [
+        float(value) for value
+        in config.get("ct_b0_candidate_weights", [])]
+    if (len(observed_weights) != len(expected_weights)
+            or any(abs(observed - expected) > 1e-12
+                   for observed, expected in zip(
+                       observed_weights, expected_weights))):
         raise ValueError(
-            "formal d86990c B0 candidate weights are not equal")
+            "formal B0 candidate weights do not match the runtime protocol")
     return config
 
 
@@ -133,11 +146,15 @@ def main() -> None:
 
     command = build_command(args, artifact_dir)
     manifest = {
-        "schema": "ct_seqtrack.bounded_train_check.v1",
+        "schema": "ct_seqtrack.bounded_train_check.v2",
         "variant": config["ct_variant"],
+        "runtime_protocol": config.get("ct_runtime_protocol"),
+        "optimizer_topology": config.get("ct_optimizer_topology"),
+        "observation_rng_mode": config.get("ct_observation_rng_mode"),
         "candidate_contract": {
             "b0_views": 4,
             "b2_views": 1,
+            "b0_weights": list(config["ct_b0_candidate_weights"]),
         },
         "command": command,
         "status": "launching",
@@ -150,6 +167,48 @@ def main() -> None:
     completed = subprocess.run(command, cwd=ROOT, check=False)
     manifest["status"] = "passed" if completed.returncode == 0 else "failed"
     manifest["returncode"] = completed.returncode
+    if completed.returncode == 0:
+        checkpoints = sorted(artifact_dir.rglob("last.ckpt"))
+        if len(checkpoints) != 1:
+            manifest["status"] = "failed"
+            manifest["postcheck_error"] = (
+                "expected exactly one disposable last.ckpt, found "
+                f"{len(checkpoints)}")
+            completed = subprocess.CompletedProcess(
+                command, returncode=2)
+            manifest["returncode"] = completed.returncode
+        else:
+            checkpoint = torch.load(
+                checkpoints[0], map_location="cpu", weights_only=False)
+            manifest["checkpoint"] = str(checkpoints[0])
+            manifest["module_audit"] = checkpoint.get("ct_module_audit")
+            manifest["b0_prefix_hashes"] = checkpoint.get(
+                "ct_b0_prefix_hashes")
+            manifest["observation_batch_fingerprints"] = checkpoint.get(
+                "ct_observation_batch_fingerprints")
+            manifest["cuda_stage_audit"] = checkpoint.get(
+                "ct_cuda_stage_audit")
+            if str(config.get("ct_runtime_protocol", "")) == (
+                    "safe_seqtrack_auto_v1"):
+                prefixes = manifest["b0_prefix_hashes"] or {}
+                required = ["initial", "step_1"]
+                if args.steps >= 100:
+                    required.append("step_100")
+                missing = [key for key in required if key not in prefixes]
+                fingerprints = (
+                    manifest["observation_batch_fingerprints"] or [])
+                expected_fingerprints = min(int(args.steps), 100)
+                if missing or len(fingerprints) < expected_fingerprints:
+                    manifest["status"] = "failed"
+                    manifest["postcheck_error"] = {
+                        "missing_b0_prefix_hashes": missing,
+                        "expected_observation_fingerprints": (
+                            expected_fingerprints),
+                        "observed_observation_fingerprints": len(fingerprints),
+                    }
+                    completed = subprocess.CompletedProcess(
+                        command, returncode=2)
+                    manifest["returncode"] = completed.returncode
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

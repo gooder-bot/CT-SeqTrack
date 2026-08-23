@@ -1,6 +1,6 @@
 # CT-SeqTrack 服务器路径
 
-本文件只记录正式 v24 实验需要的服务器路径。历史 KITTI/HTV/M2 路径已移出活动文档。
+本文件记录 Safe-SeqTrack v25（以及只读 v24 证据）需要的服务器路径。历史 KITTI/HTV/M2 路径已移出活动文档。
 
 ## nuScenes mini
 
@@ -22,7 +22,8 @@
 ## 完整 nuScenes
 
 完整数据根必须在服务器运行前显式确认，并通过 `--path DATA_ROOT` 覆盖配置。
-不得把 mini 路径用于 `24_*_nuscenes_full.yaml`。
+不得把 mini 路径用于 `25_*_nuscenes_full.yaml`；v25 full 配置固定为
+`version: v1.0-trainval`。
 
 ## Python 环境
 
@@ -45,10 +46,9 @@ export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 ```bash
 python tools/verify_ct_slimming.py verify
 python -m pytest -q
-python main.py --cfg cfgs/ct_seqtrack/24_b0.yaml --path DATA_ROOT --help
+python main.py --cfg cfgs/ct_seqtrack/25_b0.yaml --path DATA_ROOT --help
 ```
 
 完整环境中的真实 batch 前向/反向、100-step resume 等价和点/框可视化仍是
-推荐验收项；用户已明确跳过本轮服务器 smoke，因此不把它们记为已通过，也不再
-阻止四臂命令交付。若之后执行，这些工程验收 checkpoint 必须丢弃，正式运行仍从
-epoch0 开始。
+正式训练前验收项；当前本地环境无法把它们记为已通过。工程验收 checkpoint 必须
+在对照完成后丢弃，正式运行仍从 epoch0 开始。

@@ -1,0 +1,11 @@
+_base_: 25_b1.yaml
+
+experiment_name: ct25_safe_full_minus_b3_scratch_seed42
+ct_variant: full_minus_b3
+ct_targetness_class_weight_source: online_canonical_preflight
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0
+proposal_inference_mode: raw_search
+checkpoint_monitor: success_raw_search/mini_val
+checkpoint_mode: max
+

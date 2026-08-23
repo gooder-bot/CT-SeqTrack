@@ -17,17 +17,45 @@ def main():
         audit = checkpoint.get("ct_module_audit")
         if not isinstance(audit, dict):
             raise SystemExit(f"{path}: missing ct_module_audit")
-        audits.append((path, audit))
+        audits.append((path, audit, checkpoint))
     for module in args.modules:
         available = [
             (path, audit["parameter_sha256"].get(module))
-            for path, audit in audits
+            for path, audit, _ in audits
             if module in audit["parameter_sha256"]]
         values = {value for _, value in available}
         if len(values) > 1:
             detail = ", ".join(
                 f"{path}={value}" for path, value in available)
             raise SystemExit(f"{module} hash mismatch: {detail}")
+    safe = [
+        str(audit.get("runtime_protocol", "")).strip().lower()
+        == "safe_seqtrack_auto_v1"
+        for _, audit, _ in audits]
+    if any(safe):
+        if not all(safe):
+            raise SystemExit("cannot compare v24 and v25 checkpoint audits")
+        required = ("initial", "step_1", "step_100")
+        for key in required:
+            available = []
+            for path, _, checkpoint in audits:
+                value = checkpoint.get("ct_b0_prefix_hashes", {}).get(key)
+                if value is None:
+                    raise SystemExit(f"{path}: missing B0 prefix hash {key}")
+                available.append((path, value))
+            if len({value for _, value in available}) != 1:
+                detail = ", ".join(
+                    f"{path}={value}" for path, value in available)
+                raise SystemExit(f"B0 prefix {key} mismatch: {detail}")
+        fingerprints = []
+        for path, _, checkpoint in audits:
+            rows = checkpoint.get("ct_observation_batch_fingerprints")
+            if not isinstance(rows, list) or len(rows) < 100:
+                raise SystemExit(
+                    f"{path}: missing first-100 observation fingerprints")
+            fingerprints.append((path, rows[:100]))
+        if len({repr(rows) for _, rows in fingerprints}) != 1:
+            raise SystemExit("first-100 observation fingerprints mismatch")
     print("matched module hashes are identical")
 
 

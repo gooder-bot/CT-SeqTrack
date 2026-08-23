@@ -1,0 +1,7 @@
+_base_: 25_b1.yaml
+
+experiment_name: ct25_safe_b1_nuscenes_full_scratch_seed42
+version: v1.0-trainval
+train_split: train_track
+val_split: val
+ct_b0_steps_per_epoch: 0

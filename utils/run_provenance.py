@@ -72,7 +72,7 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
         resolved_config, sort_keys=True, separators=(",", ":"), default=str)
     payload = {
         "schema": "ct_seqtrack.run_provenance",
-        "schema_version": 2,
+        "schema_version": 3,
         "mode": mode,
         "git": git_state(root),
         "config_path": str(cfg_path),
@@ -91,6 +91,36 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
             if mode == "train" else
             "test: use the explicitly supplied frozen checkpoint; no threshold retuning"
         ),
+        "safe_seqtrack": {
+            "runtime_protocol": getattr(
+                cfg, "ct_runtime_protocol", None),
+            "optimizer_topology": getattr(
+                cfg, "ct_optimizer_topology", None),
+            "batch_schema": getattr(cfg, "ct_batch_schema", None),
+            "observation_rng_mode": getattr(
+                cfg, "ct_observation_rng_mode", None),
+            "validation_rng_mode": getattr(
+                cfg, "ct_validation_rng_mode", None),
+            "candidate_policy": getattr(
+                cfg, "ct_candidate_policy", None),
+            "b0_candidate_weights": list(getattr(
+                cfg, "ct_b0_candidate_weights", [])),
+            "b2_candidate_views": getattr(
+                cfg, "ct_b2_candidate_views", None),
+            "mechanism_shadow_b0_no_grad": getattr(
+                cfg, "ct_mechanism_shadow_b0_no_grad", None),
+            "cuda_stage_audit": getattr(
+                cfg, "ct_cuda_stage_audit", None),
+            "observation_fingerprint_steps": getattr(
+                cfg, "ct_observation_fingerprint_steps", None),
+            "evaluator_identity": getattr(
+                cfg, "ct_evaluator_identity", None),
+            "seqtrack_reference": {
+                "url": getattr(cfg, "ct_seqtrack_reference_url", None),
+                "commit": getattr(
+                    cfg, "ct_seqtrack_reference_commit", None),
+            },
+        },
         "datasets": {
             name: dataset_provenance(dataset) for name, dataset in datasets.items()
         },

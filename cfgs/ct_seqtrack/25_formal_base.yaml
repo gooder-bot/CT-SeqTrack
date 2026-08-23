@@ -1,0 +1,28 @@
+_base_: 24_formal_base.yaml
+
+# Safe-SeqTrack automatic-optimization protocol.  The v24 line remains
+# immutable evidence and is intentionally not used for resume.
+ct_runtime_protocol: safe_seqtrack_auto_v1
+ct_optimizer_topology: unified_auto
+ct_observation_rng_mode: stateless_seqtrack
+ct_validation_rng_mode: stateless_tracklet_frame
+ct_batch_schema: ct_seqtrack.train.v2
+ct_candidate_policy: b2_raw
+check_val_every_n_epoch: 1
+ct_b0_training_protocol: safe_seqtrack_auto_v1
+ct_separate_optimizers: false
+ct_manual_amp_enabled: false
+ct_b0_lr: 0.0001
+ct_b1_lr: 0.0001
+ct_b2_lr: 0.0001
+ct_b3_lr: 0.0001
+ct_b0_candidate_weights: [0.5, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666]
+ct_b0_loss_reduction: candidate_weighted
+ct_mechanism_shadow_b0_no_grad: true
+ct_cuda_stage_audit: true
+ct_observation_fingerprint_steps: 100
+ct_seqtrack_reference_commit: 2972678b6d863e99217b47528a2a4e095452a03b
+ct_seqtrack_reference_url: https://github.com/aron-lin/seqtrack3d
+ct_evaluator_identity: safe_first_frame_size_recursive_prediction
+gradient_clip_val: 0.0
+precision: 32

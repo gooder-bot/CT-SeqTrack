@@ -1,0 +1,8 @@
+_base_: 25_formal_base.yaml
+
+experiment_name: ct25_safe_b0_scratch_seed42
+ct_variant: b0
+proposal_inference_mode: observation
+checkpoint_monitor: success/mini_val
+checkpoint_mode: max
+

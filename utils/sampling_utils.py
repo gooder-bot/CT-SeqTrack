@@ -5,10 +5,87 @@ import hashlib
 import numpy as np
 
 
+SEQTRACK_OBSERVATION_CORE_FIELDS = frozenset({
+    "points", "box_label", "ref_boxs", "box_label_prev",
+    "motion_label", "motion_state_label", "bbox_size", "seg_label",
+    "valid_mask", "delta_T", "num_points_in_search", "candidate_id",
+    "prev_bc", "this_bc", "candidate_bc",
+})
+
+
+def prune_seqtrack_observation_payload(data_dict):
+    """Return the B0-only tensor contract without CT mechanism fields."""
+    return {
+        key: value for key, value in data_dict.items()
+        if key in SEQTRACK_OBSERVATION_CORE_FIELDS}
+
+
 def stable_uint32_seed(base_seed, *parts):
     payload = "::".join((str(int(base_seed)), *(str(part) for part in parts)))
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "big", signed=False)
+
+
+class StatelessCandidateBatchSampler:
+    """Epoch-addressable four-view batches independent of loader workers.
+
+    Every batch contains the same number of rows from each candidate branch,
+    but the annotation permutation is independent per branch.  This keeps the
+    ordinary four-candidate population while making the configured branch
+    loss weights exact inside every optimizer transaction.
+    """
+
+    def __init__(self, dataset, batch_size, candidate_views, seed, drop_last=True):
+        self.dataset = dataset
+        self.batch_size = int(batch_size)
+        self.candidate_views = int(candidate_views)
+        self.seed = int(seed)
+        self.drop_last = bool(drop_last)
+        self.epoch = 0
+        if self.candidate_views <= 0:
+            raise ValueError("candidate_views must be positive")
+        if self.batch_size <= 0 or self.batch_size % self.candidate_views:
+            raise ValueError(
+                "batch_size must be a positive multiple of candidate_views")
+        if len(dataset) % self.candidate_views:
+            raise ValueError(
+                "candidate dataset length must be divisible by candidate_views")
+        self.annotation_count = len(dataset) // self.candidate_views
+        self.rows_per_view = self.batch_size // self.candidate_views
+        if self.annotation_count < self.rows_per_view:
+            raise ValueError("candidate dataset is smaller than one batch")
+
+    def __len__(self):
+        if self.drop_last:
+            return self.annotation_count // self.rows_per_view
+        return ((self.annotation_count + self.rows_per_view - 1)
+                // self.rows_per_view)
+
+    def set_epoch(self, epoch):
+        self.epoch = int(epoch)
+        if hasattr(self.dataset, "set_epoch"):
+            self.dataset.set_epoch(self.epoch)
+
+    def __iter__(self):
+        permutations = []
+        for view_id in range(self.candidate_views):
+            rng = np.random.default_rng(stable_uint32_seed(
+                self.seed, "observation-shuffle", self.epoch, view_id))
+            permutations.append(rng.permutation(self.annotation_count))
+        for batch_index in range(len(self)):
+            start = batch_index * self.rows_per_view
+            stop = min(start + self.rows_per_view, self.annotation_count)
+            if stop - start < self.rows_per_view and self.drop_last:
+                return
+            indices = []
+            for view_id, permutation in enumerate(permutations):
+                indices.extend(
+                    int(annotation_id) * self.candidate_views + view_id
+                    for annotation_id in permutation[start:stop])
+            mix_rng = np.random.default_rng(stable_uint32_seed(
+                self.seed, "observation-batch-mix", self.epoch, batch_index))
+            order = mix_rng.permutation(len(indices))
+            yield [indices[int(position)] for position in order]
 
 
 def deterministic_candidate_offset(candidate_id, config, *seed_parts):

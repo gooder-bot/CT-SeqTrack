@@ -27,6 +27,9 @@ def configure_ct_variant(config):
         raise ValueError(
             "ct_variant must be b0, b1, full_minus_b3 or full")
     use_joint, use_b1, use_b2, use_b3 = VARIANTS[variant]
+    runtime_protocol = str(get_config(
+        config, "ct_runtime_protocol", "legacy")).strip().lower()
+    unified_auto = runtime_protocol == "safe_seqtrack_auto_v1"
     values = {
         "ct_variant": variant,
         "use_ct_joint_full": use_joint,
@@ -35,7 +38,11 @@ def configure_ct_variant(config):
         "ct_enable_b2": use_b2,
         "ct_enable_b3": use_b3,
         "ct_joint_contract_version": 3,
-        "ct_separate_optimizers": True,
+        "ct_separate_optimizers": not unified_auto,
+        "ct_optimizer_topology": (
+            "unified_auto" if unified_auto
+            else str(get_config(
+                config, "ct_optimizer_topology", "isolated_manual"))),
         "ct_initialization_policy": "scratch_only",
         "ct_b0_initialization_policy": "scratch_only",
         "ct_training_state_policy": "observation",
@@ -44,6 +51,15 @@ def configure_ct_variant(config):
     }
     for name, value in values.items():
         set_config(config, name, value)
+    if unified_auto:
+        if str(get_config(
+                config, "ct_observation_rng_mode", "")) != "stateless_seqtrack":
+            raise ValueError(
+                "safe_seqtrack_auto_v1 requires stateless_seqtrack RNG")
+        if str(get_config(config, "ct_batch_schema", "")) != (
+                "ct_seqtrack.train.v2"):
+            raise ValueError(
+                "safe_seqtrack_auto_v1 requires ct_seqtrack.train.v2")
     forbidden = (
         "use_observability_gate", "use_dynamics_encoder", "use_ct_v2",
         "use_search_evidence_v2", "use_search_evidence_v21",
