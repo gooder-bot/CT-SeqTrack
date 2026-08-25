@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from datasets import get_dataset  # noqa: E402
 from datasets import points_utils  # noqa: E402
 from models import get_model  # noqa: E402
+from models.ct_variant import configure_ct_variant  # noqa: E402
 from utils.config import load_yaml_config  # noqa: E402
 from utils.metrics import estimateAccuracy, estimateOverlap  # noqa: E402
 
@@ -39,6 +40,8 @@ def load_config(path):
         cfg.preloading = False
     if "tiny" not in cfg:
         cfg.tiny = False
+    if str(getattr(cfg, "net_model", "")).strip().lower() == "ctseqtrack":
+        configure_ct_variant(cfg)
     return cfg
 
 
@@ -123,8 +126,12 @@ def predict_until(model, sequence, end_frame):
     return results_bbs
 
 
-def load_model(label, cfg_path, ckpt_path, args, device):
+def load_model(label, cfg_path, ckpt_path, backend, args, device):
     cfg = apply_dataset_overrides(load_config(cfg_path), args)
+    if backend is not None:
+        cfg.motion_v3_temporal_backend = backend
+    if str(getattr(cfg, "net_model", "")).strip().lower() == "ctseqtrack":
+        configure_ct_variant(cfg)
     model_cls = get_model(cfg.net_model)
     model = model_cls.load_from_checkpoint(
         ckpt_path,
@@ -235,6 +242,14 @@ def parse_args():
         metavar=("LABEL", "CFG", "CKPT"),
         help="Repeatable: --model A2 cfgs/a2.yaml output/.../last.ckpt",
     )
+    parser.add_argument(
+        "--model-backend",
+        action="append",
+        nargs=2,
+        metavar=("LABEL", "BACKEND"),
+        help=("Optional per-model B1 backend. BACKEND must be gru or cfc; "
+              "LABEL must match one --model label."),
+    )
     return parser.parse_args()
 
 
@@ -256,9 +271,31 @@ def main():
         device = torch.device(args.device)
 
     model_specs = args.model or []
+    model_labels = [label for label, _, _ in model_specs]
+    if len(model_labels) != len(set(model_labels)):
+        raise ValueError("--model labels must be unique")
+    backend_by_label = {}
+    for label, backend in args.model_backend or []:
+        backend = str(backend).strip().lower()
+        if label not in model_labels:
+            raise ValueError(
+                f"--model-backend label {label!r} has no matching --model")
+        if label in backend_by_label:
+            raise ValueError(
+                f"duplicate --model-backend for label {label!r}")
+        if backend not in ("gru", "cfc"):
+            raise ValueError("--model-backend BACKEND must be gru or cfc")
+        backend_by_label[label] = backend
     predictions = []
     for label, cfg_path, ckpt_path in model_specs:
-        item = load_model(label, cfg_path, ckpt_path, args, device)
+        item = load_model(
+            label,
+            cfg_path,
+            ckpt_path,
+            backend_by_label.get(label),
+            args,
+            device,
+        )
         boxes = predict_until(item["model"], sequence, end_frame)
         predictions.append({"label": label, "boxes": boxes})
         print(f"predicted: {label}")

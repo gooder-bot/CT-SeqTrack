@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-08-25T00:00:00+08:00",
+  "comparison_runs": [
+    {
+      "run": "SeqTrack-60-high",
+      "family": "SeqTrack",
+      "final_success": 50.98577880859375,
+      "final_precision": 59.96171188354492,
+      "late3_success": 50.10758590698242,
+      "late3_precision": 58.862876892089844,
+      "validation_points": 12,
+      "workers": 12,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "原版验证（读取当前帧 GT 尺寸）",
+      "comparability": "描述性",
+      "interpretation": "高分随机轨迹；旧运行未保存代码 commit"
+    },
+    {
+      "run": "SeqTrack-60-low",
+      "family": "SeqTrack",
+      "final_success": 31.683805465698242,
+      "final_precision": 31.33698081970215,
+      "late3_success": 31.138220469156902,
+      "late3_precision": 30.640408833821613,
+      "validation_points": 12,
+      "workers": 4,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "原版验证（读取当前帧 GT 尺寸）",
+      "comparability": "描述性",
+      "interpretation": "低分随机轨迹；日志配置除 workers/tag 外与高分 run 相同"
+    },
+    {
+      "run": "SeqTrack-180-gpu1",
+      "family": "SeqTrack",
+      "final_success": 49.15427017211914,
+      "final_precision": 54.90700149536133,
+      "late3_success": 49.289206186930336,
+      "late3_precision": 55.1145133972168,
+      "validation_points": 36,
+      "workers": 12,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "原版验证（读取当前帧 GT 尺寸）",
+      "comparability": "描述性",
+      "interpretation": "180 epoch 最终结果；不能与60 epoch final直接等同"
+    },
+    {
+      "run": "SeqTrack-180-gpu3",
+      "family": "SeqTrack",
+      "final_success": 51.33588790893555,
+      "final_precision": 60.1466064453125,
+      "late3_success": 50.74799601236979,
+      "late3_precision": 59.22757339477539,
+      "validation_points": 36,
+      "workers": 12,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "原版验证（读取当前帧 GT 尺寸）",
+      "comparability": "描述性",
+      "interpretation": "相同日志配置的另一条180 epoch轨迹"
+    },
+    {
+      "run": "CT21-B0",
+      "family": "CT21",
+      "final_success": 51.001094818115234,
+      "final_precision": 60.892784118652344,
+      "late3_success": 48.41393280029297,
+      "late3_precision": 54.81692250569662,
+      "validation_points": 12,
+      "workers": 4,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "旧 CT evaluator",
+      "comparability": "非隔离消融",
+      "interpretation": "旧协议 B0；无跨臂 prefix hash"
+    },
+    {
+      "run": "CT21-B1",
+      "family": "CT21",
+      "final_success": 55.397159576416016,
+      "final_precision": 66.12582397460938,
+      "late3_success": 54.508026123046875,
+      "late3_precision": 64.514954884847,
+      "validation_points": 12,
+      "workers": 4,
+      "validation_cadence": "每5 epoch",
+      "evaluator": "旧 CT evaluator",
+      "comparability": "非隔离消融",
+      "interpretation": "correlated-candidate + legacy proposal fusion + fused loss"
+    },
+    {
+      "run": "v24-B0",
+      "family": "CT-v24",
+      "final_success": 31.414663314819336,
+      "final_precision": 31.10284423828125,
+      "late3_success": 31.505835851033527,
+      "late3_precision": 31.604304631551106,
+      "validation_points": 60,
+      "workers": null,
+      "validation_cadence": "每 epoch",
+      "evaluator": "safe recursive evaluator",
+      "comparability": "同版本描述",
+      "interpretation": "step1 prefix 已与其余 v24 臂分叉"
+    },
+    {
+      "run": "v24-B1",
+      "family": "CT-v24",
+      "final_success": 47.65755081176758,
+      "final_precision": 52.42232131958008,
+      "late3_success": 47.14478556315104,
+      "late3_precision": 51.553610483805336,
+      "validation_points": 60,
+      "workers": null,
+      "validation_cadence": "每 epoch",
+      "evaluator": "safe recursive evaluator",
+      "comparability": "同版本描述",
+      "interpretation": "proposal=observation；高于 v24 B0 不能归因于 B1"
+    },
+    {
+      "run": "v25-B0",
+      "family": "CT-v25",
+      "final_success": 50.690372467041016,
+      "final_precision": 59.28009033203125,
+      "late3_success": 50.18490219116211,
+      "late3_precision": 57.03756586710612,
+      "validation_points": 60,
+      "workers": 4,
+      "validation_cadence": "每 epoch",
+      "evaluator": "safe_first_frame_size_recursive_prediction",
+      "comparability": "v25正式协议内",
+      "interpretation": "独立安全 B0"
+    },
+    {
+      "run": "v25-B1-only",
+      "family": "CT-v25",
+      "final_success": 33.44310760498047,
+      "final_precision": 35.137855529785156,
+      "late3_success": 33.34901809692383,
+      "late3_precision": 34.966084798177086,
+      "validation_points": 60,
+      "workers": 4,
+      "validation_cadence": "每 epoch",
+      "evaluator": "safe_first_frame_size_recursive_prediction",
+      "comparability": "v25正式协议内",
+      "interpretation": "proposal=observation；跟踪分数是该臂 B0 轨迹"
+    },
+    {
+      "run": "v25-Full",
+      "family": "CT-v25",
+      "final_success": 52.55251693725586,
+      "final_precision": 61.19365692138672,
+      "late3_success": 50.281182607014976,
+      "late3_precision": 58.94967269897461,
+      "validation_points": 60,
+      "workers": 4,
+      "validation_cadence": "每 epoch",
+      "evaluator": "safe_first_frame_size_recursive_prediction",
+      "comparability": "v25正式协议内",
+      "interpretation": "无 calibration artifact，B3 fail-closed 到 observation"
+    }
+  ],
+  "b1_history_comparison": [
+    {
+      "version": "CT21-B1",
+      "final_success": 55.397159576416016,
+      "paired_b0_success": 51.001094818115234,
+      "apparent_delta": 4.396064758300781,
+      "b0_isolated": "否",
+      "why_not_comparable": "correlated candidate、legacy post-Transformer fusion、fused/gate loss进入总损失"
+    },
+    {
+      "version": "v24-B1",
+      "final_success": 47.65755081176758,
+      "paired_b0_success": 31.414663314819336,
+      "apparent_delta": 16.242887496948242,
+      "b0_isolated": "否",
+      "why_not_comparable": "四臂从step1分叉；B1 learned MSE 还比CV差4.3%"
+    },
+    {
+      "version": "v25-B1",
+      "final_success": 33.44310760498047,
+      "paired_b0_success": 50.690372467041016,
+      "apparent_delta": -17.247264862060547,
+      "b0_isolated": "否",
+      "why_not_comparable": "输入/RNG一致但step1参数hash分叉；proposal仍为observation"
+    }
+  ],
+  "random_path_evidence": [
+    {
+      "evidence": "SeqTrack 60ep 同seed日志配置",
+      "observation": "hparams仅workers 12→4及tag变化，Success 50.986→31.684（−19.302）",
+      "supports": "worker/随机事务可以把模型送入高、低两个训练盆地",
+      "confidence": "强支持；旧run无代码commit，非唯一变量证明"
+    },
+    {
+      "evidence": "v25 四臂 B0 prefix",
+      "observation": "initial和前100批输入一致，但step1参数hash全部不同",
+      "supports": "分叉发生在第一次backward/Adam更新附近，而不是模块推理收益",
+      "confidence": "已验证"
+    },
+    {
+      "evidence": "v25 B1-only部署路径",
+      "observation": "proposal=observation，final Success=33.443",
+      "supports": "低分是该臂B0轨迹，不是B1 proposal直接伤害",
+      "confidence": "已验证"
+    },
+    {
+      "evidence": "v25 Full部署路径",
+      "observation": "calibration缺失、B3 applied rate=0，final Success=52.553",
+      "supports": "高分是Full臂自己的B0轨迹，不是B3有效",
+      "confidence": "已验证"
+    }
+  ],
+  "headline": {
+    "v25_b0_success": 50.690372467041016,
+    "seqtrack_high_success": 50.98577880859375,
+    "v25_b0_minus_seqtrack_high": -0.2954063415527344,
+    "seqtrack_high_low_spread": 19.301973342895508,
+    "v25_b1_minus_v24_b1": -14.21444320678711,
+    "full_b3_action_coverage": 0.0
+  },
+  "seqtrack_60_hparams_check": {
+    "equal_after_normalizing_tag_and_workers": true,
+    "high_workers": 12,
+    "low_workers": 4,
+    "material_logged_differences": [
+      "tag",
+      "workers"
+    ]
+  },
+  "excluded": [
+    "trajtrack",
+    "B0 2x2",
+    "historical leaked-score threshold"
+  ],
+  "source_limitations": [
+    "SeqTrack historical runs do not contain run-level git commit provenance.",
+    "SeqTrack historical evaluator reads current-frame GT size and is descriptive only.",
+    "CT21/v24/v25 are different training protocols; only within-protocol paired audits can support module attribution."
+  ]
+}

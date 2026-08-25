@@ -26,3 +26,14 @@ ct_seqtrack_reference_url: https://github.com/aron-lin/seqtrack3d
 ct_evaluator_identity: safe_first_frame_size_recursive_prediction
 gradient_clip_val: 0.0
 precision: 32
+
+# Repaired B1 objective.  GRU is the formal default; CfC is selected only by
+# the command-line/config override and shares every non-temporal component.
+motion_v3_temporal_backend: gru
+motion_v3_cfc_backbone_units: 105
+motion_v3_beta_nll_beta: 0.5
+motion_v3_tail_direction_weight: 0.25
+motion_v3_tail_direction_margin: 0.9
+motion_v3_log_sigma_min: -2.302585092994046
+motion_v3_log_sigma_max: 2.5
+motion_v3_aux_nll_weight: 0.05

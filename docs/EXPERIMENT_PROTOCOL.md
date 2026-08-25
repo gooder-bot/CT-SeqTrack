@@ -46,7 +46,7 @@ B2: 1 view
 B0 目标保持：
 
 ```text
-L_B0 = (L_candidate0 + L_candidate1 + L_candidate2 + L_candidate3) / 4
+L_B0 = 0.5*L_candidate0 + (L_candidate1 + L_candidate2 + L_candidate3)/6
 ```
 
 固定配置字段为：
@@ -55,11 +55,11 @@ L_B0 = (L_candidate0 + L_candidate1 + L_candidate2 + L_candidate3) / 4
 num_candidates: 4
 ct_recursive_candidate_views: 4
 ct_b0_candidate_views: 4
-ct_b0_candidate_weights: [0.25, 0.25, 0.25, 0.25]
+ct_b0_candidate_weights: [0.5, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666]
 ct_b2_candidate_views: 1
 ct_recovery_candidate_policy: "off"
 ct_training_topology: dual_stream
-ct_b0_training_protocol: seqtrack_d86990c
+ct_b0_training_protocol: safe_seqtrack_auto_v1
 ct_b0_candidate_mode: independent
 ct_b0_steps_per_epoch: 1262
 ct_mechanism_stream: online_recursive
@@ -75,12 +75,12 @@ ct_mechanism_b0_view: canonical_only
 
 | 配置 | 启用模块 | 训练/评测输出 |
 |---|---|---|
-| `24_b0.yaml` | B0 | observation |
-| `24_b1.yaml` | B0+B1 | observation；B1 作为 prior/shadow 机制评估 |
-| `24_full_minus_b3.yaml` | B0+B1+B2 | `raw_search`，用于直接衡量 B2 |
-| `24_full.yaml` | B0+B1+B2+B3 | 未校准时 fail-closed 为 observation；校准后 selective |
+| `25_b0.yaml` | B0 | observation |
+| `25_b1.yaml` | B0+B1 | observation；B1 作为 prior/shadow 机制评估 |
+| `25_full_minus_b3.yaml` | B0+B1+B2 | `raw_search`，用于直接衡量 B2 |
+| `25_full.yaml` | B0+B1+B2+B3 | 未校准时 fail-closed 为 observation；校准后 selective |
 
-不设置 preflight、promotion、kill-test 或中途停止门禁。Acquisition、presence、target-bearing、retention 等字段在训练中持续记录，只在 final 和 late-3 完成后分析。
+不设置训练前 preflight、kill-test 或中途停止门禁。Acquisition、presence、target-bearing、retention 等字段在训练中持续记录，只在 final 和 late-3 完成后分析。B1 backend promotion 是完整训练后的独立机制指标决策，不停止或改写训练中的 run。
 
 四臂之间不共享权重。临时验收 checkpoint 不得作为任何正式实验的初始化。
 
@@ -100,14 +100,33 @@ Full 完成 scratch 训练后，才可在与 train/dev/test 分离的 calibratio
 
 ## 6. 服务器验收状态
 
-真实 batch 前向/反向、100-step/resume 和逐帧点框检查仍是推荐验收项。本轮用户明确选择不执行服务器 smoke，因此它们只能标记为“未执行”，不能标记为“通过”。为避免破坏现有耦合，依赖这些检查才能安全删除的兼容宿主源码继续保留。
+真实 batch 前向/反向、GRU/CfC 有限非零梯度、100-step B0 参数/Adam 状态哈希、resume 等价和逐帧点框检查是正式长跑前的服务器门禁。本地无完整 nuScenes/CUDA 环境时只能标记为“未执行”，不能用 CPU 单测替代；所有 smoke checkpoint 必须丢弃。
 
 ## 7. 完整 nuScenes
 
 mini 结果证明方案值得继续后：
 
-1. 使用对应的 `24_*_nuscenes_full.yaml` 从头运行四臂 seed42；
-2. 补 B0 和 Full seeds 43、44；
+1. 使用对应的 `25_*_nuscenes_full.yaml` 从头运行四臂 seed42；
+2. seed42 保持正结果后，补四臂 seeds 52、62；
 3. 报告 final-epoch 均值、标准差、tracklet paired CI、risk--coverage 和失败案例。
 
 其他数据集和新创新点在本轮四臂 mini 验证完成前不加入。
+
+## 8. v25 B1 修复后的实验顺序（2026-08-25）
+
+1. mini seed42 分别以 `--b1-backend gru` 和 `--b1-backend cfc` 从 epoch 0
+   跑满 `25_b1.yaml`。B1-only 部署输出仍是 observation，不能用 tracking score
+   选择时序骨干。
+2. 每个后端都必须在独立 dev tracklets 上通过 learned-vs-CV 的 tracklet
+   paired-bootstrap 和 B1 calibration 门槛。CfC 只有在 CfC-minus-GRU RMSE 的
+   95% CI 上界 `<0` 且 NLL/coverage 不劣时才晋升，否则主方案保持 GRU。
+3. 以胜出 backend 重新从 epoch 0 训练 `25_full_minus_b3.yaml`，不得加载
+   B1-only checkpoint。与 matched B0 比较 final/late-3 Success、Precision，
+   并在同一 checkpoint 上评估 `force_b1_invalid` 和 `shuffle_b1_signal`。
+4. mini 通过后，完整 nuScenes 先独立训练 B0、B1、Full-B3、Full seed42；
+   保持正结果后补 seed52、seed62。所有 arm、seed 都从随机初始化开始。
+5. B1/B3 calibration 都发生在对应 scratch 训练结束后，只生成 evaluation-only
+   artifact/checkpoint，不得恢复训练或初始化后续实验。额外数据集优先使用现有
+   KITTI-HV 时间间隔协议。
+
+在上述实验完成前，不宣称涨分、SOTA、CfC 优越或物理时间的因果收益。

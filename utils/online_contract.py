@@ -7,7 +7,7 @@ import copy
 import numpy as np
 
 
-ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v7"
+ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v8"
 LEGACY_ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
 
 
@@ -117,6 +117,52 @@ def build_online_resume_contract(config):
         "enable_b1": bool(_get(config, "ct_enable_b1", True)),
         "enable_b2": bool(_get(config, "ct_enable_b2", True)),
         "enable_b3": bool(_get(config, "ct_enable_b3", True)),
+        "b1_hidden_dim": int(_get(config, "motion_v3_hidden_dim", 128)),
+        "b1_step_dim": int(_get(config, "motion_v3_step_dim", 64)),
+        "b1_eps": float(_get(config, "motion_v3_eps", 1e-3)),
+        "b1_temporal_backend": str(_get(
+            config, "motion_v3_temporal_backend", "gru")),
+        "b1_cfc_backbone_units": int(_get(
+            config, "motion_v3_cfc_backbone_units", 105)),
+        "b1_beta_nll_beta": float(_get(
+            config, "motion_v3_beta_nll_beta", 0.5)),
+        "b1_tail_direction_weight": float(_get(
+            config, "motion_v3_tail_direction_weight", 0.25)),
+        "b1_tail_direction_margin": float(_get(
+            config, "motion_v3_tail_direction_margin", 0.9)),
+        "b1_log_sigma_min": float(_get(
+            config, "motion_v3_log_sigma_min", -2.302585092994046)),
+        "b1_log_sigma_max": float(_get(
+            config, "motion_v3_log_sigma_max", 2.5)),
+        "b1_prior_weight": float(_get(
+            config, "motion_v3_prior_weight", 0.1)),
+        "b1_aux_prior_weight": float(_get(
+            config, "motion_v3_aux_prior_weight", 0.1)),
+        "b1_nll_weight": float(_get(
+            config, "motion_v3_nll_weight", 0.0)),
+        "b1_aux_nll_weight": float(_get(
+            config, "motion_v3_aux_nll_weight", 0.0)),
+        "b1_aux_query_gaps": tuple(int(value) for value in _get(
+            config, "motion_v3_aux_query_gaps", (2, 4))),
+        "b1_aux_transition_gaps": tuple(int(value) for value in _get(
+            config, "motion_v3_aux_transition_gaps", (1, 2))),
+        "b1_time_scale": float(_get(config, "time_scale", 0.5)),
+        "b1_initial_sigma": float(_get(
+            config, "motion_v3_initial_sigma", 0.5)),
+        "b1_residual_velocity_scale": float(_get(
+            config, "motion_v3_residual_velocity_scale", 4.0)),
+        "b1_max_acceleration": float(_get(
+            config, "ct_motion_max_acceleration", 8.0)),
+        "b1_max_displacement": float(_get(
+            config, "ct_motion_max_displacement", 12.0)),
+        "b1_acceleration_weight": float(_get(
+            config, "ct_motion_acceleration_weight", 0.5)),
+        "b1_min_direction_speed": float(_get(
+            config, "motion_v3_min_direction_speed", 0.2)),
+        "b1_shared_motion_anchor": bool(_get(
+            config, "ct_enable_shared_motion_anchor", False)),
+        "b1_dynamic_residual_bound": bool(_get(
+            config, "ct_enable_dynamic_residual_bound", False)),
         "num_candidates": int(_get(config, "num_candidates", 1)),
         "candidate_views": int(_get(
             config, "ct_recursive_candidate_views", 1)),
@@ -243,7 +289,7 @@ def validate_scratch_training_contract(config):
     """Reject launches that silently leave the matched-scratch regime.
 
     Epoch count and seed are intentionally not fixed here: the registered
-    42/43/44 replications are all legal.  The optimizer, update topology, data
+    42/52/62 replications are all legal.  The optimizer, update topology, data
     geometry and epoch-0 module availability are invariant across those runs.
     """
     policy = str(_get(
@@ -328,6 +374,9 @@ def validate_scratch_training_contract(config):
         require_equal("ct_mechanism_shadow_b0_no_grad", True, False)
         require_equal("ct_cuda_stage_audit", True, False)
         require_equal("ct_observation_fingerprint_steps", 100, 0)
+        require_equal("search_v3_use_dynamic_sigma", False, False)
+        require_equal("search_v3_fixed_margin_parallel", 2.0, 2.0)
+        require_equal("search_v3_fixed_margin_perpendicular", 1.0, 1.0)
         if bool(_get(config, "ct_separate_optimizers", True)):
             errors.append(
                 "safe_seqtrack_auto_v1 requires one automatic optimizer")

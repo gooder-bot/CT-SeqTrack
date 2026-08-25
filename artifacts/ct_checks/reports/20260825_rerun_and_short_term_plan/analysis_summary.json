@@ -1,0 +1,151 @@
+{
+  "generated_at": "2026-08-25T18:00:00+08:00",
+  "decision": {
+    "random_path": "confirmed within the same B1-only arm after identical input transactions",
+    "b0_numeric_scale_restored": true,
+    "b0_transaction_reproducible": false,
+    "next_plan_step": 0
+  },
+  "metrics": {
+    "new_b1_epoch30": {
+      "epoch": 30,
+      "success": 49.274620056152344,
+      "precision": 52.096282958984375,
+      "late3_success": 49.06017939249674,
+      "late3_precision": 56.07257588704427,
+      "validation_points": 30
+    },
+    "old_b1_epoch30": {
+      "epoch": 30,
+      "success": 34.68600082397461,
+      "precision": 36.07221221923828,
+      "late3_success": 32.428521474202476,
+      "late3_precision": 33.542669932047524,
+      "validation_points": 60
+    },
+    "b0_epoch60": {
+      "epoch": 60,
+      "success": 50.690372467041016,
+      "precision": 59.28009033203125,
+      "late3_success": 50.18490219116211,
+      "late3_precision": 57.03756586710612,
+      "validation_points": 60
+    },
+    "seqtrack_rerun_epoch60": {
+      "epoch": 60,
+      "success": 27.996719360351562,
+      "precision": 26.48358917236328,
+      "late3_success": 27.35776964823405,
+      "late3_precision": 25.95915412902832,
+      "validation_points": 12
+    },
+    "seqtrack_old_low_epoch60": {
+      "epoch": 60,
+      "success": 31.683805465698242,
+      "precision": 31.33698081970215,
+      "late3_success": 31.138220469156902,
+      "late3_precision": 30.640408833821613,
+      "validation_points": 12
+    },
+    "seqtrack_old_high_epoch60": {
+      "epoch": 60,
+      "success": 50.98577880859375,
+      "precision": 59.96171188354492,
+      "late3_success": 50.10758590698242,
+      "late3_precision": 58.862876892089844,
+      "validation_points": 12
+    }
+  },
+  "b1_diagnostics": {
+    "new": {
+      "rows": 1983,
+      "valid_rows": 1901,
+      "valid_rate": 0.9586485123550177,
+      "learned_rmse": 5.699820145842177,
+      "cv_rmse": 5.592396727771395,
+      "learned_minus_cv": 0.10742341807078226,
+      "mean_nll": 148.56818218750308,
+      "coverage_50": 0.051551814834297736,
+      "coverage_80": 0.15675960021041557,
+      "coverage_95": 0.3114150447133088
+    },
+    "old": {
+      "rows": 1934,
+      "valid_rows": 1852,
+      "valid_rate": 0.9576008273009308,
+      "learned_rmse": 8.947280369212905,
+      "cv_rmse": 9.038610524819926,
+      "learned_minus_cv": -0.09133015560702162,
+      "mean_nll": 110.50351085536435,
+      "coverage_50": 0.2786177105831533,
+      "coverage_80": 0.37634989200863933,
+      "coverage_95": 0.4562634989200864
+    }
+  },
+  "transaction": {
+    "same_git_commit": true,
+    "same_config_except_tag": true,
+    "same_dataset_manifests": true,
+    "same_initial_b0_hash": true,
+    "same_first_100_observation_fingerprints": true,
+    "same_step1_b0_hash": false,
+    "same_step100_b0_hash": false,
+    "first_visible_b1_total_loss_difference_step": 5,
+    "first_visible_seq_total_loss_difference_step": 3
+  },
+  "short_term_plan": [
+    {
+      "order": 0,
+      "plan_item": "恢复并固定B0",
+      "status": "数值恢复；尚未固定",
+      "evidence": "safe B0 final S=50.690，接近SeqTrack旧高轨迹50.986；但同臂step1不可复现",
+      "next_gate": "同GPU空闲、顺序重复的step1/step100 B0参数hash必须一致"
+    },
+    {
+      "order": 1,
+      "plan_item": "修复B1 sigma/NLL/coverage；保持GRU、固定geometry",
+      "status": "未通过",
+      "evidence": "新run learned−CV=+0.107m，NLL=148.6，95% coverage=31.1%",
+      "next_gate": "B0锁定后再做box-only mean/NLL与held-out校准；95% coverage≥90%、ECE≤0.05"
+    },
+    {
+      "order": 2,
+      "plan_item": "修复B2 acquisition funnel",
+      "status": "未通过",
+      "evidence": "旧正式run available约6–8%，target-bearing仅1–2行，harmful约93–97%，oracle headroom近零",
+      "next_gate": "先修extension supply/target retention；presence AUROC≥0.65且foreground-valid≥15%"
+    },
+    {
+      "order": 3,
+      "plan_item": "3A bounded adaptive shell；3B GRU vs CfC matched",
+      "status": "等待",
+      "evidence": "B0未固定、B1未校准，当前比较会把训练轨迹误当架构差",
+      "next_gate": "仅在B1 gate通过后从epoch0做matched短跑"
+    },
+    {
+      "order": 4,
+      "plan_item": "relation-aware sampling / robust voting / optional decoder",
+      "status": "等待",
+      "evidence": "当前瓶颈是没有有效target-bearing evidence，不是decoder容量不足",
+      "next_gate": "按4A→4B顺序；4C只在前两者产生oracle headroom后启用"
+    },
+    {
+      "order": 5,
+      "plan_item": "最后恢复B3 calibration",
+      "status": "禁止提前",
+      "evidence": "现有Full无artifact、applied rate=0，最终分数来自其B0轨迹",
+      "next_gate": "B2有正headroom后，在独立calibration tracklets生成绑定artifact"
+    }
+  ],
+  "limitations": [
+    "The rerun changed known server scheduling: yesterday B1 shared physical GPU1 with B0; today it ran alone.",
+    "The checkpoint does not contain pre-step gradient or Adam-state hashes, so the exact CUDA/optimizer source remains unproven.",
+    "The new B1 run ended cleanly at epoch 30 and is not a 60-epoch final result.",
+    "SeqTrack historical runs lack run-level git provenance and use an unsafe current-frame-size evaluator."
+  ],
+  "excluded": [
+    "trajtrack",
+    "B0 2x2",
+    "historical leaked-score threshold"
+  ]
+}

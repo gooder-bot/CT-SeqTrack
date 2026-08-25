@@ -54,6 +54,16 @@ def test_v25_configs_are_safe_unified_scratch_arms():
         assert config["ct_cuda_stage_audit"] is True
         assert config["ct_observation_fingerprint_steps"] == 100
         assert config["ct_separate_optimizers"] is False
+        assert config["motion_v3_temporal_backend"] == "gru"
+        assert config["motion_v3_cfc_backbone_units"] == 105
+        assert config["motion_v3_beta_nll_beta"] == pytest.approx(0.5)
+        assert config["motion_v3_tail_direction_weight"] == pytest.approx(
+            0.25)
+        assert config["motion_v3_tail_direction_margin"] == pytest.approx(0.9)
+        assert config["motion_v3_log_sigma_min"] == pytest.approx(
+            -2.302585092994046)
+        assert config["motion_v3_log_sigma_max"] == pytest.approx(2.5)
+        assert config["motion_v3_aux_nll_weight"] == pytest.approx(0.05)
         assert [config[f"ct_{name}_lr"] for name in ("b0", "b1", "b2", "b3")] == [
             1e-4, 1e-4, 1e-4, 1e-4]
         assert config["ct_initialization_policy"] == "scratch_only"
@@ -248,7 +258,7 @@ def test_v25_resume_contract_rejects_v24_protocol():
         ROOT / "cfgs" / "ct_seqtrack" / "25_b0.yaml")
     configure_ct_variant(v25)
     contract = build_online_resume_contract(v25)
-    assert contract["schema"] == "ct_seqtrack.online_resume_contract.v7"
+    assert contract["schema"] == "ct_seqtrack.online_resume_contract.v8"
     checkpoint = {
         "ct_online_resume_contract": contract,
         "ct_epoch_boundary_complete": True,
@@ -274,6 +284,8 @@ def test_bounded_train_tool_accepts_v24_and_v25_candidate_weights():
             encoding="utf-8")
     assert 'required = ("initial", "step_1", "step_100")' in compare_source
     assert "first-100 observation fingerprints mismatch" in compare_source
+    assert "ct_b0_optimizer_state_hashes" in compare_source
+    assert "lacks a finite nonzero gradient" in compare_source
 
 
 def test_v25_cuda_audit_covers_registered_training_phases():
@@ -282,6 +294,8 @@ def test_v25_cuda_audit_covers_registered_training_phases():
         assert f"_ct_record_cuda_stage('{stage}'" in source
     assert "ct_cuda_stage_audit" in source
     assert "ct_observation_batch_fingerprints" in source
+    assert "ct_b0_optimizer_state_hashes" in source
+    assert "max_gradient_norm" in source
 
 
 def test_mechanism_shadow_freezes_only_b0_batchnorm():

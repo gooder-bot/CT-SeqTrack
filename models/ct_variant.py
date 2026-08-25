@@ -83,6 +83,56 @@ def configure_ct_variant(config):
     if prior_mode == "fixed_cv" and variant != "b0":
         set_config(config, "use_b1motion_v3", True)
         set_config(config, "ct_enable_b1", False)
+    temporal_backend = str(get_config(
+        config, "motion_v3_temporal_backend", "gru")).strip().lower()
+    if temporal_backend not in ("gru", "cfc"):
+        raise ValueError("motion_v3_temporal_backend must be gru or cfc")
+    cfc_backbone_units = int(get_config(
+        config, "motion_v3_cfc_backbone_units", 105))
+    if cfc_backbone_units <= 0:
+        raise ValueError("motion_v3_cfc_backbone_units must be positive")
+    set_config(config, "motion_v3_temporal_backend", temporal_backend)
+    set_config(config, "motion_v3_cfc_backbone_units", cfc_backbone_units)
+    beta_nll_beta = float(get_config(
+        config, "motion_v3_beta_nll_beta", 0.5))
+    tail_weight = float(get_config(
+        config, "motion_v3_tail_direction_weight", 0.25))
+    tail_margin = float(get_config(
+        config, "motion_v3_tail_direction_margin", 0.9))
+    log_sigma_min = float(get_config(
+        config, "motion_v3_log_sigma_min", -2.302585092994046))
+    log_sigma_max = float(get_config(
+        config, "motion_v3_log_sigma_max", 2.5))
+    if not 0.0 <= beta_nll_beta <= 1.0:
+        raise ValueError("motion_v3_beta_nll_beta must be in [0,1]")
+    if tail_weight < 0 or not 0.0 <= tail_margin <= 1.0:
+        raise ValueError("B1 tail direction settings are invalid")
+    if not log_sigma_min < log_sigma_max:
+        raise ValueError("B1 log-sigma bounds must be ordered")
+    set_config(config, "motion_v3_beta_nll_beta", beta_nll_beta)
+    set_config(config, "motion_v3_tail_direction_weight", tail_weight)
+    set_config(config, "motion_v3_tail_direction_margin", tail_margin)
+    set_config(config, "motion_v3_log_sigma_min", log_sigma_min)
+    set_config(config, "motion_v3_log_sigma_max", log_sigma_max)
+    if unified_auto:
+        if variant == "b0":
+            # B0 has no B1-driven support geometry; normalize the inherited
+            # legacy switch before validating the common v25 identity.
+            set_config(config, "search_v3_use_dynamic_sigma", False)
+        elif bool(get_config(config, "search_v3_use_dynamic_sigma", False)):
+            raise ValueError(
+                "safe_seqtrack_auto_v1 fixes B2 geometry and forbids "
+                "search_v3_use_dynamic_sigma=true")
+        fixed_parallel = float(get_config(
+            config, "search_v3_fixed_margin_parallel", 2.0))
+        fixed_perpendicular = float(get_config(
+            config, "search_v3_fixed_margin_perpendicular", 1.0))
+        if fixed_parallel != 2.0 or fixed_perpendicular != 1.0:
+            raise ValueError(
+                "safe_seqtrack_auto_v1 requires fixed B2 margins 2m/1m")
+        set_config(config, "search_v3_use_dynamic_sigma", False)
+        set_config(config, "search_v3_fixed_margin_parallel", 2.0)
+        set_config(config, "search_v3_fixed_margin_perpendicular", 1.0)
     if variant == "b0":
         # The v24 configs inherit data/training defaults from the v23 Full
         # config.  These switches belong to B1/B2 support construction and

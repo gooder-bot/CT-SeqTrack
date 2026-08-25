@@ -31,6 +31,7 @@ from utils.config import load_yaml_config
 from utils.replay_cache import (
     b1_calibration_config_sha256,
     sha256_file,
+    sha256_json,
 )
 
 
@@ -190,6 +191,44 @@ class PhysicalMotionUncertaintyTest(unittest.TestCase):
         self.assertTrue(result["promotion"]["criteria"][
             "learned_mean_beats_kinematic"])
 
+    def test_calibration_fits_and_promotes_on_disjoint_tracklets(self):
+        rng = np.random.default_rng(43)
+        rows = 120
+        direction = np.tile([1.0, 0.0], (rows, 1))
+        predicted_sigma = np.full((rows, 2), 0.5)
+        fit_error = rng.normal(size=(rows, 2)) * predicted_sigma * np.asarray(
+            [1.8, 0.7])
+        evaluation_error = np.tile([0.2, 0.1], (rows, 1))
+        evaluation_kinematic = np.tile([0.8, 0.4], (rows, 1))
+        common = {
+            "velocity_xy": direction,
+            "log_sigma_pp": np.log(predicted_sigma),
+            "valid": np.ones(rows),
+            "gap_ratio": np.ones(rows),
+            "tracklet_key": np.asarray([
+                f"tracklet/{index // 10}" for index in range(rows)]),
+        }
+        fitted = {
+            **common,
+            "error_xy": fit_error,
+            "kinematic_error_xy": fit_error * 2.0,
+        }
+        evaluated = {
+            **common,
+            "error_xy": evaluation_error,
+            "kinematic_error_xy": evaluation_kinematic,
+        }
+        result = fit_calibration(
+            fitted, evaluation_arrays=evaluated)
+        np.testing.assert_allclose(
+            result["scale_parallel_perpendicular"], [1.8, 0.7],
+            rtol=0.2, atol=0.1)
+        bootstrap = result["mean_prediction"][
+            "paired_tracklet_bootstrap"]
+        self.assertLess(bootstrap["ci95"][1], 0.0)
+        self.assertTrue(result["promotion"]["criteria"][
+            "learned_mean_beats_kinematic"])
+
     def test_calibration_manifest_binds_partition_artifact_and_checkpoint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -198,13 +237,15 @@ class PhysicalMotionUncertaintyTest(unittest.TestCase):
             np.savez(artifact, value=np.ones(1))
             checkpoint.write_bytes(b"checkpoint")
             manifest = {
-                "schema": "ct_seqtrack.b1_calibration.v2",
+                "schema": "ct_seqtrack.b1_calibration.v3",
                 "dataset": "nuscenes",
                 "split": "mini_train",
                 "partition": "calibration",
                 "config_sha256": "a" * 64,
-                "b1_config_sha256": "b" * 64,
+                "b1_config": {},
+                "b1_config_sha256": sha256_json({}),
                 "checkpoint_sha256": sha256_file(checkpoint),
+                "tracklet_keys_sha256": sha256_json([]),
                 "artifact_sha256": sha256_file(artifact),
             }
             manifest_path = artifact.with_suffix(

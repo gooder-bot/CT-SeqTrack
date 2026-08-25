@@ -51,6 +51,7 @@ from models.ct_v2.motion import (
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
     physical_motion_uncertainty_loss,
+    recursive_gap_age_balanced_mean,
 )
 from models.ct_v2.fusion import (
     ProposalFusionGate,
@@ -692,6 +693,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.motion_v3_aux_nll_weight = float(getattr(
             config, 'motion_v3_aux_nll_weight',
             self.motion_v3_nll_weight))
+        self.motion_v3_beta_nll_beta = float(getattr(
+            config, 'motion_v3_beta_nll_beta', 0.5))
+        self.motion_v3_tail_direction_weight = float(getattr(
+            config, 'motion_v3_tail_direction_weight', 0.25))
+        self.motion_v3_tail_direction_margin = float(getattr(
+            config, 'motion_v3_tail_direction_margin', 0.9))
+        self.motion_v3_sigma_error_cap = float(getattr(
+            config, 'ct_motion_max_displacement', 12.0))
         self.motion_v3_fused_weight = float(getattr(
             config, 'motion_v3_fused_weight', 1.0))
         self.motion_v3_gate_weight = float(getattr(
@@ -854,6 +863,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 or any(value <= 0 for value in
                        self.motion_v3_aux_query_gaps)):
             raise ValueError("B1motion-v3 auxiliary query gaps must be positive")
+        if not 0.0 <= self.motion_v3_beta_nll_beta <= 1.0:
+            raise ValueError("motion_v3_beta_nll_beta must be in [0,1]")
+        if (self.motion_v3_tail_direction_weight < 0
+                or not 0.0 <= self.motion_v3_tail_direction_margin <= 1.0):
+            raise ValueError("B1 tail direction settings are invalid")
         if min(
                 self.search_v2_targetness_weight,
                 self.search_v2_vote_weight,
@@ -1133,6 +1147,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     config, 'ct_motion_max_displacement', 12.0)),
                 acceleration_weight=float(getattr(
                     config, 'ct_motion_acceleration_weight', 0.5)),
+                temporal_backend=str(getattr(
+                    config, 'motion_v3_temporal_backend', 'gru')),
+                cfc_backbone_units=int(getattr(
+                    config, 'motion_v3_cfc_backbone_units', 105)),
+                log_sigma_min=float(getattr(
+                    config, 'motion_v3_log_sigma_min',
+                    -2.302585092994046)),
+                log_sigma_max=float(getattr(
+                    config, 'motion_v3_log_sigma_max', 2.5)),
                 )
             if self.use_motion_v3_legacy_fusion:
                 with isolated_constructor_rng(
@@ -1637,6 +1660,29 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             digest.update(tensor.numpy().tobytes())
         return digest.hexdigest()
 
+    def _ct_optimizer_state_hash(self, module_name, optimizer):
+        """Hash Adam state for one named module without parameter IDs."""
+        digest = hashlib.sha256()
+        parameters = getattr(
+            self, '_ct_named_parameters_by_module', {}).get(module_name, ())
+        for parameter_name, parameter in sorted(parameters):
+            digest.update(parameter_name.encode('utf-8'))
+            state = optimizer.state.get(parameter, {})
+            if not state:
+                digest.update(b'<uninitialized>')
+                continue
+            for state_name in sorted(state):
+                digest.update(str(state_name).encode('utf-8'))
+                value = state[state_name]
+                if torch.is_tensor(value):
+                    tensor = value.detach().cpu().contiguous()
+                    digest.update(str(tensor.dtype).encode('ascii'))
+                    digest.update(str(tuple(tensor.shape)).encode('ascii'))
+                    digest.update(tensor.numpy().tobytes())
+                else:
+                    digest.update(repr(value).encode('utf-8'))
+        return digest.hexdigest()
+
     @torch.no_grad()
     def _verify_b2_v3_frozen_hashes(self):
         if sorted(self._b2_v3_frozen_reference_hashes) != sorted(
@@ -1734,9 +1780,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     for name in getattr(self, '_ct_optimizer_names', ())},
                 'last_gradient_norm': dict(getattr(
                     self, '_ct_last_gradient_norm', {})),
+                'max_gradient_norm': dict(getattr(
+                    self, '_ct_max_gradient_norm', {})),
+                'active_frozen_parameters': [
+                    name for name, parameter in self.named_parameters()
+                    if not parameter.requires_grad and (
+                        not self._ct_any_plugin_parameter(name)
+                        or {
+                            'b1': self.ct_enable_b1,
+                            'b2': self.ct_enable_b2,
+                            'b3': self.ct_enable_b3,
+                        }[self._ct_plugin_group(name)])],
             }
             checkpoint['ct_b0_prefix_hashes'] = copy.deepcopy(getattr(
                 self, '_ct_b0_prefix_hashes', {}))
+            checkpoint['ct_b0_optimizer_state_hashes'] = copy.deepcopy(
+                getattr(self, '_ct_b0_optimizer_state_hashes', {}))
             checkpoint['ct_cuda_stage_audit'] = copy.deepcopy(getattr(
                 self, '_ct_cuda_stage_max', {}))
             checkpoint['ct_observation_batch_fingerprints'] = copy.deepcopy(
@@ -1768,6 +1827,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
     def on_load_checkpoint(self, checkpoint):
         self._ct_b0_prefix_hashes = copy.deepcopy(
             checkpoint.get('ct_b0_prefix_hashes', {}))
+        self._ct_b0_optimizer_state_hashes = copy.deepcopy(
+            checkpoint.get('ct_b0_optimizer_state_hashes', {}))
         self._ct_observation_batch_fingerprints = copy.deepcopy(
             checkpoint.get('ct_observation_batch_fingerprints', []))
         if (bool(getattr(
@@ -1822,11 +1883,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.require_b1_calibration_artifact:
             if (not isinstance(calibration, dict)
                     or calibration.get('schema')
-                    != 'ct_seqtrack.b1_uncertainty_calibration.v2'
+                    != 'ct_seqtrack.b1_uncertainty_calibration.v3'
                     or len(calibration.get(
                         'fixed_margin_parallel_perpendicular_95', [])) != 2):
                 raise RuntimeError(
-                    "this configuration requires a verified v2 B1 "
+                    "this configuration requires a verified v3 B1 "
                     "calibration artifact with fixed residual margins")
             if (self.ct_joint_contract_version >= 3
                     and len(calibration.get(
@@ -1835,7 +1896,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise RuntimeError(
                     "contract-v3 calibration lacks standardized residual q90")
             source = calibration.get('source_artifact', {})
+            evaluation = calibration.get('evaluation_artifact', {})
             if (source.get('partition') != 'calibration'
+                    or evaluation.get('partition') != 'dev'
+                    or evaluation.get('dataset') != source.get('dataset')
+                    or evaluation.get('split') != source.get('split')
+                    or evaluation.get('b1_config_sha256') != source.get(
+                        'b1_config_sha256')
                     or source.get('dataset') != str(getattr(
                         self.config, 'dataset', 'unknown'))
                     or source.get('split') != str(getattr(
@@ -1852,13 +1919,6 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     "this configuration requires a promoted B1 calibration")
         if isinstance(calibration, dict):
             self._b1_uncertainty_calibration = copy.deepcopy(calibration)
-            margins = calibration.get(
-                'fixed_margin_parallel_perpendicular_95')
-            if isinstance(margins, (list, tuple)) and len(margins) == 2:
-                self.config.search_v3_fixed_margin_parallel = float(
-                    margins[0])
-                self.config.search_v3_fixed_margin_perpendicular = float(
-                    margins[1])
             standardized_q90 = calibration.get(
                 'standardized_abs_residual_q90_parallel_perpendicular')
             if (isinstance(standardized_q90, (list, tuple))
@@ -1924,7 +1984,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         torch.linalg.vector_norm(value)
                         for value in gradients])).detach().cpu())
             self._ct_pending_auto_updates = active
-            self._ct_last_gradient_norm = norms
+            previous = dict(getattr(self, '_ct_last_gradient_norm', {}))
+            previous.update(norms)
+            self._ct_last_gradient_norm = previous
+            maximum = dict(getattr(self, '_ct_max_gradient_norm', {}))
+            for name, value in norms.items():
+                maximum[name] = max(float(value), float(maximum.get(name, 0.0)))
+            self._ct_max_gradient_norm = maximum
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         if self.ct_unified_auto:
@@ -1941,6 +2007,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if update_step in (1, 100):
                     self._ct_b0_prefix_hashes[f'step_{update_step}'] = (
                         self._ct_module_parameter_hash('b0'))
+                    optimizer = self.trainer.optimizers[0]
+                    self._ct_b0_optimizer_state_hashes[
+                        f'step_{update_step}'] = (
+                            self._ct_optimizer_state_hash('b0', optimizer))
             self._ct_pending_auto_updates = set()
             self._ct_record_cuda_stage('step')
             for stage, values in self._ct_cuda_stage_current.items():
@@ -3016,6 +3086,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 gamma=self.config.lr_decay_rate)
             self._ct_b0_prefix_hashes = {
                 'initial': self._ct_module_parameter_hash('b0')}
+            self._ct_b0_optimizer_state_hashes = {
+                'initial': self._ct_optimizer_state_hash('b0', optimizer)}
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
@@ -3770,6 +3842,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         aux_motion['velocity_xy'],
                     'motion_aux_prior_kinematic_xy':
                         aux_motion['kinematic_prior_xy'],
+                    'motion_aux_prior_residual_unit_parallel_perp':
+                        aux_motion['residual_unit_parallel_perp'],
+                    'motion_aux_prior_envelope_parallel_perp':
+                        aux_motion['envelope_parallel_perp'],
                     'motion_aux_prior_valid': aux_motion['valid'],
                     'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
                     'motion_aux_prior_log_sigma_xy':
@@ -5134,6 +5210,20 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 per_sample.reshape(-1) * valid
             ).sum() / torch.clamp(valid.sum(), min=1.0)
 
+        def recursive_balanced_mean(
+                per_sample, valid, recursive_age=None,
+                recursive_age_valid=None, query_gap=None, query_gaps=None):
+            """Reduce B1 losses by equal query-gap and age strata."""
+            return recursive_gap_age_balanced_mean(
+                per_sample, valid,
+                recursive_age=recursive_age,
+                recursive_age_valid=recursive_age_valid,
+                query_gap=query_gap,
+                query_gaps=(
+                    query_gaps if query_gaps is not None
+                    else self.motion_v3_aux_query_gaps),
+            )
+
         def balanced_binary_loss(logits, targets, valid):
             """Average each observed class independently.
 
@@ -5413,20 +5503,44 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     output['motion_prior_log_sigma_parallel_perp'],
                     output['motion_prior_direction_xy'],
                     main_valid,
+                    kinematic_xy=output['motion_prior_kinematic_xy'],
+                    envelope_parallel_perp=output[
+                        'motion_prior_envelope_parallel_perp'],
+                    residual_unit_parallel_perp=output[
+                        'motion_prior_residual_unit_parallel_perp'],
+                    beta=self.motion_v3_beta_nll_beta,
+                    tail_direction_weight=(
+                        self.motion_v3_tail_direction_weight),
+                    tail_direction_margin=(
+                        self.motion_v3_tail_direction_margin),
+                    sigma_error_cap=self.motion_v3_sigma_error_cap,
                 )
                 main_prior_per_sample = uncertainty_terms[
                     'mean_per_sample']
                 main_valid = uncertainty_terms['valid']
-            loss_motion_v3_prior = masked_mean(
-                main_prior_per_sample, main_valid)
+            recursive_age = data.get('ct_recursive_state_age')
+            recursive_age_valid = data.get('ct_recursive_state_age_valid')
+            if recursive_age is None:
+                recursive_age = torch.full_like(main_prior_per_sample, -1.0)
+            if recursive_age_valid is None:
+                recursive_age_valid = torch.zeros_like(main_prior_per_sample)
+            loss_motion_v3_prior = recursive_balanced_mean(
+                main_prior_per_sample, main_valid,
+                recursive_age=recursive_age,
+                recursive_age_valid=recursive_age_valid)
             loss_total += (
                 self.motion_v3_prior_weight * loss_motion_v3_prior)
             b1_transaction_loss = (
                 b1_transaction_loss
                 + self.motion_v3_prior_weight * loss_motion_v3_prior)
             if uncertainty_terms is not None:
-                loss_motion_v3_nll = masked_mean(
-                    uncertainty_terms['nll_per_sample'], main_valid)
+                loss_motion_v3_nll = recursive_balanced_mean(
+                    uncertainty_terms['nll_per_sample'], main_valid,
+                    recursive_age=recursive_age,
+                    recursive_age_valid=recursive_age_valid)
+                motion_v3_gaussian_nll = masked_mean(
+                    uncertainty_terms['gaussian_nll_per_sample'],
+                    main_valid)
                 loss_total += (
                     self.motion_v3_nll_weight * loss_motion_v3_nll)
                 b1_transaction_loss = (
@@ -5466,6 +5580,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 coverage_errors = []
                 uncertainty_metrics = {
                     'loss_motion_v3_nll': loss_motion_v3_nll,
+                    'motion_v3_gaussian_nll': motion_v3_gaussian_nll,
+                    'motion_v3_recoverable_saturation_rate': masked_mean(
+                        uncertainty_terms[
+                            'recoverable_saturation_per_sample'],
+                        main_valid),
+                    'motion_v3_tail_axis_fraction': masked_mean(
+                        uncertainty_terms['tail_axis_fraction_per_sample'],
+                        main_valid),
                     'motion_v3_sigma_parallel_mean': masked_mean(
                         torch.exp(output[
                             'motion_prior_log_sigma_parallel_perp'][:, 0]),
@@ -5531,20 +5653,52 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                             'motion_aux_prior_log_sigma_parallel_perp'],
                         output['motion_aux_prior_direction_xy'],
                         aux_valid,
+                        kinematic_xy=output[
+                            'motion_aux_prior_kinematic_xy'],
+                        envelope_parallel_perp=output[
+                            'motion_aux_prior_envelope_parallel_perp'],
+                        residual_unit_parallel_perp=output[
+                            'motion_aux_prior_residual_unit_parallel_perp'],
+                        beta=self.motion_v3_beta_nll_beta,
+                        tail_direction_weight=(
+                            self.motion_v3_tail_direction_weight),
+                        tail_direction_margin=(
+                            self.motion_v3_tail_direction_margin),
+                        sigma_error_cap=self.motion_v3_sigma_error_cap,
                     )
                     aux_prior_per_sample = aux_uncertainty_terms[
                         'mean_per_sample']
                     aux_valid = aux_uncertainty_terms['valid']
-                loss_motion_v3_aux_prior = masked_mean(
-                    aux_prior_per_sample, aux_valid)
+                aux_query_gap = data.get('motion_aux_query_gap_frames')
+                loss_motion_v3_aux_prior = recursive_balanced_mean(
+                    aux_prior_per_sample, aux_valid,
+                    recursive_age=recursive_age,
+                    recursive_age_valid=recursive_age_valid,
+                    query_gap=aux_query_gap,
+                    query_gaps=self.motion_v3_aux_query_gaps)
                 loss_total += (
                     self.motion_v3_aux_prior_weight
                     * loss_motion_v3_aux_prior)
+                b1_transaction_loss = (
+                    b1_transaction_loss
+                    + self.motion_v3_aux_prior_weight
+                    * loss_motion_v3_aux_prior)
                 if aux_uncertainty_terms is not None:
-                    loss_motion_v3_aux_nll = masked_mean(
-                        aux_uncertainty_terms['nll_per_sample'], aux_valid)
+                    loss_motion_v3_aux_nll = recursive_balanced_mean(
+                        aux_uncertainty_terms['nll_per_sample'], aux_valid,
+                        recursive_age=recursive_age,
+                        recursive_age_valid=recursive_age_valid,
+                        query_gap=aux_query_gap,
+                        query_gaps=self.motion_v3_aux_query_gaps)
+                    motion_v3_aux_gaussian_nll = masked_mean(
+                        aux_uncertainty_terms[
+                            'gaussian_nll_per_sample'], aux_valid)
                     loss_total += (
                         self.motion_v3_aux_nll_weight
+                        * loss_motion_v3_aux_nll)
+                    b1_transaction_loss = (
+                        b1_transaction_loss
+                        + self.motion_v3_aux_nll_weight
                         * loss_motion_v3_aux_nll)
                 aux_prior_error = torch.linalg.norm(
                     output['motion_aux_prior_xy'].detach() - aux_target,
@@ -5571,6 +5725,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if aux_uncertainty_terms is not None:
                     loss_dict['loss_motion_v3_aux_nll'] = (
                         loss_motion_v3_aux_nll)
+                    loss_dict['motion_v3_aux_gaussian_nll'] = (
+                        motion_v3_aux_gaussian_nll)
+                    loss_dict[
+                        'motion_v3_aux_recoverable_saturation_rate'] = (
+                            masked_mean(aux_uncertainty_terms[
+                                'recoverable_saturation_per_sample'],
+                                aux_valid))
+                    loss_dict['motion_v3_aux_tail_axis_fraction'] = (
+                        masked_mean(aux_uncertainty_terms[
+                            'tail_axis_fraction_per_sample'], aux_valid))
                 if 'motion_aux_query_gap_frames' in data:
                     aux_query_gap = data[
                         'motion_aux_query_gap_frames'].to(
@@ -6190,6 +6354,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     loss_dict[key] = data[key].float().mean()
             for key in (
                     'ct_recursive_state_age',
+                    'ct_recursive_state_age_valid',
                     'ct_recursive_rollout_horizon',
                     'ct_recursive_reset_boundary',
                     'ct_recursive_state_source',
@@ -7027,9 +7192,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if key in output:
                 loss_dict[f"{key}_mean"] = output[key].float().mean()
 
-        # Manual isolated optimization differentiates this same objective with
-        # respect to two disjoint parameter sets.  B2 consumes detached B0
-        # evidence, so plugin losses have no path into the B0 transaction.
+        # The unified automatic optimizer differentiates the sum of disjoint
+        # transaction objectives.  B2 consumes detached B0 evidence, so plugin
+        # losses have no path into the B0 transaction.
+        recorded_b1_weighted_loss = loss_total.new_zeros(())
+        for key, weight in (
+                ('loss_motion_v3_prior', self.motion_v3_prior_weight),
+                ('loss_motion_v3_nll', self.motion_v3_nll_weight),
+                ('loss_motion_v3_aux_prior',
+                 self.motion_v3_aux_prior_weight),
+                ('loss_motion_v3_aux_nll',
+                 self.motion_v3_aux_nll_weight)):
+            if key in loss_dict:
+                recorded_b1_weighted_loss = (
+                    recorded_b1_weighted_loss + weight * loss_dict[key])
+        if not torch.equal(b1_transaction_loss, recorded_b1_weighted_loss):
+            raise RuntimeError(
+                "B1 transaction diverged from its recorded weighted losses")
+        loss_dict['motion_v3_weighted_loss'] = recorded_b1_weighted_loss
         loss_dict['loss_b0_transaction'] = b0_transaction_loss
         loss_dict['loss_b1_transaction'] = b1_transaction_loss
         loss_dict['loss_b2_transaction'] = b2_transaction_loss
@@ -7366,6 +7546,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise RuntimeError(
                 "candidate crop/history/Search state contract diverged")
         state_diagnostics = state_diagnostics or {}
+        recursive_age = state_diagnostics.get('rollout_age')
+        recursive_age_valid = recursive_age is not None
         current_labels = processed['seg_label'][
             -int(getattr(self.config, 'point_sample_size', 1024)):]
         processed.update({
@@ -7374,9 +7556,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_online_slot': np.int64(raw['online_slot']),
             'ct_online_epoch': np.int64(raw['online_epoch']),
             'ct_recursive_state_age': np.float32(
-                state_diagnostics.get(
-                    'rollout_age',
-                    int(raw['this_frame_id']) - max(state.predictions))),
+                recursive_age if recursive_age_valid else -1.0),
+            'ct_recursive_state_age_valid': np.float32(
+                recursive_age_valid),
             'ct_recursive_rollout_horizon': np.float32(
                 state_diagnostics.get('rollout_horizon', 0)),
             'ct_recursive_reset_boundary': np.float32(
@@ -8065,6 +8247,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'motion_aux_prior_velocity_xy': aux_motion['velocity_xy'],
                 'motion_aux_prior_kinematic_xy': aux_motion[
                     'kinematic_prior_xy'],
+                'motion_aux_prior_residual_unit_parallel_perp': aux_motion[
+                    'residual_unit_parallel_perp'],
+                'motion_aux_prior_envelope_parallel_perp': aux_motion[
+                    'envelope_parallel_perp'],
                 'motion_aux_prior_valid': aux_motion['valid'],
                 'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
                 'motion_aux_prior_log_sigma_xy': aux_motion['log_sigma_xy'],

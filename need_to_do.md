@@ -19,13 +19,16 @@ v24 仅作为只读失败证据。
 - [x] B0 observation 改为无状态 shuffle/candidate/点采样，四候选损失固定为 `0.5, 1/6, 1/6, 1/6`。
 - [x] 四臂统一 `ct_seqtrack.train.v2`，mechanism iterator 惰性创建并隔离 observation RNG。
 - [x] v25 使用单 Adam 自动优化和 B0→B1→B2→B3 互斥参数组；重复 B0 mechanism 前向为 no-grad、BN 隔离。
-- [x] checkpoint 增加 v7 runtime/RNG/参数组/update/hash 审计和 CUDA 分阶段审计。
+- [x] checkpoint 增加 v8 runtime/RNG/B1-backend/loss/参数组/update/hash 审计和 CUDA 分阶段审计。
+- [x] 修复 B1 gap2/gap4 transaction、归一化残差长尾监督、detached-mean beta-NLL 与独立 calibration/dev 校准；固定 B2 geometry 不变。
+- [x] 新增参数匹配、无外部依赖的 CfC 插件与 `--b1-backend gru|cfc`，默认仍为 GRU。
 - [x] 本地合同测试、全量 pytest 和 compileall 已通过；准确数量以本次交付记录为准。
 
 ## 服务器验收（待执行）
 
 - [ ] 固定同一安全 batch，对比 SeqTrack control 与 CT B0 的输入、输出、loss、梯度和一次 Adam 更新。
-- [ ] 四臂从相同 seed42 完成 disposable 100-step，比较 initial/step1/step100 B0 hash。
+- [ ] B1-GRU/B1-CfC 各完成真实 batch forward 与至少 8-step train，确认所有启用组均有有限非零梯度且无 frozen 参数。
+- [ ] B0/B1-GRU/B1-CfC 从相同 seed42 完成 disposable 100-step，比较 initial/step1/step100 B0 参数和 Adam 状态 hash；选定后端后对 Full-B3/Full 重复审计。
 - [ ] 对比 validation cadence 1/5 的相同 observation-step B0 hash。
 - [ ] 完成 scratch 连续训练与 epoch-boundary resume 等价检查。
 - [ ] 对比各阶段 CUDA allocated/reserved/peak，并执行 B0 显存阈值门禁。
@@ -40,10 +43,11 @@ v24 仅作为只读失败证据。
 ## 瘦身完成后实验
 
 - [x] 固定 candidate 协议：B0 为 4 views，candidate0 权重 0.5；B2 只读取 canonical candidate0。
-- [ ] v25 B0、B1、Full-B3、Full mini seed42 分别从 epoch0 跑满 60 epoch。
+- [ ] v25 B1-GRU/B1-CfC mini seed42 分别从 epoch0 跑满 60 epoch，并完成 paired-bootstrap 与独立 calibration/dev 门槛。
+- [ ] 选择胜出 backend 后，B0、Full-B3、Full mini seed42 分别从 epoch0 跑满 60 epoch。
 - [ ] 完成 B1、B2、B3 机制指标和 matched-prefix hash 审计。
 - [ ] mini 通过后运行完整 nuScenes 四臂 seed42。
-- [ ] 补完整 nuScenes B0/Full seeds43、44。
+- [ ] 补完整 nuScenes 四臂 seeds52、62。
 
 ## Claim guardrails
 

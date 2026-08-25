@@ -28,8 +28,10 @@ from utils.online_contract import validate_scratch_training_contract  # noqa: E4
 FORMAL_VARIANTS = {"b0", "b1", "full_minus_b3", "full"}
 
 
-def validate_config(path: Path) -> dict:
+def validate_config(path: Path, b1_backend=None) -> dict:
     config = load_yaml_config(path)
+    if b1_backend is not None:
+        config["motion_v3_temporal_backend"] = str(b1_backend)
     if str(config.get("net_model", "")).strip().lower() != "ctseqtrack":
         raise ValueError("bounded CT check requires net_model=ctseqtrack")
     configure_ct_variant(config)
@@ -101,6 +103,8 @@ def build_command(args, artifact_dir: Path) -> list[str]:
         command.extend(("--path", args.path))
     if args.preloading:
         command.append("--preloading")
+    if args.b1_backend is not None:
+        command.extend(("--b1-backend", args.b1_backend))
     return command
 
 
@@ -121,6 +125,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--preloading", action="store_true")
     parser.add_argument("--tag", default="ct-bounded-train-check")
+    parser.add_argument("--b1-backend", choices=("gru", "cfc"))
     parser.add_argument(
         "--artifact-dir",
         type=Path,
@@ -134,7 +139,7 @@ def main() -> None:
     if not args.cfg.is_file():
         raise FileNotFoundError(args.cfg)
 
-    config = validate_config(args.cfg)
+    config = validate_config(args.cfg, args.b1_backend)
     artifact_dir = args.artifact_dir.resolve()
     protected_output = (ROOT / "output").resolve()
     if artifact_dir == protected_output or protected_output in artifact_dir.parents:
@@ -151,6 +156,7 @@ def main() -> None:
         "runtime_protocol": config.get("ct_runtime_protocol"),
         "optimizer_topology": config.get("ct_optimizer_topology"),
         "observation_rng_mode": config.get("ct_observation_rng_mode"),
+        "b1_backend": config.get("motion_v3_temporal_backend"),
         "candidate_contract": {
             "b0_views": 4,
             "b2_views": 1,
@@ -184,6 +190,8 @@ def main() -> None:
             manifest["module_audit"] = checkpoint.get("ct_module_audit")
             manifest["b0_prefix_hashes"] = checkpoint.get(
                 "ct_b0_prefix_hashes")
+            manifest["b0_optimizer_state_hashes"] = checkpoint.get(
+                "ct_b0_optimizer_state_hashes")
             manifest["observation_batch_fingerprints"] = checkpoint.get(
                 "ct_observation_batch_fingerprints")
             manifest["cuda_stage_audit"] = checkpoint.get(
@@ -191,6 +199,8 @@ def main() -> None:
             if str(config.get("ct_runtime_protocol", "")) == (
                     "safe_seqtrack_auto_v1"):
                 prefixes = manifest["b0_prefix_hashes"] or {}
+                optimizer_hashes = (
+                    manifest["b0_optimizer_state_hashes"] or {})
                 required = ["initial", "step_1"]
                 if args.steps >= 100:
                     required.append("step_100")
@@ -198,10 +208,24 @@ def main() -> None:
                 fingerprints = (
                     manifest["observation_batch_fingerprints"] or [])
                 expected_fingerprints = min(int(args.steps), 100)
-                if missing or len(fingerprints) < expected_fingerprints:
+                missing_optimizer = [
+                    key for key in required if key not in optimizer_hashes]
+                audit = manifest["module_audit"] or {}
+                gradient_failures = [
+                    name for name in audit.get("parameter_groups", [])
+                    if not 0.0 < float(audit.get(
+                        "max_gradient_norm", {}).get(name, 0.0))
+                    < float("inf")]
+                frozen = audit.get("active_frozen_parameters", [])
+                if (missing or missing_optimizer or gradient_failures or frozen
+                        or len(fingerprints) < expected_fingerprints):
                     manifest["status"] = "failed"
                     manifest["postcheck_error"] = {
                         "missing_b0_prefix_hashes": missing,
+                        "missing_b0_optimizer_state_hashes": (
+                            missing_optimizer),
+                        "modules_without_nonzero_gradient": gradient_failures,
+                        "active_frozen_parameters": frozen,
                         "expected_observation_fingerprints": (
                             expected_fingerprints),
                         "observed_observation_fingerprints": len(fingerprints),

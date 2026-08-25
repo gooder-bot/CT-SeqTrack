@@ -1,0 +1,4 @@
+﻿version,final_success,paired_b0_success,apparent_delta,b0_isolated,why_not_comparable
+CT21-B1,55.397159576416016,51.001094818115234,4.396064758300781,否,correlated candidate、legacy post-Transformer fusion、fused/gate loss进入总损失
+v24-B1,47.65755081176758,31.414663314819336,16.242887496948242,否,四臂从step1分叉；B1 learned MSE 还比CV差4.3%
+v25-B1,33.44310760498047,50.690372467041016,-17.247264862060547,否,输入/RNG一致但step1参数hash分叉；proposal仍为observation

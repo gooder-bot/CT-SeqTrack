@@ -682,6 +682,7 @@ class BaseModelMF(pl.LightningModule):
             output, "motion_prior_valid") > 0.0)
         b1_nll = float("nan")
         b1_mahalanobis_sq = float("nan")
+        direction_np = np.asarray((1.0, 0.0), dtype=np.float64)
         direction = output.get("motion_prior_direction_xy")
         log_sigma = output.get("motion_prior_log_sigma_parallel_perp")
         if b1_valid and direction is not None and log_sigma is not None:
@@ -708,6 +709,17 @@ class BaseModelMF(pl.LightningModule):
                     b1_nll = float("nan")
                 if not np.isfinite(b1_mahalanobis_sq):
                     b1_mahalanobis_sq = float("nan")
+        perpendicular_np = np.asarray(
+            (-direction_np[1], direction_np[0]), dtype=np.float64)
+        envelope = output.get("motion_prior_envelope_parallel_perp")
+        envelope_np = (
+            envelope.detach().cpu().numpy().reshape(-1, 2)[0]
+            if envelope is not None else np.ones(2, dtype=np.float32))
+        target_residual_xy = target_xy - kinematic
+        target_residual_unit_np = np.asarray((
+            np.dot(target_residual_xy, direction_np),
+            np.dot(target_residual_xy, perpendicular_np),
+        ), dtype=np.float64) / np.maximum(envelope_np, 1e-6)
         raw_obs_error = float(np.linalg.norm(raw_obs - target_xy))
         raw_motion_error = float(np.linalg.norm(raw_motion - target_xy))
         counterfactual_margin = float(getattr(
@@ -747,7 +759,11 @@ class BaseModelMF(pl.LightningModule):
             "current_target_points": self._proposal_scalar(
                 data_dict, "ct_acquisition_base_target_count"),
             "recursive_age": self._proposal_scalar(
-                data_dict, "ct_recursive_state_age"),
+                data_dict, "ct_recursive_state_age",
+                default=-1.0),
+            "recursive_age_valid": int(self._proposal_scalar(
+                data_dict, "ct_recursive_state_age_valid",
+                default=0.0) > 0.0),
             "support_actual_length": self._proposal_scalar(
                 data_dict, "search_v3_support_actual_extent", column=0),
             "support_actual_width": self._proposal_scalar(
@@ -882,6 +898,14 @@ class BaseModelMF(pl.LightningModule):
                 output, "ct_router_radius"),
             "residual_unit_parallel": float(residual_unit_np[0]),
             "residual_unit_perpendicular": float(residual_unit_np[1]),
+            "target_residual_unit_parallel": float(
+                target_residual_unit_np[0]),
+            "target_residual_unit_perpendicular": float(
+                target_residual_unit_np[1]),
+            "residual_recoverable_parallel": int(
+                abs(target_residual_unit_np[0]) <= 1.0),
+            "residual_recoverable_perpendicular": int(
+                abs(target_residual_unit_np[1]) <= 1.0),
             "residual_saturation": self._proposal_scalar(
                 output, "ct_motion_residual_saturation"),
             "sigma_parallel": float(sigma_np[0]),

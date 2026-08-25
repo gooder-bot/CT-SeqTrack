@@ -1,0 +1,9 @@
+﻿check,result,equal,meaning
+tracked git commit,049de82b304bba3993bc3ba41d2cae4eab0052d7,是,不是代码版本变化
+formal config file SHA256,95a40db4aa17a9c8731d48a7a49c624d7a8f433c1b160a8557b22a78605ff055,是,resolved配置去掉tag后逐项相同
+dataset manifests,train/mechanism/val逐项相同,是,不是数据划分或manifest变化
+initial B0 parameter SHA256,798a8def3e825b91dc8f75aee70895bdf67e54d691da7bdc0beded8801e355be,是,随机初始化完全相同
+first 100 observation fingerprints,100/100相同,是,输入、候选与点采样事务已对齐
+B0 parameter SHA256 after step1,new=3564ae60140a… / old=1ef9b8f6605f…,否,第一次backward/Adam更新已经分叉
+first visible total-loss difference,logged step 5,否,微小参数差在数步后转成可见loss差
+epoch30 Success,49.275 vs 34.686,否,相差约14.589点，形成高低训练盆地

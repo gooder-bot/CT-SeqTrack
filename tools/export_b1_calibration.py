@@ -19,9 +19,11 @@ sys.path.insert(0, str(ROOT))
 from datasets import get_dataset, points_utils  # noqa: E402
 from utils.checkpoint_loading import load_initial_weights  # noqa: E402
 from models import get_model  # noqa: E402
+from models.ct_variant import configure_ct_variant  # noqa: E402
 from utils.recursive_state import stable_tracklet_partition  # noqa: E402
 from utils.config import load_yaml_config  # noqa: E402
 from utils.replay_cache import (  # noqa: E402
+    b1_calibration_config_contract,
     b1_calibration_config_sha256,
     sha256_file,
     sha256_json,
@@ -41,6 +43,9 @@ def parse_args():
     parser.add_argument("--max-tracklets", type=int)
     parser.add_argument("--preloading", action="store_true")
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--b1-backend", choices=("gru", "cfc"),
+        help="must match the backend that produced --checkpoint")
     return parser.parse_args()
 
 
@@ -67,8 +72,11 @@ def main():
         "use_motion_v3_legacy_fusion": False,
         "proposal_inference_mode": "observation",
     })
+    if args.b1_backend is not None:
+        raw_config["motion_v3_temporal_backend"] = args.b1_backend
     if args.path:
         raw_config["path"] = args.path
+    configure_ct_variant(raw_config)
     config = EasyDict(raw_config)
     dataset = get_dataset(
         config, type="test", split=args.split, protocol_role="test")
@@ -118,6 +126,8 @@ def main():
                     "gap_ratio": np.float32(prediction["gap_ratio"]),
                     "tracklet_key": str(tracklet_key),
                     "frame_id": np.int64(frame_id),
+                    "recursive_age": np.int64(max(0, frame_id - 1)),
+                    "recursive_age_valid": np.int64(1),
                 })
                 data, reference_box = model.build_input_dict(
                     sequence, frame_id, history)
@@ -145,17 +155,23 @@ def main():
         gap_ratio=np.asarray([row["gap_ratio"] for row in rows]),
         tracklet_key=np.asarray([row["tracklet_key"] for row in rows]),
         frame_id=np.asarray([row["frame_id"] for row in rows]),
+        recursive_age=np.asarray([row["recursive_age"] for row in rows]),
+        recursive_age_valid=np.asarray([
+            row["recursive_age_valid"] for row in rows]),
     )
     manifest = {
-        "schema": "ct_seqtrack.b1_calibration.v2",
+        "schema": "ct_seqtrack.b1_calibration.v3",
         "dataset": str(getattr(config, 'dataset', 'unknown')),
         "split": args.split,
         "partition": args.partition,
         "seed": seed,
         "config_sha256": sha256_json(raw_config),
+        "b1_config": b1_calibration_config_contract(config),
         "b1_config_sha256": b1_calibration_config_sha256(config),
         "checkpoint_sha256": sha256_file(args.checkpoint),
         "tracklets": selected_tracklets,
+        "tracklet_keys_sha256": sha256_json(sorted({
+            row["tracklet_key"] for row in rows})),
         "rows": len(rows),
         "artifact_sha256": sha256_file(output),
     }

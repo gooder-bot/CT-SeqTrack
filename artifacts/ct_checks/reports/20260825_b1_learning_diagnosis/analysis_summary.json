@@ -1,0 +1,79 @@
+{
+  "loss_scale_audit": [
+    {
+      "run": "B1-only retryfix epoch30",
+      "valid_rows": 1852,
+      "learned_rmse": 8.947280369212905,
+      "cv_rmse": 9.038610524819926,
+      "learned_minus_cv_rmse": -0.09133015560702162,
+      "paired_help_rate": 0.5701943844492441,
+      "mean_nll": 110.50351085536435,
+      "coverage_95": 0.4562634989200864,
+      "sigma_parallel_median": 0.4730723053216934,
+      "sigma_perpendicular_median": 0.3785505592823028,
+      "residual_parallel_median": -0.6470029056072235,
+      "top1pct_nll_share": 0.3147834022826608,
+      "tail213_prior_loss": 0.9240723282378605,
+      "tail213_nll_loss": 25.64907611975066,
+      "weighted_prior_contribution": 0.09240723282378605,
+      "weighted_nll_contribution": 1.282453805987533,
+      "nll_to_prior_contribution_ratio": 13.878283839892493
+    },
+    {
+      "run": "B1-only rerun epoch30",
+      "valid_rows": 1901,
+      "learned_rmse": 5.699820145842177,
+      "cv_rmse": 5.592396727771395,
+      "learned_minus_cv_rmse": 0.10742341807078226,
+      "paired_help_rate": 0.04208311415044713,
+      "mean_nll": 148.56818218750308,
+      "coverage_95": 0.3114150447133088,
+      "sigma_parallel_median": 0.3233213722705841,
+      "sigma_perpendicular_median": 0.3229532241821289,
+      "residual_parallel_median": 0.9420086145401,
+      "top1pct_nll_share": 0.6724859566282799,
+      "tail213_prior_loss": 0.6810727034096427,
+      "tail213_nll_loss": 25.325589534822203,
+      "weighted_prior_contribution": 0.06810727034096427,
+      "weighted_nll_contribution": 1.2662794767411103,
+      "nll_to_prior_contribution_ratio": 18.592427363506964
+    }
+  ],
+  "causal_diagnosis": [
+    {
+      "component": "B1 mean / GRU residual",
+      "status": "FAIL: weak and path-dependent",
+      "evidence": "Retryfix learned−CV RMSE = −0.091 m, but rerun = +0.107 m; rerun helps only 4.2% of valid rows and residual_parallel median is +0.942.",
+      "causal_role": "Direct B1 effectiveness failure; not explained by coverage alone.",
+      "next_action": "Keep GRU and fixed search geometry; train mean with robust SmoothL1, and stop NLL gradients from steering the mean in the diagnostic arm."
+    },
+    {
+      "component": "NLL objective / loss scale",
+      "status": "FAIL: dominates B1 transaction",
+      "evidence": "Rerun tail-213 weighted contributions are about 1.266 for NLL versus 0.068 for mean SmoothL1, a ratio of 18.6×.",
+      "causal_role": "Likely optimization driver of residual-head collapse.",
+      "next_action": "Use detached-residual sigma NLL and select its weight from measured gradient norms, not the raw metric magnitude."
+    },
+    {
+      "component": "Sigma parameterization",
+      "status": "FAIL: under-dispersed and tail-infeasible",
+      "evidence": "Rerun median sigma is about 0.323 m per axis while errors reach about 70 m; shared-anchor sigma is capped by 4 m / 3 m envelopes.",
+      "causal_role": "Creates very large NLL gradients on recursive outliers.",
+      "next_action": "Decouple uncertainty bounds from the fixed crop geometry, initialize from train-residual scale, and use a robust/censored likelihood for tails."
+    },
+    {
+      "component": "Coverage",
+      "status": "FAIL as a diagnostic, not a cause",
+      "evidence": "Rerun 95% empirical coverage is 31.1%; retryfix is 45.6%.",
+      "causal_role": "Reports sigma miscalibration; it does not backpropagate in current code.",
+      "next_action": "After the mean passes CV, fit a held-out tracklet calibration scale and gate on 50/80/95% coverage plus NLL."
+    },
+    {
+      "component": "Upstream recursive B0 path",
+      "status": "UNRESOLVED confounder",
+      "evidence": "Matched B1 runs share initial state and observation fingerprints but their B0 hashes diverge after step1.",
+      "causal_role": "Changes the online history/error distribution presented to B1.",
+      "next_action": "Complete the sequential step1 gradient/Adam-state audit before formal B1 claims."
+    }
+  ]
+}

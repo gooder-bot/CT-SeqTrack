@@ -1,0 +1,3217 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack v25 四臂实验诊断（2026-08-24）",
+    "description": "Safe-SeqTrack B0 对齐、B1/B2/B3 机制门槛与下一步实验判断。",
+    "generatedAt": "2026-08-24T00:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_v25_four_arm",
+        "label": "v25 retryfix 四臂 TensorBoard、checkpoint 与逐帧诊断",
+        "path": "artifacts/ct_checks/reports/20260824_v25_four_arm/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'v25_four_arm'",
+          "tablesUsed": [
+            "report_snapshot"
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "card_b0_score",
+        "dataset": "headline",
+        "sourceId": "src_v25_four_arm",
+        "description": "安全 evaluator 下 B0 的第60轮 Success；late-3 作为稳定性上下文。",
+        "metrics": [
+          {
+            "label": "B0 final Success",
+            "field": "b0_final_success",
+            "format": "number"
+          },
+          {
+            "label": "late-3",
+            "field": "b0_late3_success",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_b0_parity",
+        "dataset": "headline",
+        "sourceId": "src_v25_four_arm",
+        "description": "跨臂 B0 前缀哈希；输入指纹通过不等于梯度/更新通过。",
+        "metrics": [
+          {
+            "label": "B0 跨臂哈希",
+            "field": "b0_parity_status"
+          },
+          {
+            "label": "前100批输入",
+            "field": "input_fingerprint_status"
+          }
+        ]
+      },
+      {
+        "id": "card_b2_harm",
+        "dataset": "headline",
+        "sourceId": "src_v25_four_arm",
+        "description": "epoch60 mini_val 中 available B2 raw candidate 的中心误差有害率。",
+        "metrics": [
+          {
+            "label": "B1+B2 harmful",
+            "field": "b12_raw_harmful_rate",
+            "format": "percent"
+          },
+          {
+            "label": "Full harmful",
+            "field": "full_raw_harmful_rate",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "card_b3_coverage",
+        "dataset": "headline",
+        "sourceId": "src_v25_four_arm",
+        "description": "Full 未安装 held-out calibration artifact，因此保持 fail-closed observation。",
+        "metrics": [
+          {
+            "label": "B3 action coverage",
+            "field": "b3_action_coverage",
+            "format": "percent"
+          },
+          {
+            "label": "calibrated rows",
+            "field": "b3_calibrated_rate",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_validation_success",
+        "title": "四臂 mini_val Success 曲线",
+        "subtitle": "nuScenes mini car，seed42，60 epochs；每轮验证，单位为点",
+        "intent": "trend",
+        "question": "共享 B0 的四臂是否沿相同验证轨迹训练？",
+        "rationale": "60个有序验证点足以显示从早期开始的持续分叉，并保留 final/late-3 上下文。",
+        "type": "line",
+        "dataset": "validation_curves",
+        "sourceId": "src_v25_four_arm",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success",
+            "unit": "points"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "tooltip": [
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            },
+            {
+              "field": "runtime_fps",
+              "type": "quantitative",
+              "label": "FPS"
+            },
+            {
+              "field": "global_step",
+              "type": "quantitative",
+              "label": "Global step"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_b1_rmse",
+        "title": "epoch60 mini_val B1 learned 与 CV RMSE",
+        "subtitle": "仅 b1_valid=1 的逐帧中心误差；越低越好，单位 m",
+        "intent": "comparison",
+        "question": "B1 learned prior 是否在验证分布上优于运动学 CV？",
+        "rationale": "三个机制臂各有两项同单位离散比较，分组柱图能直接显示方向和幅度。",
+        "type": "bar",
+        "dataset": "b1_rmse_chart",
+        "sourceId": "src_v25_four_arm",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "y": {
+            "field": "rmse",
+            "type": "quantitative",
+            "label": "RMSE",
+            "unit": "m"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Method"
+          },
+          "tooltip": [
+            {
+              "field": "valid_rows",
+              "type": "quantitative",
+              "label": "Valid rows"
+            },
+            {
+              "field": "coverage_95",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "95% coverage"
+            },
+            {
+              "field": "mean_nll",
+              "type": "quantitative",
+              "label": "Mean NLL"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_b2_harmful",
+        "title": "epoch60 mini_val B2 raw candidate 有害率",
+        "subtitle": "available=1 且中心误差比 observation 恶化超过0.1 m",
+        "intent": "comparison",
+        "question": "B2 有效候选进入决策前有多大比例会伤害跟踪？",
+        "rationale": "两个模块臂使用同一比率定义，简单柱图比混合 oracle headroom 的双轴图更诚实。",
+        "type": "bar",
+        "dataset": "b2_validation",
+        "sourceId": "src_v25_four_arm",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "y": {
+            "field": "raw_harmful_rate",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Harmful rate"
+          },
+          "tooltip": [
+            {
+              "field": "available_rows",
+              "type": "quantitative",
+              "label": "Available rows"
+            },
+            {
+              "field": "raw_center_gain_m",
+              "type": "quantitative",
+              "label": "Mean center gain",
+              "unit": "m"
+            },
+            {
+              "field": "oracle_success_headroom_points",
+              "type": "quantitative",
+              "label": "Oracle headroom",
+              "unit": "points"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "table_arm_summary",
+        "title": "四臂 final 与 late-3",
+        "subtitle": "严格使用第60轮与58–60轮均值；不选 best epoch",
+        "dataset": "arm_summary",
+        "sourceId": "src_v25_four_arm",
+        "defaultSort": {
+          "field": "arm",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "final_success",
+            "label": "Final S",
+            "format": "number"
+          },
+          {
+            "field": "late3_success",
+            "label": "Late-3 S",
+            "format": "number"
+          },
+          {
+            "field": "final_precision",
+            "label": "Final P",
+            "format": "number"
+          },
+          {
+            "field": "late3_precision",
+            "label": "Late-3 P",
+            "format": "number"
+          },
+          {
+            "field": "runtime_fps_final",
+            "label": "Final FPS",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_b0_audit",
+        "title": "B0 跨臂审计",
+        "subtitle": "短哈希仅用于显示；完整 SHA256 保留在 checkpoint",
+        "dataset": "b0_audit",
+        "sourceId": "src_v25_four_arm",
+        "defaultSort": {
+          "field": "arm",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "initial_hash",
+            "label": "Initial",
+            "type": "text"
+          },
+          {
+            "field": "step1_hash",
+            "label": "Step1",
+            "type": "text"
+          },
+          {
+            "field": "step100_hash",
+            "label": "Step100",
+            "type": "text"
+          },
+          {
+            "field": "final_hash",
+            "label": "Final",
+            "type": "text"
+          },
+          {
+            "field": "b0_updates",
+            "label": "B0 updates",
+            "format": "number"
+          },
+          {
+            "field": "plugin_updates",
+            "label": "Plugin updates",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_gates",
+        "title": "论文实验进入门槛",
+        "subtitle": "按 SAFE_SEQTRACK_V25_PROTOCOL 与既定实验计划逐项判断",
+        "dataset": "gate_status",
+        "sourceId": "src_v25_four_arm",
+        "defaultSort": {
+          "field": "module",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "module",
+            "label": "Module",
+            "type": "text"
+          },
+          {
+            "field": "criterion",
+            "label": "Criterion",
+            "type": "text"
+          },
+          {
+            "field": "result",
+            "label": "Observed",
+            "type": "text"
+          },
+          {
+            "field": "verdict",
+            "label": "Verdict",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack v25 四臂实验诊断（2026-08-24）"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## Executive Summary / 执行摘要\n\n**结论：B0 在分数上出现明显恢复迹象，但没有通过 Safe-SeqTrack 的正式对齐门槛，当前不能宣称已经恢复到 SeqTrack 水平，也不能把 Full 相对 B0 的差值解释为模块增益。** 独立 B0 在第60轮达到 50.690 Success / 59.280 Precision，late-3 为 50.185 / 57.038；然而四臂虽然初始 B0、前100批输入指纹和最终全局 RNG 状态一致，却从 step1 起 B0 参数哈希失配。B1-only 的 observation 只剩 33.443 / 35.138，而 Full 的 fail-closed observation 为 52.553 / 61.194，证明跨臂随机训练轨迹仍未受控。\n\n模块侧也尚未过论文门槛：B1 在验证流上不稳定且不校准；B2 的 raw candidate 几乎没有 oracle headroom，并在可用行中大多有害；B3 尚无 held-out calibration artifact，所以 action coverage 为0。建议停止 full-nuScenes 扩展，先完成 step1 梯度/Adam 事务审计和顺序100-step复现。"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": [
+          "card_b0_score",
+          "card_b0_parity",
+          "card_b2_harm",
+          "card_b3_coverage"
+        ]
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 1. 范围、数据与指标定义\n\n本报告只读取四个 v25 `retryfix` 运行：B0、B1-only、B1+B2、Full。四组均为 nuScenes mini car、seed42、batch16、60 epochs、每轮验证；checkpoint 均为 epoch60 / global_step 75,720。四组 provenance 的代码提交、mini_train/mini_val 清单、安全 evaluator、候选权重与采样协议一致，训练代码没有 tracked dirty。旧 v24、B02x2、历史高分和 `trajtrack` 均未进入计算。\n\n跟踪指标只报告 final 与 late-3。逐帧 candidate CSV 用于同 checkpoint 内的 B1/B2/B3 机制诊断；由于 CSV 未覆盖全部2285个验证帧，它不替代 TensorBoard 的绝对 Success/Precision，只用于成对方向与机制供给分析。"
+      },
+      {
+        "id": "arm_summary_block",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_arm_summary"
+      },
+      {
+        "id": "b0_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 2. B0：分数恢复，但事务未恢复\n\n独立 B0 的 final/late-3 都维持在约50 Success，说明先前31分的单条坏轨迹没有再次出现；训练也完整走完60轮。因此可以说 **B0 的性能表象基本回到可用区间**。但正式问题不是某一条 run 是否到50，而是相同 observation 事务在四臂中是否一致。该条件明确失败：initial hash 一致，step1、step100、epoch60 全部失配。\n\n曲线进一步说明这不是末期微小浮点差：B1-only 长期停留在约33 Success，而 B0、B1+B2 与 Full 位于约48–53区间。Full 的配置是 `proposal_inference_mode: observation` 且无校准 artifact，其52.553主要是另一条 B0 轨迹，不是 B3 涨点。"
+      },
+      {
+        "id": "validation_chart_block",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_validation_success"
+      },
+      {
+        "id": "root_cause",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 3. B0 分叉定位\n\n现有证据把问题定位到 **第一次 backward/Adam 更新**，而不是 DataLoader 或 validation cadence：四臂 step0 的 view0 loss 完全相同，前100批 observation 指纹完全相同，最终 Python/NumPy/Torch CPU/CUDA RNG 状态也完全相同；但 step1 参数哈希已经不同。B1-only 首个可见 view0 loss 差异出现在 step6，B1+B2/Full 出现在 step3，说明极小的第一次更新差异随后被 mini 训练放大。\n\n最可能的两类原因是 PointNet2/自定义 CUDA backward 的非确定性，或 Adam foreach/多参数组在不同拓扑下对 B0 更新产生位级差异。仅凭现有 checkpoint 不能二选一；需要在服务器保存 step1 的 B0 grad hash 和 Adam state hash。若 grad 已不同，根因在 backward；若 grad 相同而参数不同，根因在 optimizer。并行运行（其中 B0 与 B1-only 共用物理GPU）会增加调度扰动，后续验收应同卡顺序执行。"
+      },
+      {
+        "id": "b0_audit_block",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_b0_audit"
+      },
+      {
+        "id": "b1_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 4. B1：平均位置先验增益弱，验证不稳且不校准\n\n训练机制流的 epoch60 平均值里，learned RMSE 比 CV 只好约0.05–0.20 m；到 mini_val epoch60，B1-only 仍仅好0.101 m，但 B1+B2 与 Full 分别反而差0.168 m和0.107 m。更严重的是不确定性失配：B1-only/B1+B2/Full 的95%经验 coverage 仅45.0%/37.5%/55.5%，mean NLL 为120.5/144.3/150.0。\n\n因此 B1 目前不能作为可靠的 physical prior gate。优先问题不是扩大网络，而是让训练机制流与 online validation 的误差分布一致，并重新检查 sigma 下界、NLL尺度和递归漂移下的 calibration。"
+      },
+      {
+        "id": "b1_chart_block",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b1_rmse"
+      },
+      {
+        "id": "b2_b3_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 5. B2 与 B3：证据供给不足，选择器尚未进入部署态\n\nB2 的训练采样供应不是空的：epoch60 eligible row recall 为100%，point recall 为40.7%–44.5%，训练 presence AP 为0.808–0.838。但 online mini_val 发生明显分布坍缩：B2 available 仅6.3%–7.6%，其中真正含 extension target 的只有1–2行；presence AP 只有0.042–0.125。可用 raw candidate 的平均中心增益为 -2.71 到 -4.03 m，93.4%–96.7% 会恶化超过0.1 m，oracle Success headroom 仅0.005–0.015点。\n\nB3 在训练行上 action AP=0.620、AUROC=0.769，但 epoch60 验证只有17个 evidence-valid 行、仅2个 helpful 行，validation action AP=0.226。更关键的是 `ct_action_calibration_path=null` 且 `ct_require_action_calibration=true`，所以所有验证行都 fail closed：`b3_calibrated=0`、`router_applied_gate=0`。当前 Full 分数不能检验 B3 是否降低 harmful rate。"
+      },
+      {
+        "id": "b2_chart_block",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b2_harmful"
+      },
+      {
+        "id": "gate_table_block",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_gates"
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 6. 推荐的下一步\n\n1. **先不要启动 full nuScenes。** 当前四臂不满足已注册的 B0 hash gate，跨臂差值没有因果解释力。\n2. **做顺序而非并行的 step1/100 审计。** 同一张空闲A40上依次跑 B0→B1→B1+B2→Full；保存 observation loss、每个 B0 参数的 grad SHA256、Adam `exp_avg/exp_avg_sq/step` SHA256、更新后参数哈希。\n3. **先区分 backward 与 optimizer。** 若 grad hash 不同，启用确定性诊断设置并排查 PointNet2 CUDA 原子操作；若 grad 相同，固定 Adam `foreach=False` 做一次100-step对照。所有 smoke checkpoint 继续丢弃。\n4. **B0 parity 通过后只重跑 mini 四臂。** B1 必须在 validation 上 learned RMSE < CV 且 coverage 接近名义值；否则先校准 B1，不进入 B2。\n5. **B2 优先修供给，不改耦合。** 保持 extension-only 与晚耦合，重点提高 online validation 的 target-bearing retention，并在 candidate 应用前要求正 oracle headroom；当前不应训练第五臂。\n6. **B3 最后校准。** 只有 B2 过门槛后，使用独立 calibration tracklets 生成与 checkpoint/config/manifest 绑定的 artifact，再报告 action coverage、risk–coverage 和 harmful-rate reduction。"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v25_four_arm",
+        "body": "## 7. 方法、限制与可复现性\n\n本次结论来自固定目录的 TensorBoard scalar、last.ckpt 审计字段、epoch60 candidate diagnostics 与 acquisition supply。Success/Precision 的绝对值使用框架已记录标量；逐帧 CSV 只做同臂内成对机制分析。报告未使用旧高分作为阈值，也未用冻结的官方 SeqTrack 数值直接对比，因为该参考实现的验证路径会读取当前帧 GT `wlh`，不满足本项目的 safe evaluator 合同。\n\n当前只有一个 seed，且四臂 B0 已分叉，所以不能估计稳定增益、paired CI 或论文效果。显存 audit 的 lifetime peak 为 B0 3.894 GiB、插件臂约4.447 GiB，但插件臂峰值包含 mechanism 事务，不能替代“同一 observation batch 对 Safe SeqTrack control”的分阶段显存验收。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-24T00:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "b0_final_success": 50.690372467041016,
+          "b0_late3_success": 50.18490219116211,
+          "b0_parity_status": "FAIL",
+          "input_fingerprint_status": "PASS",
+          "b12_raw_harmful_rate": 0.9666666666666667,
+          "full_raw_harmful_rate": 0.9344262295081968,
+          "b3_action_coverage": 0.0,
+          "b3_calibrated_rate": 0.0
+        }
+      ],
+      "validation_curves": [
+        {
+          "epoch": 1,
+          "global_step": 1262,
+          "arm": "B0",
+          "success": 19.729759216308594,
+          "precision": 31.452957153320312,
+          "runtime_fps": 16.293567657470703,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 2,
+          "global_step": 2524,
+          "arm": "B0",
+          "success": 35.95951843261719,
+          "precision": 46.99124526977539,
+          "runtime_fps": 16.43280792236328,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 3,
+          "global_step": 3786,
+          "arm": "B0",
+          "success": 27.20459747314453,
+          "precision": 34.50218963623047,
+          "runtime_fps": 17.72661781311035,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 4,
+          "global_step": 5048,
+          "arm": "B0",
+          "success": 26.143327713012695,
+          "precision": 25.50656509399414,
+          "runtime_fps": 17.307668685913086,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 5,
+          "global_step": 6310,
+          "arm": "B0",
+          "success": 34.67068099975586,
+          "precision": 36.935447692871094,
+          "runtime_fps": 17.063594818115234,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 6,
+          "global_step": 7572,
+          "arm": "B0",
+          "success": 41.587528228759766,
+          "precision": 56.01094436645508,
+          "runtime_fps": 17.600351333618164,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 7,
+          "global_step": 8834,
+          "arm": "B0",
+          "success": 32.12800979614258,
+          "precision": 43.15864562988281,
+          "runtime_fps": 17.444684982299805,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 8,
+          "global_step": 10096,
+          "arm": "B0",
+          "success": 23.602846145629883,
+          "precision": 20.826040267944336,
+          "runtime_fps": 17.030237197875977,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 9,
+          "global_step": 11358,
+          "arm": "B0",
+          "success": 40.88949966430664,
+          "precision": 39.20349884033203,
+          "runtime_fps": 17.414945602416992,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 10,
+          "global_step": 12620,
+          "arm": "B0",
+          "success": 32.99234390258789,
+          "precision": 32.89934539794922,
+          "runtime_fps": 17.3198299407959,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 11,
+          "global_step": 13882,
+          "arm": "B0",
+          "success": 42.8501091003418,
+          "precision": 53.375274658203125,
+          "runtime_fps": 17.307296752929688,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 12,
+          "global_step": 15144,
+          "arm": "B0",
+          "success": 39.475929260253906,
+          "precision": 48.59956741333008,
+          "runtime_fps": 17.514110565185547,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 13,
+          "global_step": 16406,
+          "arm": "B0",
+          "success": 48.32276153564453,
+          "precision": 59.163021087646484,
+          "runtime_fps": 17.42630958557129,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 14,
+          "global_step": 17668,
+          "arm": "B0",
+          "success": 32.734134674072266,
+          "precision": 32.53610610961914,
+          "runtime_fps": 17.502958297729492,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 15,
+          "global_step": 18930,
+          "arm": "B0",
+          "success": 32.76914596557617,
+          "precision": 31.80415916442871,
+          "runtime_fps": 17.519346237182617,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 16,
+          "global_step": 20192,
+          "arm": "B0",
+          "success": 33.45186233520508,
+          "precision": 36.76039505004883,
+          "runtime_fps": 17.426189422607422,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 17,
+          "global_step": 21454,
+          "arm": "B0",
+          "success": 37.57877731323242,
+          "precision": 39.35667419433594,
+          "runtime_fps": 17.52467155456543,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 18,
+          "global_step": 22716,
+          "arm": "B0",
+          "success": 29.92888069152832,
+          "precision": 29.62691879272461,
+          "runtime_fps": 17.493736267089844,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 19,
+          "global_step": 23978,
+          "arm": "B0",
+          "success": 26.731950759887695,
+          "precision": 22.501094818115234,
+          "runtime_fps": 17.423250198364258,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 20,
+          "global_step": 25240,
+          "arm": "B0",
+          "success": 44.01422882080078,
+          "precision": 55.87417984008789,
+          "runtime_fps": 17.570453643798828,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 21,
+          "global_step": 26502,
+          "arm": "B0",
+          "success": 45.29212188720703,
+          "precision": 48.79978561401367,
+          "runtime_fps": 17.50818634033203,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 22,
+          "global_step": 27764,
+          "arm": "B0",
+          "success": 44.12800979614258,
+          "precision": 45.21006774902344,
+          "runtime_fps": 17.48082733154297,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 23,
+          "global_step": 29026,
+          "arm": "B0",
+          "success": 47.8851203918457,
+          "precision": 50.78665542602539,
+          "runtime_fps": 17.609512329101562,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 24,
+          "global_step": 30288,
+          "arm": "B0",
+          "success": 49.403724670410156,
+          "precision": 58.00875473022461,
+          "runtime_fps": 17.365293502807617,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 25,
+          "global_step": 31550,
+          "arm": "B0",
+          "success": 46.89605712890625,
+          "precision": 54.94310760498047,
+          "runtime_fps": 17.333040237426758,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 26,
+          "global_step": 32812,
+          "arm": "B0",
+          "success": 45.55689239501953,
+          "precision": 50.27461624145508,
+          "runtime_fps": 17.47148323059082,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 27,
+          "global_step": 34074,
+          "arm": "B0",
+          "success": 47.5853385925293,
+          "precision": 56.28883743286133,
+          "runtime_fps": 17.448318481445312,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 28,
+          "global_step": 35336,
+          "arm": "B0",
+          "success": 46.5284538269043,
+          "precision": 51.56346130371094,
+          "runtime_fps": 17.61581802368164,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 29,
+          "global_step": 36598,
+          "arm": "B0",
+          "success": 43.63566970825195,
+          "precision": 44.20787811279297,
+          "runtime_fps": 17.775177001953125,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 30,
+          "global_step": 37860,
+          "arm": "B0",
+          "success": 47.060176849365234,
+          "precision": 47.27024459838867,
+          "runtime_fps": 17.93672752380371,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 31,
+          "global_step": 39122,
+          "arm": "B0",
+          "success": 47.13895034790039,
+          "precision": 49.852298736572266,
+          "runtime_fps": 18.186826705932617,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 32,
+          "global_step": 40384,
+          "arm": "B0",
+          "success": 38.574398040771484,
+          "precision": 39.053611755371094,
+          "runtime_fps": 18.323766708374023,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 33,
+          "global_step": 41646,
+          "arm": "B0",
+          "success": 46.285560607910156,
+          "precision": 47.163021087646484,
+          "runtime_fps": 18.456623077392578,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 34,
+          "global_step": 42908,
+          "arm": "B0",
+          "success": 39.61378479003906,
+          "precision": 45.20240783691406,
+          "runtime_fps": 18.675128936767578,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 35,
+          "global_step": 44170,
+          "arm": "B0",
+          "success": 47.605037689208984,
+          "precision": 61.68381118774414,
+          "runtime_fps": 18.791677474975586,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 36,
+          "global_step": 45432,
+          "arm": "B0",
+          "success": 44.06236267089844,
+          "precision": 42.78227615356445,
+          "runtime_fps": 18.977907180786133,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 37,
+          "global_step": 46694,
+          "arm": "B0",
+          "success": 43.30306625366211,
+          "precision": 42.83698272705078,
+          "runtime_fps": 19.093996047973633,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 38,
+          "global_step": 47956,
+          "arm": "B0",
+          "success": 50.368709564208984,
+          "precision": 59.22976303100586,
+          "runtime_fps": 19.197643280029297,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 39,
+          "global_step": 49218,
+          "arm": "B0",
+          "success": 46.06017303466797,
+          "precision": 45.59081268310547,
+          "runtime_fps": 19.401063919067383,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 40,
+          "global_step": 50480,
+          "arm": "B0",
+          "success": 46.12582015991211,
+          "precision": 48.81400680541992,
+          "runtime_fps": 19.490478515625,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 41,
+          "global_step": 51742,
+          "arm": "B0",
+          "success": 50.79759216308594,
+          "precision": 57.04704666137695,
+          "runtime_fps": 19.620532989501953,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 42,
+          "global_step": 53004,
+          "arm": "B0",
+          "success": 49.8851203918457,
+          "precision": 55.54267120361328,
+          "runtime_fps": 19.629104614257812,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 43,
+          "global_step": 54266,
+          "arm": "B0",
+          "success": 51.74507522583008,
+          "precision": 58.45295333862305,
+          "runtime_fps": 19.707857131958008,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 44,
+          "global_step": 55528,
+          "arm": "B0",
+          "success": 51.03829574584961,
+          "precision": 56.74398422241211,
+          "runtime_fps": 19.883214950561523,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 45,
+          "global_step": 56790,
+          "arm": "B0",
+          "success": 51.904815673828125,
+          "precision": 58.30743408203125,
+          "runtime_fps": 19.963090896606445,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 46,
+          "global_step": 58052,
+          "arm": "B0",
+          "success": 50.39496612548828,
+          "precision": 56.48358917236328,
+          "runtime_fps": 20.073894500732422,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 47,
+          "global_step": 59314,
+          "arm": "B0",
+          "success": 50.4124755859375,
+          "precision": 56.60722351074219,
+          "runtime_fps": 20.170757293701172,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 48,
+          "global_step": 60576,
+          "arm": "B0",
+          "success": 50.005470275878906,
+          "precision": 55.939823150634766,
+          "runtime_fps": 20.24333953857422,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 49,
+          "global_step": 61838,
+          "arm": "B0",
+          "success": 50.799781799316406,
+          "precision": 56.036109924316406,
+          "runtime_fps": 20.29348373413086,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 50,
+          "global_step": 63100,
+          "arm": "B0",
+          "success": 49.95295715332031,
+          "precision": 55.87089538574219,
+          "runtime_fps": 20.336240768432617,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 51,
+          "global_step": 64362,
+          "arm": "B0",
+          "success": 50.257118225097656,
+          "precision": 57.15645980834961,
+          "runtime_fps": 20.389095306396484,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 52,
+          "global_step": 65624,
+          "arm": "B0",
+          "success": 50.95295333862305,
+          "precision": 58.13895034790039,
+          "runtime_fps": 20.4197940826416,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 53,
+          "global_step": 66886,
+          "arm": "B0",
+          "success": 51.45842361450195,
+          "precision": 59.992347717285156,
+          "runtime_fps": 20.457992553710938,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 54,
+          "global_step": 68148,
+          "arm": "B0",
+          "success": 51.18927764892578,
+          "precision": 58.58095932006836,
+          "runtime_fps": 20.586223602294922,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 55,
+          "global_step": 69410,
+          "arm": "B0",
+          "success": 48.845733642578125,
+          "precision": 57.03610610961914,
+          "runtime_fps": 20.62413787841797,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 56,
+          "global_step": 70672,
+          "arm": "B0",
+          "success": 49.756019592285156,
+          "precision": 54.51531219482422,
+          "runtime_fps": 20.664234161376953,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 57,
+          "global_step": 71934,
+          "arm": "B0",
+          "success": 51.57440185546875,
+          "precision": 59.632389068603516,
+          "runtime_fps": 20.757978439331055,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 58,
+          "global_step": 73196,
+          "arm": "B0",
+          "success": 49.93763732910156,
+          "precision": 55.62910461425781,
+          "runtime_fps": 20.72125816345215,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 59,
+          "global_step": 74458,
+          "arm": "B0",
+          "success": 49.92669677734375,
+          "precision": 56.2035026550293,
+          "runtime_fps": 20.83778190612793,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 60,
+          "global_step": 75720,
+          "arm": "B0",
+          "success": 50.690372467041016,
+          "precision": 59.28009033203125,
+          "runtime_fps": 20.801467895507812,
+          "late3": true,
+          "final": true
+        },
+        {
+          "epoch": 1,
+          "global_step": 1262,
+          "arm": "B1-only",
+          "success": 16.556894302368164,
+          "precision": 25.923416137695312,
+          "runtime_fps": 7.2568535804748535,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 2,
+          "global_step": 2524,
+          "arm": "B1-only",
+          "success": 25.637853622436523,
+          "precision": 39.81181716918945,
+          "runtime_fps": 8.106724739074707,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 3,
+          "global_step": 3786,
+          "arm": "B1-only",
+          "success": 25.298686981201172,
+          "precision": 33.17943572998047,
+          "runtime_fps": 8.000629425048828,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 4,
+          "global_step": 5048,
+          "arm": "B1-only",
+          "success": 32.34682846069336,
+          "precision": 46.646610260009766,
+          "runtime_fps": 8.282609939575195,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 5,
+          "global_step": 6310,
+          "arm": "B1-only",
+          "success": 28.05579948425293,
+          "precision": 27.894968032836914,
+          "runtime_fps": 8.183093070983887,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 6,
+          "global_step": 7572,
+          "arm": "B1-only",
+          "success": 36.15864181518555,
+          "precision": 36.852298736572266,
+          "runtime_fps": 8.338155746459961,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 7,
+          "global_step": 8834,
+          "arm": "B1-only",
+          "success": 31.278995513916016,
+          "precision": 30.066740036010742,
+          "runtime_fps": 8.310173988342285,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 8,
+          "global_step": 10096,
+          "arm": "B1-only",
+          "success": 32.661930084228516,
+          "precision": 33.42013168334961,
+          "runtime_fps": 8.365957260131836,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 9,
+          "global_step": 11358,
+          "arm": "B1-only",
+          "success": 30.508750915527344,
+          "precision": 31.073305130004883,
+          "runtime_fps": 8.399456977844238,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 10,
+          "global_step": 12620,
+          "arm": "B1-only",
+          "success": 28.580963134765625,
+          "precision": 29.9135684967041,
+          "runtime_fps": 8.396537780761719,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 11,
+          "global_step": 13882,
+          "arm": "B1-only",
+          "success": 33.09956359863281,
+          "precision": 35.36433410644531,
+          "runtime_fps": 8.426443099975586,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 12,
+          "global_step": 15144,
+          "arm": "B1-only",
+          "success": 30.073305130004883,
+          "precision": 31.3807430267334,
+          "runtime_fps": 8.40411376953125,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 13,
+          "global_step": 16406,
+          "arm": "B1-only",
+          "success": 27.749454498291016,
+          "precision": 40.89606475830078,
+          "runtime_fps": 8.455116271972656,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 14,
+          "global_step": 17668,
+          "arm": "B1-only",
+          "success": 32.230857849121094,
+          "precision": 34.73851013183594,
+          "runtime_fps": 8.411224365234375,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 15,
+          "global_step": 18930,
+          "arm": "B1-only",
+          "success": 24.88730812072754,
+          "precision": 30.308536529541016,
+          "runtime_fps": 8.473552703857422,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 16,
+          "global_step": 20192,
+          "arm": "B1-only",
+          "success": 23.261489868164062,
+          "precision": 21.98686981201172,
+          "runtime_fps": 8.42678451538086,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 17,
+          "global_step": 21454,
+          "arm": "B1-only",
+          "success": 28.62910270690918,
+          "precision": 36.44967269897461,
+          "runtime_fps": 8.467899322509766,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 18,
+          "global_step": 22716,
+          "arm": "B1-only",
+          "success": 28.57440185546875,
+          "precision": 31.376365661621094,
+          "runtime_fps": 8.433517456054688,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 19,
+          "global_step": 23978,
+          "arm": "B1-only",
+          "success": 31.18927764892578,
+          "precision": 31.99234390258789,
+          "runtime_fps": 8.523626327514648,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 20,
+          "global_step": 25240,
+          "arm": "B1-only",
+          "success": 26.228666305541992,
+          "precision": 25.491249084472656,
+          "runtime_fps": 8.681352615356445,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 21,
+          "global_step": 26502,
+          "arm": "B1-only",
+          "success": 29.62691879272461,
+          "precision": 29.5864315032959,
+          "runtime_fps": 8.726835250854492,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 22,
+          "global_step": 27764,
+          "arm": "B1-only",
+          "success": 33.756019592285156,
+          "precision": 35.317291259765625,
+          "runtime_fps": 8.863860130310059,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 23,
+          "global_step": 29026,
+          "arm": "B1-only",
+          "success": 30.44748306274414,
+          "precision": 30.978118896484375,
+          "runtime_fps": 8.935827255249023,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 24,
+          "global_step": 30288,
+          "arm": "B1-only",
+          "success": 31.257110595703125,
+          "precision": 31.38621711730957,
+          "runtime_fps": 9.016295433044434,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 25,
+          "global_step": 31550,
+          "arm": "B1-only",
+          "success": 26.902624130249023,
+          "precision": 26.891687393188477,
+          "runtime_fps": 9.139370918273926,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 26,
+          "global_step": 32812,
+          "arm": "B1-only",
+          "success": 28.349014282226562,
+          "precision": 28.231948852539062,
+          "runtime_fps": 9.23117733001709,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 27,
+          "global_step": 34074,
+          "arm": "B1-only",
+          "success": 31.885120391845703,
+          "precision": 32.75382995605469,
+          "runtime_fps": 9.281641006469727,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 28,
+          "global_step": 35336,
+          "arm": "B1-only",
+          "success": 31.05579948425293,
+          "precision": 32.69474792480469,
+          "runtime_fps": 9.386198043823242,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 29,
+          "global_step": 36598,
+          "arm": "B1-only",
+          "success": 31.543764114379883,
+          "precision": 31.86104965209961,
+          "runtime_fps": 9.451318740844727,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 30,
+          "global_step": 37860,
+          "arm": "B1-only",
+          "success": 34.68600082397461,
+          "precision": 36.07221221923828,
+          "runtime_fps": 9.515405654907227,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 31,
+          "global_step": 39122,
+          "arm": "B1-only",
+          "success": 34.226478576660156,
+          "precision": 35.72538375854492,
+          "runtime_fps": 9.519537925720215,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 32,
+          "global_step": 40384,
+          "arm": "B1-only",
+          "success": 34.007659912109375,
+          "precision": 36.00656509399414,
+          "runtime_fps": 9.532148361206055,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 33,
+          "global_step": 41646,
+          "arm": "B1-only",
+          "success": 32.904815673828125,
+          "precision": 34.89824676513672,
+          "runtime_fps": 9.588876724243164,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 34,
+          "global_step": 42908,
+          "arm": "B1-only",
+          "success": 32.96826934814453,
+          "precision": 34.9682731628418,
+          "runtime_fps": 9.632111549377441,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 35,
+          "global_step": 44170,
+          "arm": "B1-only",
+          "success": 29.014223098754883,
+          "precision": 30.159738540649414,
+          "runtime_fps": 9.631196975708008,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 36,
+          "global_step": 45432,
+          "arm": "B1-only",
+          "success": 29.438730239868164,
+          "precision": 29.803064346313477,
+          "runtime_fps": 9.68380069732666,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 37,
+          "global_step": 46694,
+          "arm": "B1-only",
+          "success": 33.23741912841797,
+          "precision": 34.57111740112305,
+          "runtime_fps": 9.734223365783691,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 38,
+          "global_step": 47956,
+          "arm": "B1-only",
+          "success": 32.98796844482422,
+          "precision": 34.18162155151367,
+          "runtime_fps": 9.85189437866211,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 39,
+          "global_step": 49218,
+          "arm": "B1-only",
+          "success": 30.047046661376953,
+          "precision": 31.012035369873047,
+          "runtime_fps": 9.974165916442871,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 40,
+          "global_step": 50480,
+          "arm": "B1-only",
+          "success": 28.29650115966797,
+          "precision": 29.084243774414062,
+          "runtime_fps": 10.08915901184082,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 41,
+          "global_step": 51742,
+          "arm": "B1-only",
+          "success": 28.904813766479492,
+          "precision": 29.005468368530273,
+          "runtime_fps": 10.180126190185547,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 42,
+          "global_step": 53004,
+          "arm": "B1-only",
+          "success": 31.16520881652832,
+          "precision": 31.377464294433594,
+          "runtime_fps": 10.101034164428711,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 43,
+          "global_step": 54266,
+          "arm": "B1-only",
+          "success": 32.07549285888672,
+          "precision": 33.477027893066406,
+          "runtime_fps": 10.02559757232666,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 44,
+          "global_step": 55528,
+          "arm": "B1-only",
+          "success": 30.58096694946289,
+          "precision": 31.750547409057617,
+          "runtime_fps": 9.932929039001465,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 45,
+          "global_step": 56790,
+          "arm": "B1-only",
+          "success": 31.572214126586914,
+          "precision": 32.38840103149414,
+          "runtime_fps": 9.703176498413086,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 46,
+          "global_step": 58052,
+          "arm": "B1-only",
+          "success": 32.152076721191406,
+          "precision": 32.70896911621094,
+          "runtime_fps": 9.502860069274902,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 47,
+          "global_step": 59314,
+          "arm": "B1-only",
+          "success": 32.31181335449219,
+          "precision": 33.59299850463867,
+          "runtime_fps": 9.26871395111084,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 48,
+          "global_step": 60576,
+          "arm": "B1-only",
+          "success": 31.786653518676758,
+          "precision": 32.55580139160156,
+          "runtime_fps": 9.043537139892578,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 49,
+          "global_step": 61838,
+          "arm": "B1-only",
+          "success": 33.19584274291992,
+          "precision": 35.00984191894531,
+          "runtime_fps": 8.922362327575684,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 50,
+          "global_step": 63100,
+          "arm": "B1-only",
+          "success": 33.47154998779297,
+          "precision": 35.16849136352539,
+          "runtime_fps": 8.756612777709961,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 51,
+          "global_step": 64362,
+          "arm": "B1-only",
+          "success": 32.322757720947266,
+          "precision": 33.31509780883789,
+          "runtime_fps": 8.629631042480469,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 52,
+          "global_step": 65624,
+          "arm": "B1-only",
+          "success": 32.37964630126953,
+          "precision": 34.16520690917969,
+          "runtime_fps": 8.487696647644043,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 53,
+          "global_step": 66886,
+          "arm": "B1-only",
+          "success": 31.72100830078125,
+          "precision": 32.338077545166016,
+          "runtime_fps": 8.330680847167969,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 54,
+          "global_step": 68148,
+          "arm": "B1-only",
+          "success": 32.331512451171875,
+          "precision": 33.470458984375,
+          "runtime_fps": 8.224853515625,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 55,
+          "global_step": 69410,
+          "arm": "B1-only",
+          "success": 31.920135498046875,
+          "precision": 33.080963134765625,
+          "runtime_fps": 8.103656768798828,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 56,
+          "global_step": 70672,
+          "arm": "B1-only",
+          "success": 32.79759216308594,
+          "precision": 34.177242279052734,
+          "runtime_fps": 8.025005340576172,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 57,
+          "global_step": 71934,
+          "arm": "B1-only",
+          "success": 33.19803237915039,
+          "precision": 34.480308532714844,
+          "runtime_fps": 7.924179553985596,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 58,
+          "global_step": 73196,
+          "arm": "B1-only",
+          "success": 34.30744552612305,
+          "precision": 36.15864562988281,
+          "runtime_fps": 7.802646636962891,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 59,
+          "global_step": 74458,
+          "arm": "B1-only",
+          "success": 32.29650115966797,
+          "precision": 33.60175323486328,
+          "runtime_fps": 7.717214107513428,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 60,
+          "global_step": 75720,
+          "arm": "B1-only",
+          "success": 33.44310760498047,
+          "precision": 35.137855529785156,
+          "runtime_fps": 7.552331924438477,
+          "late3": true,
+          "final": true
+        },
+        {
+          "epoch": 1,
+          "global_step": 1262,
+          "arm": "B1+B2",
+          "success": 15.552517890930176,
+          "precision": 21.39715576171875,
+          "runtime_fps": 14.291553497314453,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 2,
+          "global_step": 2524,
+          "arm": "B1+B2",
+          "success": 29.600658416748047,
+          "precision": 49.3533935546875,
+          "runtime_fps": 13.865462303161621,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 3,
+          "global_step": 3786,
+          "arm": "B1+B2",
+          "success": 25.252735137939453,
+          "precision": 23.150985717773438,
+          "runtime_fps": 12.722724914550781,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 4,
+          "global_step": 5048,
+          "arm": "B1+B2",
+          "success": 22.812911987304688,
+          "precision": 19.8807430267334,
+          "runtime_fps": 12.969249725341797,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 5,
+          "global_step": 6310,
+          "arm": "B1+B2",
+          "success": 34.23085403442383,
+          "precision": 47.45842361450195,
+          "runtime_fps": 12.393433570861816,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 6,
+          "global_step": 7572,
+          "arm": "B1+B2",
+          "success": 34.780086517333984,
+          "precision": 53.461708068847656,
+          "runtime_fps": 12.472490310668945,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 7,
+          "global_step": 8834,
+          "arm": "B1+B2",
+          "success": 30.780088424682617,
+          "precision": 29.821664810180664,
+          "runtime_fps": 12.180049896240234,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 8,
+          "global_step": 10096,
+          "arm": "B1+B2",
+          "success": 23.955142974853516,
+          "precision": 19.328227996826172,
+          "runtime_fps": 12.248381614685059,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 9,
+          "global_step": 11358,
+          "arm": "B1+B2",
+          "success": 42.368709564208984,
+          "precision": 44.65755081176758,
+          "runtime_fps": 12.141336441040039,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 10,
+          "global_step": 12620,
+          "arm": "B1+B2",
+          "success": 37.125823974609375,
+          "precision": 37.17176818847656,
+          "runtime_fps": 12.296747207641602,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 11,
+          "global_step": 13882,
+          "arm": "B1+B2",
+          "success": 41.808536529541016,
+          "precision": 56.09955596923828,
+          "runtime_fps": 12.116947174072266,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 12,
+          "global_step": 15144,
+          "arm": "B1+B2",
+          "success": 43.736324310302734,
+          "precision": 48.97702407836914,
+          "runtime_fps": 12.212850570678711,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 13,
+          "global_step": 16406,
+          "arm": "B1+B2",
+          "success": 38.98140335083008,
+          "precision": 40.382938385009766,
+          "runtime_fps": 12.181058883666992,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 14,
+          "global_step": 17668,
+          "arm": "B1+B2",
+          "success": 33.425601959228516,
+          "precision": 29.66192626953125,
+          "runtime_fps": 12.277894020080566,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 15,
+          "global_step": 18930,
+          "arm": "B1+B2",
+          "success": 33.23960494995117,
+          "precision": 33.814002990722656,
+          "runtime_fps": 12.337967872619629,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 16,
+          "global_step": 20192,
+          "arm": "B1+B2",
+          "success": 38.51313018798828,
+          "precision": 62.15535354614258,
+          "runtime_fps": 12.388920783996582,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 17,
+          "global_step": 21454,
+          "arm": "B1+B2",
+          "success": 38.580963134765625,
+          "precision": 38.04923629760742,
+          "runtime_fps": 12.412612915039062,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 18,
+          "global_step": 22716,
+          "arm": "B1+B2",
+          "success": 39.21772384643555,
+          "precision": 55.62582015991211,
+          "runtime_fps": 12.682289123535156,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 19,
+          "global_step": 23978,
+          "arm": "B1+B2",
+          "success": 28.287744522094727,
+          "precision": 23.286651611328125,
+          "runtime_fps": 12.939075469970703,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 20,
+          "global_step": 25240,
+          "arm": "B1+B2",
+          "success": 42.933258056640625,
+          "precision": 55.259300231933594,
+          "runtime_fps": 13.197171211242676,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 21,
+          "global_step": 26502,
+          "arm": "B1+B2",
+          "success": 44.98140335083008,
+          "precision": 46.1159782409668,
+          "runtime_fps": 13.412895202636719,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 22,
+          "global_step": 27764,
+          "arm": "B1+B2",
+          "success": 45.1739616394043,
+          "precision": 43.79869079589844,
+          "runtime_fps": 13.624130249023438,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 23,
+          "global_step": 29026,
+          "arm": "B1+B2",
+          "success": 44.59627914428711,
+          "precision": 48.68599319458008,
+          "runtime_fps": 13.829924583435059,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 24,
+          "global_step": 30288,
+          "arm": "B1+B2",
+          "success": 48.56345748901367,
+          "precision": 56.65317916870117,
+          "runtime_fps": 14.024534225463867,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 25,
+          "global_step": 31550,
+          "arm": "B1+B2",
+          "success": 47.10612869262695,
+          "precision": 53.911380767822266,
+          "runtime_fps": 14.204460144042969,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 26,
+          "global_step": 32812,
+          "arm": "B1+B2",
+          "success": 39.92450714111328,
+          "precision": 39.933265686035156,
+          "runtime_fps": 14.388263702392578,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 27,
+          "global_step": 34074,
+          "arm": "B1+B2",
+          "success": 43.742889404296875,
+          "precision": 49.48249816894531,
+          "runtime_fps": 14.551034927368164,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 28,
+          "global_step": 35336,
+          "arm": "B1+B2",
+          "success": 42.1498908996582,
+          "precision": 46.45295715332031,
+          "runtime_fps": 14.57659912109375,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 29,
+          "global_step": 36598,
+          "arm": "B1+B2",
+          "success": 45.823848724365234,
+          "precision": 47.1783332824707,
+          "runtime_fps": 14.726242065429688,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 30,
+          "global_step": 37860,
+          "arm": "B1+B2",
+          "success": 42.749454498291016,
+          "precision": 40.74726867675781,
+          "runtime_fps": 14.860733032226562,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 31,
+          "global_step": 39122,
+          "arm": "B1+B2",
+          "success": 41.475929260253906,
+          "precision": 42.94858169555664,
+          "runtime_fps": 14.859711647033691,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 32,
+          "global_step": 40384,
+          "arm": "B1+B2",
+          "success": 41.43873596191406,
+          "precision": 44.690372467041016,
+          "runtime_fps": 14.987242698669434,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 33,
+          "global_step": 41646,
+          "arm": "B1+B2",
+          "success": 41.89825439453125,
+          "precision": 40.8555793762207,
+          "runtime_fps": 15.120049476623535,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 34,
+          "global_step": 42908,
+          "arm": "B1+B2",
+          "success": 36.528446197509766,
+          "precision": 39.89715576171875,
+          "runtime_fps": 15.239717483520508,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 35,
+          "global_step": 44170,
+          "arm": "B1+B2",
+          "success": 47.4715576171875,
+          "precision": 62.54813766479492,
+          "runtime_fps": 15.347702026367188,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 36,
+          "global_step": 45432,
+          "arm": "B1+B2",
+          "success": 43.30744171142578,
+          "precision": 42.69693374633789,
+          "runtime_fps": 15.453001976013184,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 37,
+          "global_step": 46694,
+          "arm": "B1+B2",
+          "success": 39.89825439453125,
+          "precision": 36.66411590576172,
+          "runtime_fps": 15.539966583251953,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 38,
+          "global_step": 47956,
+          "arm": "B1+B2",
+          "success": 46.35776901245117,
+          "precision": 52.351200103759766,
+          "runtime_fps": 15.636589050292969,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 39,
+          "global_step": 49218,
+          "arm": "B1+B2",
+          "success": 41.61159896850586,
+          "precision": 42.778995513916016,
+          "runtime_fps": 15.7228422164917,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 40,
+          "global_step": 50480,
+          "arm": "B1+B2",
+          "success": 41.425601959228516,
+          "precision": 44.18052291870117,
+          "runtime_fps": 15.809144973754883,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 41,
+          "global_step": 51742,
+          "arm": "B1+B2",
+          "success": 46.50656509399414,
+          "precision": 48.931068420410156,
+          "runtime_fps": 15.896976470947266,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 42,
+          "global_step": 53004,
+          "arm": "B1+B2",
+          "success": 47.30963134765625,
+          "precision": 51.655364990234375,
+          "runtime_fps": 15.981368064880371,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 43,
+          "global_step": 54266,
+          "arm": "B1+B2",
+          "success": 46.668495178222656,
+          "precision": 50.698028564453125,
+          "runtime_fps": 16.055234909057617,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 44,
+          "global_step": 55528,
+          "arm": "B1+B2",
+          "success": 46.007659912109375,
+          "precision": 49.155364990234375,
+          "runtime_fps": 16.131223678588867,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 45,
+          "global_step": 56790,
+          "arm": "B1+B2",
+          "success": 46.20240783691406,
+          "precision": 48.206787109375,
+          "runtime_fps": 15.411639213562012,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 46,
+          "global_step": 58052,
+          "arm": "B1+B2",
+          "success": 47.27899169921875,
+          "precision": 49.38840103149414,
+          "runtime_fps": 14.912744522094727,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 47,
+          "global_step": 59314,
+          "arm": "B1+B2",
+          "success": 44.845733642578125,
+          "precision": 48.51969528198242,
+          "runtime_fps": 14.423112869262695,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 48,
+          "global_step": 60576,
+          "arm": "B1+B2",
+          "success": 46.83479309082031,
+          "precision": 50.037200927734375,
+          "runtime_fps": 14.050506591796875,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 49,
+          "global_step": 61838,
+          "arm": "B1+B2",
+          "success": 46.935447692871094,
+          "precision": 50.404815673828125,
+          "runtime_fps": 13.64873218536377,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 50,
+          "global_step": 63100,
+          "arm": "B1+B2",
+          "success": 46.83698272705078,
+          "precision": 51.457332611083984,
+          "runtime_fps": 13.351738929748535,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 51,
+          "global_step": 64362,
+          "arm": "B1+B2",
+          "success": 47.13019561767578,
+          "precision": 50.71554183959961,
+          "runtime_fps": 13.051627159118652,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 52,
+          "global_step": 65624,
+          "arm": "B1+B2",
+          "success": 47.793216705322266,
+          "precision": 52.359954833984375,
+          "runtime_fps": 12.78115463256836,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 53,
+          "global_step": 66886,
+          "arm": "B1+B2",
+          "success": 48.740699768066406,
+          "precision": 54.25164031982422,
+          "runtime_fps": 12.524704933166504,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 54,
+          "global_step": 68148,
+          "arm": "B1+B2",
+          "success": 48.01203918457031,
+          "precision": 52.27352523803711,
+          "runtime_fps": 12.29404067993164,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 55,
+          "global_step": 69410,
+          "arm": "B1+B2",
+          "success": 45.637855529785156,
+          "precision": 50.645511627197266,
+          "runtime_fps": 11.925238609313965,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 56,
+          "global_step": 70672,
+          "arm": "B1+B2",
+          "success": 47.18052291870117,
+          "precision": 51.118160247802734,
+          "runtime_fps": 11.410183906555176,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 57,
+          "global_step": 71934,
+          "arm": "B1+B2",
+          "success": 47.94858169555664,
+          "precision": 53.059078216552734,
+          "runtime_fps": 11.09024715423584,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 58,
+          "global_step": 73196,
+          "arm": "B1+B2",
+          "success": 47.77571105957031,
+          "precision": 51.0032844543457,
+          "runtime_fps": 10.82181167602539,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 59,
+          "global_step": 74458,
+          "arm": "B1+B2",
+          "success": 47.384029388427734,
+          "precision": 50.84572982788086,
+          "runtime_fps": 10.57557487487793,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 60,
+          "global_step": 75720,
+          "arm": "B1+B2",
+          "success": 47.852298736572266,
+          "precision": 54.57002639770508,
+          "runtime_fps": 10.320636749267578,
+          "late3": true,
+          "final": true
+        },
+        {
+          "epoch": 1,
+          "global_step": 1262,
+          "arm": "Full",
+          "success": 33.34682846069336,
+          "precision": 38.77790069580078,
+          "runtime_fps": 14.207125663757324,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 2,
+          "global_step": 2524,
+          "arm": "Full",
+          "success": 34.59190368652344,
+          "precision": 32.53173065185547,
+          "runtime_fps": 14.4645414352417,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 3,
+          "global_step": 3786,
+          "arm": "Full",
+          "success": 31.051424026489258,
+          "precision": 38.817291259765625,
+          "runtime_fps": 14.476103782653809,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 4,
+          "global_step": 5048,
+          "arm": "Full",
+          "success": 31.591901779174805,
+          "precision": 29.007658004760742,
+          "runtime_fps": 14.576300621032715,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 5,
+          "global_step": 6310,
+          "arm": "Full",
+          "success": 30.13675880432129,
+          "precision": 26.710065841674805,
+          "runtime_fps": 14.62208080291748,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 6,
+          "global_step": 7572,
+          "arm": "Full",
+          "success": 31.847923278808594,
+          "precision": 31.42560386657715,
+          "runtime_fps": 14.714224815368652,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 7,
+          "global_step": 8834,
+          "arm": "Full",
+          "success": 38.09299850463867,
+          "precision": 49.648799896240234,
+          "runtime_fps": 14.74950885772705,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 8,
+          "global_step": 10096,
+          "arm": "Full",
+          "success": 43.42122268676758,
+          "precision": 57.4453010559082,
+          "runtime_fps": 14.77535343170166,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 9,
+          "global_step": 11358,
+          "arm": "Full",
+          "success": 42.79103088378906,
+          "precision": 46.63566589355469,
+          "runtime_fps": 14.817923545837402,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 10,
+          "global_step": 12620,
+          "arm": "Full",
+          "success": 48.550331115722656,
+          "precision": 63.74616622924805,
+          "runtime_fps": 14.431550979614258,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 11,
+          "global_step": 13882,
+          "arm": "Full",
+          "success": 42.543766021728516,
+          "precision": 57.758201599121094,
+          "runtime_fps": 14.405157089233398,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 12,
+          "global_step": 15144,
+          "arm": "Full",
+          "success": 41.7341423034668,
+          "precision": 48.37089920043945,
+          "runtime_fps": 14.00792121887207,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 13,
+          "global_step": 16406,
+          "arm": "Full",
+          "success": 46.61159896850586,
+          "precision": 61.19365692138672,
+          "runtime_fps": 14.071913719177246,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 14,
+          "global_step": 17668,
+          "arm": "Full",
+          "success": 46.7056884765625,
+          "precision": 58.92122268676758,
+          "runtime_fps": 14.076767921447754,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 15,
+          "global_step": 18930,
+          "arm": "Full",
+          "success": 33.7647705078125,
+          "precision": 32.14332962036133,
+          "runtime_fps": 14.140007019042969,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 16,
+          "global_step": 20192,
+          "arm": "Full",
+          "success": 38.92232131958008,
+          "precision": 57.85995864868164,
+          "runtime_fps": 14.127649307250977,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 17,
+          "global_step": 21454,
+          "arm": "Full",
+          "success": 35.96826934814453,
+          "precision": 33.771331787109375,
+          "runtime_fps": 14.157005310058594,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 18,
+          "global_step": 22716,
+          "arm": "Full",
+          "success": 39.5612678527832,
+          "precision": 48.83589172363281,
+          "runtime_fps": 14.046102523803711,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 19,
+          "global_step": 23978,
+          "arm": "Full",
+          "success": 34.357765197753906,
+          "precision": 31.20022201538086,
+          "runtime_fps": 13.977051734924316,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 20,
+          "global_step": 25240,
+          "arm": "Full",
+          "success": 38.11268997192383,
+          "precision": 53.683807373046875,
+          "runtime_fps": 13.909024238586426,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 21,
+          "global_step": 26502,
+          "arm": "Full",
+          "success": 50.40809631347656,
+          "precision": 59.25273895263672,
+          "runtime_fps": 13.84616470336914,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 22,
+          "global_step": 27764,
+          "arm": "Full",
+          "success": 48.28774642944336,
+          "precision": 51.7089729309082,
+          "runtime_fps": 13.782732963562012,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 23,
+          "global_step": 29026,
+          "arm": "Full",
+          "success": 49.434356689453125,
+          "precision": 55.11488342285156,
+          "runtime_fps": 13.737251281738281,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 24,
+          "global_step": 30288,
+          "arm": "Full",
+          "success": 51.96608352661133,
+          "precision": 63.978111267089844,
+          "runtime_fps": 13.689674377441406,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 25,
+          "global_step": 31550,
+          "arm": "Full",
+          "success": 50.9157600402832,
+          "precision": 62.8829345703125,
+          "runtime_fps": 13.653307914733887,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 26,
+          "global_step": 32812,
+          "arm": "Full",
+          "success": 46.04923629760742,
+          "precision": 50.34135437011719,
+          "runtime_fps": 13.604578971862793,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 27,
+          "global_step": 34074,
+          "arm": "Full",
+          "success": 51.725379943847656,
+          "precision": 63.72429275512695,
+          "runtime_fps": 13.564298629760742,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 28,
+          "global_step": 35336,
+          "arm": "Full",
+          "success": 44.83260726928711,
+          "precision": 48.470458984375,
+          "runtime_fps": 13.442083358764648,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 29,
+          "global_step": 36598,
+          "arm": "Full",
+          "success": 47.66630554199219,
+          "precision": 48.991249084472656,
+          "runtime_fps": 13.425455093383789,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 30,
+          "global_step": 37860,
+          "arm": "Full",
+          "success": 48.24617385864258,
+          "precision": 50.890594482421875,
+          "runtime_fps": 13.292101860046387,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 31,
+          "global_step": 39122,
+          "arm": "Full",
+          "success": 47.2374153137207,
+          "precision": 50.89496994018555,
+          "runtime_fps": 13.283697128295898,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 32,
+          "global_step": 40384,
+          "arm": "Full",
+          "success": 45.088623046875,
+          "precision": 48.43763732910156,
+          "runtime_fps": 13.184732437133789,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 33,
+          "global_step": 41646,
+          "arm": "Full",
+          "success": 48.03829574584961,
+          "precision": 53.138946533203125,
+          "runtime_fps": 13.160344123840332,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 34,
+          "global_step": 42908,
+          "arm": "Full",
+          "success": 43.38402557373047,
+          "precision": 48.660831451416016,
+          "runtime_fps": 13.051780700683594,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 35,
+          "global_step": 44170,
+          "arm": "Full",
+          "success": 50.565643310546875,
+          "precision": 63.1509895324707,
+          "runtime_fps": 13.050368309020996,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 36,
+          "global_step": 45432,
+          "arm": "Full",
+          "success": 47.907005310058594,
+          "precision": 53.33698272705078,
+          "runtime_fps": 12.954751014709473,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 37,
+          "global_step": 46694,
+          "arm": "Full",
+          "success": 44.33588790893555,
+          "precision": 46.771331787109375,
+          "runtime_fps": 12.948192596435547,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 38,
+          "global_step": 47956,
+          "arm": "Full",
+          "success": 48.71006774902344,
+          "precision": 57.70132064819336,
+          "runtime_fps": 12.306581497192383,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 39,
+          "global_step": 49218,
+          "arm": "Full",
+          "success": 48.81947708129883,
+          "precision": 53.01749801635742,
+          "runtime_fps": 11.767988204956055,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 40,
+          "global_step": 50480,
+          "arm": "Full",
+          "success": 45.359954833984375,
+          "precision": 51.78774642944336,
+          "runtime_fps": 11.536724090576172,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 41,
+          "global_step": 51742,
+          "arm": "Full",
+          "success": 48.11925506591797,
+          "precision": 54.287742614746094,
+          "runtime_fps": 11.257915496826172,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 42,
+          "global_step": 53004,
+          "arm": "Full",
+          "success": 50.03829574584961,
+          "precision": 57.111595153808594,
+          "runtime_fps": 11.029000282287598,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 43,
+          "global_step": 54266,
+          "arm": "Full",
+          "success": 51.53719711303711,
+          "precision": 58.535011291503906,
+          "runtime_fps": 10.803390502929688,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 44,
+          "global_step": 55528,
+          "arm": "Full",
+          "success": 48.33369827270508,
+          "precision": 55.01203536987305,
+          "runtime_fps": 10.493367195129395,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 45,
+          "global_step": 56790,
+          "arm": "Full",
+          "success": 51.640045166015625,
+          "precision": 59.64661407470703,
+          "runtime_fps": 10.155248641967773,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 46,
+          "global_step": 58052,
+          "arm": "Full",
+          "success": 49.34026336669922,
+          "precision": 56.05252456665039,
+          "runtime_fps": 9.856522560119629,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 47,
+          "global_step": 59314,
+          "arm": "Full",
+          "success": 50.61378479003906,
+          "precision": 57.560176849365234,
+          "runtime_fps": 9.40141773223877,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 48,
+          "global_step": 60576,
+          "arm": "Full",
+          "success": 49.7975959777832,
+          "precision": 57.49671936035156,
+          "runtime_fps": 9.035161018371582,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 49,
+          "global_step": 61838,
+          "arm": "Full",
+          "success": 49.31837844848633,
+          "precision": 57.11378479003906,
+          "runtime_fps": 8.663431167602539,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 50,
+          "global_step": 63100,
+          "arm": "Full",
+          "success": 51.615970611572266,
+          "precision": 59.89059066772461,
+          "runtime_fps": 8.34144115447998,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 51,
+          "global_step": 64362,
+          "arm": "Full",
+          "success": 51.117069244384766,
+          "precision": 59.41138458251953,
+          "runtime_fps": 8.06319808959961,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 52,
+          "global_step": 65624,
+          "arm": "Full",
+          "success": 50.39496612548828,
+          "precision": 58.10503387451172,
+          "runtime_fps": 7.807200908660889,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 53,
+          "global_step": 66886,
+          "arm": "Full",
+          "success": 49.182716369628906,
+          "precision": 58.94529342651367,
+          "runtime_fps": 7.59560489654541,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 54,
+          "global_step": 68148,
+          "arm": "Full",
+          "success": 51.10394287109375,
+          "precision": 58.835880279541016,
+          "runtime_fps": 7.380835056304932,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 55,
+          "global_step": 69410,
+          "arm": "Full",
+          "success": 52.346832275390625,
+          "precision": 61.09846878051758,
+          "runtime_fps": 7.195023059844971,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 56,
+          "global_step": 70672,
+          "arm": "Full",
+          "success": 49.77790069580078,
+          "precision": 56.92451095581055,
+          "runtime_fps": 6.958671569824219,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 57,
+          "global_step": 71934,
+          "arm": "Full",
+          "success": 51.17615509033203,
+          "precision": 60.86980056762695,
+          "runtime_fps": 6.690598011016846,
+          "late3": false,
+          "final": false
+        },
+        {
+          "epoch": 58,
+          "global_step": 73196,
+          "arm": "Full",
+          "success": 49.09956359863281,
+          "precision": 57.65755081176758,
+          "runtime_fps": 6.458621501922607,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 59,
+          "global_step": 74458,
+          "arm": "Full",
+          "success": 49.19146728515625,
+          "precision": 57.99781036376953,
+          "runtime_fps": 6.235123634338379,
+          "late3": true,
+          "final": false
+        },
+        {
+          "epoch": 60,
+          "global_step": 75720,
+          "arm": "Full",
+          "success": 52.55251693725586,
+          "precision": 61.19365692138672,
+          "runtime_fps": 6.040872097015381,
+          "late3": true,
+          "final": true
+        }
+      ],
+      "arm_summary": [
+        {
+          "arm": "B0",
+          "final_success": 50.690372467041016,
+          "late3_success": 50.18490219116211,
+          "final_precision": 59.28009033203125,
+          "late3_precision": 57.03756586710612,
+          "runtime_fps_final": 20.801467895507812,
+          "runtime_fps_mean": 18.611060078938802,
+          "validation_points": 60
+        },
+        {
+          "arm": "B1-only",
+          "final_success": 33.44310760498047,
+          "late3_success": 33.34901809692383,
+          "final_precision": 35.137855529785156,
+          "late3_precision": 34.966084798177086,
+          "runtime_fps_final": 7.552331924438477,
+          "runtime_fps_mean": 8.856061895688375,
+          "validation_points": 60
+        },
+        {
+          "arm": "B1+B2",
+          "final_success": 47.852298736572266,
+          "late3_success": 47.6706797281901,
+          "final_precision": 54.57002639770508,
+          "late3_precision": 52.13968022664388,
+          "runtime_fps_final": 10.320636749267578,
+          "runtime_fps_mean": 13.581691678365072,
+          "validation_points": 60
+        },
+        {
+          "arm": "Full",
+          "final_success": 52.55251693725586,
+          "late3_success": 50.281182607014976,
+          "final_precision": 61.19365692138672,
+          "late3_precision": 58.94967269897461,
+          "runtime_fps_final": 6.040872097015381,
+          "runtime_fps_mean": 11.99164613087972,
+          "validation_points": 60
+        }
+      ],
+      "b0_audit": [
+        {
+          "arm": "B0",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "7f547e5b4afd",
+          "step100_hash": "51f8f50343f3",
+          "final_hash": "895fccc63777",
+          "b0_updates": 75720,
+          "plugin_updates": 0,
+          "input_fingerprints": 100,
+          "peak_allocated_mb": 3893.921875
+        },
+        {
+          "arm": "B1-only",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "1ef9b8f6605f",
+          "step100_hash": "08e4dd9ec3b9",
+          "final_hash": "eebf71baedc8",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "input_fingerprints": 100,
+          "peak_allocated_mb": 4447.03466796875
+        },
+        {
+          "arm": "B1+B2",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "abe8f19d87af",
+          "step100_hash": "628e87457b97",
+          "final_hash": "19828d4f927e",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "input_fingerprints": 100,
+          "peak_allocated_mb": 4446.7197265625
+        },
+        {
+          "arm": "Full",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "9b5a3d6548f2",
+          "step100_hash": "aebf3c4e3e02",
+          "final_hash": "419fa7e6655b",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "input_fingerprints": 100,
+          "peak_allocated_mb": 4447.8251953125
+        }
+      ],
+      "loss_divergence": [
+        {
+          "arm": "B0",
+          "first_view0_loss_difference_step": -1,
+          "view0_event_count": 75720
+        },
+        {
+          "arm": "B1-only",
+          "first_view0_loss_difference_step": 6,
+          "view0_event_count": 75720
+        },
+        {
+          "arm": "B1+B2",
+          "first_view0_loss_difference_step": 3,
+          "view0_event_count": 75720
+        },
+        {
+          "arm": "Full",
+          "first_view0_loss_difference_step": 3,
+          "view0_event_count": 75720
+        }
+      ],
+      "b1_validation": [
+        {
+          "arm": "B1-only",
+          "rows": 1934,
+          "valid_rows": 1852,
+          "valid_rate": 0.9576008273009308,
+          "learned_rmse": 10.654226087543329,
+          "cv_rmse": 10.755030708273615,
+          "learned_minus_cv": -0.10080462073028684,
+          "mean_nll": 120.54424443343908,
+          "coverage_50": 0.28995680345572356,
+          "coverage_80": 0.3833693304535637,
+          "coverage_95": 0.4503239740820734
+        },
+        {
+          "arm": "B1+B2",
+          "rows": 1975,
+          "valid_rows": 1893,
+          "valid_rate": 0.9584810126582278,
+          "learned_rmse": 7.3688325668082095,
+          "cv_rmse": 7.2011484436450965,
+          "learned_minus_cv": 0.16768412316311299,
+          "mean_nll": 144.27241738180015,
+          "coverage_50": 0.054410987849973586,
+          "coverage_80": 0.20443740095087162,
+          "coverage_95": 0.3750660327522451
+        },
+        {
+          "arm": "Full",
+          "rows": 1952,
+          "valid_rows": 1870,
+          "valid_rate": 0.9579918032786885,
+          "learned_rmse": 6.393813507811336,
+          "cv_rmse": 6.287075456922167,
+          "learned_minus_cv": 0.10673805088916843,
+          "mean_nll": 149.97321634172596,
+          "coverage_50": 0.11497326203208556,
+          "coverage_80": 0.393048128342246,
+          "coverage_95": 0.5545454545454546
+        }
+      ],
+      "b1_rmse_chart": [
+        {
+          "arm": "B1-only",
+          "metric": "Learned",
+          "rmse": 10.654226087543329,
+          "valid_rows": 1852,
+          "coverage_95": 0.4503239740820734,
+          "mean_nll": 120.54424443343908,
+          "learned_minus_cv": -0.10080462073028684
+        },
+        {
+          "arm": "B1-only",
+          "metric": "CV",
+          "rmse": 10.755030708273615,
+          "valid_rows": 1852,
+          "coverage_95": 0.4503239740820734,
+          "mean_nll": 120.54424443343908,
+          "learned_minus_cv": -0.10080462073028684
+        },
+        {
+          "arm": "B1+B2",
+          "metric": "Learned",
+          "rmse": 7.3688325668082095,
+          "valid_rows": 1893,
+          "coverage_95": 0.3750660327522451,
+          "mean_nll": 144.27241738180015,
+          "learned_minus_cv": 0.16768412316311299
+        },
+        {
+          "arm": "B1+B2",
+          "metric": "CV",
+          "rmse": 7.2011484436450965,
+          "valid_rows": 1893,
+          "coverage_95": 0.3750660327522451,
+          "mean_nll": 144.27241738180015,
+          "learned_minus_cv": 0.16768412316311299
+        },
+        {
+          "arm": "Full",
+          "metric": "Learned",
+          "rmse": 6.393813507811336,
+          "valid_rows": 1870,
+          "coverage_95": 0.5545454545454546,
+          "mean_nll": 149.97321634172596,
+          "learned_minus_cv": 0.10673805088916843
+        },
+        {
+          "arm": "Full",
+          "metric": "CV",
+          "rmse": 6.287075456922167,
+          "valid_rows": 1870,
+          "coverage_95": 0.5545454545454546,
+          "mean_nll": 149.97321634172596,
+          "learned_minus_cv": 0.10673805088916843
+        }
+      ],
+      "b2_validation": [
+        {
+          "arm": "B1+B2",
+          "diagnostic_rows": 1975,
+          "available_rows": 150,
+          "available_rate": 0.0759493670886076,
+          "target_bearing_rows": 1,
+          "target_bearing_given_available": 0.006666666666666667,
+          "validation_presence_prior": 0.006666666666666667,
+          "validation_presence_ap": 0.125,
+          "training_presence_ap": 0.8079886436462402,
+          "raw_center_gain_m": -4.026045817873358,
+          "raw_helpful_rate": 0.02666666666666667,
+          "raw_harmful_rate": 0.9666666666666667,
+          "raw_iou_gain": -0.37208424951604585,
+          "oracle_success_headroom_points": 0.005063291139244086,
+          "deployment_change_rate": 0.009113924050632912,
+          "training_row_recall": 1.0,
+          "training_point_recall": 0.40684277900616783,
+          "training_eligible_rows": 134,
+          "training_sampled_targets": 3496
+        },
+        {
+          "arm": "Full",
+          "diagnostic_rows": 1952,
+          "available_rows": 122,
+          "available_rate": 0.0625,
+          "target_bearing_rows": 2,
+          "target_bearing_given_available": 0.01639344262295082,
+          "validation_presence_prior": 0.01639344262295082,
+          "validation_presence_ap": 0.041530054644808745,
+          "training_presence_ap": 0.8381772041320801,
+          "raw_center_gain_m": -2.7084118113877995,
+          "raw_helpful_rate": 0.05737704918032787,
+          "raw_harmful_rate": 0.9344262295081968,
+          "raw_iou_gain": -0.4089151869565987,
+          "oracle_success_headroom_points": 0.015368852459019422,
+          "deployment_change_rate": 0.0,
+          "training_row_recall": 1.0,
+          "training_point_recall": 0.4451045921524941,
+          "training_eligible_rows": 145,
+          "training_sampled_targets": 3596
+        }
+      ],
+      "b3_validation": [
+        {
+          "validation_rows": 1952,
+          "evidence_valid_rows": 17,
+          "evidence_valid_rate": 0.008709016393442622,
+          "utility_rows": 17,
+          "helpful_prior": 0.11764705882352941,
+          "validation_action_ap": 0.22619047619047616,
+          "training_action_ap": 0.6202706098556519,
+          "training_action_auroc": 0.7693564295768738,
+          "training_action_ece": 0.24070851504802704,
+          "calibrated_rate": 0.0,
+          "router_applied_rate": 0.0,
+          "deployment_change_rate": 0.0
+        }
+      ],
+      "gate_status": [
+        {
+          "module": "B0",
+          "criterion": "四臂 initial/step1/step100/final B0 哈希一致",
+          "result": "仅 initial 一致；step1 起失配",
+          "verdict": "FAIL"
+        },
+        {
+          "module": "B1",
+          "criterion": "mini_val learned RMSE < CV 且 coverage 有限/接近名义值",
+          "result": "B1+B2/Full learned 分别差 0.168/0.107 m；95% coverage 37.5%/55.5%",
+          "verdict": "FAIL"
+        },
+        {
+          "module": "B2",
+          "criterion": "正 oracle headroom、有效 target-bearing、presence AP 高于先验",
+          "result": "headroom 0.005–0.015 点；可用行 93%–97% 有害；验证正例仅 1–2 行",
+          "verdict": "FAIL"
+        },
+        {
+          "module": "B3",
+          "criterion": "action coverage > 0 且相对 raw 降低 harmful rate",
+          "result": "无校准 artifact，action coverage=0",
+          "verdict": "NOT READY"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_v25_four_arm",
+      "label": "v25 retryfix 四臂 TensorBoard、checkpoint 与逐帧诊断",
+      "path": "artifacts/ct_checks/reports/20260824_v25_four_arm/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'v25_four_arm'",
+        "tablesUsed": [
+          "report_snapshot"
+        ]
+      }
+    }
+  ]
+}

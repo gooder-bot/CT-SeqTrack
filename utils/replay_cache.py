@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 
-REPLAY_SCHEMA_VERSION = 2
+REPLAY_SCHEMA_VERSION = 3
 B0_STATE_PREFIXES = (
     "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
     "motion_state_mlp.", "feature_pointnet.", "Transformer.",
@@ -20,22 +20,45 @@ REPLAY_CONFIG_FIELDS = (
     "dataset", "category_name", "hist_num", "num_candidates",
     "bb_scale", "bb_offset", "point_sample_size", "degrees",
     "observation_safe_bbox_size",
-    "use_real_time", "default_time_step", "pseudo_time_step",
+    "use_real_time", "default_time_step", "pseudo_time_step", "time_scale",
     "dynamics_time_mode", "dynamics_fixed_delta_t",
     "use_b1motion_v3", "motion_v3_hidden_dim", "motion_v3_step_dim",
+    "motion_v3_temporal_backend", "motion_v3_cfc_backbone_units",
+    "motion_v3_beta_nll_beta", "motion_v3_tail_direction_weight",
+    "motion_v3_tail_direction_margin", "motion_v3_prior_weight",
+    "motion_v3_aux_prior_weight", "motion_v3_nll_weight",
+    "motion_v3_aux_nll_weight", "motion_v3_aux_query_gaps",
+    "motion_v3_aux_transition_gaps",
     "motion_v3_min_delta_t", "motion_v3_max_delta_t",
     "motion_v3_max_speed", "motion_v3_max_displacement",
+    "motion_v3_initial_sigma", "motion_v3_residual_velocity_scale",
+    "motion_v3_eps", "ct_motion_max_acceleration",
+    "ct_motion_max_displacement",
+    "ct_motion_acceleration_weight", "ct_enable_shared_motion_anchor",
+    "ct_enable_dynamic_residual_bound",
     "motion_v3_min_direction_speed", "motion_v3_log_sigma_min",
     "motion_v3_log_sigma_max", "use_calibrated_motion_uncertainty",
 )
 B1_CALIBRATION_CONFIG_FIELDS = (
     "dataset", "category_name", "hist_num", "degrees",
     "observation_safe_bbox_size", "use_real_time", "default_time_step",
+    "time_scale",
     "pseudo_time_step", "dynamics_time_mode", "dynamics_fixed_delta_t",
     "use_b1motion_v3", "motion_v3_hidden_dim", "motion_v3_step_dim",
+    "motion_v3_temporal_backend", "motion_v3_cfc_backbone_units",
+    "motion_v3_beta_nll_beta", "motion_v3_tail_direction_weight",
+    "motion_v3_tail_direction_margin", "motion_v3_prior_weight",
+    "motion_v3_aux_prior_weight", "motion_v3_nll_weight",
+    "motion_v3_aux_nll_weight", "motion_v3_aux_query_gaps",
+    "motion_v3_aux_transition_gaps",
     "motion_v3_time_scale", "motion_v3_min_delta_t",
     "motion_v3_max_delta_t", "motion_v3_max_speed",
     "motion_v3_max_displacement", "motion_v3_min_direction_speed",
+    "motion_v3_initial_sigma", "motion_v3_residual_velocity_scale",
+    "motion_v3_eps", "ct_motion_max_acceleration",
+    "ct_motion_max_displacement",
+    "ct_motion_acceleration_weight", "ct_enable_shared_motion_anchor",
+    "ct_enable_dynamic_residual_bound",
     "motion_v3_log_sigma_min", "motion_v3_log_sigma_max",
     "use_calibrated_motion_uncertainty",
 )
@@ -103,11 +126,16 @@ def replay_config_sha256(config):
     return sha256_json(replay_config_contract(config))
 
 
-def b1_calibration_config_sha256(config):
+def b1_calibration_config_contract(config):
+    """Return every resolved field that changes B1 calibration meaning."""
     getter = config.get if isinstance(config, dict) else lambda key, default=None: getattr(
         config, key, default)
-    return sha256_json({
-        key: getter(key, None) for key in B1_CALIBRATION_CONFIG_FIELDS})
+    return {
+        key: getter(key, None) for key in B1_CALIBRATION_CONFIG_FIELDS}
+
+
+def b1_calibration_config_sha256(config):
+    return sha256_json(b1_calibration_config_contract(config))
 
 
 def b2_candidate_config_contract(config):
@@ -146,8 +174,9 @@ def validate_b1_calibration_state(calibration, state_dict):
     """Bind calibration metadata to the checkpoint scale buffer."""
     if not isinstance(calibration, dict):
         return False
-    if calibration.get("schema") != "ct_seqtrack.b1_uncertainty_calibration.v2":
-        return False
+    if calibration.get("schema") != "ct_seqtrack.b1_uncertainty_calibration.v3":
+        raise RuntimeError(
+            "B1 calibration artifact uses an incompatible schema")
     expected = calibration.get("log_scale_parallel_perpendicular")
     keys = [
         key for key in state_dict

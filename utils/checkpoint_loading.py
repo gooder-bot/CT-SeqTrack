@@ -27,13 +27,22 @@ def apply_b1_calibration_contract(model, payload, state_dict):
     if bool(getattr(model, "require_b1_calibration_artifact", False)):
         if (not isinstance(calibration, dict)
                 or calibration.get("schema")
-                != "ct_seqtrack.b1_uncertainty_calibration.v2"
+                != "ct_seqtrack.b1_uncertainty_calibration.v3"
                 or len(calibration.get(
                     "fixed_margin_parallel_perpendicular_95", [])) != 2):
             raise RuntimeError(
-                "checkpoint lacks the required B1 v2 calibration artifact")
+                "checkpoint lacks the required B1 v3 calibration artifact")
         source_metadata = calibration.get("source_artifact", {})
+        evaluation_metadata = calibration.get("evaluation_artifact", {})
         if (source_metadata.get("partition") != "calibration"
+                or evaluation_metadata.get("partition") != "dev"
+                or evaluation_metadata.get("dataset") != source_metadata.get(
+                    "dataset")
+                or evaluation_metadata.get("split") != source_metadata.get(
+                    "split")
+                or evaluation_metadata.get(
+                    "b1_config_sha256") != source_metadata.get(
+                        "b1_config_sha256")
                 or source_metadata.get("dataset") != str(getattr(
                     model.config, "dataset", "unknown"))
                 or source_metadata.get("split") != str(getattr(
@@ -48,12 +57,6 @@ def apply_b1_calibration_contract(model, payload, state_dict):
             raise RuntimeError("checkpoint lacks promoted B1 uncertainty")
     if isinstance(calibration, dict):
         model._b1_uncertainty_calibration = copy.deepcopy(calibration)
-        margins = calibration.get(
-            "fixed_margin_parallel_perpendicular_95")
-        if isinstance(margins, (list, tuple)) and len(margins) == 2:
-            model.config.search_v3_fixed_margin_parallel = float(margins[0])
-            model.config.search_v3_fixed_margin_perpendicular = float(
-                margins[1])
     return calibration
 
 
@@ -74,6 +77,14 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
     source = payload.get("state_dict", payload.get("model", payload))
     if not isinstance(source, dict):
         raise TypeError("checkpoint does not contain a state_dict mapping")
+    hyper_parameters = payload.get("hyper_parameters", {})
+    saved_config = hyper_parameters.get("config", hyper_parameters)
+    if isinstance(saved_config, dict) and saved_config:
+        observed_b1_config = b1_calibration_config_sha256(saved_config)
+        expected_b1_config = b1_calibration_config_sha256(model.config)
+        if observed_b1_config != expected_b1_config:
+            raise RuntimeError(
+                "checkpoint B1 backend/loss/config identity mismatch")
     target = model.state_dict()
     candidates = [("none", source)]
     for prefix in ("model.", "module."):

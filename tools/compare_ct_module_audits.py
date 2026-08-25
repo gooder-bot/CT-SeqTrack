@@ -47,6 +47,30 @@ def main():
                 detail = ", ".join(
                     f"{path}={value}" for path, value in available)
                 raise SystemExit(f"B0 prefix {key} mismatch: {detail}")
+            optimizer_available = []
+            for path, _, checkpoint in audits:
+                value = checkpoint.get(
+                    "ct_b0_optimizer_state_hashes", {}).get(key)
+                if value is None:
+                    raise SystemExit(
+                        f"{path}: missing B0 optimizer-state hash {key}")
+                optimizer_available.append((path, value))
+            if len({value for _, value in optimizer_available}) != 1:
+                detail = ", ".join(
+                    f"{path}={value}"
+                    for path, value in optimizer_available)
+                raise SystemExit(
+                    f"B0 optimizer state {key} mismatch: {detail}")
+        for path, audit, _ in audits:
+            if audit.get("active_frozen_parameters"):
+                raise SystemExit(
+                    f"{path}: active parameters were frozen")
+            for module in audit.get("parameter_groups", []):
+                maximum = audit.get("max_gradient_norm", {}).get(module)
+                if maximum is None or not torch.isfinite(torch.tensor(
+                        float(maximum))) or float(maximum) <= 0.0:
+                    raise SystemExit(
+                        f"{path}: {module} lacks a finite nonzero gradient")
         fingerprints = []
         for path, _, checkpoint in audits:
             rows = checkpoint.get("ct_observation_batch_fingerprints")

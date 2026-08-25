@@ -123,11 +123,17 @@ def load_b1_calibration_contract(path, *, checkpoint=False):
         calibration = json.loads(Path(path).read_text(encoding="utf-8"))
     if (not isinstance(calibration, dict)
             or calibration.get("schema")
-            != "ct_seqtrack.b1_uncertainty_calibration.v2"
+            != "ct_seqtrack.b1_uncertainty_calibration.v3"
             or len(calibration.get(
                 "fixed_margin_parallel_perpendicular_95", [])) != 2):
         raise RuntimeError(
-            "B1 calibration input is not a verified v2 artifact")
+            "B1 calibration input is not a verified v3 artifact")
+    source = calibration.get("source_artifact", {})
+    evaluation = calibration.get("evaluation_artifact", {})
+    if (source.get("partition") != "calibration"
+            or evaluation.get("partition") != "dev"):
+        raise RuntimeError(
+            "B1 v3 calibration requires calibration-fit and dev-eval artifacts")
     return calibration
 
 
@@ -273,11 +279,11 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
     if bool(getattr(model, 'require_b1_calibration_artifact', False)):
         if (not isinstance(calibration, dict)
                 or calibration.get('schema')
-                != 'ct_seqtrack.b1_uncertainty_calibration.v2'
+                != 'ct_seqtrack.b1_uncertainty_calibration.v3'
                 or len(calibration.get(
                     'fixed_margin_parallel_perpendicular_95', [])) != 2):
             raise RuntimeError(
-                "initialization checkpoint lacks a verified v2 B1 "
+                "initialization checkpoint lacks a verified v3 B1 "
                 "calibration artifact with fixed residual margins")
         if (int(getattr(
                 model, 'ct_joint_contract_version', 1)) >= 3
@@ -287,7 +293,13 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
             raise RuntimeError(
                 "contract-v3 calibration lacks standardized residual q90")
         source = calibration.get('source_artifact', {})
+        evaluation = calibration.get('evaluation_artifact', {})
         if (source.get('partition') != 'calibration'
+                or evaluation.get('partition') != 'dev'
+                or evaluation.get('dataset') != source.get('dataset')
+                or evaluation.get('split') != source.get('split')
+                or evaluation.get('b1_config_sha256') != source.get(
+                    'b1_config_sha256')
                 or source.get('dataset') != str(getattr(
                     model.config, 'dataset', 'unknown'))
                 or source.get('split') != str(getattr(
@@ -304,12 +316,6 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
                 "initialization checkpoint lacks a promoted B1 calibration")
     if isinstance(calibration, dict):
         model._b1_uncertainty_calibration = calibration
-        margins = calibration.get(
-            'fixed_margin_parallel_perpendicular_95')
-        if isinstance(margins, (list, tuple)) and len(margins) == 2:
-            model.config.search_v3_fixed_margin_parallel = float(margins[0])
-            model.config.search_v3_fixed_margin_perpendicular = float(
-                margins[1])
         standardized_q90 = calibration.get(
             'standardized_abs_residual_q90_parallel_perpendicular')
         if (isinstance(standardized_q90, (list, tuple))
@@ -586,6 +592,11 @@ def parse_config():
         '--motion_v3_fusion_scale', type=float, default=argparse.SUPPRESS,
         help='B1motion-v3 runtime fusion scale; use zero for observation-only evaluation.')
     parser.add_argument(
+        '--b1-backend', '--motion_v3_temporal_backend',
+        dest='motion_v3_temporal_backend', choices=('gru', 'cfc'),
+        default=argparse.SUPPRESS,
+        help='B1 temporal aggregator; both choices train from scratch.')
+    parser.add_argument(
         '--recursive_replay_cache_dir', default=argparse.SUPPRESS,
         help='Hash-validated frozen B0/B1 recursive replay cache.')
     parser.add_argument(
@@ -594,11 +605,12 @@ def parse_config():
         help='Use the recursive replay cache for training histories.')
     parser.add_argument(
         '--b1_calibration_artifact_path', default=argparse.SUPPRESS,
-        help='Verified v2 calibration JSON used to freeze B1 residual margins.')
+        help='Verified v3 post-hoc B1 uncertainty calibration JSON.')
     parser.add_argument(
         '--search_v3_use_dynamic_sigma', action='store_true',
         default=argparse.SUPPRESS,
-        help='Use promoted calibrated B1 sigma for the B2 support tube.')
+        help=('Legacy-only dynamic B2 support; safe v25 rejects this because '
+              'its geometry is fixed at 2m/1m.'))
     parser.add_argument(
         '--require_b1_calibration_passed', action='store_true',
         default=argparse.SUPPRESS,
@@ -655,17 +667,19 @@ def parse_config():
                 raise RuntimeError(
                     "contract-v3 calibration lacks standardized residual q90")
             source = calibration.get('source_artifact', {})
+            evaluation = calibration.get('evaluation_artifact', {})
             if (source.get('partition') != 'calibration'
+                    or evaluation.get('partition') != 'dev'
+                    or evaluation.get('dataset') != source.get('dataset')
+                    or evaluation.get('split') != source.get('split')
+                    or evaluation.get('b1_config_sha256') != source.get(
+                        'b1_config_sha256')
                     or source.get('dataset') != config.get('dataset')
                     or source.get('split') != config.get('train_split')
                     or source.get('b1_config_sha256')
                     != b1_calibration_config_sha256(config)):
                 raise RuntimeError(
                     "B1 calibration partition/dataset does not match runtime")
-            margins = calibration[
-                'fixed_margin_parallel_perpendicular_95']
-            config['search_v3_fixed_margin_parallel'] = float(margins[0])
-            config['search_v3_fixed_margin_perpendicular'] = float(margins[1])
             standardized_q90 = calibration.get(
                 'standardized_abs_residual_q90_parallel_perpendicular')
             if (isinstance(standardized_q90, (list, tuple))

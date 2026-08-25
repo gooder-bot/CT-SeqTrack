@@ -1,0 +1,5 @@
+﻿location,decision,change,preserved,reason
+B1 temporal aggregation (recommended),GO after B1 mean/sigma repair,Replace only the GRU over chronological transition embeddings with a parameter-matched CfC cell.,"B0, step projection, CV anchor, residual/sigma heads, fixed crop, B2/B3 contracts and observation-only writer.",This is the only location where explicit pairwise delta-t is both available and causally relevant.
+B0 backbone/decoder,NO-GO,Would inject motion features into the Safe-SeqTrack observation baseline.,No,Breaks B0 parity and late coupling; confounds the paper baseline.
+B2 evidence network,NO-GO for first integration,Would make CfC responsible for evidence supply rather than physical motion.,"Extension-only could remain, but the attribution becomes unclear.","B2 is bottlenecked by target-bearing supply, not temporal recurrence capacity."
+B3 selective router,NO-GO,Would add recurrence after detached evidence/action features.,"Fail-closed semantics might remain, but calibration data are currently absent.",B3 currently has zero deployment action coverage; CfC cannot create calibration evidence.

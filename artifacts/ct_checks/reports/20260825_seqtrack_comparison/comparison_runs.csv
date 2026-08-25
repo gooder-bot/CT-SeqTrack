@@ -1,0 +1,12 @@
+﻿run,family,final_success,final_precision,late3_success,late3_precision,validation_points,workers,validation_cadence,evaluator,comparability,interpretation
+SeqTrack-60-high,SeqTrack,50.98577880859375,59.96171188354492,50.10758590698242,58.862876892089844,12,12,每5 epoch,原版验证（读取当前帧 GT 尺寸）,描述性,高分随机轨迹；旧运行未保存代码 commit
+SeqTrack-60-low,SeqTrack,31.683805465698242,31.33698081970215,31.138220469156902,30.640408833821613,12,4,每5 epoch,原版验证（读取当前帧 GT 尺寸）,描述性,低分随机轨迹；日志配置除 workers/tag 外与高分 run 相同
+SeqTrack-180-gpu1,SeqTrack,49.15427017211914,54.90700149536133,49.289206186930336,55.1145133972168,36,12,每5 epoch,原版验证（读取当前帧 GT 尺寸）,描述性,180 epoch 最终结果；不能与60 epoch final直接等同
+SeqTrack-180-gpu3,SeqTrack,51.33588790893555,60.1466064453125,50.74799601236979,59.22757339477539,36,12,每5 epoch,原版验证（读取当前帧 GT 尺寸）,描述性,相同日志配置的另一条180 epoch轨迹
+CT21-B0,CT21,51.001094818115234,60.892784118652344,48.41393280029297,54.81692250569662,12,4,每5 epoch,旧 CT evaluator,非隔离消融,旧协议 B0；无跨臂 prefix hash
+CT21-B1,CT21,55.397159576416016,66.12582397460938,54.508026123046875,64.514954884847,12,4,每5 epoch,旧 CT evaluator,非隔离消融,correlated-candidate + legacy proposal fusion + fused loss
+v24-B0,CT-v24,31.414663314819336,31.10284423828125,31.505835851033527,31.604304631551106,60,,每 epoch,safe recursive evaluator,同版本描述,step1 prefix 已与其余 v24 臂分叉
+v24-B1,CT-v24,47.65755081176758,52.42232131958008,47.14478556315104,51.553610483805336,60,,每 epoch,safe recursive evaluator,同版本描述,proposal=observation；高于 v24 B0 不能归因于 B1
+v25-B0,CT-v25,50.690372467041016,59.28009033203125,50.18490219116211,57.03756586710612,60,4,每 epoch,safe_first_frame_size_recursive_prediction,v25正式协议内,独立安全 B0
+v25-B1-only,CT-v25,33.44310760498047,35.137855529785156,33.34901809692383,34.966084798177086,60,4,每 epoch,safe_first_frame_size_recursive_prediction,v25正式协议内,proposal=observation；跟踪分数是该臂 B0 轨迹
+v25-Full,CT-v25,52.55251693725586,61.19365692138672,50.281182607014976,58.94967269897461,60,4,每 epoch,safe_first_frame_size_recursive_prediction,v25正式协议内,无 calibration artifact，B3 fail-closed 到 observation

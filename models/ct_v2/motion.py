@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 
+from models.ct_v2.cfc import FullGatedCfCCell
 from models.dynamics import DynamicsEncoder, wrap_angle
 
 
@@ -73,11 +74,17 @@ def motion_aligned_covariance(
 
 def physical_motion_uncertainty_loss(
         mean_xy, target_xy, log_sigma_parallel_perp,
-        motion_direction_xy, valid, eps=1e-6):
-    """Masked-ready robust mean and heteroscedastic Gaussian terms.
+        motion_direction_xy, valid, eps=1e-6, *,
+        kinematic_xy=None, envelope_parallel_perp=None,
+        residual_unit_parallel_perp=None, beta=0.5,
+        tail_direction_weight=0.25, tail_direction_margin=0.9,
+        sigma_error_cap=12.0, mean_huber_beta=0.25):
+    """Masked robust residual learning and isolated beta-NLL sigma terms.
 
     Returned losses are per sample.  Callers own weighting and masked
     reduction so this helper can also be used by calibration diagnostics.
+    Sigma targets are detached by construction: uncertainty must not steer
+    the temporal backbone or the learned mean.
     """
     if mean_xy.shape != target_xy.shape or mean_xy.shape[-1] != 2:
         raise ValueError("mean_xy and target_xy must both have shape [B,2]")
@@ -87,6 +94,13 @@ def physical_motion_uncertainty_loss(
         raise ValueError("motion direction must have shape [B,2]")
     perpendicular = torch.stack((
         -motion_direction_xy[:, 1], motion_direction_xy[:, 0]), dim=1)
+    if not 0.0 <= float(beta) <= 1.0:
+        raise ValueError("motion beta-NLL beta must be in [0,1]")
+    if tail_direction_weight < 0 or not 0.0 <= tail_direction_margin <= 1.0:
+        raise ValueError("motion tail loss settings are invalid")
+    if sigma_error_cap <= 0 or mean_huber_beta <= 0:
+        raise ValueError("motion robust-loss scales must be positive")
+
     error = target_xy - mean_xy
     aligned_error = torch.stack((
         (error * motion_direction_xy).sum(dim=1),
@@ -94,22 +108,160 @@ def physical_motion_uncertainty_loss(
     ), dim=1)
     safe_log_sigma = torch.clamp(
         torch.nan_to_num(log_sigma_parallel_perp), min=-4.0, max=2.5)
-    nll_per_axis = 0.5 * (
-        aligned_error.pow(2) * torch.exp(-2.0 * safe_log_sigma)
-        + 2.0 * safe_log_sigma)
-    robust_mean = torch.nn.functional.smooth_l1_loss(
-        mean_xy, target_xy, reduction="none").mean(dim=1)
+    safe_aligned_error = torch.nan_to_num(
+        aligned_error.detach(), nan=0.0,
+        posinf=float(sigma_error_cap), neginf=-float(sigma_error_cap))
+    variance = torch.exp(2.0 * safe_log_sigma)
+    raw_nll_per_axis = 0.5 * (
+        safe_aligned_error.pow(2) / variance + torch.log(variance))
+    capped_error = torch.clamp(
+        safe_aligned_error,
+        min=-float(sigma_error_cap), max=float(sigma_error_cap))
+    beta_nll_per_axis = 0.5 * (
+        capped_error.pow(2) / variance + torch.log(variance))
+    if beta > 0:
+        beta_nll_per_axis = (
+            beta_nll_per_axis * variance.detach().pow(float(beta)))
+
+    use_normalized_residual = all(value is not None for value in (
+        kinematic_xy, envelope_parallel_perp,
+        residual_unit_parallel_perp))
+    if use_normalized_residual:
+        for name, value in (
+                ("kinematic_xy", kinematic_xy),
+                ("envelope_parallel_perp", envelope_parallel_perp),
+                ("residual_unit_parallel_perp",
+                 residual_unit_parallel_perp)):
+            if value.shape != mean_xy.shape:
+                raise ValueError(f"{name} must have shape [B,2]")
+        target_residual = target_xy - kinematic_xy
+        aligned_target_residual = torch.stack((
+            (target_residual * motion_direction_xy).sum(dim=1),
+            (target_residual * perpendicular).sum(dim=1),
+        ), dim=1)
+        safe_envelope = torch.clamp(
+            envelope_parallel_perp, min=float(eps))
+        target_unit = aligned_target_residual / safe_envelope
+        predicted_unit = residual_unit_parallel_perp
+        recoverable_axis = torch.abs(target_unit) <= 1.0
+        mean_per_axis = torch.nn.functional.smooth_l1_loss(
+            predicted_unit, torch.clamp(target_unit, min=-1.0, max=1.0),
+            reduction="none", beta=float(mean_huber_beta))
+        recoverable_count = recoverable_axis.to(mean_xy.dtype).sum(dim=1)
+        tail_axis = ~recoverable_axis
+        tail_count = tail_axis.to(mean_xy.dtype).sum(dim=1)
+        tail_hinge = torch.relu(
+            float(tail_direction_margin)
+            - torch.sign(target_unit) * predicted_unit)
+        robust_mean = torch.where(
+            recoverable_axis,
+            mean_per_axis,
+            float(tail_direction_weight) * tail_hinge,
+        ).mean(dim=1)
+        recoverable_saturation = (
+            ((torch.abs(predicted_unit) >= 0.95) & recoverable_axis)
+            .to(mean_xy.dtype).sum(dim=1)
+            / torch.clamp(recoverable_count, min=1.0))
+        tail_axis_fraction = tail_count / float(mean_xy.shape[1])
+    else:
+        robust_mean = torch.nn.functional.smooth_l1_loss(
+            mean_xy, target_xy, reduction="none").mean(dim=1)
+        recoverable_saturation = torch.zeros_like(robust_mean)
+        tail_axis_fraction = torch.zeros_like(robust_mean)
     valid = valid.to(device=mean_xy.device, dtype=mean_xy.dtype).reshape(-1)
     finite = (
         torch.isfinite(aligned_error).all(dim=1)
-        & torch.isfinite(nll_per_axis).all(dim=1)
+        & torch.isfinite(raw_nll_per_axis).all(dim=1)
+        & torch.isfinite(beta_nll_per_axis).all(dim=1)
+        & torch.isfinite(robust_mean)
     ).to(mean_xy.dtype)
     return {
         "mean_per_sample": robust_mean,
-        "nll_per_sample": nll_per_axis.sum(dim=1),
+        "nll_per_sample": beta_nll_per_axis.sum(dim=1),
+        "gaussian_nll_per_sample": raw_nll_per_axis.sum(dim=1),
         "aligned_error": aligned_error,
+        "recoverable_saturation_per_sample": recoverable_saturation,
+        "tail_axis_fraction_per_sample": tail_axis_fraction,
         "valid": valid * finite,
     }
+
+
+def recursive_gap_age_balanced_mean(
+        per_sample, valid, recursive_age=None,
+        recursive_age_valid=None, query_gap=None, query_gaps=None):
+    """Average valid B1 losses first across ages, then across query gaps.
+
+    The two-stage reduction keeps each non-empty age bucket equally weighted
+    inside a query gap and each non-empty query gap equally weighted overall.
+    Missing age-validity metadata is treated as invalid instead of silently
+    fabricating age zero.
+    """
+    per_sample = per_sample.reshape(-1)
+    base_valid = valid.to(
+        device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+    if base_valid.shape != per_sample.shape:
+        raise ValueError("B1 loss values and validity must have equal length")
+
+    def masked_average(mask):
+        mask = mask.to(
+            device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+        if mask.shape != per_sample.shape:
+            raise ValueError("B1 reduction mask has the wrong length")
+        safe_values = torch.where(
+            mask > 0, per_sample, torch.zeros_like(per_sample))
+        return safe_values.sum() / torch.clamp(mask.sum(), min=1.0)
+
+    if recursive_age is None:
+        return masked_average(base_valid)
+    age = recursive_age.to(
+        device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+    if age.shape != per_sample.shape:
+        raise ValueError("B1 recursive age has the wrong length")
+    if recursive_age_valid is None:
+        base_valid = torch.zeros_like(base_valid)
+    else:
+        age_valid = recursive_age_valid.to(
+            device=per_sample.device, dtype=per_sample.dtype).reshape(-1)
+        if age_valid.shape != per_sample.shape:
+            raise ValueError("B1 recursive age validity has the wrong length")
+        base_valid = base_valid * age_valid
+
+    if query_gap is None:
+        gap_masks = (torch.ones_like(base_valid),)
+    else:
+        gaps = query_gap.to(device=per_sample.device).reshape(-1)
+        if gaps.shape != per_sample.shape:
+            raise ValueError("B1 query gap has the wrong length")
+        values = tuple(query_gaps or ())
+        if not values:
+            raise ValueError("B1 query-gap reduction requires query_gaps")
+        gap_masks = tuple(
+            (gaps == int(value)).to(base_valid.dtype) for value in values)
+    age_masks = (
+        ((age >= 0) & (age < 2)).to(base_valid.dtype),
+        ((age >= 2) & (age < 4)).to(base_valid.dtype),
+        ((age >= 4) & (age < 8)).to(base_valid.dtype),
+        (age >= 8).to(base_valid.dtype),
+    )
+    gap_values = []
+    gap_nonempty = []
+    for gap_mask in gap_masks:
+        age_values = []
+        age_nonempty = []
+        for age_mask in age_masks:
+            cell_valid = base_valid * gap_mask * age_mask
+            age_values.append(masked_average(cell_valid))
+            age_nonempty.append((cell_valid.sum() > 0).to(per_sample.dtype))
+        age_values = torch.stack(age_values)
+        age_nonempty = torch.stack(age_nonempty)
+        gap_values.append(
+            (age_values * age_nonempty).sum()
+            / torch.clamp(age_nonempty.sum(), min=1.0))
+        gap_nonempty.append((age_nonempty.sum() > 0).to(per_sample.dtype))
+    gap_values = torch.stack(gap_values)
+    gap_nonempty = torch.stack(gap_nonempty)
+    return (gap_values * gap_nonempty).sum() / torch.clamp(
+        gap_nonempty.sum(), min=1.0)
 
 
 class ContinuousTimeMotionEncoder(DynamicsEncoder):
@@ -331,7 +483,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             shared_kinematic_anchor=False,
             max_acceleration=8.0,
             max_displacement=12.0,
-            acceleration_weight=0.5):
+            acceleration_weight=0.5,
+            temporal_backend="gru",
+            cfc_backbone_units=105,
+            log_sigma_min=math.log(0.1),
+            log_sigma_max=2.5):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
         self.step_dim = int(step_dim)
@@ -345,6 +501,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.max_acceleration = float(max_acceleration)
         self.max_displacement = float(max_displacement)
         self.acceleration_weight = float(acceleration_weight)
+        self.temporal_backend = str(temporal_backend).strip().lower()
+        self.cfc_backbone_units = int(cfc_backbone_units)
+        self.log_sigma_min = float(log_sigma_min)
+        self.log_sigma_max = float(log_sigma_max)
+        self.initial_sigma = float(initial_sigma)
         if self.hidden_dim <= 0 or self.step_dim <= 0:
             raise ValueError("physical motion encoder dimensions must be positive")
         if self.residual_velocity_scale <= 0:
@@ -358,6 +519,18 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 "shared-anchor acceleration/displacement caps must be positive")
         if not 0.0 <= self.acceleration_weight <= 1.0:
             raise ValueError("shared-anchor acceleration weight must be in [0,1]")
+        if self.temporal_backend not in ("gru", "cfc"):
+            raise ValueError("B1 temporal backend must be gru or cfc")
+        if self.cfc_backbone_units <= 0:
+            raise ValueError("CfC backbone units must be positive")
+        if not self.log_sigma_min < self.log_sigma_max:
+            raise ValueError("motion log-sigma bounds must be ordered")
+        sigma_floor = math.exp(self.log_sigma_min)
+        if not sigma_floor < self.initial_sigma <= math.exp(
+                self.log_sigma_max):
+            raise ValueError(
+                "initial sigma must lie strictly above the sigma floor and "
+                "at or below the sigma maximum")
 
         # xy velocity, xy displacement, sin/cos yaw change, log pair gap,
         # query/pair ratio, and transition-valid flag.
@@ -366,12 +539,19 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             nn.LayerNorm(self.step_dim),
             nn.ReLU(inplace=True),
         )
-        self.gru = nn.GRU(
-            input_size=self.step_dim,
-            hidden_size=self.hidden_dim,
-            num_layers=1,
-            batch_first=True,
-        )
+        if self.temporal_backend == "gru":
+            self.gru = nn.GRU(
+                input_size=self.step_dim,
+                hidden_size=self.hidden_dim,
+                num_layers=1,
+                batch_first=True,
+            )
+        else:
+            self.cfc = FullGatedCfCCell(
+                input_size=self.step_dim,
+                hidden_size=self.hidden_dim,
+                backbone_units=self.cfc_backbone_units,
+            )
         self.context = nn.Sequential(
             nn.Linear(self.hidden_dim + 2, self.hidden_dim),
             nn.ReLU(inplace=True),
@@ -381,7 +561,9 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         nn.init.zeros_(self.velocity_residual_head.weight)
         nn.init.zeros_(self.velocity_residual_head.bias)
         nn.init.zeros_(self.log_sigma_head.weight)
-        nn.init.constant_(self.log_sigma_head.bias, math.log(initial_sigma))
+        sigma_offset = self.initial_sigma - sigma_floor
+        sigma_raw_bias = math.log(math.expm1(sigma_offset))
+        nn.init.constant_(self.log_sigma_head.bias, sigma_raw_bias)
         # Historical B1-v3 instances keep this non-persistent.  The new
         # calibrated path stores it in checkpoints without breaking strict
         # loading of old state dictionaries.
@@ -431,8 +613,8 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             + self.log_sigma_calibration.to(
                 device=raw_log_sigma.device,
                 dtype=raw_log_sigma.dtype).unsqueeze(0),
-            min=-4.0,
-            max=2.5,
+            min=self.log_sigma_min,
+            max=self.log_sigma_max,
         )
         return motion_aligned_covariance(
             basis_velocity_xy,
@@ -459,6 +641,55 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             value.reshape(batch_size), nan=self.time_scale,
             posinf=self.time_scale, neginf=self.time_scale)
         return torch.clamp(value, min=self.eps), finite
+
+    def _statistical_log_sigma(self, context):
+        """Predict statistical scale without coupling it to mean geometry."""
+        sigma_floor = context.new_tensor(math.exp(self.log_sigma_min))
+        sigma_max = context.new_tensor(math.exp(self.log_sigma_max))
+        sigma = sigma_floor + torch.nn.functional.softplus(
+            self.log_sigma_head(context.detach()))
+        return torch.log(torch.clamp(sigma, max=sigma_max))
+
+    def _encode_transitions(
+            self, projected, chronological_valid,
+            chronological_pair_gap):
+        """Aggregate valid oldest-to-newest transitions."""
+        if self.temporal_backend == "cfc":
+            hidden = projected.new_zeros(
+                (projected.shape[0], self.hidden_dim))
+            normalized_gap = chronological_pair_gap / self.time_scale
+            for index in range(projected.shape[1]):
+                updated = self.cfc(
+                    projected[:, index], hidden, normalized_gap[:, index])
+                valid = chronological_valid[:, index].unsqueeze(1)
+                hidden = torch.where(valid, updated, hidden)
+            return hidden
+
+        chronological_index = torch.arange(
+            chronological_valid.shape[1],
+            device=chronological_valid.device,
+            dtype=torch.int64,
+        ).unsqueeze(0)
+        compact_key = chronological_index + (
+            (~chronological_valid).to(torch.int64)
+            * chronological_valid.shape[1])
+        compact_indices = torch.argsort(compact_key, dim=1)
+        compact_projected = torch.gather(
+            projected,
+            dim=1,
+            index=compact_indices.unsqueeze(-1).expand_as(projected),
+        )
+        transition_count = chronological_valid.to(
+            projected.dtype).sum(dim=1)
+        packed_projected = pack_padded_sequence(
+            compact_projected,
+            lengths=torch.clamp(
+                transition_count, min=1).to(torch.long).cpu(),
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        _, ordered_hidden = self.gru(packed_projected)
+        return ordered_hidden[-1]
 
     def kinematic_fallback(
             self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
@@ -617,7 +848,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         zeros_xy = ref_boxs.new_zeros((batch_size, 2))
         zeros_feature = ref_boxs.new_zeros((batch_size, self.hidden_dim))
         initial_log_sigma = ref_boxs.new_full(
-            (batch_size, 2), self.log_sigma_head.bias[0].item())
+            (batch_size, 2), math.log(self.initial_sigma))
         if history_length < 2:
             uncertainty = self._uncertainty_outputs(
                 zeros_xy, initial_log_sigma)
@@ -675,38 +906,13 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         chronological = torch.flip(step_features, dims=(1,))
         projected = self.step_projection(chronological)
         chronological_valid = torch.flip(pair_valid, dims=(1,))
-        # A zero vector is not a no-op for a GRU with biases.  Compact valid
-        # transitions before packing so padded history cannot alter the state.
         projected = projected * chronological_valid.unsqueeze(-1)
-        # Use unique order-aware keys instead of ``stable=True`` so the
-        # checkpoint remains runnable on the project's PyTorch 1.8 stack.
-        # Valid entries retain their chronological indices; invalid entries
-        # are shifted behind them.  Because every key is unique, an unstable
-        # sort cannot permute valid transitions with equal keys.
-        chronological_index = torch.arange(
-            chronological_valid.shape[1],
-            device=chronological_valid.device,
-            dtype=torch.int64,
-        ).unsqueeze(0)
-        compact_key = chronological_index + (
-            (~chronological_valid).to(torch.int64)
-            * chronological_valid.shape[1])
-        compact_indices = torch.argsort(compact_key, dim=1)
-        compact_projected = torch.gather(
-            projected,
-            dim=1,
-            index=compact_indices.unsqueeze(-1).expand_as(projected),
-        )
         transition_count = pair_valid_f.sum(dim=1)
-        packed_projected = pack_padded_sequence(
-            compact_projected,
-            lengths=torch.clamp(
-                transition_count, min=1).to(torch.long).cpu(),
-            batch_first=True,
-            enforce_sorted=False,
+        ordered_state = self._encode_transitions(
+            projected,
+            chronological_valid,
+            torch.flip(pair_gap, dims=(1,)),
         )
-        _, ordered_hidden = self.gru(packed_projected)
-        ordered_state = ordered_hidden[-1]
 
         nominal_gap = (
             (pair_gap * pair_valid_f).sum(dim=1)
@@ -804,15 +1010,16 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             predicted_velocity = prior_xy / torch.clamp(
                 query_gap.unsqueeze(1), min=self.eps)
 
-            raw_sigma = self.log_sigma_head(context)
-            bounded_sigma = (
-                0.1 + (envelope - 0.1)
-                * torch.sigmoid(raw_sigma))
-            bounded_sigma = torch.clamp(bounded_sigma, min=0.1)
-            raw_log_sigma = torch.log(bounded_sigma)
+            raw_log_sigma = self._statistical_log_sigma(context)
             uncertainty = motion_aligned_covariance(
                 base_velocity,
-                raw_log_sigma,
+                torch.clamp(
+                    raw_log_sigma
+                    + self.log_sigma_calibration.to(
+                        device=raw_log_sigma.device,
+                        dtype=raw_log_sigma.dtype).unsqueeze(0),
+                    min=self.log_sigma_min,
+                    max=self.log_sigma_max),
                 min_speed=self.min_direction_speed,
                 eps=self.eps,
                 direction_xy=direction,
@@ -825,8 +1032,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             prior_xy = predicted_velocity * query_gap.unsqueeze(1)
             kinematic_prior_xy = (
                 base_velocity * query_gap.unsqueeze(1) * valid.unsqueeze(1))
-            raw_log_sigma = torch.clamp(
-                self.log_sigma_head(context), min=-4.0, max=2.5)
+            raw_log_sigma = self._statistical_log_sigma(context)
             envelope = ref_boxs.new_zeros((batch_size, 2))
             residual_unit = ref_boxs.new_zeros((batch_size, 2))
             residual_xy = prior_xy - kinematic_prior_xy

@@ -1,0 +1,5 @@
+﻿evidence,observation,supports,confidence
+SeqTrack 60ep 同seed日志配置,hparams仅workers 12→4及tag变化，Success 50.986→31.684（−19.302）,worker/随机事务可以把模型送入高、低两个训练盆地,强支持；旧run无代码commit，非唯一变量证明
+v25 四臂 B0 prefix,initial和前100批输入一致，但step1参数hash全部不同,分叉发生在第一次backward/Adam更新附近，而不是模块推理收益,已验证
+v25 B1-only部署路径,proposal=observation，final Success=33.443,低分是该臂B0轨迹，不是B1 proposal直接伤害,已验证
+v25 Full部署路径,calibration缺失、B3 applied rate=0，final Success=52.553,高分是Full臂自己的B0轨迹，不是B3有效,已验证

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from datasets import get_dataset  # noqa: E402
 from models import get_model  # noqa: E402
+from models.ct_variant import configure_ct_variant  # noqa: E402
 from utils.config import load_yaml_config  # noqa: E402
 
 
@@ -102,6 +103,7 @@ def main():
     parser.add_argument("--obs-gate", action="store_true",
                         help="Temporarily enable P5 observability gate with dynamics branch.")
     parser.add_argument("--no-loss", action="store_true")
+    parser.add_argument("--b1-backend", choices=("gru", "cfc"))
     args = parser.parse_args()
 
     cfg = load_config(args.cfg)
@@ -116,8 +118,12 @@ def main():
     if args.obs_gate:
         cfg.use_dynamics_encoder = True
         cfg.use_observability_gate = True
+    if args.b1_backend is not None:
+        cfg.motion_v3_temporal_backend = args.b1_backend
     cfg.batch_size = args.batch_size
     cfg.workers = args.workers
+    if str(getattr(cfg, "net_model", "")).strip().lower() == "ctseqtrack":
+        configure_ct_variant(cfg)
 
     split = args.split if args.split is not None else cfg.train_split
     dataset = get_dataset(cfg, type=cfg.train_type, split=split)

@@ -1,0 +1,7 @@
+﻿order,plan_item,status,evidence,next_gate
+0,恢复并固定B0,数值恢复；尚未固定,safe B0 final S=50.690，接近SeqTrack旧高轨迹50.986；但同臂step1不可复现,同GPU空闲、顺序重复的step1/step100 B0参数hash必须一致
+1,修复B1 sigma/NLL/coverage；保持GRU、固定geometry,未通过,新run learned−CV=+0.107m，NLL=148.6，95% coverage=31.1%,B0锁定后再做box-only mean/NLL与held-out校准；95% coverage≥90%、ECE≤0.05
+2,修复B2 acquisition funnel,未通过,旧正式run available约6–8%，target-bearing仅1–2行，harmful约93–97%，oracle headroom近零,先修extension supply/target retention；presence AUROC≥0.65且foreground-valid≥15%
+3,3A bounded adaptive shell；3B GRU vs CfC matched,等待,B0未固定、B1未校准，当前比较会把训练轨迹误当架构差,仅在B1 gate通过后从epoch0做matched短跑
+4,relation-aware sampling / robust voting / optional decoder,等待,当前瓶颈是没有有效target-bearing evidence，不是decoder容量不足,按4A→4B顺序；4C只在前两者产生oracle headroom后启用
+5,最后恢复B3 calibration,禁止提前,现有Full无artifact、applied rate=0，最终分数来自其B0轨迹,B2有正headroom后，在独立calibration tracklets生成绑定artifact

@@ -1,0 +1,264 @@
+{
+  "scope": {
+    "runs": {
+      "B0": "output/20260824-0219-25_b0-ct25_b0_mini_car_60ep_bs16_seed42_retryfix",
+      "B1-only": "output/20260824-0220-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_retryfix",
+      "B1+B2": "output/20260824-0220-25_full_minus_b3-ct25_b1_b2_mini_car_60ep_bs16_seed42_retryfix",
+      "Full": "output/20260824-0220-25_full-ct25_full_mini_car_60ep_bs16_seed42_retryfix"
+    }
+  },
+  "validation_summary": [
+    {
+      "arm": "B0",
+      "final_success": 50.690372467041016,
+      "late3_success": 50.18490219116211,
+      "final_precision": 59.28009033203125,
+      "late3_precision": 57.03756586710612,
+      "runtime_fps_final": 20.801467895507812,
+      "runtime_fps_mean": 18.611060078938802,
+      "validation_points": 60
+    },
+    {
+      "arm": "B1-only",
+      "final_success": 33.44310760498047,
+      "late3_success": 33.34901809692383,
+      "final_precision": 35.137855529785156,
+      "late3_precision": 34.966084798177086,
+      "runtime_fps_final": 7.552331924438477,
+      "runtime_fps_mean": 8.856061895688375,
+      "validation_points": 60
+    },
+    {
+      "arm": "B1+B2",
+      "final_success": 47.852298736572266,
+      "late3_success": 47.6706797281901,
+      "final_precision": 54.57002639770508,
+      "late3_precision": 52.13968022664388,
+      "runtime_fps_final": 10.320636749267578,
+      "runtime_fps_mean": 13.581691678365072,
+      "validation_points": 60
+    },
+    {
+      "arm": "Full",
+      "final_success": 52.55251693725586,
+      "late3_success": 50.281182607014976,
+      "final_precision": 61.19365692138672,
+      "late3_precision": 58.94967269897461,
+      "runtime_fps_final": 6.040872097015381,
+      "runtime_fps_mean": 11.99164613087972,
+      "validation_points": 60
+    }
+  ],
+  "b0_audit": {
+    "rows": [
+      {
+        "arm": "B0",
+        "epoch": 60,
+        "global_step": 75720,
+        "initial_hash": "798a8def3e82",
+        "step1_hash": "7f547e5b4afd",
+        "step100_hash": "51f8f50343f3",
+        "final_hash": "895fccc63777",
+        "b0_updates": 75720,
+        "plugin_updates": 0,
+        "input_fingerprints": 100,
+        "peak_allocated_mb": 3893.921875
+      },
+      {
+        "arm": "B1-only",
+        "epoch": 60,
+        "global_step": 75720,
+        "initial_hash": "798a8def3e82",
+        "step1_hash": "1ef9b8f6605f",
+        "step100_hash": "08e4dd9ec3b9",
+        "final_hash": "eebf71baedc8",
+        "b0_updates": 75720,
+        "plugin_updates": 12780,
+        "input_fingerprints": 100,
+        "peak_allocated_mb": 4447.03466796875
+      },
+      {
+        "arm": "B1+B2",
+        "epoch": 60,
+        "global_step": 75720,
+        "initial_hash": "798a8def3e82",
+        "step1_hash": "abe8f19d87af",
+        "step100_hash": "628e87457b97",
+        "final_hash": "19828d4f927e",
+        "b0_updates": 75720,
+        "plugin_updates": 12780,
+        "input_fingerprints": 100,
+        "peak_allocated_mb": 4446.7197265625
+      },
+      {
+        "arm": "Full",
+        "epoch": 60,
+        "global_step": 75720,
+        "initial_hash": "798a8def3e82",
+        "step1_hash": "9b5a3d6548f2",
+        "step100_hash": "aebf3c4e3e02",
+        "final_hash": "419fa7e6655b",
+        "b0_updates": 75720,
+        "plugin_updates": 12780,
+        "input_fingerprints": 100,
+        "peak_allocated_mb": 4447.8251953125
+      }
+    ],
+    "prefix_checks": {
+      "initial": true,
+      "step_1": false,
+      "step_100": false,
+      "epoch_060": false
+    },
+    "first_100_fingerprints_equal": true,
+    "final_cpu_rng_equal": true,
+    "final_cuda_rng_equal": true,
+    "loss_divergence": [
+      {
+        "arm": "B0",
+        "first_view0_loss_difference_step": -1,
+        "view0_event_count": 75720
+      },
+      {
+        "arm": "B1-only",
+        "first_view0_loss_difference_step": 6,
+        "view0_event_count": 75720
+      },
+      {
+        "arm": "B1+B2",
+        "first_view0_loss_difference_step": 3,
+        "view0_event_count": 75720
+      },
+      {
+        "arm": "Full",
+        "first_view0_loss_difference_step": 3,
+        "view0_event_count": 75720
+      }
+    ]
+  },
+  "b1_validation": [
+    {
+      "arm": "B1-only",
+      "rows": 1934,
+      "valid_rows": 1852,
+      "valid_rate": 0.9576008273009308,
+      "learned_rmse": 10.654226087543329,
+      "cv_rmse": 10.755030708273615,
+      "learned_minus_cv": -0.10080462073028684,
+      "mean_nll": 120.54424443343908,
+      "coverage_50": 0.28995680345572356,
+      "coverage_80": 0.3833693304535637,
+      "coverage_95": 0.4503239740820734
+    },
+    {
+      "arm": "B1+B2",
+      "rows": 1975,
+      "valid_rows": 1893,
+      "valid_rate": 0.9584810126582278,
+      "learned_rmse": 7.3688325668082095,
+      "cv_rmse": 7.2011484436450965,
+      "learned_minus_cv": 0.16768412316311299,
+      "mean_nll": 144.27241738180015,
+      "coverage_50": 0.054410987849973586,
+      "coverage_80": 0.20443740095087162,
+      "coverage_95": 0.3750660327522451
+    },
+    {
+      "arm": "Full",
+      "rows": 1952,
+      "valid_rows": 1870,
+      "valid_rate": 0.9579918032786885,
+      "learned_rmse": 6.393813507811336,
+      "cv_rmse": 6.287075456922167,
+      "learned_minus_cv": 0.10673805088916843,
+      "mean_nll": 149.97321634172596,
+      "coverage_50": 0.11497326203208556,
+      "coverage_80": 0.393048128342246,
+      "coverage_95": 0.5545454545454546
+    }
+  ],
+  "b2_validation": [
+    {
+      "arm": "B1+B2",
+      "diagnostic_rows": 1975,
+      "available_rows": 150,
+      "available_rate": 0.0759493670886076,
+      "target_bearing_rows": 1,
+      "target_bearing_given_available": 0.006666666666666667,
+      "validation_presence_prior": 0.006666666666666667,
+      "validation_presence_ap": 0.125,
+      "training_presence_ap": 0.8079886436462402,
+      "raw_center_gain_m": -4.026045817873358,
+      "raw_helpful_rate": 0.02666666666666667,
+      "raw_harmful_rate": 0.9666666666666667,
+      "raw_iou_gain": -0.37208424951604585,
+      "oracle_success_headroom_points": 0.005063291139244086,
+      "deployment_change_rate": 0.009113924050632912,
+      "training_row_recall": 1.0,
+      "training_point_recall": 0.40684277900616783,
+      "training_eligible_rows": 134,
+      "training_sampled_targets": 3496
+    },
+    {
+      "arm": "Full",
+      "diagnostic_rows": 1952,
+      "available_rows": 122,
+      "available_rate": 0.0625,
+      "target_bearing_rows": 2,
+      "target_bearing_given_available": 0.01639344262295082,
+      "validation_presence_prior": 0.01639344262295082,
+      "validation_presence_ap": 0.041530054644808745,
+      "training_presence_ap": 0.8381772041320801,
+      "raw_center_gain_m": -2.7084118113877995,
+      "raw_helpful_rate": 0.05737704918032787,
+      "raw_harmful_rate": 0.9344262295081968,
+      "raw_iou_gain": -0.4089151869565987,
+      "oracle_success_headroom_points": 0.015368852459019422,
+      "deployment_change_rate": 0.0,
+      "training_row_recall": 1.0,
+      "training_point_recall": 0.4451045921524941,
+      "training_eligible_rows": 145,
+      "training_sampled_targets": 3596
+    }
+  ],
+  "b3_validation": {
+    "validation_rows": 1952,
+    "evidence_valid_rows": 17,
+    "evidence_valid_rate": 0.008709016393442622,
+    "utility_rows": 17,
+    "helpful_prior": 0.11764705882352941,
+    "validation_action_ap": 0.22619047619047616,
+    "training_action_ap": 0.6202706098556519,
+    "training_action_auroc": 0.7693564295768738,
+    "training_action_ece": 0.24070851504802704,
+    "calibrated_rate": 0.0,
+    "router_applied_rate": 0.0,
+    "deployment_change_rate": 0.0
+  },
+  "gate_status": [
+    {
+      "module": "B0",
+      "criterion": "四臂 initial/step1/step100/final B0 哈希一致",
+      "result": "仅 initial 一致；step1 起失配",
+      "verdict": "FAIL"
+    },
+    {
+      "module": "B1",
+      "criterion": "mini_val learned RMSE < CV 且 coverage 有限/接近名义值",
+      "result": "B1+B2/Full learned 分别差 0.168/0.107 m；95% coverage 37.5%/55.5%",
+      "verdict": "FAIL"
+    },
+    {
+      "module": "B2",
+      "criterion": "正 oracle headroom、有效 target-bearing、presence AP 高于先验",
+      "result": "headroom 0.005–0.015 点；可用行 93%–97% 有害；验证正例仅 1–2 行",
+      "verdict": "FAIL"
+    },
+    {
+      "module": "B3",
+      "criterion": "action coverage > 0 且相对 raw 降低 harmful rate",
+      "result": "无校准 artifact，action coverage=0",
+      "verdict": "NOT READY"
+    }
+  ]
+}

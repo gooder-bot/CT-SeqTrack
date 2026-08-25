@@ -1,0 +1,168 @@
+{
+  "current_uncertainty_path": [
+    {
+      "run": "B1 retryfix epoch30",
+      "valid_rows": 1852,
+      "learned_minus_cv_rmse": -0.09133015560702162,
+      "help_rate": 0.5701943844492441,
+      "coverage_95": 0.4562634989200864,
+      "sigma_parallel_p50": 0.4730723053216934,
+      "sigma_parallel_p95": 2.2299066781997676,
+      "sigma_perpendicular_p50": 0.3785505592823028,
+      "sigma_perpendicular_p95": 1.2718966484069822,
+      "residual_parallel_p50": -0.6470029056072235,
+      "residual_parallel_p05": -0.6517077088356018,
+      "residual_parallel_p95": -0.6179270684719086,
+      "query_delta_t_mean": 0.49907038059914344,
+      "query_delta_t_std": 0.02444970773524775,
+      "recursive_age_unique": 1,
+      "gap2_learned_rmse": 6.764113580676871,
+      "gap2_cv_rmse": 7.241427079332826,
+      "gap4_learned_rmse": 10.962277109913982,
+      "gap4_cv_rmse": 10.938992726411058
+    },
+    {
+      "run": "B1 rerun epoch30",
+      "valid_rows": 1901,
+      "learned_minus_cv_rmse": 0.10742341807078226,
+      "help_rate": 0.04208311415044713,
+      "coverage_95": 0.3114150447133088,
+      "sigma_parallel_p50": 0.3233213722705841,
+      "sigma_parallel_p95": 0.3748819828033447,
+      "sigma_perpendicular_p50": 0.3229532241821289,
+      "sigma_perpendicular_p95": 0.3398454785346985,
+      "residual_parallel_p50": 0.9420086145401,
+      "residual_parallel_p05": 0.9398678541183472,
+      "residual_parallel_p95": 0.9440584182739258,
+      "query_delta_t_mean": 0.499094571896693,
+      "query_delta_t_std": 0.024132944768801574,
+      "recursive_age_unique": 1,
+      "gap2_learned_rmse": 4.9331410392908985,
+      "gap2_cv_rmse": 4.930373807713179,
+      "gap4_learned_rmse": 10.137193130775236,
+      "gap4_cv_rmse": 10.176341470698235
+    }
+  ],
+  "historical_cfc_comparison": [
+    {
+      "run": "Plain GRU",
+      "family": "plain fixed-geometry",
+      "backend": "GRU",
+      "valid_rows": 445,
+      "learned_rmse": 48.82716091496972,
+      "cv_rmse": 48.81324577125892,
+      "learned_minus_cv_rmse": 0.01391514371079694,
+      "mean_nll": 7489.938297723043,
+      "coverage_95": 0.04943820224719101,
+      "help_rate": 0.42696629213483145,
+      "query_delta_t_mean": 0.49888421230101854,
+      "query_delta_t_std": 0.021491560818203366,
+      "interpretation": "Pure backbone comparison, but old B0 path/protocol is not a formal v25 control."
+    },
+    {
+      "run": "Plain CfC",
+      "family": "plain fixed-geometry",
+      "backend": "CfC",
+      "valid_rows": 443,
+      "learned_rmse": 49.12556763497984,
+      "cv_rmse": 49.1443383166557,
+      "learned_minus_cv_rmse": -0.0187706816758606,
+      "mean_nll": 11988.80152138688,
+      "coverage_95": 0.05417607223476298,
+      "help_rate": 0.510158013544018,
+      "query_delta_t_mean": 0.49876616232551246,
+      "query_delta_t_std": 0.0214037891968264,
+      "interpretation": "Pure backbone comparison, but old B0 path/protocol is not a formal v25 control."
+    },
+    {
+      "run": "RA-PMM GRU",
+      "family": "RA-PMM multi-change",
+      "backend": "GRU",
+      "valid_rows": 436,
+      "learned_rmse": 5.316178259458588,
+      "cv_rmse": 5.3174504635249775,
+      "learned_minus_cv_rmse": -0.001272204066389726,
+      "mean_nll": 3.766169460093798,
+      "coverage_95": 0.7775229357798165,
+      "help_rate": 0.5022935779816514,
+      "query_delta_t_mean": 0.49874710107068404,
+      "query_delta_t_std": 0.021574768855344144,
+      "interpretation": "Not a CfC-only comparison: uncertainty objective and dynamic geometry also changed."
+    },
+    {
+      "run": "RA-PMM CfC",
+      "family": "RA-PMM multi-change",
+      "backend": "CfC",
+      "valid_rows": 447,
+      "learned_rmse": 5.076223716857202,
+      "cv_rmse": 5.081657716630311,
+      "learned_minus_cv_rmse": -0.0054339997731096545,
+      "mean_nll": 4.015107362831914,
+      "coverage_95": 0.6957494407158836,
+      "help_rate": 0.5480984340044742,
+      "query_delta_t_mean": 0.49877725938289225,
+      "query_delta_t_std": 0.021307925458945925,
+      "interpretation": "Not a CfC-only comparison: uncertainty objective and dynamic geometry also changed."
+    }
+  ],
+  "issue_scope_map": [
+    {
+      "issue": "Effective uncertainty collapse",
+      "status": "Verified in the current rerun",
+      "included_before": "Yes: the earlier sigma/NLL/coverage failure is the aggregate symptom.",
+      "evidence": "Rerun sigma p50/p95 is 0.323/0.375 m parallel and 0.323/0.340 m perpendicular; 95% coverage is 31.1%.",
+      "boundary": "Not literal zero variance; it is severe under-dispersion with weak sample adaptation."
+    },
+    {
+      "issue": "B1 endpoint/path inaccuracy",
+      "status": "Verified for the endpoint; full path is not yet measured",
+      "included_before": "Yes: learned-vs-CV RMSE and residual-head collapse already captured endpoint failure.",
+      "evidence": "Rerun learned RMSE is 0.107 m worse than CV and helps only 4.2% of rows; gap2/gap4 train-tail gains are only −0.003/+0.039 m relative to CV.",
+      "boundary": "The current contract predicts one xy endpoint, not a dense continuous trajectory."
+    },
+    {
+      "issue": "B0 recursive training-path divergence",
+      "status": "Verified upstream confounder",
+      "included_before": "Yes, but it is separate from B1 internal collapse.",
+      "evidence": "Matched runs share input fingerprints yet B0 parameters diverge after step1.",
+      "boundary": "It changes B1 inputs/targets and can trigger different B1 collapse directions."
+    },
+    {
+      "issue": "Recursive-age stratification",
+      "status": "Not measurable with the current export",
+      "included_before": "The plan requested it, but the current epoch30 CSV contains only age=0.",
+      "evidence": "Both current B1 epoch30 exports have recursive_age_unique=1 and value 0.",
+      "boundary": "Fix the diagnostic field before claiming robustness to recursive drift."
+    }
+  ],
+  "cfc_placement_decision": [
+    {
+      "location": "B1 temporal aggregation (recommended)",
+      "decision": "GO after B1 mean/sigma repair",
+      "change": "Replace only the GRU over chronological transition embeddings with a parameter-matched CfC cell.",
+      "preserved": "B0, step projection, CV anchor, residual/sigma heads, fixed crop, B2/B3 contracts and observation-only writer.",
+      "reason": "This is the only location where explicit pairwise delta-t is both available and causally relevant."
+    },
+    {
+      "location": "B0 backbone/decoder",
+      "decision": "NO-GO",
+      "change": "Would inject motion features into the Safe-SeqTrack observation baseline.",
+      "preserved": "No",
+      "reason": "Breaks B0 parity and late coupling; confounds the paper baseline."
+    },
+    {
+      "location": "B2 evidence network",
+      "decision": "NO-GO for first integration",
+      "change": "Would make CfC responsible for evidence supply rather than physical motion.",
+      "preserved": "Extension-only could remain, but the attribution becomes unclear.",
+      "reason": "B2 is bottlenecked by target-bearing supply, not temporal recurrence capacity."
+    },
+    {
+      "location": "B3 selective router",
+      "decision": "NO-GO",
+      "change": "Would add recurrence after detached evidence/action features.",
+      "preserved": "Fail-closed semantics might remain, but calibration data are currently absent.",
+      "reason": "B3 currently has zero deployment action coverage; CfC cannot create calibration evidence."
+    }
+  ]
+}

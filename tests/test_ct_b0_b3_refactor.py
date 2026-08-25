@@ -194,7 +194,8 @@ def test_b1_report_contains_registered_strata_and_mean_vs_cv():
     report = build_report(rows)
     assert report["overall"]["learned_minus_cv_rmse"] < 0
     assert set(report["strata"]) == {
-        "time_gap", "sparsity", "recursive_age"}
+        "time_gap", "sparsity", "recursive_age",
+        "kinematic_error_tail"}
 
 
 def test_variant_normalization_rejects_cross_product_switches():
