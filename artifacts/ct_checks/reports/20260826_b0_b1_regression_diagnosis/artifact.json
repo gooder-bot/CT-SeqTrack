@@ -1,0 +1,1976 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack B0/B1 再次退化诊断（2026-08-26）",
+    "description": "定位 v25 B0/B1 从约50分回落到约30分的训练事务、SeqTrack基线等价性与剩余风险。",
+    "generatedAt": "2026-08-26T00:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_b0_b1_regression_20260826",
+        "label": "CT-SeqTrack B0/B1 TensorBoard、checkpoint、provenance 与代码合同派生快照",
+        "path": "artifacts/ct_checks/reports/20260826_b0_b1_regression_diagnosis/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b0_b1_regression_20260826'",
+          "tablesUsed": [
+            "report_snapshot"
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "card_current_b0",
+        "dataset": "headline",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "description": "当前 v25 B0 的 epoch60 mini_val Success。",
+        "metrics": [
+          {
+            "label": "Current B0 Success",
+            "field": "current_b0_success",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_regression",
+        "dataset": "headline",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "description": "当前 B0 相对 2026-08-24 单条高分 B0 的 final Success 差值。",
+        "metrics": [
+          {
+            "label": "B0 regression",
+            "field": "b0_regression_points",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_step1",
+        "dataset": "headline",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "description": "相同初始化和首批输入下，第一次 Adam 更新后的 B0 参数一致性。",
+        "metrics": [
+          {
+            "label": "Step1 parity",
+            "field": "step1_parity"
+          }
+        ]
+      },
+      {
+        "id": "card_baseline",
+        "dataset": "headline",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "description": "要求稳定复现且训练/评估合同清楚后，才可称为恢复 SeqTrack B0 基线。",
+        "metrics": [
+          {
+            "label": "SeqTrack baseline",
+            "field": "seqtrack_baseline_status"
+          }
+        ]
+      },
+      {
+        "id": "card_b1_mean",
+        "dataset": "headline",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "description": "当前 GRU epoch60 learned prior 相对自身 CV anchor 的 RMSE 差值。",
+        "metrics": [
+          {
+            "label": "B1 learned−CV",
+            "field": "current_b1_mean_delta_cv",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_b0_success",
+        "title": "B0 与 SeqTrack mini_val Success",
+        "subtitle": "每5 epoch 对齐；v25 使用 safe evaluator，SeqTrack 参考使用旧 evaluator",
+        "intent": "trend",
+        "question": "之前的50分是否形成了可复现的 B0 收敛轨迹？",
+        "rationale": "12个对齐验证点显示回退从早期开始，而非最后一个 checkpoint 波动。",
+        "type": "line",
+        "dataset": "tracking_curve",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success",
+            "unit": "points"
+          },
+          "color": {
+            "field": "run",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_b0_loss",
+        "title": "v25 B0 训练目标的 epoch 均值",
+        "subtitle": "loss_b0_transaction；两条轨迹损失接近，但递归 tracking 分数相差约21点",
+        "intent": "trend",
+        "question": "低分是否由明显的训练 loss 发散解释？",
+        "rationale": "60个 epoch 均值显示 surrogate loss 的轻微差异不能直接解释 tracking 崩落。",
+        "type": "line",
+        "dataset": "b0_loss_curve",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "mean_b0_loss",
+            "type": "quantitative",
+            "label": "Mean B0 loss"
+          },
+          "color": {
+            "field": "run",
+            "type": "nominal",
+            "label": "Run"
+          }
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_b1_tracking",
+        "title": "B1-only observation Success",
+        "subtitle": "旧高轨迹只运行到epoch30；两条实验的部署输出都仍是B0 observation",
+        "intent": "trend",
+        "question": "B1-only 的高低分是否等同于 B1 学习质量？",
+        "rationale": "同 epoch 对照表明 top-line tracking 与 B1 mechanism 指标可以反向变化。",
+        "type": "line",
+        "dataset": "b1_tracking_curve",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success",
+            "unit": "points"
+          },
+          "color": {
+            "field": "run",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            }
+          ]
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "table_tracking",
+        "title": "Tracking final/late-3 汇总",
+        "subtitle": "每条 run 按其实际最后验证点计算；旧 B1 high 仅到 epoch30",
+        "dataset": "tracking_summary",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "defaultSort": {
+          "field": "final_success",
+          "direction": "desc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "run",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "final_epoch",
+            "label": "Final epoch",
+            "format": "number"
+          },
+          {
+            "field": "final_success",
+            "label": "Final S",
+            "format": "number"
+          },
+          {
+            "field": "late3_success",
+            "label": "Late-3 S",
+            "format": "number"
+          },
+          {
+            "field": "final_precision",
+            "label": "Final P",
+            "format": "number"
+          },
+          {
+            "field": "late3_precision",
+            "label": "Late-3 P",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_chain",
+        "title": "B0 分叉链路",
+        "subtitle": "从初始化、输入、forward 到第一次 optimizer update 的证据顺序",
+        "dataset": "b0_chain",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "stage",
+            "label": "Stage",
+            "type": "text"
+          },
+          {
+            "field": "prior_high",
+            "label": "Prior high",
+            "type": "text"
+          },
+          {
+            "field": "current_low",
+            "label": "Current low",
+            "type": "text"
+          },
+          {
+            "field": "equal",
+            "label": "Equal",
+            "type": "text"
+          },
+          {
+            "field": "meaning",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "table_baseline",
+        "title": "当前 v25 B0 与正常 SeqTrack 的合同差异",
+        "subtitle": "架构继承不等于训练事务和 evaluator 等价",
+        "dataset": "baseline_contract",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "aspect",
+            "label": "Aspect",
+            "type": "text"
+          },
+          {
+            "field": "SeqTrack_reference",
+            "label": "SeqTrack",
+            "type": "text"
+          },
+          {
+            "field": "current_v25_B0",
+            "label": "Current v25 B0",
+            "type": "text"
+          },
+          {
+            "field": "equivalent",
+            "label": "Equivalent",
+            "type": "text"
+          },
+          {
+            "field": "impact",
+            "label": "Impact",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "table_b1",
+        "title": "B1 top-line 与 mechanism 指标",
+        "subtitle": "旧高分 B1 的 mean/coverage 实际更差；当前修复改善了 mechanism，而不是 observation 轨迹",
+        "dataset": "b1_mechanism",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "defaultSort": {
+          "field": "epoch",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "run",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "epoch",
+            "label": "Epoch",
+            "format": "number"
+          },
+          {
+            "field": "tracking_success",
+            "label": "Tracking S",
+            "format": "number"
+          },
+          {
+            "field": "learned_rmse",
+            "label": "Learned RMSE",
+            "format": "number"
+          },
+          {
+            "field": "cv_rmse",
+            "label": "CV RMSE",
+            "format": "number"
+          },
+          {
+            "field": "learned_minus_cv",
+            "label": "Learned−CV",
+            "format": "number"
+          },
+          {
+            "field": "nll",
+            "label": "NLL",
+            "format": "number"
+          },
+          {
+            "field": "coverage95",
+            "label": "Coverage95",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "table_causes",
+        "title": "根因证据分级",
+        "subtitle": "Verified 与 Likely/Unresolved 明确分开",
+        "dataset": "root_cause_ladder",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "status",
+            "label": "Status",
+            "type": "text"
+          },
+          {
+            "field": "finding",
+            "label": "Finding",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Evidence",
+            "type": "text"
+          },
+          {
+            "field": "confidence",
+            "label": "Confidence",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "table_issues",
+        "title": "仍存在的问题",
+        "subtitle": "按对论文因果解释和服务器实验决策的影响排序",
+        "dataset": "other_issues",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "severity",
+            "label": "Severity",
+            "type": "text"
+          },
+          {
+            "field": "issue",
+            "label": "Issue",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Evidence",
+            "type": "text"
+          },
+          {
+            "field": "impact",
+            "label": "Impact",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack B0/B1 再次退化诊断（2026-08-26）"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 技术结论\n\n**当前没有恢复到稳定的 SeqTrack B0 基线。** 2026-08-24 的 v25 B0 达到 50.690 Success，但 2026-08-25 的同 seed scratch B0 只有 29.870，下降20.821点。两者数据清单、B0 初始化、前100批 observation 指纹和第一个 forward/loss 相同；第一次 Adam 更新后的 B0 参数已经不同，第3个训练 step 才出现可见 loss 差。回退因此起源于 backward/optimizer 数值路径，被递归验证放大，而不是 B1 新 loss 直接污染了独立 B0。\n\n旧50分证明当前 SeqTrack-derived B0 有能力进入高分盆地，但单条 run 不能证明基线已恢复或固定。当前 B1-GRU 的 tracking 也主要跟随低分 B0 observation 轨迹；它的 mean prior 相比旧高分 B1 反而学得更好。因此应把问题称为 **B0 事务不可复现 + B1-only 指标口径混淆**，而不是“B1 修复失败导致整体掉分”。"
+      },
+      {
+        "id": "metrics",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": [
+          "card_current_b0",
+          "card_regression",
+          "card_step1",
+          "card_baseline",
+          "card_b1_mean"
+        ]
+      },
+      {
+        "id": "key_finding_b0",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 1. 50分是一次高分轨迹，不是已锁定的 B0\n\n旧 v25 B0 在 epoch45 后稳定在约50 Success；当前 B0 从 epoch5 起就只有20.791，之后长期停在约30。两条 run 的 epoch60 B0 loss 均值仅为0.2425与0.2494，最后1000步均值也仅差约0.0066，但 final Success 相差20.821点。这说明当前 observation surrogate loss 对递归 tracking 盆地非常敏感，单看 loss 收敛无法发现回归。"
+      },
+      {
+        "id": "b0_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b0_success"
+      },
+      {
+        "id": "loss_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b0_loss"
+      },
+      {
+        "id": "tracking_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_tracking"
+      },
+      {
+        "id": "key_finding_chain",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 2. 分叉发生在第一次 backward/Adam 更新\n\ninitial SHA、首100批输入和 step0 loss 都一致，排除了数据划分、初始化和首个 forward 口径。step1 参数 SHA 已经不同，但日志 loss 到 step3 才出现约0.0013的差值；到 epoch5，Success 已相差13.880点。当前 checkpoint 只保存 post-step 参数与 Adam 状态，没有保存 pre-step gradient SHA，因此尚不能判断是 CUDA backward 先不同，还是梯度相同而 Adam 更新不同。"
+      },
+      {
+        "id": "chain_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_chain"
+      },
+      {
+        "id": "causes_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_causes"
+      },
+      {
+        "id": "seqtrack_equivalence",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 3. 架构继承了 SeqTrack，但实验基线并不等价\n\n当前 `CTSEQTRACK` 确实继承 `SEQTRACK3D`，B0 arm 也关闭 B1/B2/B3，因此 observation 网络核心仍来自 SeqTrack。但 v25 改成候选均衡的 stateless sampler、`0.5 + 3×1/6` 加权目标、safe dual-stream envelope 和 first-frame-size recursive evaluator；正常 SeqTrack 使用普通 batch mean/global RNG，且旧 evaluator 在 safe flag 缺失时读取当前帧 GT 尺寸。两者训练目标和评估口径都不同。\n\n所以旧 v25 B0 的50.690与 SeqTrack 的约51分只能叫数值接近，不能叫 transaction-equivalent restoration。当前29.870进一步说明数值基线也没有稳定恢复。"
+      },
+      {
+        "id": "baseline_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_baseline"
+      },
+      {
+        "id": "b1_interpretation",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 4. B1 top-line 回退不等于 B1 又学坏了\n\n旧 B1-only 高轨迹在 epoch30 有49.275 Success，但 learned RMSE=5.700 m，比 CV=5.592 m 更差，coverage95仅31.1%。当前 GRU 在同为 epoch30 时只有30.415 Success，却已经做到 learned 10.244 m < CV 10.463 m，coverage95=78.0%；到 epoch60，learned−CV=-0.208 m 且 coverage95=82.7%。旧高分来自其 B0 observation 轨迹，不是 B1 mechanism 成功；当前则相反，B1 mechanism 改善但上游 B0 轨迹低。"
+      },
+      {
+        "id": "b1_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b1_tracking"
+      },
+      {
+        "id": "b1_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_b1"
+      },
+      {
+        "id": "scope_definitions",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 5. 范围、数据与指标定义\n\n比较使用 nuScenes mini Car、seed42、batch16、60-epoch scratch runs；旧 B1 high 只完成30轮。Tracking 使用各 run 的 TensorBoard Success/Precision，B0 曲线按每5 epoch 对齐。B0 loss 为每1262个 observation optimizer step 的 epoch 均值。输入一致性来自 checkpoint 的前100批 observation fingerprint；参数一致性来自 B0 SHA256。B1 mechanism 只在同 checkpoint 的 `b1_valid` endpoint 上计算 RMSE/NLL/coverage。"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 6. 诊断方法\n\n诊断顺序是：先复算 final/late-3 与完整曲线，再核对 provenance 的数据清单、commit、resolved config 和 evaluator；随后沿 initialization→fingerprint→step0 loss→step1 hash→step3 loss→epoch5 validation 建立分叉链。Git diff 用于确认 B1 repair commit 没有修改启用状态下的 B0 forward/损失定义。当前代码门禁为148 passed、1 skipped，compileall 通过；slimming verify 仅因 HEAD 不等于固定 baseline commit `001951a` 按设计失败。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 7. 限制、不确定性与稳健性\n\n最主要的不确定性是缺少 step1 更新前的逐参数 gradient SHA，无法在 backward 与 Adam 之间二选一。旧高分与当前低分使用不同 commit，且 validation cadence 为1与5；虽然两项都不能解释发生在首次 validation 前的 step1 分叉，但它们阻止了严格单变量复现。运行 provenance 也没有记录 GPU型号、CUDA/cuDNN、PyTorch和PointNet2 build。三个新 arm 并行放在不同GPU上，不能满足同物理GPU、顺序执行的位级公平性验收。"
+      },
+      {
+        "id": "issues_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_issues"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b0_b1_regression_20260826",
+        "body": "## 8. 建议的下一步\n\n1. 暂停 full nuScenes 和 B1+B2 涨分实验。先在同一张空闲GPU上顺序跑 B0→B1-GRU→B1-CfC 的2-step与100-step audit，三条都从 epoch0 开始。\n2. 在 optimizer step 前保存每个 B0 参数的 gradient SHA/范数，step 后保存 Adam `step/exp_avg/exp_avg_sq` 与参数 SHA。若 grad 已不同，排查 PointNet2/CUDA backward；若 grad 相同而更新不同，固定 Adam `foreach=False` 做诊断对照。\n3. 固定同一 resolved config，包括 validation cadence；同时记录 GPU UUID/model、driver、CUDA/cuDNN、torch、Lightning和PointNet2 build。\n4. 要么把论文 B0 明确定义为 Safe-SeqTrack-derived control，并用相同 evaluator 重新建立多seed基线；要么增加一个完全忠实于原始 SeqTrack 训练事务的 reference arm。不要再用单条50分 run 同时承担这两个含义。\n5. B0 parity 通过后再重跑 mini；B1-GRU 保留为主方案。修复 recursive-age validation 导出并完成 held-out uncertainty calibration 后，才进入 full-minus-B3。"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 9. 仍需回答的问题\n\n- step1 的 B0 gradient 是否已经不同？\n- 同一物理GPU顺序运行时，B0 能否重复得到相同 step1/step100 SHA？\n- 论文中的 B0 要定义为原始 SeqTrack，还是安全评估下的 SeqTrack-derived control？\n- 多seed下高/低盆地的概率和方差有多大？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-26T00:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "current_b0_success": 29.86980438232422,
+          "b0_regression_points": -20.820568084716797,
+          "step1_parity": "FAIL",
+          "seqtrack_baseline_status": "NOT RESTORED",
+          "current_b1_mean_delta_cv": -0.2083957368469136
+        }
+      ],
+      "tracking_curve": [
+        {
+          "run": "SeqTrack reference",
+          "epoch": 5,
+          "success": 27.95952033996582,
+          "precision": 27.414661407470703,
+          "global_step": 6310
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 10,
+          "success": 32.285560607910156,
+          "precision": 27.096281051635742,
+          "global_step": 12620
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 15,
+          "success": 46.90699768066406,
+          "precision": 63.28774642944336,
+          "global_step": 18930
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 20,
+          "success": 38.95732879638672,
+          "precision": 54.008750915527344,
+          "global_step": 25240
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 25,
+          "success": 48.78227615356445,
+          "precision": 61.27899932861328,
+          "global_step": 31550
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 30,
+          "success": 51.926700592041016,
+          "precision": 65.42122650146484,
+          "global_step": 37860
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 35,
+          "success": 44.8829345703125,
+          "precision": 44.891685485839844,
+          "global_step": 44170
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 40,
+          "success": 49.65755081176758,
+          "precision": 59.56127166748047,
+          "global_step": 50480
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 45,
+          "success": 50.530635833740234,
+          "precision": 58.31947326660156,
+          "global_step": 56790
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 50,
+          "success": 46.898250579833984,
+          "precision": 51.073299407958984,
+          "global_step": 63100
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 55,
+          "success": 47.34245300292969,
+          "precision": 52.484683990478516,
+          "global_step": 69410
+        },
+        {
+          "run": "SeqTrack reference",
+          "epoch": 60,
+          "success": 51.001094818115234,
+          "precision": 60.892784118652344,
+          "global_step": 75720
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 5,
+          "success": 34.67068099975586,
+          "precision": 36.935447692871094,
+          "global_step": 6310
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 10,
+          "success": 32.99234390258789,
+          "precision": 32.89934539794922,
+          "global_step": 12620
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 15,
+          "success": 32.76914596557617,
+          "precision": 31.80415916442871,
+          "global_step": 18930
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 20,
+          "success": 44.01422882080078,
+          "precision": 55.87417984008789,
+          "global_step": 25240
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 25,
+          "success": 46.89605712890625,
+          "precision": 54.94310760498047,
+          "global_step": 31550
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 30,
+          "success": 47.060176849365234,
+          "precision": 47.27024459838867,
+          "global_step": 37860
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 35,
+          "success": 47.605037689208984,
+          "precision": 61.68381118774414,
+          "global_step": 44170
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 40,
+          "success": 46.12582015991211,
+          "precision": 48.81400680541992,
+          "global_step": 50480
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 45,
+          "success": 51.904815673828125,
+          "precision": 58.30743408203125,
+          "global_step": 56790
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 50,
+          "success": 49.95295715332031,
+          "precision": 55.87089538574219,
+          "global_step": 63100
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 55,
+          "success": 48.845733642578125,
+          "precision": 57.03610610961914,
+          "global_step": 69410
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 60,
+          "success": 50.690372467041016,
+          "precision": 59.28009033203125,
+          "global_step": 75720
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 5,
+          "success": 20.791030883789062,
+          "precision": 20.57549476623535,
+          "global_step": 6310
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 10,
+          "success": 29.259300231933594,
+          "precision": 30.375274658203125,
+          "global_step": 12620
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 15,
+          "success": 26.8216609954834,
+          "precision": 31.937641143798828,
+          "global_step": 18930
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 20,
+          "success": 32.92888259887695,
+          "precision": 34.81291198730469,
+          "global_step": 25240
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 25,
+          "success": 31.607223510742188,
+          "precision": 33.04267120361328,
+          "global_step": 31550
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 30,
+          "success": 30.064552307128906,
+          "precision": 31.13129425048828,
+          "global_step": 37860
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 35,
+          "success": 30.931074142456055,
+          "precision": 31.566741943359375,
+          "global_step": 44170
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 40,
+          "success": 30.261486053466797,
+          "precision": 32.18271255493164,
+          "global_step": 50480
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 45,
+          "success": 30.134572982788086,
+          "precision": 31.314002990722656,
+          "global_step": 56790
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 50,
+          "success": 31.16302490234375,
+          "precision": 32.579872131347656,
+          "global_step": 63100
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 55,
+          "success": 30.57659339904785,
+          "precision": 31.312910079956055,
+          "global_step": 69410
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 60,
+          "success": 29.86980438232422,
+          "precision": 30.398250579833984,
+          "global_step": 75720
+        }
+      ],
+      "b1_tracking_curve": [
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 5,
+          "success": 39.18927764892578,
+          "precision": 47.93873596191406,
+          "global_step": 6310
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 10,
+          "success": 47.85230255126953,
+          "precision": 56.4967155456543,
+          "global_step": 12620
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 15,
+          "success": 36.57658767700195,
+          "precision": 33.565643310546875,
+          "global_step": 18930
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 20,
+          "success": 41.44967269897461,
+          "precision": 46.84244918823242,
+          "global_step": 25240
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 25,
+          "success": 50.1739616394043,
+          "precision": 61.925601959228516,
+          "global_step": 31550
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 30,
+          "success": 49.274620056152344,
+          "precision": 52.096282958984375,
+          "global_step": 37860
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 5,
+          "success": 22.311817169189453,
+          "precision": 25.169584274291992,
+          "global_step": 6310
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 10,
+          "success": 30.04266929626465,
+          "precision": 32.21006774902344,
+          "global_step": 12620
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 15,
+          "success": 28.661928176879883,
+          "precision": 30.843547821044922,
+          "global_step": 18930
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 20,
+          "success": 23.445295333862305,
+          "precision": 22.838077545166016,
+          "global_step": 25240
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 25,
+          "success": 28.944202423095703,
+          "precision": 27.853389739990234,
+          "global_step": 31550
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 30,
+          "success": 30.414661407470703,
+          "precision": 29.844642639160156,
+          "global_step": 37860
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 35,
+          "success": 31.471555709838867,
+          "precision": 31.497812271118164,
+          "global_step": 44170
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 40,
+          "success": 30.96170425415039,
+          "precision": 31.527355194091797,
+          "global_step": 50480
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 45,
+          "success": 30.696941375732422,
+          "precision": 31.1487979888916,
+          "global_step": 56790
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 50,
+          "success": 31.123634338378906,
+          "precision": 31.8512020111084,
+          "global_step": 63100
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 55,
+          "success": 30.942014694213867,
+          "precision": 31.857772827148438,
+          "global_step": 69410
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 60,
+          "success": 31.226476669311523,
+          "precision": 32.286651611328125,
+          "global_step": 75720
+        }
+      ],
+      "tracking_summary": [
+        {
+          "run": "SeqTrack reference",
+          "final_epoch": 60,
+          "final_success": 51.001094818115234,
+          "final_precision": 60.892784118652344,
+          "late3_success": 48.41393280029297,
+          "late3_precision": 54.81692250569662,
+          "validation_points": 12
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "final_epoch": 60,
+          "final_success": 50.690372467041016,
+          "final_precision": 59.28009033203125,
+          "late3_success": 50.18490219116211,
+          "late3_precision": 57.03756586710612,
+          "validation_points": 60
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "final_epoch": 30,
+          "final_success": 49.274620056152344,
+          "final_precision": 52.096282958984375,
+          "late3_success": 49.06017939249674,
+          "late3_precision": 56.07257588704427,
+          "validation_points": 30
+        },
+        {
+          "run": "v25 B0 current-low",
+          "final_epoch": 60,
+          "final_success": 29.86980438232422,
+          "final_precision": 30.398250579833984,
+          "late3_success": 30.536474227905273,
+          "late3_precision": 31.430344263712566,
+          "validation_points": 12
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "final_epoch": 60,
+          "final_success": 31.226476669311523,
+          "final_precision": 32.286651611328125,
+          "late3_success": 31.097375233968098,
+          "late3_precision": 31.998542149861652,
+          "validation_points": 12
+        }
+      ],
+      "b0_loss_curve": [
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 1,
+          "mean_b0_loss": 6.799783610126296
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 2,
+          "mean_b0_loss": 2.1864966064360933
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 3,
+          "mean_b0_loss": 1.2251822689869891
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 4,
+          "mean_b0_loss": 1.02632890828249
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 5,
+          "mean_b0_loss": 0.9192655344512874
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 6,
+          "mean_b0_loss": 0.8220314127518522
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 7,
+          "mean_b0_loss": 0.7678789923619922
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 8,
+          "mean_b0_loss": 0.6901338334695661
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 9,
+          "mean_b0_loss": 0.6817917877870203
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 10,
+          "mean_b0_loss": 0.6188155604428988
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 11,
+          "mean_b0_loss": 0.5939952538669014
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 12,
+          "mean_b0_loss": 0.5738592927245255
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 13,
+          "mean_b0_loss": 0.533602739594251
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 14,
+          "mean_b0_loss": 0.5068629533288596
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 15,
+          "mean_b0_loss": 0.4970640744157903
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 16,
+          "mean_b0_loss": 0.48818578843836175
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 17,
+          "mean_b0_loss": 0.4779047276086739
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 18,
+          "mean_b0_loss": 0.44405030909034227
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 19,
+          "mean_b0_loss": 0.4398171792955104
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 20,
+          "mean_b0_loss": 0.4096344866082899
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 21,
+          "mean_b0_loss": 0.34058718252248127
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 22,
+          "mean_b0_loss": 0.3157306200457167
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 23,
+          "mean_b0_loss": 0.3029673567333992
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 24,
+          "mean_b0_loss": 0.3032776037151387
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 25,
+          "mean_b0_loss": 0.2961527521584756
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 26,
+          "mean_b0_loss": 0.28318224666660824
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 27,
+          "mean_b0_loss": 0.2816196269755696
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 28,
+          "mean_b0_loss": 0.2856696717523735
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 29,
+          "mean_b0_loss": 0.2795804076475311
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 30,
+          "mean_b0_loss": 0.2691441659834797
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 31,
+          "mean_b0_loss": 0.2823334852212866
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 32,
+          "mean_b0_loss": 0.2687638700244544
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 33,
+          "mean_b0_loss": 0.2630526996948262
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 34,
+          "mean_b0_loss": 0.26729769140434717
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 35,
+          "mean_b0_loss": 0.2700378134457037
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 36,
+          "mean_b0_loss": 0.26630844304518164
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 37,
+          "mean_b0_loss": 0.2501382499921435
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 38,
+          "mean_b0_loss": 0.2571745497984856
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 39,
+          "mean_b0_loss": 0.25659669657044476
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 40,
+          "mean_b0_loss": 0.24804314796218024
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 41,
+          "mean_b0_loss": 0.23795231023770883
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 42,
+          "mean_b0_loss": 0.2404360879513711
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 43,
+          "mean_b0_loss": 0.24136489234782058
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 44,
+          "mean_b0_loss": 0.24431256541359445
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 45,
+          "mean_b0_loss": 0.2404800022992109
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 46,
+          "mean_b0_loss": 0.24058174934657364
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 47,
+          "mean_b0_loss": 0.24298236780636095
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 48,
+          "mean_b0_loss": 0.2437545603492464
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 49,
+          "mean_b0_loss": 0.23603779193244154
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 50,
+          "mean_b0_loss": 0.23291543447272336
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 51,
+          "mean_b0_loss": 0.23787488187951067
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 52,
+          "mean_b0_loss": 0.2404652791608438
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 53,
+          "mean_b0_loss": 0.23886677190047437
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 54,
+          "mean_b0_loss": 0.23587278611426685
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 55,
+          "mean_b0_loss": 0.23674575334470926
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 56,
+          "mean_b0_loss": 0.23916723120443983
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 57,
+          "mean_b0_loss": 0.23420909199444503
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 58,
+          "mean_b0_loss": 0.23921696182854013
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 59,
+          "mean_b0_loss": 0.23703937426728983
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "epoch": 60,
+          "mean_b0_loss": 0.2424986904425024
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 1,
+          "mean_b0_loss": 6.842585338843417
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 2,
+          "mean_b0_loss": 2.1931666111700507
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 3,
+          "mean_b0_loss": 1.2638863933917648
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 4,
+          "mean_b0_loss": 1.0464580806234938
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 5,
+          "mean_b0_loss": 0.9322027933153599
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 6,
+          "mean_b0_loss": 0.8259857599571843
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 7,
+          "mean_b0_loss": 0.7597022844263
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 8,
+          "mean_b0_loss": 0.7100323950384763
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 9,
+          "mean_b0_loss": 0.6810111963970914
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 10,
+          "mean_b0_loss": 0.6303521873881057
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 11,
+          "mean_b0_loss": 0.5938544471507594
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 12,
+          "mean_b0_loss": 0.5727260731243293
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 13,
+          "mean_b0_loss": 0.5615248204505576
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 14,
+          "mean_b0_loss": 0.5091482695375116
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 15,
+          "mean_b0_loss": 0.49077638937676954
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 16,
+          "mean_b0_loss": 0.4921389009608709
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 17,
+          "mean_b0_loss": 0.48413692666261965
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 18,
+          "mean_b0_loss": 0.4570236497347593
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 19,
+          "mean_b0_loss": 0.442739445344204
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 20,
+          "mean_b0_loss": 0.438741373763126
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 21,
+          "mean_b0_loss": 0.3658729888286247
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 22,
+          "mean_b0_loss": 0.33181136202439077
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 23,
+          "mean_b0_loss": 0.3180988524729023
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 24,
+          "mean_b0_loss": 0.3178226741742219
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 25,
+          "mean_b0_loss": 0.3069400784047394
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 26,
+          "mean_b0_loss": 0.29188057738939294
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 27,
+          "mean_b0_loss": 0.2962801383952898
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 28,
+          "mean_b0_loss": 0.29446465517327824
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 29,
+          "mean_b0_loss": 0.29232794425425174
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 30,
+          "mean_b0_loss": 0.2743598491236827
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 31,
+          "mean_b0_loss": 0.29139834126419195
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 32,
+          "mean_b0_loss": 0.2763997356978536
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 33,
+          "mean_b0_loss": 0.27293125782663774
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 34,
+          "mean_b0_loss": 0.27497249354627545
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 35,
+          "mean_b0_loss": 0.27619788717189225
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 36,
+          "mean_b0_loss": 0.2714782990515232
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 37,
+          "mean_b0_loss": 0.25486335694412043
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 38,
+          "mean_b0_loss": 0.2646715184363718
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 39,
+          "mean_b0_loss": 0.2645342695436746
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 40,
+          "mean_b0_loss": 0.2577050652785932
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 41,
+          "mean_b0_loss": 0.24452825560103128
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 42,
+          "mean_b0_loss": 0.242508718056129
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 43,
+          "mean_b0_loss": 0.24653539509053465
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 44,
+          "mean_b0_loss": 0.24859694724462678
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 45,
+          "mean_b0_loss": 0.2481665737903345
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 46,
+          "mean_b0_loss": 0.2472162931779674
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 47,
+          "mean_b0_loss": 0.2515282718532626
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 48,
+          "mean_b0_loss": 0.24993314353155827
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 49,
+          "mean_b0_loss": 0.2430287915711452
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 50,
+          "mean_b0_loss": 0.24035612538031845
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 51,
+          "mean_b0_loss": 0.24620569040393678
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 52,
+          "mean_b0_loss": 0.2447599451191924
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 53,
+          "mean_b0_loss": 0.24426855487533491
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 54,
+          "mean_b0_loss": 0.24168660945706247
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 55,
+          "mean_b0_loss": 0.24249243002426227
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 56,
+          "mean_b0_loss": 0.24735498578891324
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 57,
+          "mean_b0_loss": 0.24124798751930615
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 58,
+          "mean_b0_loss": 0.24410080408497392
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 59,
+          "mean_b0_loss": 0.24676207678537174
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch": 60,
+          "mean_b0_loss": 0.24944919883827021
+        }
+      ],
+      "b0_loss_summary": [
+        {
+          "run": "v25 B0 prior-high",
+          "epoch1_mean": 6.799783610126296,
+          "epoch60_mean": 0.2424986904425024,
+          "last1000_mean": 0.2497171325236559
+        },
+        {
+          "run": "v25 B0 current-low",
+          "epoch1_mean": 6.842585338843417,
+          "epoch60_mean": 0.24944919883827021,
+          "last1000_mean": 0.2563527857288718
+        }
+      ],
+      "b0_chain": [
+        {
+          "stage": "Initialization",
+          "prior_high": "798a8def3e82",
+          "current_low": "798a8def3e82",
+          "equal": true,
+          "meaning": "B0 architecture and seeded initialization match"
+        },
+        {
+          "stage": "First 100 observation fingerprints",
+          "prior_high": "100",
+          "current_low": "100",
+          "equal": true,
+          "meaning": "Candidate IDs, point samples and observation batches match"
+        },
+        {
+          "stage": "First logged B0 loss (step0)",
+          "prior_high": "18.006416321",
+          "current_low": "18.006416321",
+          "equal": true,
+          "meaning": "The first forward and loss reduction match"
+        },
+        {
+          "stage": "B0 parameters after optimizer step1",
+          "prior_high": "7f547e5b4afd",
+          "current_low": "cf88c167bc9f",
+          "equal": false,
+          "meaning": "The regression begins in backward/Adam, before validation"
+        },
+        {
+          "stage": "First visible loss difference (step3)",
+          "prior_high": "15.279096603",
+          "current_low": "15.277811050",
+          "equal": false,
+          "meaning": "A tiny update difference becomes visible three batches later"
+        },
+        {
+          "stage": "mini_val Success at epoch5",
+          "prior_high": "34.671",
+          "current_low": "20.791",
+          "equal": false,
+          "meaning": "Recursive validation amplifies the early numerical split"
+        }
+      ],
+      "run_identity": [
+        {
+          "run": "SeqTrack reference",
+          "commit": "25586b27",
+          "config": "cfgs/ct_v2/01_seqtrack3d_baseline.yaml",
+          "resolved_sha": "2390b43b98c5",
+          "seed": 42,
+          "workers": 4,
+          "validation_cadence": 5,
+          "evaluator": "legacy/current-frame-size",
+          "initial_b0_hash": "not recorded",
+          "step1_b0_hash": "not recorded"
+        },
+        {
+          "run": "v25 B0 prior-high",
+          "commit": "049de82b",
+          "config": "cfgs/ct_seqtrack/25_b0.yaml",
+          "resolved_sha": "19385390636e",
+          "seed": 42,
+          "workers": 4,
+          "validation_cadence": 1,
+          "evaluator": "safe_first_frame_size_recursive_prediction",
+          "initial_b0_hash": "798a8def3e82",
+          "step1_b0_hash": "7f547e5b4afd"
+        },
+        {
+          "run": "v25 B1 prior-high@30",
+          "commit": "049de82b",
+          "config": "cfgs/ct_seqtrack/25_b1.yaml",
+          "resolved_sha": "cde3916388a1",
+          "seed": 42,
+          "workers": 4,
+          "validation_cadence": 1,
+          "evaluator": "safe_first_frame_size_recursive_prediction",
+          "initial_b0_hash": "798a8def3e82",
+          "step1_b0_hash": "3564ae60140a"
+        },
+        {
+          "run": "v25 B0 current-low",
+          "commit": "b8222bb2",
+          "config": "cfgs/ct_seqtrack/25_b0.yaml",
+          "resolved_sha": "48d7d65853ae",
+          "seed": 42,
+          "workers": 4,
+          "validation_cadence": 5,
+          "evaluator": "safe_first_frame_size_recursive_prediction",
+          "initial_b0_hash": "798a8def3e82",
+          "step1_b0_hash": "cf88c167bc9f"
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "commit": "b8222bb2",
+          "config": "cfgs/ct_seqtrack/25_b1.yaml",
+          "resolved_sha": "84554b333016",
+          "seed": 42,
+          "workers": 4,
+          "validation_cadence": 5,
+          "evaluator": "safe_first_frame_size_recursive_prediction",
+          "initial_b0_hash": "798a8def3e82",
+          "step1_b0_hash": "dd94b82cc057"
+        }
+      ],
+      "resolved_diffs": [
+        {
+          "field": "check_val_every_n_epoch",
+          "prior_high": 1,
+          "current_low": 5,
+          "active_for_b0": true
+        },
+        {
+          "field": "motion_v3_aux_nll_weight",
+          "prior_high": 0.0,
+          "current_low": 0.05,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_beta_nll_beta",
+          "prior_high": null,
+          "current_low": 0.5,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_cfc_backbone_units",
+          "prior_high": null,
+          "current_low": 105,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_log_sigma_max",
+          "prior_high": null,
+          "current_low": 2.5,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_log_sigma_min",
+          "prior_high": null,
+          "current_low": -2.302585092994046,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_tail_direction_margin",
+          "prior_high": null,
+          "current_low": 0.9,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_tail_direction_weight",
+          "prior_high": null,
+          "current_low": 0.25,
+          "active_for_b0": false
+        },
+        {
+          "field": "motion_v3_temporal_backend",
+          "prior_high": null,
+          "current_low": "gru",
+          "active_for_b0": false
+        },
+        {
+          "field": "tag",
+          "prior_high": "ct25_b0_mini_car_60ep_bs16_seed42_retryfix",
+          "current_low": "ct25_b0_mini_car_seed42_60ep_bs16_val5",
+          "active_for_b0": false
+        }
+      ],
+      "baseline_contract": [
+        {
+          "aspect": "B0 network implementation",
+          "SeqTrack_reference": "SEQTRACK3D",
+          "current_v25_B0": "CTSEQTRACK subclass of SEQTRACK3D; B1/B2/B3 disabled",
+          "equivalent": "Mostly yes",
+          "impact": "Core observation model is inherited"
+        },
+        {
+          "aspect": "Training candidate objective",
+          "SeqTrack_reference": "4 candidates through the ordinary batch mean",
+          "current_v25_B0": "balanced candidate batches; 0.5*view0 + (view1+view2+view3)/6",
+          "equivalent": "No",
+          "impact": "Different optimization target"
+        },
+        {
+          "aspect": "Sampling/RNG",
+          "SeqTrack_reference": "ordinary shuffled DataLoader and global RNG",
+          "current_v25_B0": "stateless candidate IDs and point-sampling fingerprints",
+          "equivalent": "No",
+          "impact": "Safer auditability, but not the original training transaction"
+        },
+        {
+          "aspect": "Validation box size",
+          "SeqTrack_reference": "current-frame GT size when safe flag is absent",
+          "current_v25_B0": "first-frame size propagated through recursive predictions",
+          "equivalent": "No",
+          "impact": "v25 removes a GT-size dependency; scores are not the same metric"
+        },
+        {
+          "aspect": "Runtime/optimizer envelope",
+          "SeqTrack_reference": "standard Lightning path",
+          "current_v25_B0": "safe_seqtrack_auto_v1, named unified Adam group, dual-stream envelope",
+          "equivalent": "No",
+          "impact": "B0-only still has one group, but the experiment contract differs"
+        }
+      ],
+      "b1_mechanism": [
+        {
+          "run": "v25 B1 prior-high@30",
+          "epoch": 30,
+          "tracking_success": 49.274620056152344,
+          "tracking_precision": 52.096282958984375,
+          "learned_rmse": 5.6998201458421764,
+          "cv_rmse": 5.592396727771393,
+          "learned_minus_cv": 0.10742341807078315,
+          "help_rate": 0.04208311415044713,
+          "nll": 148.56818218750294,
+          "coverage95": 0.3114150447133088,
+          "deployment_output": "B0 observation"
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 30,
+          "tracking_success": 30.414661407470703,
+          "tracking_precision": 29.844642639160156,
+          "learned_rmse": 10.24360913031267,
+          "cv_rmse": 10.46341118817519,
+          "learned_minus_cv": -0.21980205786251972,
+          "help_rate": 0.6109925293489862,
+          "nll": 10.170182497165367,
+          "coverage95": 0.7796157950907151,
+          "deployment_output": "B0 observation"
+        },
+        {
+          "run": "v25 B1-GRU current",
+          "epoch": 60,
+          "tracking_success": 31.226476669311523,
+          "tracking_precision": 32.286651611328125,
+          "learned_rmse": 9.525545757485297,
+          "cv_rmse": 9.73394149433221,
+          "learned_minus_cv": -0.2083957368469136,
+          "help_rate": 0.6104589114194237,
+          "nll": 8.101885910371717,
+          "coverage95": 0.8271077908217717,
+          "deployment_output": "B0 observation"
+        }
+      ],
+      "root_cause_ladder": [
+        {
+          "status": "Verified",
+          "finding": "Not a data/init/first-forward mismatch",
+          "evidence": "Same train/val manifests, initial B0 SHA, first 100 fingerprints and step0 loss",
+          "confidence": "High"
+        },
+        {
+          "status": "Verified",
+          "finding": "The trajectories split at the first optimizer update",
+          "evidence": "step1 B0 hashes differ; first visible loss difference is step3",
+          "confidence": "High"
+        },
+        {
+          "status": "Verified",
+          "finding": "B1 repair is not the direct cause of the independent B0 low run",
+          "evidence": "B0 has B1 disabled; reviewed commit diff does not change the active B0 forward/loss definition",
+          "confidence": "High"
+        },
+        {
+          "status": "Likely",
+          "finding": "Uncontrolled CUDA backward/Adam numerical path selects different basins",
+          "evidence": "Trainer deterministic mode is absent; custom PointNet2 CUDA is active; separate GPUs were used",
+          "confidence": "Medium-high"
+        },
+        {
+          "status": "Unresolved",
+          "finding": "Whether divergence first appears in gradients or only in Adam update",
+          "evidence": "Checkpoints contain post-step parameters/Adam hashes but no pre-step per-parameter gradient hash",
+          "confidence": "Requires a new 2-step audit"
+        }
+      ],
+      "other_issues": [
+        {
+          "severity": "Critical",
+          "issue": "B0 baseline is not reproducible",
+          "evidence": "One v25 B0 run reaches 50.690, the next reaches 29.870 from the same seed/init/data",
+          "impact": "No cross-arm causal attribution or stable baseline claim"
+        },
+        {
+          "severity": "High",
+          "issue": "Current v25 B0 is SeqTrack-derived, not transaction-equivalent",
+          "evidence": "Candidate weighting, RNG/sampler, wrapper and evaluator differ",
+          "impact": "Numerical parity with a historical SeqTrack score is descriptive only"
+        },
+        {
+          "severity": "High",
+          "issue": "Old-high and current-low resolved configs are not identical",
+          "evidence": "Validation cadence is 1 vs 5; YAML SHA matches but resolved SHA does not",
+          "impact": "The historical 50-point run is not a formally matched control"
+        },
+        {
+          "severity": "High",
+          "issue": "B1-only tracking score does not measure deployed B1 benefit",
+          "evidence": "Both prior and current B1-only runs output B0 observation",
+          "impact": "A high/low B1-only Success mainly reports its B0 trajectory"
+        },
+        {
+          "severity": "High",
+          "issue": "Uncertainty promotion gate remains open",
+          "evidence": "Current GRU raw coverage95=82.7%, ECE=10.8%; no held-out calibration/dev artifact",
+          "impact": "Sigma/NLL/coverage repair cannot be called complete"
+        },
+        {
+          "severity": "Medium",
+          "issue": "Recursive-age validation diagnostics are incomplete",
+          "evidence": "epoch60 CSV has zero age-valid rows; official B1 report crashes on the empty stratum",
+          "impact": "Age-stratified long-tail generalization cannot be audited"
+        },
+        {
+          "severity": "Medium",
+          "issue": "Environment identity is missing from run provenance",
+          "evidence": "GPU model/index, CUDA/cuDNN, torch and PointNet2 build are not recorded",
+          "impact": "Cross-GPU numerical divergence cannot be reconciled after the run"
+        },
+        {
+          "severity": "Medium",
+          "issue": "Evidence is still one seed on mini",
+          "evidence": "All new arms use seed42 and nuScenes mini",
+          "impact": "No variance estimate or full-dataset paper claim"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_b0_b1_regression_20260826",
+      "label": "CT-SeqTrack B0/B1 TensorBoard、checkpoint、provenance 与代码合同派生快照",
+      "path": "artifacts/ct_checks/reports/20260826_b0_b1_regression_diagnosis/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b0_b1_regression_20260826'",
+        "tablesUsed": [
+          "report_snapshot"
+        ]
+      }
+    }
+  ]
+}

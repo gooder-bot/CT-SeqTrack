@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -12,7 +13,11 @@ from models.ct_v2 import (
     B2EvidenceAcquirer,
     B3SelectiveUpdater,
 )
-from utils.ct_search import sample_joint_novel_extensions
+from utils.ct_search import (
+    diagnostic_oriented_support_union_volume,
+    diagnostic_points_in_oriented_support,
+    sample_joint_novel_extensions,
+)
 from utils.config import load_yaml_config
 from utils.recursive_state import OnlineRecursiveBatchSampler
 from utils.training_isolation import (
@@ -22,6 +27,41 @@ from utils.training_isolation import (
     isolated_constructor_rng,
 )
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _DiagnosticBox:
+    def __init__(self, center=(0.0, 0.0, 0.0), wlh=(2.0, 2.0, 2.0)):
+        self.center = np.asarray(center, dtype=np.float64)
+        self.wlh = np.asarray(wlh, dtype=np.float64)
+        self.rotation_matrix = np.eye(3, dtype=np.float64)
+
+
+def test_diagnostic_support_separates_xy_hit_from_z_clip_and_is_monotonic():
+    points = np.asarray([
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.25],
+        [1.25, 0.0, 0.0],
+        [2.25, 0.0, 0.0],
+    ], dtype=np.float32)
+    box = _DiagnosticBox()
+    xyz = diagnostic_points_in_oriented_support(points, box)
+    xy = diagnostic_points_in_oriented_support(
+        points, box, ignore_z=True)
+    margin = diagnostic_points_in_oriented_support(
+        points, box, offset=0.5)
+    wide = diagnostic_points_in_oriented_support(
+        points, box, offset=1.5)
+    np.testing.assert_array_equal(xyz, [True, False, False, False])
+    np.testing.assert_array_equal(xy, [True, True, False, False])
+    assert np.all(~xyz | margin)
+    assert np.all(~margin | wide)
+    shifted = _DiagnosticBox(center=(1.0, 0.0, 0.0))
+    assert diagnostic_oriented_support_union_volume(
+        ((box, 1.0, 0.0),)) == pytest.approx(8.0)
+    assert diagnostic_oriented_support_union_volume((
+        (box, 1.0, 0.0), (box, 1.0, 0.0))) == pytest.approx(8.0)
+    assert diagnostic_oriented_support_union_volume((
+        (box, 1.0, 0.0), (shifted, 1.0, 0.0))) == pytest.approx(12.0)
 
 
 class NovelExtensionAcquisitionTest(unittest.TestCase):
@@ -52,6 +92,41 @@ class NovelExtensionAcquisitionTest(unittest.TestCase):
                              for row in selected))
         self.assertEqual(set(source[valid > 0].tolist()), {1, 2, 3})
         self.assertEqual(diagnostics['both_count'], 1)
+        np.testing.assert_array_equal(points, np.asarray([
+            [2.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ], dtype=np.float32))
+        np.testing.assert_array_equal(
+            valid, np.asarray([1, 1, 1, 0, 0, 0, 0, 0],
+                              dtype=np.float32))
+        np.testing.assert_array_equal(
+            source, np.asarray([3, 1, 2, 0, 0, 0, 0, 0],
+                               dtype=np.int64))
+        np.testing.assert_array_equal(
+            diagnostics['_pool_points'], selected)
+        np.testing.assert_array_equal(
+            diagnostics['_pool_source'], source[valid > 0])
+
+    def test_pool_can_contain_target_that_fixed_quota_sampling_drops(self):
+        baseline = np.empty((0, 3), dtype=np.float32)
+        endpoint = np.asarray([
+            [10.0 + index, 0.0, 0.0] for index in range(5)
+        ], dtype=np.float32)
+        tube = np.asarray([[100.0, 0.0, 0.0]], dtype=np.float32)
+        points, valid, _, diagnostics = sample_joint_novel_extensions(
+            baseline, endpoint, tube, endpoint_quota=1, tube_quota=1,
+            seed=7)
+        target = np.asarray([10.0, 0.0, 0.0], dtype=np.float32)
+        assert any(np.array_equal(row, target)
+                   for row in diagnostics['_pool_points'])
+        assert not any(np.array_equal(row, target)
+                       for row in points[valid > 0])
 
 
 class MemoryAttentionContractTest(unittest.TestCase):

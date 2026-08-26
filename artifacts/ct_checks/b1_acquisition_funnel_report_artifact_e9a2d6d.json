@@ -1,0 +1,232 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "B1→B2 Acquisition Funnel 诊断：主要瓶颈在搜索几何",
+    "description": "GRU 与 CfC epoch60 mini-dev acquisition funnel 的阶段分解与 B2 修改建议。",
+    "generatedAt": "2026-08-26",
+    "sources": [
+      {
+        "id": "source_analysis",
+        "label": "Executed B1 acquisition funnel analysis",
+        "path": "artifacts/ct_checks/b1_acquisition_funnel_analysis_e9a2d6d.ipynb",
+        "query": {
+          "language": "sql",
+          "description": "Reconciles GRU and CfC epoch60 mini-dev candidate0 acquisition funnel aggregates.",
+          "sql": "SELECT * FROM read_json_auto(['artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json', 'artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json'], union_by_name = true)",
+          "tables_used": [
+            "artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json",
+            "artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json"
+          ],
+          "filters": [
+            "population = dev_candidate0",
+            "checkpoint epoch = 60",
+            "weak recovery: base_target_count <= 2",
+            "strict miss: base_target_count == 0"
+          ],
+          "metric_definitions": [
+            "geometry_miss_share = geometry_miss_rows / population rows",
+            "support_row_recall = rows with expansion_target_count > 0 / population rows",
+            "pool_row_recall = rows with pool_target_count > 0 / support rows",
+            "sampling_row_recall = rows with sampled_target_count > 0 / pool rows",
+            "end_to_end_row_retention = retained rows / population rows"
+          ]
+        }
+      },
+      {
+        "id": "source_gru",
+        "label": "GRU acquisition-only report",
+        "path": "artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json"
+      },
+      {
+        "id": "source_cfc",
+        "label": "CfC acquisition-only report",
+        "path": "artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json"
+      }
+    ],
+    "charts": [
+      {
+        "id": "weak_stage_chart",
+        "title": "Weak-recovery 行的 acquisition 阶段分布",
+        "description": "mini-dev candidate0；GRU n=135，CfC n=162；纵轴为各后端 weak-recovery 人口占比。",
+        "type": "bar",
+        "dataset": "weak_stage_shares",
+        "encodings": {
+          "x": { "field": "stage", "type": "nominal", "title": "阶段" },
+          "y": { "field": "share", "type": "quantitative", "title": "人口占比", "format": "percent" },
+          "color": { "field": "backend", "type": "nominal", "title": "B1 后端" }
+        },
+        "options": {
+          "orientation": "vertical",
+          "grouping": "grouped",
+          "legend": true,
+          "valueLabels": true,
+          "yDomain": [0, 1]
+        },
+        "source": {
+          "id": "source_analysis",
+          "label": "Executed B1 acquisition funnel analysis",
+          "path": "artifacts/ct_checks/b1_acquisition_funnel_analysis_e9a2d6d.ipynb",
+          "query": {
+            "language": "sql",
+            "sql": "SELECT * FROM read_json_auto(['artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json', 'artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json'], union_by_name = true)",
+            "description": "Reconciles GRU and CfC epoch60 mini-dev candidate0 acquisition funnel aggregates.",
+            "tables_used": [
+              "artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json",
+              "artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json"
+            ],
+            "filters": [
+              "population = dev_candidate0",
+              "checkpoint epoch = 60"
+            ],
+            "metric_definitions": [
+              "geometry_miss_share = geometry_miss_rows / population rows",
+              "sampling_row_recall = retained rows / pool rows"
+            ]
+          }
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "funnel_summary_table",
+        "title": "Weak 与 strict 人口的漏失分解",
+        "description": "精确行数与条件 recall；null 表示分母为零。",
+        "dataset": "funnel_summary",
+        "columns": [
+          { "field": "backend", "label": "后端", "type": "text" },
+          { "field": "population", "label": "人口", "type": "text" },
+          { "field": "rows", "label": "行数", "type": "number" },
+          { "field": "geometry_miss_share", "label": "几何漏失占比", "type": "number", "format": "percent" },
+          { "field": "support_rows", "label": "support命中行", "type": "number" },
+          { "field": "pool_rows", "label": "pool命中行", "type": "number" },
+          { "field": "sampling_loss_rows", "label": "采样丢失行", "type": "number" },
+          { "field": "retained_rows", "label": "最终保留行", "type": "number" },
+          { "field": "sampling_row_recall", "label": "采样行召回", "type": "number", "format": "percent" }
+        ],
+        "defaultSort": { "field": "geometry_miss_share", "direction": "desc" },
+        "source": {
+          "id": "source_analysis",
+          "label": "Executed B1 acquisition funnel analysis",
+          "path": "artifacts/ct_checks/b1_acquisition_funnel_analysis_e9a2d6d.ipynb",
+          "query": {
+            "language": "sql",
+            "sql": "SELECT * FROM read_json_auto(['artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json', 'artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json'], union_by_name = true)",
+            "description": "Reconciles GRU and CfC epoch60 mini-dev candidate0 acquisition funnel aggregates.",
+            "tables_used": [
+              "artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json",
+              "artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json"
+            ],
+            "filters": [
+              "population = dev_candidate0",
+              "checkpoint epoch = 60"
+            ],
+            "metric_definitions": [
+              "geometry_miss_share = geometry_miss_rows / population rows",
+              "sampling_row_recall = retained rows / pool rows"
+            ]
+          }
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# B1→B2 Acquisition Funnel 诊断：主要瓶颈在搜索几何"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "source_analysis",
+        "body": "## 技术结论\n\n两套后端得到同一方向：当前 B2 acquisition 的主瓶颈是 **B1 驱动的 endpoint+tube 搜索区域没有覆盖弱目标**，不是固定采样把已经进入 pool 的目标点丢掉。Weak recovery 中，GRU 有 119/135（88.15%）、CfC 有 144/162（88.89%）在 expansion 阶段即为零目标点；两组 `sampling_loss_rows` 均为 0。下一步应先做 **stable B0 base + bounded adaptive shell**，第一轮保持 extension-only、128/128 配额、固定采样和 voting 不变。"
+      },
+      {
+        "id": "key_findings",
+        "type": "markdown",
+        "sourceId": "source_analysis",
+        "body": "## 几何漏失在两种 B1 后端上都占约 89%\n\n下图使用 weak-recovery 人口作为主分析。`geometry_miss` 是 expansion 中没有任何目标点；`no_novel_target` 是 expansion 有目标点但 extension-only pool 为零；`sampling_loss` 才是 pool 有目标点、采样后为零。两套后端的结构高度一致，说明换 GRU/CfC 没有改变当前 funnel 的主瓶颈。"
+      },
+      { "id": "weak_chart_block", "type": "chart", "chartId": "weak_stage_chart" },
+      {
+        "id": "scope_definitions",
+        "type": "markdown",
+        "body": "## 范围与指标定义\n\n数据来自 epoch60 的 nuScenes-mini dev、candidate0，共 14 个 tracklets。GRU 有 311 个诊断行，CfC 有 310 个；weak recovery 定义为 `base_target_count <= 2`，strict miss 定义为 `base_target_count == 0`。`support_row_recall` 测量 expansion 是否覆盖目标；`pool_row_recall` 测量这些命中是否产生 novel pool 目标点；`sampling_row_recall` 测量 pool 命中是否被固定采样保留。"
+      },
+      { "id": "summary_table_block", "type": "table", "tableId": "funnel_summary_table" },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "sourceId": "source_analysis",
+        "body": "## 聚合复算与稳健性检查\n\n阶段计数在每个后端、每个人口内都互斥并精确回和总行数；support、pool、sampling 和 end-to-end 行级 recall 均从报告中的分子分母独立复算通过。Strict miss 提供更无歧义的检查：GRU 的 104/104 均为 geometry miss；CfC 的 137 行中 134 行 geometry miss，只有 3 行进入 expansion，而这 3 行全部进入 pool 并被采样保留。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "sourceId": "source_analysis",
+        "body": "## 限制与不确定性\n\nCfC 的 100% sampling recall 只建立在 3 个 weak-recovery pool 行上；GRU 在 weak/strict 人口中没有可供评估的 pool 行。因此证据只支持“目前没有观察到采样丢失”，不支持“固定采样已被充分证明可靠”。GRU/CfC 汇总相差 1 行，且当前没有两份逐帧 CSV 做键级配对，所以 CfC 多保留的 3 行只能视为小样本信号，不能用于选择 B1 后端。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "sourceId": "source_analysis",
+        "body": "## 推荐的下一步\n\n1. 以已选定的 B1 后端为底座实现 bounded adaptive shell；B0 observation crop 完全不变，B1 无效时回退固定 2m/1m。\n2. 第一轮只改变几何，保持 extension-only、endpoint/tube 128/128、现有固定采样与 soft mean/voting 不变，以隔离因果来源。\n3. 用同一 acquisition funnel 重跑。若 expansion coverage 上升但 pool 仍低，再检查 novel construction；只有 pool 机会足够后出现 `sampling_loss`，才进入 relation-aware hybrid sampling。\n4. Robust consensus voting 放在 supply/retention 改善后评估；当前 B1-only funnel 不能回答 voting 质量问题。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 仍需回答的问题\n\n- bounded shell 的长度/宽度上界在不扩大干扰点的情况下能恢复多少 strict-miss 行？\n- weak population 的 `no_novel_target` 是否只是重复覆盖 base 中已有的 1–2 个目标 return？这需要逐帧 CSV 或点级 overlap 诊断确认。\n- 选定 B1 后端应继续依据 paired RMSE、NLL 与 coverage，而不是这 3 个 CfC retained 行。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-26",
+    "datasets": {
+      "weak_stage_shares": [
+        { "backend": "GRU", "population": "weak_recovery", "stage": "geometry_miss", "rows": 119, "population_rows": 135, "share": 0.8814814814814815, "support_rows": 16, "pool_rows": 0, "retained_rows": 0 },
+        { "backend": "GRU", "population": "weak_recovery", "stage": "no_novel_target", "rows": 16, "population_rows": 135, "share": 0.11851851851851852, "support_rows": 16, "pool_rows": 0, "retained_rows": 0 },
+        { "backend": "GRU", "population": "weak_recovery", "stage": "sampling_loss", "rows": 0, "population_rows": 135, "share": 0.0, "support_rows": 16, "pool_rows": 0, "retained_rows": 0 },
+        { "backend": "GRU", "population": "weak_recovery", "stage": "retained", "rows": 0, "population_rows": 135, "share": 0.0, "support_rows": 16, "pool_rows": 0, "retained_rows": 0 },
+        { "backend": "CfC", "population": "weak_recovery", "stage": "geometry_miss", "rows": 144, "population_rows": 162, "share": 0.8888888888888888, "support_rows": 18, "pool_rows": 3, "retained_rows": 3 },
+        { "backend": "CfC", "population": "weak_recovery", "stage": "no_novel_target", "rows": 15, "population_rows": 162, "share": 0.09259259259259259, "support_rows": 18, "pool_rows": 3, "retained_rows": 3 },
+        { "backend": "CfC", "population": "weak_recovery", "stage": "sampling_loss", "rows": 0, "population_rows": 162, "share": 0.0, "support_rows": 18, "pool_rows": 3, "retained_rows": 3 },
+        { "backend": "CfC", "population": "weak_recovery", "stage": "retained", "rows": 3, "population_rows": 162, "share": 0.018518518518518517, "support_rows": 18, "pool_rows": 3, "retained_rows": 3 }
+      ],
+      "funnel_summary": [
+        { "backend": "GRU", "population": "weak_recovery", "rows": 135, "geometry_miss_share": 0.8814814814814815, "support_rows": 16, "pool_rows": 0, "sampling_loss_rows": 0, "retained_rows": 0, "sampling_row_recall": null },
+        { "backend": "CfC", "population": "weak_recovery", "rows": 162, "geometry_miss_share": 0.8888888888888888, "support_rows": 18, "pool_rows": 3, "sampling_loss_rows": 0, "retained_rows": 3, "sampling_row_recall": 1.0 },
+        { "backend": "GRU", "population": "strict_miss", "rows": 104, "geometry_miss_share": 1.0, "support_rows": 0, "pool_rows": 0, "sampling_loss_rows": 0, "retained_rows": 0, "sampling_row_recall": null },
+        { "backend": "CfC", "population": "strict_miss", "rows": 137, "geometry_miss_share": 0.9781021897810219, "support_rows": 3, "pool_rows": 3, "sampling_loss_rows": 0, "retained_rows": 3, "sampling_row_recall": 1.0 }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "source_analysis",
+      "label": "Executed B1 acquisition funnel analysis",
+      "path": "artifacts/ct_checks/b1_acquisition_funnel_analysis_e9a2d6d.ipynb",
+      "query": {
+        "language": "sql",
+        "description": "Reconciles GRU and CfC epoch60 mini-dev candidate0 acquisition funnel aggregates.",
+        "sql": "SELECT * FROM read_json_auto(['artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json', 'artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json'], union_by_name = true)",
+        "tables_used": [
+          "artifacts/ct_checks/b1_gru_acquisition_funnel_e9a2d6d.json",
+          "artifacts/ct_checks/b1_cfc_acquisition_funnel_e9a2d6d.json"
+        ],
+        "filters": [
+          "population = dev_candidate0",
+          "checkpoint epoch = 60"
+        ],
+        "metric_definitions": [
+          "geometry_miss_share = geometry_miss_rows / population rows",
+          "support_row_recall = support rows / population rows",
+          "pool_row_recall = pool rows / support rows",
+          "sampling_row_recall = retained rows / pool rows"
+        ]
+      }
+    }
+  ]
+}

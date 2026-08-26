@@ -1,0 +1,258 @@
+{
+  "scope": {
+    "runs": {
+      "B0": "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5",
+      "B1-GRU": "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5",
+      "B1-CfC": "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5",
+      "SeqTrack reference": "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42"
+    },
+    "source_paths": [
+      "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+      "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/hparams.yaml",
+      "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+      "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/hparams.yaml",
+      "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+      "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/hparams.yaml",
+      "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42/run_provenance.json",
+      "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42/lightning_logs/version_0/hparams.yaml",
+      "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/checkpoints/last.ckpt",
+      "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/checkpoints/last.ckpt",
+      "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/checkpoints/last.ckpt",
+      "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv",
+      "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv"
+    ]
+  },
+  "identity_audit": {
+    "same_git_commit": true,
+    "all_clean_tracked": true,
+    "same_train_selection": true,
+    "same_val_selection": true,
+    "same_seed": true,
+    "same_batch_size": true,
+    "same_epochs": true,
+    "same_validation_cadence": true,
+    "scratch_only": true,
+    "fingerprints_first100_equal": true,
+    "b0_prefix_equal": {
+      "initial": true,
+      "step_1": false,
+      "step_100": false
+    },
+    "b0_optimizer_prefix_equal": {
+      "initial": true,
+      "step_1": false,
+      "step_100": false
+    }
+  },
+  "tracking_summary": [
+    {
+      "arm": "B0",
+      "comparison_role": "matched-current arm",
+      "final_success": 29.86980438232422,
+      "late3_success": 30.536474227905273,
+      "final_precision": 30.398250579833984,
+      "late3_precision": 31.430344263712566,
+      "final_runtime_fps": 53.98516845703125,
+      "validation_points": 12,
+      "final_success_vs_b0": 0.0,
+      "late3_success_vs_b0": 0.0,
+      "final_precision_vs_b0": 0.0,
+      "late3_precision_vs_b0": 0.0,
+      "final_success_vs_seqtrack": -21.131290435791016,
+      "late3_success_vs_seqtrack": -17.877458572387695,
+      "final_precision_vs_seqtrack": -30.49453353881836,
+      "late3_precision_vs_seqtrack": -23.38657824198405
+    },
+    {
+      "arm": "B1-GRU",
+      "comparison_role": "matched-current arm",
+      "final_success": 31.226476669311523,
+      "late3_success": 31.097375233968098,
+      "final_precision": 32.286651611328125,
+      "late3_precision": 31.998542149861652,
+      "final_runtime_fps": 15.67153263092041,
+      "validation_points": 12,
+      "final_success_vs_b0": 1.3566722869873047,
+      "late3_success_vs_b0": 0.5609010060628243,
+      "final_precision_vs_b0": 1.8884010314941406,
+      "late3_precision_vs_b0": 0.5681978861490862,
+      "final_success_vs_seqtrack": -19.77461814880371,
+      "late3_success_vs_seqtrack": -17.31655756632487,
+      "final_precision_vs_seqtrack": -28.60613250732422,
+      "late3_precision_vs_seqtrack": -22.818380355834964
+    },
+    {
+      "arm": "B1-CfC",
+      "comparison_role": "matched-current arm",
+      "final_success": 26.9135684967041,
+      "late3_success": 26.669949213663738,
+      "final_precision": 25.650983810424805,
+      "late3_precision": 25.03136444091797,
+      "final_runtime_fps": 15.006781578063965,
+      "validation_points": 12,
+      "final_success_vs_b0": -2.956235885620117,
+      "late3_success_vs_b0": -3.8665250142415353,
+      "final_precision_vs_b0": -4.74726676940918,
+      "late3_precision_vs_b0": -6.3989798227945975,
+      "final_success_vs_seqtrack": -24.087526321411133,
+      "late3_success_vs_seqtrack": -21.74398358662923,
+      "final_precision_vs_seqtrack": -35.24180030822754,
+      "late3_precision_vs_seqtrack": -29.785558064778648
+    },
+    {
+      "arm": "SeqTrack reference",
+      "comparison_role": "historical descriptive reference",
+      "final_success": 51.001094818115234,
+      "late3_success": 48.41393280029297,
+      "final_precision": 60.892784118652344,
+      "late3_precision": 54.81692250569662,
+      "final_runtime_fps": 5.340946674346924,
+      "validation_points": 12,
+      "final_success_vs_b0": 21.131290435791016,
+      "late3_success_vs_b0": 17.877458572387695,
+      "final_precision_vs_b0": 30.49453353881836,
+      "late3_precision_vs_b0": 23.38657824198405,
+      "final_success_vs_seqtrack": 0.0,
+      "late3_success_vs_seqtrack": 0.0,
+      "final_precision_vs_seqtrack": 0.0,
+      "late3_precision_vs_seqtrack": 0.0
+    }
+  ],
+  "b1_diagnostics": [
+    {
+      "arm": "B1-GRU",
+      "csv_rows": 1956,
+      "valid_rows": 1874,
+      "learned_rmse": 9.525545757485297,
+      "cv_rmse": 9.73394149433221,
+      "learned_minus_cv_rmse": -0.2083957368469136,
+      "relative_mse_improvement": 0.042360013302189525,
+      "paired_ci_low": -0.2512868807067157,
+      "paired_ci_high": -0.17138236989431113,
+      "paired_ci_pass": true,
+      "tracklets": 98,
+      "help_rate": 0.6104589114194237,
+      "nll": 8.101885910371717,
+      "coverage_50": 0.6547491995731056,
+      "coverage_80": 0.7529348986125933,
+      "coverage_95": 0.8271077908217717,
+      "coverage_ece": 0.10823550337958021,
+      "coverage_gate_pass": false,
+      "top1pct_nll_share": 0.32810432209992946,
+      "recoverable_saturation_rate": 0.0,
+      "tail_axis_fraction": 0.5032017075773746,
+      "sigma_parallel_p50": 5.5991175174713135,
+      "sigma_perpendicular_p50": 2.598167657852173,
+      "residual_parallel_p50": -0.7147141695022583,
+      "residual_perpendicular_p50": 0.0022018293384462595,
+      "recursive_age_valid_rows": 0
+    },
+    {
+      "arm": "B1-CfC",
+      "csv_rows": 1940,
+      "valid_rows": 1858,
+      "learned_rmse": 9.79921829484909,
+      "cv_rmse": 10.168516939883915,
+      "learned_minus_cv_rmse": -0.36929864503482435,
+      "relative_mse_improvement": 0.07131670848118721,
+      "paired_ci_low": -0.4308399060426763,
+      "paired_ci_high": -0.3176030450807306,
+      "paired_ci_pass": true,
+      "tracklets": 98,
+      "help_rate": 0.6264800861141012,
+      "nll": 7.892812780812251,
+      "coverage_50": 0.5909580193756727,
+      "coverage_80": 0.7082884822389667,
+      "coverage_95": 0.7890204520990313,
+      "coverage_ece": 0.11454969501255825,
+      "coverage_gate_pass": false,
+      "top1pct_nll_share": 0.25925221302728285,
+      "recoverable_saturation_rate": 0.0,
+      "tail_axis_fraction": 0.4760495156081808,
+      "sigma_parallel_p50": 5.819955110549927,
+      "sigma_perpendicular_p50": 1.978714406490326,
+      "residual_parallel_p50": -0.8195251524448395,
+      "residual_perpendicular_p50": 0.006776829715818167,
+      "recursive_age_valid_rows": 0
+    }
+  ],
+  "training_epoch60": [
+    {
+      "arm": "B1-GRU",
+      "main_learned": 3.1607759060434333,
+      "main_cv": 3.4580683389180145,
+      "gap2_learned": 6.747006890219702,
+      "gap2_cv": 7.512072657195615,
+      "gap4_learned": 10.910547457950216,
+      "gap4_cv": 11.133266877120649,
+      "coverage_95": 0.8282765004556504,
+      "coverage_ece": 0.153560109436512,
+      "sigma_parallel": 3.923489687028625,
+      "sigma_perpendicular": 2.1081645287258524,
+      "saturation": 0.0,
+      "tail_axis_fraction": 0.3692829018467469
+    },
+    {
+      "arm": "B1-CfC",
+      "main_learned": 3.21242785845564,
+      "main_cv": 3.6782023906707764,
+      "gap2_learned": 7.187637843996146,
+      "gap2_cv": 8.177970466479449,
+      "gap4_learned": 11.442090969130467,
+      "gap4_cv": 11.916185720425815,
+      "coverage_95": 0.8320790159870202,
+      "coverage_ece": 0.14773420062563228,
+      "sigma_parallel": 3.7561175341897166,
+      "sigma_perpendicular": 1.7884518786775114,
+      "saturation": 0.0,
+      "tail_axis_fraction": 0.37838355259436396
+    }
+  ],
+  "backend_comparison": {
+    "endpoint_sets_identical": false,
+    "endpoint_counts": {
+      "B1-GRU": 1956,
+      "B1-CfC": 1940
+    },
+    "promotion_computable": false,
+    "recommended_backend": "gru"
+  },
+  "gate_status": [
+    {
+      "gate": "Run integrity",
+      "criterion": "同 commit/data/seed/cadence，scratch，所有启用模块有梯度且无冻结",
+      "observed": "PASS；三组 epoch60/global_step75720，B0/B1 optimizer groups 均参与",
+      "verdict": "PASS"
+    },
+    {
+      "gate": "B0 matched-prefix",
+      "criterion": "initial、step1、step100 B0 参数与 Adam 状态跨臂一致",
+      "observed": "仅 initial 一致；step1 起参数与 Adam hash 均分叉",
+      "verdict": "FAIL"
+    },
+    {
+      "gate": "Mean residual",
+      "criterion": "learned−CV tracklet bootstrap 95% CI 上界 < 0",
+      "observed": "GRU -0.208 m, CI [-0.251, -0.171]；CfC -0.369 m, CI [-0.431, -0.318]",
+      "verdict": "PASS"
+    },
+    {
+      "gate": "Sigma/coverage",
+      "criterion": "独立校准后 ECE≤5%、coverage95≥90%、NLL 优于 fixed sigma",
+      "observed": "raw GRU ECE 10.8%/C95 82.7%；raw CfC ECE 11.5%/C95 78.9%；无 calibration/dev artifact",
+      "verdict": "NOT PASSED"
+    },
+    {
+      "gate": "Long-tail supervision",
+      "criterion": "gap2/gap4 有效训练，并可按真实 recursive_age 分层验收",
+      "observed": "gap2/gap4 epoch60 learned RMSE 均优于 CV；验证 CSV 的 age-valid 行为 0",
+      "verdict": "PARTIAL"
+    },
+    {
+      "gate": "CfC promotion",
+      "criterion": "相同 endpoint 的 CfC−GRU RMSE CI<0，且 NLL/coverage 不劣",
+      "observed": "endpoint 集不一致（GRU 1956 / CfC 1940），且 B0 step1 分叉",
+      "verdict": "FAIL / KEEP GRU"
+    }
+  ]
+}

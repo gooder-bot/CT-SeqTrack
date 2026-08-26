@@ -1167,7 +1167,168 @@ def sample_joint_novel_extensions(
         "_pool_points": np.asarray(
             [value[0] for value in merged.values()], dtype=np.float32
         ).reshape(-1, baseline_points.shape[1]),
+        # Evaluation-only provenance aligned one-to-one with ``_pool_points``.
+        # The leading underscore keeps this out of the model contract; callers
+        # may use it to diagnose endpoint-only/tube-only/overlap retention.
+        "_pool_source": np.asarray(
+            [value[1] for value in merged.values()], dtype=np.int64),
     }
+
+
+def diagnostic_points_in_oriented_support(
+        points, support_box, *, scale=1.0, offset=0.0, ignore_z=False):
+    """Return the exact crop-membership mask for a diagnostic support box.
+
+    This pure helper mirrors ``points_utils.generate_subwindow`` without
+    constructing a cropped point cloud.  It is deliberately diagnostic-only:
+    no annotation, mask, or result from this function is consumed by model
+    inputs, sampling, losses, candidates, or recursive state.
+    """
+    points = np.asarray(points)
+    if points.ndim != 2 or points.shape[1] < 3:
+        raise ValueError("diagnostic support points must have shape [N,C>=3]")
+    if support_box is None:
+        return np.zeros((len(points),), dtype=bool)
+    scale = float(scale)
+    offset = float(offset)
+    if (not np.isfinite(scale) or scale <= 0.0
+            or not np.isfinite(offset) or offset < 0.0):
+        raise ValueError("diagnostic support scale/offset must be finite")
+    center = np.asarray(support_box.center, dtype=np.float64).reshape(3)
+    size = np.asarray(support_box.wlh, dtype=np.float64).reshape(3)
+    rotation = np.asarray(
+        support_box.rotation_matrix, dtype=np.float64).reshape(3, 3)
+    if (not np.isfinite(center).all() or not np.isfinite(size).all()
+            or not np.isfinite(rotation).all() or np.any(size <= 0.0)):
+        raise ValueError("diagnostic support box must be finite and positive")
+    local = (rotation.T @ (
+        points[:, :3].astype(np.float64, copy=False) - center).T).T
+    half_extent = 0.5 * size * scale + offset
+    mask = (
+        (local[:, 0] > -half_extent[0])
+        & (local[:, 0] < half_extent[0])
+        & (local[:, 1] > -half_extent[1])
+        & (local[:, 1] < half_extent[1]))
+    if not bool(ignore_z):
+        mask &= (
+            (local[:, 2] > -half_extent[2])
+            & (local[:, 2] < half_extent[2]))
+    return mask
+
+
+def diagnostic_oriented_support_union_volume(box_specs):
+    """Return the deterministic union volume of yaw-oriented support boxes.
+
+    ``box_specs`` contains ``(box, scale, offset)`` triples with the same
+    scale/offset semantics as the diagnostic membership helper.  The volume
+    is exact for the yaw-only boxes used by the tracker and reads no random
+    state.
+    """
+    rectangles = []
+    for support_box, scale, offset in box_specs:
+        if support_box is None:
+            continue
+        scale = float(scale)
+        offset = float(offset)
+        size = np.asarray(support_box.wlh, dtype=np.float64).reshape(3)
+        center = np.asarray(
+            support_box.center, dtype=np.float64).reshape(3)
+        rotation = np.asarray(
+            support_box.rotation_matrix, dtype=np.float64).reshape(3, 3)
+        dimensions = size * scale + 2.0 * offset
+        if (not np.isfinite(dimensions).all()
+                or not np.isfinite(center).all()
+                or not np.isfinite(rotation).all()
+                or np.any(dimensions <= 0.0)):
+            raise ValueError("diagnostic support box must be finite and positive")
+        half_x, half_y = dimensions[:2] * 0.5
+        local = np.asarray((
+            (-half_x, -half_y),
+            (half_x, -half_y),
+            (half_x, half_y),
+            (-half_x, half_y),
+        ), dtype=np.float64)
+        polygon = local @ rotation[:2, :2].T + center[:2]
+        half_z = dimensions[2] * 0.5
+        rectangles.append((polygon, center[2] - half_z,
+                           center[2] + half_z))
+    if not rectangles:
+        return 0.0
+
+    def clip_polygon(subject, clip):
+        output = np.asarray(subject, dtype=np.float64)
+        for edge_index in range(len(clip)):
+            if len(output) == 0:
+                break
+            edge_start = clip[edge_index]
+            edge_end = clip[(edge_index + 1) % len(clip)]
+            edge = edge_end - edge_start
+
+            def inside(point):
+                relative = point - edge_start
+                return (edge[0] * relative[1]
+                        - edge[1] * relative[0]) >= -1e-10
+
+            def intersection(start, end):
+                segment = end - start
+                denominator = edge[0] * segment[1] - edge[1] * segment[0]
+                if abs(denominator) <= 1e-12:
+                    return end
+                relative = edge_start - start
+                fraction = (
+                    edge[0] * relative[1] - edge[1] * relative[0]
+                ) / denominator
+                return start + fraction * segment
+
+            clipped = []
+            previous = output[-1]
+            previous_inside = inside(previous)
+            for current in output:
+                current_inside = inside(current)
+                if current_inside:
+                    if not previous_inside:
+                        clipped.append(intersection(previous, current))
+                    clipped.append(current)
+                elif previous_inside:
+                    clipped.append(intersection(previous, current))
+                previous = current
+                previous_inside = current_inside
+            output = np.asarray(clipped, dtype=np.float64).reshape(-1, 2)
+        return output
+
+    def polygon_area(polygon):
+        if len(polygon) < 3:
+            return 0.0
+        return float(abs(np.dot(polygon[:, 0], np.roll(polygon[:, 1], -1))
+                         - np.dot(polygon[:, 1],
+                                  np.roll(polygon[:, 0], -1))) * 0.5)
+
+    z_edges = sorted({
+        float(value) for _, lower, upper in rectangles
+        for value in (lower, upper)})
+    volume = 0.0
+    for lower, upper in zip(z_edges, z_edges[1:]):
+        if upper <= lower:
+            continue
+        midpoint = 0.5 * (lower + upper)
+        active = [
+            polygon for polygon, z_min, z_max in rectangles
+            if z_min < midpoint < z_max]
+        union_area = 0.0
+        for subset_mask in range(1, 1 << len(active)):
+            indices = [
+                index for index in range(len(active))
+                if subset_mask & (1 << index)]
+            intersection_polygon = active[indices[0]]
+            for index in indices[1:]:
+                intersection_polygon = clip_polygon(
+                    intersection_polygon, active[index])
+                if len(intersection_polygon) == 0:
+                    break
+            sign = 1.0 if len(indices) % 2 else -1.0
+            union_area += sign * polygon_area(intersection_polygon)
+        volume += max(union_area, 0.0) * (upper - lower)
+    return float(volume)
 
 
 def combined_search_support_statistics(

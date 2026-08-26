@@ -1,0 +1,368 @@
+{
+  "verdict": {
+    "stable_seqtrack_b0_restored": false,
+    "b0_core_inherits_seqtrack": true,
+    "b0_training_and_evaluator_equivalent_to_seqtrack": false,
+    "regression_origin": "first backward/Adam update",
+    "b1_mechanism_regressed": false,
+    "ready_for_full_nuscenes": false
+  },
+  "source_paths": [
+    "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42/run_provenance.json",
+    "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42/lightning_logs/version_0/hparams.yaml",
+    "output/20260824-0219-25_b0-ct25_b0_mini_car_60ep_bs16_seed42_retryfix/run_provenance.json",
+    "output/20260824-0219-25_b0-ct25_b0_mini_car_60ep_bs16_seed42_retryfix/lightning_logs/version_0/hparams.yaml",
+    "output/20260825-0057-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_rerun_20260825/run_provenance.json",
+    "output/20260825-0057-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_rerun_20260825/lightning_logs/version_0/hparams.yaml",
+    "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+    "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/hparams.yaml",
+    "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+    "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/hparams.yaml",
+    "output/20260824-0219-25_b0-ct25_b0_mini_car_60ep_bs16_seed42_retryfix/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260825-0057-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_rerun_20260825/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260825-0057-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_rerun_20260825/lightning_logs/version_0/candidate_diagnostics/epoch_30.csv",
+    "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/candidate_diagnostics/epoch_30.csv",
+    "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv"
+  ],
+  "headline": {
+    "current_b0_success": 29.86980438232422,
+    "b0_regression_points": -20.820568084716797,
+    "step1_parity": "FAIL",
+    "seqtrack_baseline_status": "NOT RESTORED",
+    "current_b1_mean_delta_cv": -0.2083957368469136
+  },
+  "tracking_summary": [
+    {
+      "run": "SeqTrack reference",
+      "final_epoch": 60,
+      "final_success": 51.001094818115234,
+      "final_precision": 60.892784118652344,
+      "late3_success": 48.41393280029297,
+      "late3_precision": 54.81692250569662,
+      "validation_points": 12
+    },
+    {
+      "run": "v25 B0 prior-high",
+      "final_epoch": 60,
+      "final_success": 50.690372467041016,
+      "final_precision": 59.28009033203125,
+      "late3_success": 50.18490219116211,
+      "late3_precision": 57.03756586710612,
+      "validation_points": 60
+    },
+    {
+      "run": "v25 B1 prior-high@30",
+      "final_epoch": 30,
+      "final_success": 49.274620056152344,
+      "final_precision": 52.096282958984375,
+      "late3_success": 49.06017939249674,
+      "late3_precision": 56.07257588704427,
+      "validation_points": 30
+    },
+    {
+      "run": "v25 B0 current-low",
+      "final_epoch": 60,
+      "final_success": 29.86980438232422,
+      "final_precision": 30.398250579833984,
+      "late3_success": 30.536474227905273,
+      "late3_precision": 31.430344263712566,
+      "validation_points": 12
+    },
+    {
+      "run": "v25 B1-GRU current",
+      "final_epoch": 60,
+      "final_success": 31.226476669311523,
+      "final_precision": 32.286651611328125,
+      "late3_success": 31.097375233968098,
+      "late3_precision": 31.998542149861652,
+      "validation_points": 12
+    }
+  ],
+  "b0_chain": [
+    {
+      "stage": "Initialization",
+      "prior_high": "798a8def3e82",
+      "current_low": "798a8def3e82",
+      "equal": true,
+      "meaning": "B0 architecture and seeded initialization match"
+    },
+    {
+      "stage": "First 100 observation fingerprints",
+      "prior_high": "100",
+      "current_low": "100",
+      "equal": true,
+      "meaning": "Candidate IDs, point samples and observation batches match"
+    },
+    {
+      "stage": "First logged B0 loss (step0)",
+      "prior_high": "18.006416321",
+      "current_low": "18.006416321",
+      "equal": true,
+      "meaning": "The first forward and loss reduction match"
+    },
+    {
+      "stage": "B0 parameters after optimizer step1",
+      "prior_high": "7f547e5b4afd",
+      "current_low": "cf88c167bc9f",
+      "equal": false,
+      "meaning": "The regression begins in backward/Adam, before validation"
+    },
+    {
+      "stage": "First visible loss difference (step3)",
+      "prior_high": "15.279096603",
+      "current_low": "15.277811050",
+      "equal": false,
+      "meaning": "A tiny update difference becomes visible three batches later"
+    },
+    {
+      "stage": "mini_val Success at epoch5",
+      "prior_high": "34.671",
+      "current_low": "20.791",
+      "equal": false,
+      "meaning": "Recursive validation amplifies the early numerical split"
+    }
+  ],
+  "b0_loss_summary": [
+    {
+      "run": "v25 B0 prior-high",
+      "epoch1_mean": 6.799783610126296,
+      "epoch60_mean": 0.2424986904425024,
+      "last1000_mean": 0.2497171325236559
+    },
+    {
+      "run": "v25 B0 current-low",
+      "epoch1_mean": 6.842585338843417,
+      "epoch60_mean": 0.24944919883827021,
+      "last1000_mean": 0.2563527857288718
+    }
+  ],
+  "resolved_config_differences": [
+    {
+      "field": "check_val_every_n_epoch",
+      "prior_high": 1,
+      "current_low": 5,
+      "active_for_b0": true
+    },
+    {
+      "field": "motion_v3_aux_nll_weight",
+      "prior_high": 0.0,
+      "current_low": 0.05,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_beta_nll_beta",
+      "prior_high": null,
+      "current_low": 0.5,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_cfc_backbone_units",
+      "prior_high": null,
+      "current_low": 105,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_log_sigma_max",
+      "prior_high": null,
+      "current_low": 2.5,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_log_sigma_min",
+      "prior_high": null,
+      "current_low": -2.302585092994046,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_tail_direction_margin",
+      "prior_high": null,
+      "current_low": 0.9,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_tail_direction_weight",
+      "prior_high": null,
+      "current_low": 0.25,
+      "active_for_b0": false
+    },
+    {
+      "field": "motion_v3_temporal_backend",
+      "prior_high": null,
+      "current_low": "gru",
+      "active_for_b0": false
+    },
+    {
+      "field": "tag",
+      "prior_high": "ct25_b0_mini_car_60ep_bs16_seed42_retryfix",
+      "current_low": "ct25_b0_mini_car_seed42_60ep_bs16_val5",
+      "active_for_b0": false
+    }
+  ],
+  "baseline_contract": [
+    {
+      "aspect": "B0 network implementation",
+      "SeqTrack_reference": "SEQTRACK3D",
+      "current_v25_B0": "CTSEQTRACK subclass of SEQTRACK3D; B1/B2/B3 disabled",
+      "equivalent": "Mostly yes",
+      "impact": "Core observation model is inherited"
+    },
+    {
+      "aspect": "Training candidate objective",
+      "SeqTrack_reference": "4 candidates through the ordinary batch mean",
+      "current_v25_B0": "balanced candidate batches; 0.5*view0 + (view1+view2+view3)/6",
+      "equivalent": "No",
+      "impact": "Different optimization target"
+    },
+    {
+      "aspect": "Sampling/RNG",
+      "SeqTrack_reference": "ordinary shuffled DataLoader and global RNG",
+      "current_v25_B0": "stateless candidate IDs and point-sampling fingerprints",
+      "equivalent": "No",
+      "impact": "Safer auditability, but not the original training transaction"
+    },
+    {
+      "aspect": "Validation box size",
+      "SeqTrack_reference": "current-frame GT size when safe flag is absent",
+      "current_v25_B0": "first-frame size propagated through recursive predictions",
+      "equivalent": "No",
+      "impact": "v25 removes a GT-size dependency; scores are not the same metric"
+    },
+    {
+      "aspect": "Runtime/optimizer envelope",
+      "SeqTrack_reference": "standard Lightning path",
+      "current_v25_B0": "safe_seqtrack_auto_v1, named unified Adam group, dual-stream envelope",
+      "equivalent": "No",
+      "impact": "B0-only still has one group, but the experiment contract differs"
+    }
+  ],
+  "b1_mechanism": [
+    {
+      "run": "v25 B1 prior-high@30",
+      "epoch": 30,
+      "tracking_success": 49.274620056152344,
+      "tracking_precision": 52.096282958984375,
+      "learned_rmse": 5.6998201458421764,
+      "cv_rmse": 5.592396727771393,
+      "learned_minus_cv": 0.10742341807078315,
+      "help_rate": 0.04208311415044713,
+      "nll": 148.56818218750294,
+      "coverage95": 0.3114150447133088,
+      "deployment_output": "B0 observation"
+    },
+    {
+      "run": "v25 B1-GRU current",
+      "epoch": 30,
+      "tracking_success": 30.414661407470703,
+      "tracking_precision": 29.844642639160156,
+      "learned_rmse": 10.24360913031267,
+      "cv_rmse": 10.46341118817519,
+      "learned_minus_cv": -0.21980205786251972,
+      "help_rate": 0.6109925293489862,
+      "nll": 10.170182497165367,
+      "coverage95": 0.7796157950907151,
+      "deployment_output": "B0 observation"
+    },
+    {
+      "run": "v25 B1-GRU current",
+      "epoch": 60,
+      "tracking_success": 31.226476669311523,
+      "tracking_precision": 32.286651611328125,
+      "learned_rmse": 9.525545757485297,
+      "cv_rmse": 9.73394149433221,
+      "learned_minus_cv": -0.2083957368469136,
+      "help_rate": 0.6104589114194237,
+      "nll": 8.101885910371717,
+      "coverage95": 0.8271077908217717,
+      "deployment_output": "B0 observation"
+    }
+  ],
+  "root_cause_ladder": [
+    {
+      "status": "Verified",
+      "finding": "Not a data/init/first-forward mismatch",
+      "evidence": "Same train/val manifests, initial B0 SHA, first 100 fingerprints and step0 loss",
+      "confidence": "High"
+    },
+    {
+      "status": "Verified",
+      "finding": "The trajectories split at the first optimizer update",
+      "evidence": "step1 B0 hashes differ; first visible loss difference is step3",
+      "confidence": "High"
+    },
+    {
+      "status": "Verified",
+      "finding": "B1 repair is not the direct cause of the independent B0 low run",
+      "evidence": "B0 has B1 disabled; reviewed commit diff does not change the active B0 forward/loss definition",
+      "confidence": "High"
+    },
+    {
+      "status": "Likely",
+      "finding": "Uncontrolled CUDA backward/Adam numerical path selects different basins",
+      "evidence": "Trainer deterministic mode is absent; custom PointNet2 CUDA is active; separate GPUs were used",
+      "confidence": "Medium-high"
+    },
+    {
+      "status": "Unresolved",
+      "finding": "Whether divergence first appears in gradients or only in Adam update",
+      "evidence": "Checkpoints contain post-step parameters/Adam hashes but no pre-step per-parameter gradient hash",
+      "confidence": "Requires a new 2-step audit"
+    }
+  ],
+  "other_issues": [
+    {
+      "severity": "Critical",
+      "issue": "B0 baseline is not reproducible",
+      "evidence": "One v25 B0 run reaches 50.690, the next reaches 29.870 from the same seed/init/data",
+      "impact": "No cross-arm causal attribution or stable baseline claim"
+    },
+    {
+      "severity": "High",
+      "issue": "Current v25 B0 is SeqTrack-derived, not transaction-equivalent",
+      "evidence": "Candidate weighting, RNG/sampler, wrapper and evaluator differ",
+      "impact": "Numerical parity with a historical SeqTrack score is descriptive only"
+    },
+    {
+      "severity": "High",
+      "issue": "Old-high and current-low resolved configs are not identical",
+      "evidence": "Validation cadence is 1 vs 5; YAML SHA matches but resolved SHA does not",
+      "impact": "The historical 50-point run is not a formally matched control"
+    },
+    {
+      "severity": "High",
+      "issue": "B1-only tracking score does not measure deployed B1 benefit",
+      "evidence": "Both prior and current B1-only runs output B0 observation",
+      "impact": "A high/low B1-only Success mainly reports its B0 trajectory"
+    },
+    {
+      "severity": "High",
+      "issue": "Uncertainty promotion gate remains open",
+      "evidence": "Current GRU raw coverage95=82.7%, ECE=10.8%; no held-out calibration/dev artifact",
+      "impact": "Sigma/NLL/coverage repair cannot be called complete"
+    },
+    {
+      "severity": "Medium",
+      "issue": "Recursive-age validation diagnostics are incomplete",
+      "evidence": "epoch60 CSV has zero age-valid rows; official B1 report crashes on the empty stratum",
+      "impact": "Age-stratified long-tail generalization cannot be audited"
+    },
+    {
+      "severity": "Medium",
+      "issue": "Environment identity is missing from run provenance",
+      "evidence": "GPU model/index, CUDA/cuDNN, torch and PointNet2 build are not recorded",
+      "impact": "Cross-GPU numerical divergence cannot be reconciled after the run"
+    },
+    {
+      "severity": "Medium",
+      "issue": "Evidence is still one seed on mini",
+      "evidence": "All new arms use seed42 and nuScenes mini",
+      "impact": "No variance estimate or full-dataset paper claim"
+    }
+  ],
+  "verification": {
+    "pytest": "148 passed, 1 skipped",
+    "compileall": "passed",
+    "slimming_verify": "expected failure: HEAD e9a2d6d != pinned 001951a"
+  }
+}

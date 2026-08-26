@@ -32,6 +32,8 @@ from utils.ct_search import (
     build_ordered_trajectory_search_box,
     build_time_guided_search_box,
     combined_search_support_statistics,
+    diagnostic_oriented_support_union_volume,
+    diagnostic_points_in_oriented_support,
     resolve_b1_search_support,
     resolve_joint_search_geometry,
     sample_padded_search_extension,
@@ -586,6 +588,283 @@ class BaseModelMF(pl.LightningModule):
             })
         return row
 
+    def _build_ct_acquisition_diagnostics_v2(
+            self, *, this_pc, this_box, coordinate_anchor_box,
+            history_boxes, effective_delta_t, valid_mask, motion_prediction,
+            support_kwargs, active_endpoint_box, active_tube_box,
+            active_diagnostics, baseline_points, sampled_base_points,
+            endpoint_points, tube_points, extension_pool_points,
+            extension_pool_source, sampled_extension_points,
+            sampled_extension_source):
+        """Build a GT-only evaluation sidecar without changing model inputs."""
+        global_points = np.asarray(this_pc.points.T)
+        global_xyz = global_points[:, :3]
+        if len(global_points):
+            exact_target_mask = geometry_utils.points_in_box(
+                this_box, global_xyz.T, 1.0).astype(bool)
+            label_target_mask = geometry_utils.points_in_box(
+                this_box, global_xyz.T, self.config.bb_scale).astype(bool)
+        else:
+            exact_target_mask = np.zeros((0,), dtype=bool)
+            label_target_mask = np.zeros((0,), dtype=bool)
+        target_box = points_utils.transform_box(
+            this_box, coordinate_anchor_box)
+
+        def target_mask(points, scale=None):
+            points = np.asarray(points)
+            if len(points) == 0:
+                return np.zeros((0,), dtype=bool)
+            return geometry_utils.points_in_box(
+                target_box, points[:, :3].T,
+                self.config.bb_scale if scale is None else float(scale),
+            ).astype(bool)
+
+        def unique_rows(points, tolerance=1e-6):
+            points = np.asarray(points)
+            if len(points) == 0:
+                channels = points.shape[1] if points.ndim == 2 else 3
+                return np.empty((0, channels), dtype=np.float32)
+            keys = np.rint(points[:, :3] / float(tolerance)).astype(np.int64)
+            _, indices = np.unique(keys, axis=0, return_index=True)
+            return points[np.sort(indices)]
+
+        def expanded_z(box, margin):
+            if box is None:
+                return None
+            result = copy.deepcopy(box)
+            result.wlh = np.asarray(result.wlh, dtype=np.float64).copy()
+            result.wlh[2] += 2.0 * float(margin)
+            return result
+
+        def measure_support(box_specs, *, diagnostics=None):
+            xyz_masks = []
+            xy_masks = []
+            for box, scale, offset in box_specs:
+                if box is None:
+                    continue
+                xyz_masks.append(diagnostic_points_in_oriented_support(
+                    global_points, box, scale=scale, offset=offset))
+                xy_masks.append(diagnostic_points_in_oriented_support(
+                    global_points, box, scale=scale, offset=offset,
+                    ignore_z=True))
+            if not xyz_masks:
+                return {
+                    "valid": 0, "xy_target_count": 0,
+                    "xyz_target_count": 0, "target_bearing": 0,
+                    "raw_point_count": 0, "background_count": 0,
+                    "support_volume": 0.0, "truncated": 0,
+                    "endpoint_error_xy": 0.0,
+                    "endpoint_error_z": 0.0,
+                }
+            xyz_union = np.logical_or.reduce(xyz_masks)
+            xy_union = np.logical_or.reduce(xy_masks)
+            xyz_target_count = int(np.sum(xyz_union & label_target_mask))
+            xy_target_count = int(np.sum(xy_union & label_target_mask))
+            endpoint_box = box_specs[0][0]
+            endpoint_error_xy = float(np.linalg.norm(
+                np.asarray(endpoint_box.center[:2], dtype=np.float64)
+                - np.asarray(this_box.center[:2], dtype=np.float64)))
+            endpoint_error_z = float(abs(
+                float(endpoint_box.center[2]) - float(this_box.center[2])))
+            return {
+                "valid": 1,
+                "xy_target_count": xy_target_count,
+                "xyz_target_count": xyz_target_count,
+                "target_bearing": int(xyz_target_count > 0),
+                "raw_point_count": int(np.sum(xyz_union)),
+                "background_count": int(
+                    np.sum(xyz_union) - xyz_target_count),
+                "support_volume": diagnostic_oriented_support_union_volume(
+                    box_specs),
+                "truncated": int(bool(
+                    (diagnostics or {}).get("truncated", False))),
+                "endpoint_error_xy": endpoint_error_xy,
+                "endpoint_error_z": endpoint_error_z,
+            }
+
+        active_learned = active_diagnostics.get("prior_source") == "b1"
+        endpoint_scale = 1.0 if active_learned else float(
+            self.config.bb_scale)
+        endpoint_offset = 0.0 if active_learned else float(
+            self.config.bb_offset)
+        active_measure = measure_support((
+            (active_endpoint_box, endpoint_scale, endpoint_offset),
+            (active_tube_box, 1.0, 0.0),
+        ), diagnostics=active_diagnostics)
+        endpoint_measure = measure_support((
+            (active_endpoint_box, endpoint_scale, endpoint_offset),))
+        tube_measure = measure_support(((active_tube_box, 1.0, 0.0),))
+
+        def box_size(box, scale=1.0, offset=0.0):
+            if box is None:
+                return (0.0, 0.0, 0.0)
+            size = (
+                np.asarray(box.wlh, dtype=np.float64).reshape(3)
+                * float(scale) + 2.0 * float(offset))
+            return tuple(float(value) for value in size)
+
+        endpoint_size = box_size(
+            active_endpoint_box, endpoint_scale, endpoint_offset)
+        tube_size = box_size(active_tube_box)
+
+        expansion_points = unique_rows(np.concatenate((
+            np.asarray(endpoint_points), np.asarray(tube_points)), axis=0))
+        expansion_target_mask = target_mask(expansion_points)
+        pool_target_mask = target_mask(extension_pool_points)
+        sampled_target_mask = target_mask(sampled_extension_points)
+        extension_pool_source = np.asarray(
+            extension_pool_source, dtype=np.int64).reshape(-1)
+        sampled_extension_source = np.asarray(
+            sampled_extension_source, dtype=np.int64).reshape(-1)
+        if len(extension_pool_source) != len(extension_pool_points):
+            raise RuntimeError("extension pool diagnostics lost source alignment")
+        if len(sampled_extension_source) != len(sampled_extension_points):
+            raise RuntimeError("sampled extension diagnostics lost source alignment")
+
+        def source_target_count(mask, source, source_id):
+            return int(np.sum(mask & (source == int(source_id))))
+
+        diagnostics_v2 = {
+            "acquisition_schema_version": 2,
+            "global_target_count_exact": int(np.sum(exact_target_mask)),
+            "global_target_count_label": int(np.sum(label_target_mask)),
+            "global_raw_point_count": int(len(global_points)),
+            "base_target_count": int(np.sum(target_mask(baseline_points))),
+            "base_raw_target_count": int(np.sum(target_mask(baseline_points))),
+            "base_sampled_target_count": int(np.sum(
+                target_mask(sampled_base_points))),
+            "base_raw_point_count": int(len(baseline_points)),
+            "base_sampled_point_count": int(len(sampled_base_points)),
+            "endpoint_raw_target_count": int(np.sum(
+                target_mask(endpoint_points))),
+            "tube_raw_target_count": int(np.sum(target_mask(tube_points))),
+            "endpoint_raw_point_count": int(len(endpoint_points)),
+            "tube_raw_point_count": int(len(tube_points)),
+            "expansion_target_count": int(np.sum(expansion_target_mask)),
+            "support_union_target_count": int(np.sum(expansion_target_mask)),
+            "support_union_raw_point_count": int(len(expansion_points)),
+            "support_union_background_count": int(
+                len(expansion_points) - np.sum(expansion_target_mask)),
+            "support_xy_target_count": int(
+                active_measure["xy_target_count"]),
+            "support_xyz_target_count": int(
+                active_measure["xyz_target_count"]),
+            "support_z_clip_target_count": max(
+                int(active_measure["xy_target_count"])
+                - int(active_measure["xyz_target_count"]), 0),
+            "endpoint_target_center_inside_xy": int(
+                bool(diagnostic_points_in_oriented_support(
+                    np.asarray(this_box.center, dtype=np.float64)[None, :],
+                    active_endpoint_box, scale=endpoint_scale,
+                    offset=endpoint_offset, ignore_z=True)[0])
+                if active_endpoint_box is not None else 0),
+            "endpoint_target_center_inside_xyz": int(
+                bool(diagnostic_points_in_oriented_support(
+                    np.asarray(this_box.center, dtype=np.float64)[None, :],
+                    active_endpoint_box, scale=endpoint_scale,
+                    offset=endpoint_offset)[0])
+                if active_endpoint_box is not None else 0),
+            "tube_target_center_inside_xy": int(
+                bool(diagnostic_points_in_oriented_support(
+                    np.asarray(this_box.center, dtype=np.float64)[None, :],
+                    active_tube_box, ignore_z=True)[0])
+                if active_tube_box is not None else 0),
+            "tube_target_center_inside_xyz": int(
+                bool(diagnostic_points_in_oriented_support(
+                    np.asarray(this_box.center, dtype=np.float64)[None, :],
+                    active_tube_box)[0])
+                if active_tube_box is not None else 0),
+            "active_endpoint_error_xy": float(
+                endpoint_measure["endpoint_error_xy"]),
+            "active_endpoint_error_z": float(
+                endpoint_measure["endpoint_error_z"]),
+            "active_tube_error_xy": float(
+                tube_measure["endpoint_error_xy"]),
+            "active_tube_error_z": float(
+                tube_measure["endpoint_error_z"]),
+            "active_prior_source": str(
+                active_diagnostics.get("prior_source", "base_only")),
+            "active_support_truncated": int(bool(
+                active_diagnostics.get("truncated", False))),
+            "active_endpoint_width": endpoint_size[0],
+            "active_endpoint_length": endpoint_size[1],
+            "active_endpoint_height": endpoint_size[2],
+            "active_tube_width": tube_size[0],
+            "active_tube_length": tube_size[1],
+            "active_tube_height": tube_size[2],
+            "pool_target_count": int(np.sum(pool_target_mask)),
+            "sampled_target_count": int(np.sum(sampled_target_mask)),
+            "extension_pool_count": int(len(extension_pool_points)),
+            "sampled_count": int(len(sampled_extension_points)),
+            "pool_background_count": int(
+                len(extension_pool_points) - np.sum(pool_target_mask)),
+            "sampled_background_count": int(
+                len(sampled_extension_points) - np.sum(sampled_target_mask)),
+        }
+        for label, source_id in (
+                ("endpoint_only", 1), ("tube_only", 2), ("overlap", 3)):
+            diagnostics_v2[f"pool_{label}_target_count"] = (
+                source_target_count(
+                    pool_target_mask, extension_pool_source, source_id))
+            diagnostics_v2[f"sampled_{label}_target_count"] = (
+                source_target_count(
+                    sampled_target_mask, sampled_extension_source, source_id))
+
+        counterfactuals = {}
+
+        def resolve_arm(name, margins, z_margin=0.0, *, use_cv=False):
+            kwargs = dict(support_kwargs)
+            kwargs.update({
+                "prediction": None if use_cv else motion_prediction,
+                "use_b1_prepass": not use_cv,
+                "use_dynamic_sigma": False,
+                "fixed_margins": tuple(margins),
+            })
+            if not use_cv and not (
+                    isinstance(motion_prediction, dict)
+                    and bool(motion_prediction.get("valid", False))):
+                counterfactuals[name] = measure_support(())
+                return None, None, None
+            endpoint, tube, arm_diagnostics = resolve_joint_search_geometry(
+                history_boxes, effective_delta_t, valid_mask, **kwargs)
+            endpoint = expanded_z(endpoint, z_margin)
+            tube = expanded_z(tube, z_margin)
+            counterfactuals[name] = measure_support((
+                (endpoint, 1.0, 0.0), (tube, 1.0, 0.0)),
+                diagnostics=arm_diagnostics)
+            return endpoint, tube, arm_diagnostics
+
+        learned_endpoint = None
+        learned_tube = None
+        for name, margins, z_margin in (
+                ("learned_2_1_z0", (2.0, 1.0), 0.0),
+                ("learned_2_1_z05", (2.0, 1.0), 0.5),
+                ("learned_2_1_z10", (2.0, 1.0), 1.0),
+                ("learned_3_1p5_z0", (3.0, 1.5), 0.0),
+                ("learned_4_2_z0", (4.0, 2.0), 0.0),
+                ("learned_6_3_z0", (6.0, 3.0), 0.0)):
+            endpoint, tube, _ = resolve_arm(
+                name, margins, z_margin=z_margin)
+            if name == "learned_2_1_z0":
+                learned_endpoint, learned_tube = endpoint, tube
+        cv_endpoint, _, cv_diagnostics = resolve_arm(
+            "cv_2_1_z0", (2.0, 1.0), use_cv=True)
+        if learned_endpoint is not None and cv_endpoint is not None:
+            counterfactuals["learned_plus_cv_endpoint"] = measure_support((
+                (learned_endpoint, 1.0, 0.0),
+                (learned_tube, 1.0, 0.0),
+                (cv_endpoint, 1.0, 0.0),
+            ), diagnostics={
+                "truncated": bool(
+                    counterfactuals["learned_2_1_z0"]["truncated"]
+                    or (cv_diagnostics or {}).get("truncated", False))})
+        else:
+            counterfactuals["learned_plus_cv_endpoint"] = measure_support(())
+        for arm, values in counterfactuals.items():
+            for key, value in values.items():
+                diagnostics_v2[f"cf_{arm}_{key}"] = value
+        return diagnostics_v2
+
     def _build_ct_joint_diagnostic_row(
             self, output, data_dict, this_box, reference_box, frame_id,
             acquisition_diagnostics=None):
@@ -595,6 +874,9 @@ class BaseModelMF(pl.LightningModule):
                 "joint B2 diagnostics require evaluation-only acquisition "
                 "counts")
         required_acquisition_fields = (
+            "acquisition_schema_version",
+            "global_target_count_exact", "global_target_count_label",
+            "base_raw_target_count", "base_sampled_target_count",
             "base_target_count", "expansion_target_count",
             "pool_target_count", "sampled_target_count",
             "extension_pool_count", "sampled_count")
@@ -688,7 +970,7 @@ class BaseModelMF(pl.LightningModule):
         sigma = output.get("motion_prior_log_sigma_parallel_perp")
         sigma_np = (
             np.exp(sigma.detach().cpu().numpy().reshape(-1, 2)[0])
-            if sigma is not None else np.asarray((np.nan, np.nan)))
+            if sigma is not None else np.zeros((2,), dtype=np.float64))
         residual_unit = output.get(
             "motion_prior_residual_unit_parallel_perp")
         residual_unit_np = (
@@ -696,8 +978,10 @@ class BaseModelMF(pl.LightningModule):
             if residual_unit is not None else np.zeros(2, dtype=np.float32))
         b1_valid = bool(self._proposal_scalar(
             output, "motion_prior_valid") > 0.0)
-        b1_nll = float("nan")
-        b1_mahalanobis_sq = float("nan")
+        b1_nll = 0.0
+        b1_mahalanobis_sq = 0.0
+        b1_metrics_valid = False
+        aligned_error = np.zeros((2,), dtype=np.float64)
         direction_np = np.asarray((1.0, 0.0), dtype=np.float64)
         direction = output.get("motion_prior_direction_xy")
         log_sigma = output.get("motion_prior_log_sigma_parallel_perp")
@@ -721,10 +1005,12 @@ class BaseModelMF(pl.LightningModule):
                     + 2.0 * safe_log_sigma)))
                 b1_mahalanobis_sq = float(np.sum(
                     aligned_error ** 2 * np.exp(-2.0 * safe_log_sigma)))
-                if not np.isfinite(b1_nll):
-                    b1_nll = float("nan")
-                if not np.isfinite(b1_mahalanobis_sq):
-                    b1_mahalanobis_sq = float("nan")
+                b1_metrics_valid = bool(
+                    np.isfinite(b1_nll)
+                    and np.isfinite(b1_mahalanobis_sq))
+                if not b1_metrics_valid:
+                    b1_nll = 0.0
+                    b1_mahalanobis_sq = 0.0
         perpendicular_np = np.asarray(
             (-direction_np[1], direction_np[0]), dtype=np.float64)
         envelope = output.get("motion_prior_envelope_parallel_perp")
@@ -838,17 +1124,21 @@ class BaseModelMF(pl.LightningModule):
                 kinematic - target_xy)),
             "learned_motion_error": float(np.linalg.norm(
                 learned - target_xy)),
-            "b1_valid": int(b1_valid and np.isfinite(b1_nll)),
+            "learned_error_parallel": float(aligned_error[0]),
+            "learned_error_perpendicular": float(aligned_error[1]),
+            "learned_cv_disagreement": float(np.linalg.norm(
+                learned - kinematic)),
+            "b1_valid": int(b1_valid and b1_metrics_valid),
             "b1_nll": b1_nll,
             "b1_mahalanobis_sq": b1_mahalanobis_sq,
             "b1_coverage_50": int(
-                np.isfinite(b1_mahalanobis_sq)
+                b1_metrics_valid
                 and b1_mahalanobis_sq <= 1.38629436112),
             "b1_coverage_80": int(
-                np.isfinite(b1_mahalanobis_sq)
+                b1_metrics_valid
                 and b1_mahalanobis_sq <= 3.21887582487),
             "b1_coverage_95": int(
-                np.isfinite(b1_mahalanobis_sq)
+                b1_metrics_valid
                 and b1_mahalanobis_sq <= 5.99146454711),
             "raw_search_error": float(np.linalg.norm(
                 raw_search - target_xy)),
@@ -945,6 +1235,7 @@ class BaseModelMF(pl.LightningModule):
             "presence_target": int(
                 endpoint_extension_foreground
                 + tube_extension_foreground >= 1),
+            **acquisition_diagnostics,
         }
 
     @staticmethod
@@ -1166,16 +1457,19 @@ class BaseModelMF(pl.LightningModule):
                 build_kwargs = {}
                 if motion_prediction is not None:
                     build_kwargs["motion_prediction"] = motion_prediction
+                diagnostic_sidecar = {}
+                if bool(getattr(
+                        self.config,
+                        "export_proposal_diagnostics",
+                        False)):
+                    build_kwargs["_ct_diagnostic_sidecar"] = (
+                        diagnostic_sidecar)
                 data_dict, ref_bb = self.build_input_dict(
                     sequence, frame_id, recursive_state.results_bbs,
                     recursive_state=recursive_state,
                     **build_kwargs)
-                acquisition_diagnostics = data_dict.pop(
-                    "_ct_acquisition_diagnostics", None)
-                if "_ct_acquisition_diagnostics" in data_dict:
-                    raise RuntimeError(
-                        "evaluation-only acquisition diagnostics leaked into "
-                        "the model input")
+                acquisition_diagnostics = diagnostic_sidecar.get(
+                    "acquisition")
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
                     results_bbs.append(ref_bb)
@@ -1406,6 +1700,7 @@ class BaseModelMF(pl.LightningModule):
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
+            row["tracklet_key"] = str(tracklet_key)
             eval_partition = getattr(
                 self.config, "ct_eval_partition", None)
             if eval_partition is not None:
@@ -1416,7 +1711,6 @@ class BaseModelMF(pl.LightningModule):
                 row["epoch"] = int(source_epoch)
             if bool(getattr(
                     self.config, "use_asymmetric_dual_query", False)):
-                row["tracklet_key"] = str(tracklet_key)
                 row["dataset_split"] = str(getattr(
                     self.config, "test_split", "unknown"))
                 row["candidate_config_sha256"] = (
@@ -1487,6 +1781,10 @@ class MotionBaseModelMF(BaseModelMF):
         self.save_hyperparameters()
 
     def build_input_dict(self, sequence, frame_id, results_bbs, **kwargs): # Note: There may be cases of input with empty point clouds
+        diagnostic_sidecar = kwargs.pop("_ct_diagnostic_sidecar", None)
+        if (diagnostic_sidecar is not None
+                and not isinstance(diagnostic_sidecar, dict)):
+            raise TypeError("CT diagnostic sidecar must be a dict")
         assert frame_id > 0, "no need to construct an input_dict at frame 0"
 
         if (bool(getattr(
@@ -1782,6 +2080,9 @@ class MotionBaseModelMF(BaseModelMF):
             dtype=baseline_search_points.dtype,
         )
         search_v2_endpoint_xy = np.zeros((2,), dtype=np.float32)
+        search_history_boxes_world = tuple(ref_boxs)
+        motion_prediction = None
+        support_kwargs = {}
         if use_endpoint_search_evidence:
             motion_prediction = kwargs.get("motion_prediction")
             use_prepass = (
@@ -2046,6 +2347,7 @@ class MotionBaseModelMF(BaseModelMF):
         extension_pool_points = np.empty(
             (0, baseline_search_points.shape[1]),
             dtype=baseline_search_points.dtype)
+        extension_pool_source = np.empty((0,), dtype=np.int64)
         if use_ct_joint_full and joint_contract_v3:
             joint_extension_seed = (
                 int(current_sampling_seed) * 22695477 + 1) & 0xFFFFFFFF
@@ -2064,6 +2366,8 @@ class MotionBaseModelMF(BaseModelMF):
             )
             extension_pool_points = joint_extension_sampling.pop(
                 '_pool_points', extension_pool_points)
+            extension_pool_source = joint_extension_sampling.pop(
+                '_pool_source', extension_pool_source)
             endpoint_quota = int(getattr(
                 self.config, 'ct_endpoint_quota', 128))
             search_v2_points = joint_extension_points[:endpoint_quota]
@@ -2078,39 +2382,36 @@ class MotionBaseModelMF(BaseModelMF):
             trajectory_search_point_source = (
                 trajectory_search_point_valid_mask > 0).astype(np.int64)
         acquisition_diagnostics = None
-        if (use_ct_joint_full and joint_contract_v3 and bool(getattr(
-                self.config, "export_proposal_diagnostics", False))):
-            target_box = points_utils.transform_box(
-                this_frame["3d_bbox"], coordinate_anchor_box)
-            expansion_regions = np.concatenate((
-                search_v2_expanded_points, expanded_search_points), axis=0)
-            if len(expansion_regions):
-                _, unique_expansion_indices = np.unique(
-                    np.rint(
-                        expansion_regions[:, :3] / 1e-6).astype(np.int64),
-                    axis=0, return_index=True)
-                expansion_regions = expansion_regions[
-                    np.sort(unique_expansion_indices)]
-
-            def target_count(points):
-                if len(points) == 0:
-                    return 0
-                return int(np.sum(geometry_utils.points_in_box(
-                    target_box, points[:, :3].T, self.config.bb_scale)))
-
+        if (use_ct_joint_full and joint_contract_v3
+                and diagnostic_sidecar is not None
+                and bool(getattr(
+                    self.config, "export_proposal_diagnostics", False))):
             sampled_extension_points = joint_extension_points[
                 joint_extension_valid_mask > 0]
-            acquisition_diagnostics = {
-                "base_target_count": target_count(baseline_search_points),
-                "expansion_target_count": target_count(expansion_regions),
-                "pool_target_count": target_count(extension_pool_points),
-                "sampled_target_count": target_count(
-                    sampled_extension_points),
-                "extension_pool_count": int(
-                    joint_extension_sampling["available_count"]),
-                "sampled_count": int(
-                    joint_extension_sampling["sample_count"]),
-            }
+            sampled_extension_source = joint_extension_source[
+                joint_extension_valid_mask > 0]
+            acquisition_diagnostics = (
+                self._build_ct_acquisition_diagnostics_v2(
+                    this_pc=this_pc,
+                    this_box=this_frame["3d_bbox"],
+                    coordinate_anchor_box=coordinate_anchor_box,
+                    history_boxes=search_history_boxes_world,
+                    effective_delta_t=effective_delta_t_list,
+                    valid_mask=valid_mask,
+                    motion_prediction=motion_prediction,
+                    support_kwargs=support_kwargs,
+                    active_endpoint_box=search_v2_box,
+                    active_tube_box=ct_search_box,
+                    active_diagnostics=search_v2_diagnostics,
+                    baseline_points=baseline_search_points,
+                    sampled_base_points=this_points,
+                    endpoint_points=search_v2_expanded_points,
+                    tube_points=expanded_search_points,
+                    extension_pool_points=extension_pool_points,
+                    extension_pool_source=extension_pool_source,
+                    sampled_extension_points=sampled_extension_points,
+                    sampled_extension_source=sampled_extension_source,
+                ))
         joint_support = combined_search_support_statistics(
             (search_v2_points, trajectory_search_points),
             (search_v2_point_valid_mask,
@@ -2351,10 +2652,9 @@ class MotionBaseModelMF(BaseModelMF):
                           dtype=torch.float32),
                       }
         if acquisition_diagnostics is not None:
-            # This private GT-only sidecar is removed in evaluate_one_sequence
-            # before evaluate_one_sample receives the model input.
-            data_dict["_ct_acquisition_diagnostics"] = (
-                acquisition_diagnostics)
+            # The GT-only payload travels through a dedicated evaluation
+            # sidecar and is never inserted into the model input dictionary.
+            diagnostic_sidecar["acquisition"] = acquisition_diagnostics
         if use_ct_joint_full and joint_contract_v3:
             if joint_extension_source is None:
                 raise RuntimeError(

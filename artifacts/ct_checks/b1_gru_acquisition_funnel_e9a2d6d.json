@@ -1,0 +1,50 @@
+{
+  "acquisition_eligible_rows": 0,
+  "acquisition_only": true,
+  "acquisition_point_recall": null,
+  "acquisition_retained_rows": 0,
+  "acquisition_row_recall": null,
+  "acquisition_stage_counts": {
+    "base_sufficient": 176,
+    "geometry_miss": 119,
+    "no_novel_target": 16,
+    "retained": 0,
+    "sampling_loss": 0
+  },
+  "acquisition_strict_miss": {
+    "definition": "base_target_count == 0",
+    "end_to_end_row_retention": 0.0,
+    "geometry_miss_rows": 104,
+    "name": "strict_miss",
+    "no_novel_target_rows": 0,
+    "pool_row_recall": null,
+    "retained_rows": 0,
+    "rows": 104,
+    "sampling_loss_rows": 0,
+    "sampling_point_recall": null,
+    "sampling_row_recall": null,
+    "support_row_recall": 0.0
+  },
+  "acquisition_weak_recovery": {
+    "definition": "base_target_count <= 2",
+    "end_to_end_row_retention": 0.0,
+    "geometry_miss_rows": 119,
+    "name": "weak_recovery",
+    "no_novel_target_rows": 16,
+    "pool_row_recall": 0.0,
+    "retained_rows": 0,
+    "rows": 135,
+    "sampling_loss_rows": 0,
+    "sampling_point_recall": null,
+    "sampling_row_recall": null,
+    "support_row_recall": 0.11851851851851852
+  },
+  "candidate_diagnostics_sha256": [
+    "6c229943beb34a9fe57a6ea705e91947701c7b38d5623abd5a07c4063ee50101"
+  ],
+  "diagnostic_rows": 311,
+  "diagnostic_tracklets": 14,
+  "population": "dev_candidate0",
+  "source_checkpoint_epoch": 60,
+  "source_checkpoint_sha256": "5ea20d0a1c1cf04462a9718ea2847cd0da05c2f651f7f1160f43d4128a5fa817"
+}

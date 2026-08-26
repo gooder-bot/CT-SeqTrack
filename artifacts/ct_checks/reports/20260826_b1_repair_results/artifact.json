@@ -1,0 +1,1556 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack B1 修复实验结果（2026-08-26）",
+    "description": "B0/B1-GRU/B1-CfC、正常 SeqTrack、B1 均值与 uncertainty/long-tail 门槛审计。",
+    "generatedAt": "2026-08-26T00:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_b1_repair_20260826",
+        "label": "三组 v25 B1 修复实验与 SeqTrack 历史参考的可复核快照",
+        "path": "artifacts/ct_checks/reports/20260826_b1_repair_results/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b1_repair_20260826'",
+          "tablesUsed": [
+            "report_snapshot"
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "card_gru_delta",
+        "dataset": "headline",
+        "sourceId": "src_b1_repair_20260826",
+        "description": "仅为跨独立训练轨迹的描述性差值，不能解释为 B1 因果增益。",
+        "metrics": [
+          {
+            "label": "GRU final S vs B0",
+            "field": "gru_final_success_delta_b0",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_gru_mean",
+        "dataset": "headline",
+        "sourceId": "src_b1_repair_20260826",
+        "description": "epoch60 mini_val 逐 tracklet paired bootstrap 的点估计。",
+        "metrics": [
+          {
+            "label": "GRU learned−CV RMSE",
+            "field": "gru_mean_delta_cv_m",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_coverage",
+        "dataset": "headline",
+        "sourceId": "src_b1_repair_20260826",
+        "description": "未经独立 post-hoc calibration 的 raw 95% coverage。",
+        "metrics": [
+          {
+            "label": "GRU raw coverage95",
+            "field": "gru_coverage95",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "card_parity",
+        "dataset": "headline",
+        "sourceId": "src_b1_repair_20260826",
+        "description": "B0 参数和 Adam state 在 step1 已经跨臂失配。",
+        "metrics": [
+          {
+            "label": "Matched-prefix",
+            "field": "b0_prefix_gate"
+          },
+          {
+            "label": "Overall",
+            "field": "overall_verdict"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_success",
+        "title": "mini_val Success 曲线",
+        "subtitle": "每 5 epoch 验证；SeqTrack 为旧提交/旧配置的描述性参考",
+        "intent": "trend",
+        "question": "三条新运行与正常 SeqTrack 的收敛轨迹如何？",
+        "rationale": "12 个同 cadence 验证点显示末期差值是否只是单点波动。",
+        "type": "line",
+        "dataset": "tracking_curve",
+        "sourceId": "src_b1_repair_20260826",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success",
+            "unit": "points"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            },
+            {
+              "field": "runtime_fps",
+              "type": "quantitative",
+              "label": "FPS"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_precision",
+        "title": "mini_val Precision 曲线",
+        "subtitle": "每 5 epoch 验证；单位为点",
+        "intent": "trend",
+        "question": "Precision 是否支持与 Success 相同的方向判断？",
+        "rationale": "Success 与 Precision 同向时，描述性差值更不易由单一指标定义造成。",
+        "type": "line",
+        "dataset": "tracking_curve",
+        "sourceId": "src_b1_repair_20260826",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "precision",
+            "type": "quantitative",
+            "label": "Precision",
+            "unit": "points"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "success",
+              "type": "quantitative",
+              "label": "Success"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_b1_rmse",
+        "title": "epoch60 B1 learned prior 与 CV RMSE",
+        "subtitle": "仅 b1_valid=1 的中心误差；越低越好，单位 m",
+        "intent": "comparison",
+        "question": "修复后的均值头是否真正优于其固定运动学 anchor？",
+        "rationale": "同一 backend 内 learned/CV 是有效的逐 endpoint 配对比较。",
+        "type": "bar",
+        "dataset": "b1_rmse_chart",
+        "sourceId": "src_b1_repair_20260826",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Backend"
+          },
+          "y": {
+            "field": "rmse",
+            "type": "quantitative",
+            "label": "RMSE",
+            "unit": "m"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Method"
+          }
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_coverage",
+        "title": "epoch60 raw coverage 曲线",
+        "subtitle": "虚线理想关系由 nominal=observed 表示；当前数据尚未独立校准",
+        "intent": "trend",
+        "question": "sigma 给出的置信域是否与经验覆盖率匹配？",
+        "rationale": "多置信水平曲线比单个 coverage95 更清楚地显示欠/过离散。",
+        "type": "line",
+        "dataset": "coverage_curve",
+        "sourceId": "src_b1_repair_20260826",
+        "encodings": {
+          "x": {
+            "field": "nominal",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Nominal coverage"
+          },
+          "y": {
+            "field": "observed",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Observed coverage"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Backend"
+          }
+        },
+        "layout": "full"
+      },
+      {
+        "id": "chart_training_gaps",
+        "title": "epoch60 训练流 main/gap2/gap4 RMSE",
+        "subtitle": "每项为最后 213 个 mechanism batch 均值；越低越好",
+        "intent": "comparison",
+        "question": "gap2/gap4 辅助监督是否实际参与并产生可学习信号？",
+        "rationale": "分组柱图同时显示两种 backend 在三个 gap 上的 learned/CV 差值。",
+        "type": "bar",
+        "dataset": "training_gap_chart",
+        "sourceId": "src_b1_repair_20260826",
+        "encodings": {
+          "x": {
+            "field": "backend_gap",
+            "type": "nominal",
+            "label": "Backend / gap"
+          },
+          "y": {
+            "field": "rmse",
+            "type": "quantitative",
+            "label": "RMSE",
+            "unit": "m"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Method"
+          }
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "table_tracking",
+        "title": "Tracking final 与 late-3",
+        "subtitle": "final=epoch60；late-3=epoch50/55/60 均值；不选 best epoch",
+        "dataset": "tracking_summary",
+        "sourceId": "src_b1_repair_20260826",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "final_success",
+            "label": "Final S",
+            "format": "number"
+          },
+          {
+            "field": "late3_success",
+            "label": "Late-3 S",
+            "format": "number"
+          },
+          {
+            "field": "final_precision",
+            "label": "Final P",
+            "format": "number"
+          },
+          {
+            "field": "late3_precision",
+            "label": "Late-3 P",
+            "format": "number"
+          },
+          {
+            "field": "final_success_vs_b0",
+            "label": "Final S ΔB0",
+            "format": "number"
+          },
+          {
+            "field": "final_success_vs_seqtrack",
+            "label": "Final S ΔSeqTrack",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_b1",
+        "title": "B1 epoch60 机制与 uncertainty 指标",
+        "subtitle": "paired CI 以 tracklet 为 bootstrap 单位；coverage 均为未校准 raw 输出",
+        "dataset": "b1_diagnostics",
+        "sourceId": "src_b1_repair_20260826",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Backend",
+            "type": "text"
+          },
+          {
+            "field": "learned_rmse",
+            "label": "Learned RMSE",
+            "format": "number"
+          },
+          {
+            "field": "cv_rmse",
+            "label": "CV RMSE",
+            "format": "number"
+          },
+          {
+            "field": "learned_minus_cv_rmse",
+            "label": "ΔRMSE",
+            "format": "number"
+          },
+          {
+            "field": "paired_ci_low",
+            "label": "CI low",
+            "format": "number"
+          },
+          {
+            "field": "paired_ci_high",
+            "label": "CI high",
+            "format": "number"
+          },
+          {
+            "field": "help_rate",
+            "label": "Help rate",
+            "format": "percent"
+          },
+          {
+            "field": "nll",
+            "label": "Raw NLL",
+            "format": "number"
+          },
+          {
+            "field": "coverage_95",
+            "label": "Coverage95",
+            "format": "percent"
+          },
+          {
+            "field": "coverage_ece",
+            "label": "ECE",
+            "format": "percent"
+          },
+          {
+            "field": "recursive_age_valid_rows",
+            "label": "Age-valid",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_audit",
+        "title": "B0/optimizer 前缀与训练参与审计",
+        "subtitle": "短 hash 仅用于可视化；完整 SHA256 保留在 last.ckpt",
+        "dataset": "audit_rows",
+        "sourceId": "src_b1_repair_20260826",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "initial_hash",
+            "label": "B0 initial",
+            "type": "text"
+          },
+          {
+            "field": "step1_hash",
+            "label": "B0 step1",
+            "type": "text"
+          },
+          {
+            "field": "step100_hash",
+            "label": "B0 step100",
+            "type": "text"
+          },
+          {
+            "field": "adam_step1_hash",
+            "label": "Adam step1",
+            "type": "text"
+          },
+          {
+            "field": "optimizer_groups",
+            "label": "Groups",
+            "type": "text"
+          },
+          {
+            "field": "frozen_parameters",
+            "label": "Frozen",
+            "format": "number"
+          },
+          {
+            "field": "b0_max_grad",
+            "label": "B0 max grad",
+            "format": "number"
+          },
+          {
+            "field": "b1_max_grad",
+            "label": "B1 max grad",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "table_gates",
+        "title": "本轮修改验收门槛",
+        "subtitle": "按预注册计划逐项判断，不以单个 tracking 分数替代机制门槛",
+        "dataset": "gate_status",
+        "sourceId": "src_b1_repair_20260826",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "gate",
+            "label": "Gate",
+            "type": "text"
+          },
+          {
+            "field": "criterion",
+            "label": "Criterion",
+            "type": "text"
+          },
+          {
+            "field": "observed",
+            "label": "Observed",
+            "type": "text"
+          },
+          {
+            "field": "verdict",
+            "label": "Verdict",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack B1 修复实验结果（2026-08-26）"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 技术结论\n\n**这次修改是部分成功，不是完整成功。** 均值残差修复已得到明确正证据：GRU 与 CfC 在各自 epoch60 mini_val 上都显著优于固定 CV anchor，tracklet paired-bootstrap 的 95% CI 全部低于 0；gap2/gap4 在训练末期也都由 learned prior 优于 CV，说明辅助长间隔损失已真正进入训练。\n\n但还不能宣称 B1 给 tracking 涨分。GRU 相对独立 B0 的 final Success/Precision 表面上为正，但三组 B0 虽有相同初始化和前100批输入指纹，第一次 Adam 更新后的参数与 optimizer-state hash 已不同；而且 B1-only 的最终跟踪合同仍是 observation 输出。因此该差值只是独立训练轨迹的描述，不能归因于 B1。Sigma/coverage 也尚未达标，recursive-age 分层数据缺失。当前正式选择应继续保留 **GRU**，CfC 不晋升。"
+      },
+      {
+        "id": "cards",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": [
+          "card_gru_delta",
+          "card_gru_mean",
+          "card_coverage",
+          "card_parity"
+        ]
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 1. 范围、数据与比较边界\n\n三组新实验均来自 commit `b8222bb`，nuScenes mini Car，seed42，batch16，60 epochs，每5轮验证，mini_train/mini_val 分别为274/106条 tracklet，均从 epoch0 随机初始化；没有加载 checkpoint，没有 frozen 参数。正常 SeqTrack 参考为 2026-08-13 的60-epoch、batch16、seed42 scratch run，数据清单相同，但代码提交与配置族不同，所以只用于描述当前分数距离，不作为匹配因果 control。逐帧 B1 CSV 只覆盖导出的 candidate endpoint，不替代官方 TensorBoard tracking 指标。"
+      },
+      {
+        "id": "tracking_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_tracking"
+      },
+      {
+        "id": "success_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_success"
+      },
+      {
+        "id": "precision_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_precision"
+      },
+      {
+        "id": "tracking_interpretation",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 2. B1 相对 B0 是否提升\n\n按 final 看，GRU 比 B0 高 1.357 Success / 1.888 Precision；late-3 分别高 0.561 / 0.568。CfC 则在 final 比 B0 低 2.956 / 4.747。这些数值只说明三条 run 的结果排序，不是 B1 的因果涨分。\n\n与正常 SeqTrack 参考相比，当前 B0/GRU/CfC 的 final Success 分别低 21.131、19.775、24.088 点。当前主要异常仍是新代码线三条 B0 训练轨迹整体偏低且跨臂失配，而不是已经验证的 B1 涨分。"
+      },
+      {
+        "id": "mean_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 3. 均值残差：修复成功\n\nGRU learned RMSE=9.526 m，CV=9.734 m，差值 -0.208 m，95% CI [-0.251, -0.171]；CfC 为 9.799 vs 10.169 m，差值 -0.369 m，95% CI [-0.431, -0.318]。两者 CI 上界都小于0，达到预注册 mean gate。可恢复样本饱和率均为0，预测残差中位数也没有整体卡死在 ±1，支持“均值残差塌陷已被修复”的判断。"
+      },
+      {
+        "id": "b1_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_b1_rmse"
+      },
+      {
+        "id": "b1_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_b1"
+      },
+      {
+        "id": "uncertainty_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 4. Sigma / NLL / coverage：明显改善，但尚未过门槛\n\nGRU raw NLL=8.102、coverage95=82.7%、三点 coverage ECE=10.8%；CfC 分别为 7.893、78.9%、11.5%。相较修复前约31%–46%的 coverage95，方向上已有大幅改善，NLL 也不再出现历史级长尾爆炸；但 raw 输出仍低于 coverage95≥90%、ECE≤5%的门槛。\n\n本批结果没有独立 calibration/dev tracklet 产物，也没有 calibrated NLL 与 fixed-sigma NLL 的同集外比较，所以不能把 sigma/NLL/coverage 记为完成。正确下一步是对这两个 scratch checkpoint 分别做 held-out post-hoc calibration，再在独立 dev 上验收；校准 checkpoint 只用于评估，不能回流训练。"
+      },
+      {
+        "id": "coverage_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_coverage"
+      },
+      {
+        "id": "tail_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 5. 递归长尾监督：loss 接线成功，age 验收未完成\n\nepoch60 训练流中，GRU 的 main/gap2/gap4 learned RMSE 为3.161/6.747/10.911 m，对应 CV 为3.458/7.512/11.133 m；CfC 为3.212/7.188/11.442 m，对应 CV 为3.678/8.178/11.916 m。说明 gap2/gap4 不再只是日志项，而是获得了有效训练信号。\n\n但是两个 epoch60 candidate CSV 的 `recursive_age_valid` 都没有一个有效行，官方 B1 report 因空 age stratum 无法生成。因此“真实递归年龄分组等权归约”和 age 分层 RMSE/help-rate 仍无法在验证流中证实。本项只能判为部分完成。"
+      },
+      {
+        "id": "gap_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_training_gaps"
+      },
+      {
+        "id": "backend_result",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 6. GRU 与 CfC：当前保留 GRU\n\n绝对 epoch60 指标上，GRU 的 learned RMSE、coverage95、ECE、Success 和 Precision 都优于 CfC；CfC 只在 raw NLL、相对自身 CV 的改善量、help rate 与 top-1% NLL 集中度上略好。更重要的是，两条 backend run 的 B0 从 step1 起不同，导出的 endpoint 集也不同，无法执行计划要求的同 endpoint `CfC−GRU` paired CI。\n\n因此这批数据不支持 CfC 晋升。最稳妥且符合预注册规则的选择是：**GRU 继续作为默认正式方案，CfC 保留为可切换消融插件**。"
+      },
+      {
+        "id": "audit_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_audit"
+      },
+      {
+        "id": "gate_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_gates"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 7. 下一步建议\n\n1. 先不要进入 full nuScenes 或 B1+B2 涨分实验；先解决 B0 step1/Adam 跨臂分叉。建议同一张 GPU 顺序运行三臂的 2-step 与 100-step audit，并同时保存每个 B0 参数的 grad hash、Adam `step/exp_avg/exp_avg_sq` hash 和更新后参数 hash。\n2. 修复验证数据中 `recursive_age_valid=0` 的传播或导出，并让 `report_ct_b1.py` 对空 age stratum 给出明确 fail-closed 报告，而不是 IndexError。\n3. 对 GRU/CfC 当前 scratch checkpoint 分别运行独立 calibration，再用独立 dev 检查 ECE、coverage95、calibrated NLL vs fixed sigma。\n4. 完成前两项后，仍以 GRU 为主、CfC 为消融，重新从 epoch0 做匹配 mini 三臂。只有 B0 prefix gate 通过，tracking 差值和 backend paired promotion 才可解释。\n5. mini 全部门槛通过后，再从头训练 full-minus-B3；不要迁移本次 B1-only 权重，也不要冻结任何模块。"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b1_repair_20260826",
+        "body": "## 8. 方法、限制与可复现性\n\nTracking 取 TensorBoard 的第60轮和最后三个验证点（epoch50/55/60），没有选择 best epoch。B1 RMSE/NLL/coverage 来自同 checkpoint 的 epoch60 candidate CSV；mean gate 使用 tracklet-cluster bootstrap 2,000次。训练 gap 指标为最后一个 epoch 的213个 mechanism batch 均值。Checkpoint 用于核对初始/step1/step100 B0 与 Adam hash、optimizer groups、梯度和 frozen 参数。\n\n主要限制是单 seed、mini 数据、B0 matched-prefix 失败、GRU/CfC endpoint 不一致、没有 held-out calibration/dev、recursive-age 字段无效，以及正常 SeqTrack 参考来自不同 commit/config。因此本报告不支持涨分、SOTA、CfC 优越或完整 calibration 成功的论文声明。"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 9. 仍需回答的问题\n\n- B0 的第一次梯度已经不同，还是梯度相同但 Adam 多参数组更新不同？\n- `recursive_age_valid` 是在 online validation 状态构造、batch contract 还是 CSV 导出阶段丢失？\n- held-out parallel/perpendicular log-scale 校准后，coverage95 与 ECE 能否同时过门槛，并且 calibrated NLL 胜过 fixed sigma？\n- B0 prefix gate 通过后，GRU 的小幅 tracking 正差是否仍然存在？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-26T00:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "gru_final_success_delta_b0": 1.3566722869873047,
+          "gru_mean_delta_cv_m": -0.2083957368469136,
+          "gru_coverage95": 0.8271077908217717,
+          "b0_prefix_gate": "FAIL",
+          "overall_verdict": "部分成功，尚未达到论文实验晋升门槛"
+        }
+      ],
+      "tracking_curve": [
+        {
+          "arm": "B0",
+          "epoch": 5,
+          "global_step": 6310,
+          "success": 20.791030883789062,
+          "precision": 20.57549476623535,
+          "runtime_fps": 54.68368911743164,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 29.259300231933594,
+          "precision": 30.375274658203125,
+          "runtime_fps": 54.05585479736328,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 15,
+          "global_step": 18930,
+          "success": 26.8216609954834,
+          "precision": 31.937641143798828,
+          "runtime_fps": 53.96597671508789,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 32.92888259887695,
+          "precision": 34.81291198730469,
+          "runtime_fps": 53.98882293701172,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 25,
+          "global_step": 31550,
+          "success": 31.607223510742188,
+          "precision": 33.04267120361328,
+          "runtime_fps": 53.924320220947266,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 30.064552307128906,
+          "precision": 31.13129425048828,
+          "runtime_fps": 53.91227340698242,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 35,
+          "global_step": 44170,
+          "success": 30.931074142456055,
+          "precision": 31.566741943359375,
+          "runtime_fps": 53.853336334228516,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 30.261486053466797,
+          "precision": 32.18271255493164,
+          "runtime_fps": 53.728633880615234,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 45,
+          "global_step": 56790,
+          "success": 30.134572982788086,
+          "precision": 31.314002990722656,
+          "runtime_fps": 53.75538635253906,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B0",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 31.16302490234375,
+          "precision": 32.579872131347656,
+          "runtime_fps": 53.77107238769531,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B0",
+          "epoch": 55,
+          "global_step": 69410,
+          "success": 30.57659339904785,
+          "precision": 31.312910079956055,
+          "runtime_fps": 53.62302780151367,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B0",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 29.86980438232422,
+          "precision": 30.398250579833984,
+          "runtime_fps": 53.98516845703125,
+          "final": true,
+          "late3": true
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 5,
+          "global_step": 6310,
+          "success": 22.311817169189453,
+          "precision": 25.169584274291992,
+          "runtime_fps": 13.187671661376953,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 30.04266929626465,
+          "precision": 32.21006774902344,
+          "runtime_fps": 13.537952423095703,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 15,
+          "global_step": 18930,
+          "success": 28.661928176879883,
+          "precision": 30.843547821044922,
+          "runtime_fps": 14.692621231079102,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 23.445295333862305,
+          "precision": 22.838077545166016,
+          "runtime_fps": 14.798379898071289,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 25,
+          "global_step": 31550,
+          "success": 28.944202423095703,
+          "precision": 27.853389739990234,
+          "runtime_fps": 14.762164115905762,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 30.414661407470703,
+          "precision": 29.844642639160156,
+          "runtime_fps": 14.989988327026367,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 35,
+          "global_step": 44170,
+          "success": 31.471555709838867,
+          "precision": 31.497812271118164,
+          "runtime_fps": 15.325305938720703,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 30.96170425415039,
+          "precision": 31.527355194091797,
+          "runtime_fps": 15.278009414672852,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 45,
+          "global_step": 56790,
+          "success": 30.696941375732422,
+          "precision": 31.1487979888916,
+          "runtime_fps": 15.372563362121582,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 31.123634338378906,
+          "precision": 31.8512020111084,
+          "runtime_fps": 15.587692260742188,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 55,
+          "global_step": 69410,
+          "success": 30.942014694213867,
+          "precision": 31.857772827148438,
+          "runtime_fps": 15.725183486938477,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 31.226476669311523,
+          "precision": 32.286651611328125,
+          "runtime_fps": 15.67153263092041,
+          "final": true,
+          "late3": true
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 5,
+          "global_step": 6310,
+          "success": 21.727571487426758,
+          "precision": 22.729761123657227,
+          "runtime_fps": 19.193185806274414,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 20.576587677001953,
+          "precision": 19.984683990478516,
+          "runtime_fps": 18.317726135253906,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 15,
+          "global_step": 18930,
+          "success": 22.911378860473633,
+          "precision": 25.773521423339844,
+          "runtime_fps": 16.571422576904297,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 24.025165557861328,
+          "precision": 22.323850631713867,
+          "runtime_fps": 15.130701065063477,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 25,
+          "global_step": 31550,
+          "success": 25.828227996826172,
+          "precision": 23.892780303955078,
+          "runtime_fps": 15.127659797668457,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 28.17833709716797,
+          "precision": 26.632383346557617,
+          "runtime_fps": 14.566145896911621,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 35,
+          "global_step": 44170,
+          "success": 29.02297592163086,
+          "precision": 27.48358917236328,
+          "runtime_fps": 15.401385307312012,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 25.841354370117188,
+          "precision": 23.494531631469727,
+          "runtime_fps": 14.832141876220703,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 45,
+          "global_step": 56790,
+          "success": 26.353391647338867,
+          "precision": 24.640045166015625,
+          "runtime_fps": 15.35480785369873,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 26.867616653442383,
+          "precision": 25.05251693725586,
+          "runtime_fps": 14.91788101196289,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 55,
+          "global_step": 69410,
+          "success": 26.228662490844727,
+          "precision": 24.390592575073242,
+          "runtime_fps": 14.92009162902832,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 26.9135684967041,
+          "precision": 25.650983810424805,
+          "runtime_fps": 15.006781578063965,
+          "final": true,
+          "late3": true
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 5,
+          "global_step": 6310,
+          "success": 27.95952033996582,
+          "precision": 27.414661407470703,
+          "runtime_fps": 6.671866416931152,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 32.285560607910156,
+          "precision": 27.096281051635742,
+          "runtime_fps": 6.197785377502441,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 15,
+          "global_step": 18930,
+          "success": 46.90699768066406,
+          "precision": 63.28774642944336,
+          "runtime_fps": 6.124110698699951,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 38.95732879638672,
+          "precision": 54.008750915527344,
+          "runtime_fps": 5.729936599731445,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 25,
+          "global_step": 31550,
+          "success": 48.78227615356445,
+          "precision": 61.27899932861328,
+          "runtime_fps": 5.8537983894348145,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 51.926700592041016,
+          "precision": 65.42122650146484,
+          "runtime_fps": 5.6477532386779785,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 35,
+          "global_step": 44170,
+          "success": 44.8829345703125,
+          "precision": 44.891685485839844,
+          "runtime_fps": 5.518778324127197,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 49.65755081176758,
+          "precision": 59.56127166748047,
+          "runtime_fps": 5.632881164550781,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 45,
+          "global_step": 56790,
+          "success": 50.530635833740234,
+          "precision": 58.31947326660156,
+          "runtime_fps": 5.544663906097412,
+          "final": false,
+          "late3": false
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 46.898250579833984,
+          "precision": 51.073299407958984,
+          "runtime_fps": 5.390686511993408,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 55,
+          "global_step": 69410,
+          "success": 47.34245300292969,
+          "precision": 52.484683990478516,
+          "runtime_fps": 5.345188140869141,
+          "final": false,
+          "late3": true
+        },
+        {
+          "arm": "SeqTrack reference",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 51.001094818115234,
+          "precision": 60.892784118652344,
+          "runtime_fps": 5.340946674346924,
+          "final": true,
+          "late3": true
+        }
+      ],
+      "tracking_summary": [
+        {
+          "arm": "B0",
+          "comparison_role": "matched-current arm",
+          "final_success": 29.86980438232422,
+          "late3_success": 30.536474227905273,
+          "final_precision": 30.398250579833984,
+          "late3_precision": 31.430344263712566,
+          "final_runtime_fps": 53.98516845703125,
+          "validation_points": 12,
+          "final_success_vs_b0": 0.0,
+          "late3_success_vs_b0": 0.0,
+          "final_precision_vs_b0": 0.0,
+          "late3_precision_vs_b0": 0.0,
+          "final_success_vs_seqtrack": -21.131290435791016,
+          "late3_success_vs_seqtrack": -17.877458572387695,
+          "final_precision_vs_seqtrack": -30.49453353881836,
+          "late3_precision_vs_seqtrack": -23.38657824198405
+        },
+        {
+          "arm": "B1-GRU",
+          "comparison_role": "matched-current arm",
+          "final_success": 31.226476669311523,
+          "late3_success": 31.097375233968098,
+          "final_precision": 32.286651611328125,
+          "late3_precision": 31.998542149861652,
+          "final_runtime_fps": 15.67153263092041,
+          "validation_points": 12,
+          "final_success_vs_b0": 1.3566722869873047,
+          "late3_success_vs_b0": 0.5609010060628243,
+          "final_precision_vs_b0": 1.8884010314941406,
+          "late3_precision_vs_b0": 0.5681978861490862,
+          "final_success_vs_seqtrack": -19.77461814880371,
+          "late3_success_vs_seqtrack": -17.31655756632487,
+          "final_precision_vs_seqtrack": -28.60613250732422,
+          "late3_precision_vs_seqtrack": -22.818380355834964
+        },
+        {
+          "arm": "B1-CfC",
+          "comparison_role": "matched-current arm",
+          "final_success": 26.9135684967041,
+          "late3_success": 26.669949213663738,
+          "final_precision": 25.650983810424805,
+          "late3_precision": 25.03136444091797,
+          "final_runtime_fps": 15.006781578063965,
+          "validation_points": 12,
+          "final_success_vs_b0": -2.956235885620117,
+          "late3_success_vs_b0": -3.8665250142415353,
+          "final_precision_vs_b0": -4.74726676940918,
+          "late3_precision_vs_b0": -6.3989798227945975,
+          "final_success_vs_seqtrack": -24.087526321411133,
+          "late3_success_vs_seqtrack": -21.74398358662923,
+          "final_precision_vs_seqtrack": -35.24180030822754,
+          "late3_precision_vs_seqtrack": -29.785558064778648
+        },
+        {
+          "arm": "SeqTrack reference",
+          "comparison_role": "historical descriptive reference",
+          "final_success": 51.001094818115234,
+          "late3_success": 48.41393280029297,
+          "final_precision": 60.892784118652344,
+          "late3_precision": 54.81692250569662,
+          "final_runtime_fps": 5.340946674346924,
+          "validation_points": 12,
+          "final_success_vs_b0": 21.131290435791016,
+          "late3_success_vs_b0": 17.877458572387695,
+          "final_precision_vs_b0": 30.49453353881836,
+          "late3_precision_vs_b0": 23.38657824198405,
+          "final_success_vs_seqtrack": 0.0,
+          "late3_success_vs_seqtrack": 0.0,
+          "final_precision_vs_seqtrack": 0.0,
+          "late3_precision_vs_seqtrack": 0.0
+        }
+      ],
+      "b1_diagnostics": [
+        {
+          "arm": "B1-GRU",
+          "csv_rows": 1956,
+          "valid_rows": 1874,
+          "learned_rmse": 9.525545757485297,
+          "cv_rmse": 9.73394149433221,
+          "learned_minus_cv_rmse": -0.2083957368469136,
+          "relative_mse_improvement": 0.042360013302189525,
+          "paired_ci_low": -0.2512868807067157,
+          "paired_ci_high": -0.17138236989431113,
+          "paired_ci_pass": true,
+          "tracklets": 98,
+          "help_rate": 0.6104589114194237,
+          "nll": 8.101885910371717,
+          "coverage_50": 0.6547491995731056,
+          "coverage_80": 0.7529348986125933,
+          "coverage_95": 0.8271077908217717,
+          "coverage_ece": 0.10823550337958021,
+          "coverage_gate_pass": false,
+          "top1pct_nll_share": 0.32810432209992946,
+          "recoverable_saturation_rate": 0.0,
+          "tail_axis_fraction": 0.5032017075773746,
+          "sigma_parallel_p50": 5.5991175174713135,
+          "sigma_perpendicular_p50": 2.598167657852173,
+          "residual_parallel_p50": -0.7147141695022583,
+          "residual_perpendicular_p50": 0.0022018293384462595,
+          "recursive_age_valid_rows": 0
+        },
+        {
+          "arm": "B1-CfC",
+          "csv_rows": 1940,
+          "valid_rows": 1858,
+          "learned_rmse": 9.79921829484909,
+          "cv_rmse": 10.168516939883915,
+          "learned_minus_cv_rmse": -0.36929864503482435,
+          "relative_mse_improvement": 0.07131670848118721,
+          "paired_ci_low": -0.4308399060426763,
+          "paired_ci_high": -0.3176030450807306,
+          "paired_ci_pass": true,
+          "tracklets": 98,
+          "help_rate": 0.6264800861141012,
+          "nll": 7.892812780812251,
+          "coverage_50": 0.5909580193756727,
+          "coverage_80": 0.7082884822389667,
+          "coverage_95": 0.7890204520990313,
+          "coverage_ece": 0.11454969501255825,
+          "coverage_gate_pass": false,
+          "top1pct_nll_share": 0.25925221302728285,
+          "recoverable_saturation_rate": 0.0,
+          "tail_axis_fraction": 0.4760495156081808,
+          "sigma_parallel_p50": 5.819955110549927,
+          "sigma_perpendicular_p50": 1.978714406490326,
+          "residual_parallel_p50": -0.8195251524448395,
+          "residual_perpendicular_p50": 0.006776829715818167,
+          "recursive_age_valid_rows": 0
+        }
+      ],
+      "b1_rmse_chart": [
+        {
+          "arm": "B1-GRU",
+          "metric": "Learned",
+          "rmse": 9.525545757485297
+        },
+        {
+          "arm": "B1-GRU",
+          "metric": "CV",
+          "rmse": 9.73394149433221
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "Learned",
+          "rmse": 9.79921829484909
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "CV",
+          "rmse": 10.168516939883915
+        }
+      ],
+      "coverage_curve": [
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.1,
+          "observed": 0.41782283884738525
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.2,
+          "observed": 0.5080042689434365
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.3,
+          "observed": 0.5773745997865528
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.4,
+          "observed": 0.6184631803628602
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.5,
+          "observed": 0.6547491995731056
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.6,
+          "observed": 0.6787620064034151
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.7,
+          "observed": 0.7171824973319103
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.8,
+          "observed": 0.7529348986125933
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.9,
+          "observed": 0.7977588046958378
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.95,
+          "observed": 0.8271077908217717
+        },
+        {
+          "arm": "B1-GRU",
+          "nominal": 0.99,
+          "observed": 0.8612593383137673
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.1,
+          "observed": 0.34822389666307857
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.2,
+          "observed": 0.4327233584499462
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.3,
+          "observed": 0.5005382131324004
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.4,
+          "observed": 0.5548977395048439
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.5,
+          "observed": 0.5909580193756727
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.6,
+          "observed": 0.6297093649085038
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.7,
+          "observed": 0.673842841765339
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.8,
+          "observed": 0.7082884822389667
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.9,
+          "observed": 0.7588805166846071
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.95,
+          "observed": 0.7890204520990313
+        },
+        {
+          "arm": "B1-CfC",
+          "nominal": 0.99,
+          "observed": 0.8396124865446717
+        }
+      ],
+      "training_epoch60": [
+        {
+          "arm": "B1-GRU",
+          "main_learned": 3.1607759060434333,
+          "main_cv": 3.4580683389180145,
+          "gap2_learned": 6.747006890219702,
+          "gap2_cv": 7.512072657195615,
+          "gap4_learned": 10.910547457950216,
+          "gap4_cv": 11.133266877120649,
+          "coverage_95": 0.8282765004556504,
+          "coverage_ece": 0.153560109436512,
+          "sigma_parallel": 3.923489687028625,
+          "sigma_perpendicular": 2.1081645287258524,
+          "saturation": 0.0,
+          "tail_axis_fraction": 0.3692829018467469
+        },
+        {
+          "arm": "B1-CfC",
+          "main_learned": 3.21242785845564,
+          "main_cv": 3.6782023906707764,
+          "gap2_learned": 7.187637843996146,
+          "gap2_cv": 8.177970466479449,
+          "gap4_learned": 11.442090969130467,
+          "gap4_cv": 11.916185720425815,
+          "coverage_95": 0.8320790159870202,
+          "coverage_ece": 0.14773420062563228,
+          "sigma_parallel": 3.7561175341897166,
+          "sigma_perpendicular": 1.7884518786775114,
+          "saturation": 0.0,
+          "tail_axis_fraction": 0.37838355259436396
+        }
+      ],
+      "training_gap_chart": [
+        {
+          "backend_gap": "GRU main",
+          "metric": "Learned",
+          "rmse": 3.1607759060434333
+        },
+        {
+          "backend_gap": "GRU main",
+          "metric": "CV",
+          "rmse": 3.4580683389180145
+        },
+        {
+          "backend_gap": "GRU gap2",
+          "metric": "Learned",
+          "rmse": 6.747006890219702
+        },
+        {
+          "backend_gap": "GRU gap2",
+          "metric": "CV",
+          "rmse": 7.512072657195615
+        },
+        {
+          "backend_gap": "GRU gap4",
+          "metric": "Learned",
+          "rmse": 10.910547457950216
+        },
+        {
+          "backend_gap": "GRU gap4",
+          "metric": "CV",
+          "rmse": 11.133266877120649
+        },
+        {
+          "backend_gap": "CfC main",
+          "metric": "Learned",
+          "rmse": 3.21242785845564
+        },
+        {
+          "backend_gap": "CfC main",
+          "metric": "CV",
+          "rmse": 3.6782023906707764
+        },
+        {
+          "backend_gap": "CfC gap2",
+          "metric": "Learned",
+          "rmse": 7.187637843996146
+        },
+        {
+          "backend_gap": "CfC gap2",
+          "metric": "CV",
+          "rmse": 8.177970466479449
+        },
+        {
+          "backend_gap": "CfC gap4",
+          "metric": "Learned",
+          "rmse": 11.442090969130467
+        },
+        {
+          "backend_gap": "CfC gap4",
+          "metric": "CV",
+          "rmse": 11.916185720425815
+        }
+      ],
+      "audit_rows": [
+        {
+          "arm": "B0",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "cf88c167bc9f",
+          "step100_hash": "8ad897189b1c",
+          "adam_initial_hash": "57063755cb70",
+          "adam_step1_hash": "2f43e623ca93",
+          "adam_step100_hash": "645986618985",
+          "optimizer_groups": "b0",
+          "frozen_parameters": 0,
+          "b0_max_grad": 452.61834716796875,
+          "b1_max_grad": 0.0,
+          "fingerprints": 100
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "dd94b82cc057",
+          "step100_hash": "f80896e17890",
+          "adam_initial_hash": "57063755cb70",
+          "adam_step1_hash": "ce43b7de4f6e",
+          "adam_step100_hash": "8bbad357ed70",
+          "optimizer_groups": "b0, b1",
+          "frozen_parameters": 0,
+          "b0_max_grad": 511.12762451171875,
+          "b1_max_grad": 27.69318199157715,
+          "fingerprints": 100
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 60,
+          "global_step": 75720,
+          "initial_hash": "798a8def3e82",
+          "step1_hash": "20294475fc7e",
+          "step100_hash": "dc54d041acc6",
+          "adam_initial_hash": "57063755cb70",
+          "adam_step1_hash": "283ab978552e",
+          "adam_step100_hash": "74543698a41e",
+          "optimizer_groups": "b0, b1",
+          "frozen_parameters": 0,
+          "b0_max_grad": 642.1624145507812,
+          "b1_max_grad": 40.31105422973633,
+          "fingerprints": 100
+        }
+      ],
+      "gate_status": [
+        {
+          "gate": "Run integrity",
+          "criterion": "同 commit/data/seed/cadence，scratch，所有启用模块有梯度且无冻结",
+          "observed": "PASS；三组 epoch60/global_step75720，B0/B1 optimizer groups 均参与",
+          "verdict": "PASS"
+        },
+        {
+          "gate": "B0 matched-prefix",
+          "criterion": "initial、step1、step100 B0 参数与 Adam 状态跨臂一致",
+          "observed": "仅 initial 一致；step1 起参数与 Adam hash 均分叉",
+          "verdict": "FAIL"
+        },
+        {
+          "gate": "Mean residual",
+          "criterion": "learned−CV tracklet bootstrap 95% CI 上界 < 0",
+          "observed": "GRU -0.208 m, CI [-0.251, -0.171]；CfC -0.369 m, CI [-0.431, -0.318]",
+          "verdict": "PASS"
+        },
+        {
+          "gate": "Sigma/coverage",
+          "criterion": "独立校准后 ECE≤5%、coverage95≥90%、NLL 优于 fixed sigma",
+          "observed": "raw GRU ECE 10.8%/C95 82.7%；raw CfC ECE 11.5%/C95 78.9%；无 calibration/dev artifact",
+          "verdict": "NOT PASSED"
+        },
+        {
+          "gate": "Long-tail supervision",
+          "criterion": "gap2/gap4 有效训练，并可按真实 recursive_age 分层验收",
+          "observed": "gap2/gap4 epoch60 learned RMSE 均优于 CV；验证 CSV 的 age-valid 行为 0",
+          "verdict": "PARTIAL"
+        },
+        {
+          "gate": "CfC promotion",
+          "criterion": "相同 endpoint 的 CfC−GRU RMSE CI<0，且 NLL/coverage 不劣",
+          "observed": "endpoint 集不一致（GRU 1956 / CfC 1940），且 B0 step1 分叉",
+          "verdict": "FAIL / KEEP GRU"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_b1_repair_20260826",
+      "label": "三组 v25 B1 修复实验与 SeqTrack 历史参考的可复核快照",
+      "path": "artifacts/ct_checks/reports/20260826_b1_repair_results/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b1_repair_20260826'",
+        "tablesUsed": [
+          "report_snapshot"
+        ]
+      }
+    }
+  ]
+}

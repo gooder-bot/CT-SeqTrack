@@ -29,6 +29,9 @@ from tools.report_ct_b2 import (
     acquisition_stage,
     build_acquisition_metrics,
     build_metrics,
+    build_reference_comparison,
+    COUNTERFACTUAL_ARMS,
+    COUNTERFACTUAL_METRICS,
     success_auc,
 )
 
@@ -456,3 +459,227 @@ def test_b2_acquisition_report_requires_expansion_count():
     }
     with pytest.raises(ValueError, match="expansion_target_count"):
         build_acquisition_metrics([row])
+
+
+def _v2_acquisition_row(
+        frame_id, *, global_label=1, global_exact=None, base_raw=0,
+        base_sampled=0, support_xy=0, support_xyz=0, pool=0, sampled=0,
+        endpoint_target=0, tube_target=0, pool_source="endpoint_only",
+        sampled_source="endpoint_only", cf_overrides=None,
+        tracklet_key="scene/token"):
+    global_exact = global_label if global_exact is None else global_exact
+    row = {
+        "partition": "dev",
+        "candidate_id": 0,
+        "tracklet_id": 0,
+        "tracklet_key": tracklet_key,
+        "frame_id": frame_id,
+        "acquisition_schema_version": 2,
+        "global_target_count_exact": global_exact,
+        "global_target_count_label": global_label,
+        "global_raw_point_count": max(global_label + 20, 20),
+        "base_target_count": base_raw,
+        "base_raw_target_count": base_raw,
+        "base_sampled_target_count": base_sampled,
+        "base_raw_point_count": base_raw + 4,
+        "base_sampled_point_count": base_sampled + 4,
+        "endpoint_raw_target_count": endpoint_target,
+        "tube_raw_target_count": tube_target,
+        "endpoint_raw_point_count": endpoint_target + 4,
+        "tube_raw_point_count": tube_target + 4,
+        "support_union_target_count": support_xyz,
+        "support_union_raw_point_count": support_xyz + 5,
+        "support_union_background_count": 5,
+        "support_xy_target_count": support_xy,
+        "support_xyz_target_count": support_xyz,
+        "support_z_clip_target_count": support_xy - support_xyz,
+        "endpoint_target_center_inside_xy": int(endpoint_target > 0),
+        "endpoint_target_center_inside_xyz": int(endpoint_target > 0),
+        "tube_target_center_inside_xy": int(tube_target > 0),
+        "tube_target_center_inside_xyz": int(tube_target > 0),
+        "active_endpoint_error_xy": 1.0,
+        "active_endpoint_error_z": 0.25,
+        "active_tube_error_xy": 0.5,
+        "active_tube_error_z": 0.25,
+        "active_prior_source": "b1",
+        "active_support_truncated": 0,
+        "active_endpoint_width": 4.0,
+        "active_endpoint_length": 8.0,
+        "active_endpoint_height": 2.0,
+        "active_tube_width": 4.0,
+        "active_tube_length": 10.0,
+        "active_tube_height": 2.0,
+        "expansion_target_count": support_xyz,
+        "pool_target_count": pool,
+        "sampled_target_count": sampled,
+        "extension_pool_count": pool + 3,
+        "sampled_count": sampled + 2,
+        "pool_background_count": 3,
+        "sampled_background_count": 2,
+        "learned_motion_error": 1.0,
+        "kinematic_error": 1.5,
+        "learned_error_parallel": 0.75,
+        "learned_error_perpendicular": -0.25,
+        "learned_cv_disagreement": 0.5,
+        "b1_valid": 1,
+        "b1_nll": 1.0,
+        "b1_mahalanobis_sq": 1.0,
+        "b1_coverage_50": 1,
+        "b1_coverage_80": 1,
+        "b1_coverage_95": 1,
+        "sigma_parallel": 1.0,
+        "sigma_perpendicular": 0.5,
+        "query_delta_t": 0.5,
+        "gap_ratio": 1.0,
+        "support_actual_length": 10.0,
+        "support_actual_width": 4.0,
+        "support_volume": 80.0,
+        "recursive_age": -1,
+        "recursive_age_valid": 0,
+        "search_geometry_source_id": 1,
+    }
+    for prefix, total, source in (
+            ("pool", pool, pool_source),
+            ("sampled", sampled, sampled_source)):
+        for name in ("endpoint_only", "tube_only", "overlap"):
+            row[f"{prefix}_{name}_target_count"] = (
+                total if name == source else 0)
+    for arm in COUNTERFACTUAL_ARMS:
+        xyz = support_xyz
+        xy = max(support_xy, xyz)
+        row.update({
+            f"cf_{arm}_valid": 1,
+            f"cf_{arm}_xy_target_count": xy,
+            f"cf_{arm}_xyz_target_count": xyz,
+            f"cf_{arm}_target_bearing": int(xyz > 0),
+            f"cf_{arm}_raw_point_count": xyz + 5,
+            f"cf_{arm}_background_count": 5,
+            f"cf_{arm}_support_volume": 100.0,
+            f"cf_{arm}_truncated": 0,
+            f"cf_{arm}_endpoint_error_xy": 1.0,
+            f"cf_{arm}_endpoint_error_z": 0.25,
+        })
+    for key, value in (cf_overrides or {}).items():
+        row[key] = value
+    for arm in COUNTERFACTUAL_ARMS:
+        xyz_key = f"cf_{arm}_xyz_target_count"
+        row[f"cf_{arm}_target_bearing"] = int(row[xyz_key] > 0)
+        row[f"cf_{arm}_raw_point_count"] = row[xyz_key] + 5
+        row[f"cf_{arm}_background_count"] = 5
+    return row
+
+
+def test_b2_v2_report_separates_observability_geometry_and_sampling():
+    rows = [
+        _v2_acquisition_row(1, global_label=0, global_exact=0),
+        _v2_acquisition_row(2, support_xy=0, support_xyz=0,
+                            global_exact=0),
+        _v2_acquisition_row(3, support_xy=1, support_xyz=0,
+                            cf_overrides={
+                                "cf_learned_2_1_z05_xyz_target_count": 1,
+                                "cf_learned_2_1_z10_xyz_target_count": 1,
+                            }),
+        _v2_acquisition_row(4, support_xy=1, support_xyz=1,
+                            endpoint_target=1),
+        _v2_acquisition_row(5, support_xy=1, support_xyz=1,
+                            endpoint_target=0, tube_target=1, pool=1,
+                            sampled=0, pool_source="tube_only"),
+        _v2_acquisition_row(6, support_xy=1, support_xyz=1,
+                            endpoint_target=1, tube_target=1, pool=1,
+                            sampled=1, pool_source="overlap",
+                            sampled_source="overlap"),
+    ]
+    metrics = build_acquisition_metrics(rows)
+    assert metrics["acquisition_schema_version"] == 2
+    assert metrics["observability"] == {
+        "rows": 6,
+        "exact_visible_rows": 4,
+        "label_visible_rows": 5,
+        "sensor_unobservable_rows": 1,
+        "boundary_only_rows": 1,
+        "label_visible_rate": pytest.approx(5 / 6),
+    }
+    funnel = metrics["observable_strict_funnel"]
+    assert funnel["rows"] == 5
+    assert funnel["xy_miss_rows"] == 1
+    assert funnel["z_clip_miss_rows"] == 1
+    assert funnel["xyz_geometry_miss_rows"] == 2
+    assert funnel["no_novel_target_rows"] == 1
+    assert funnel["sampling_loss_rows"] == 1
+    assert funnel["retained_rows"] == 1
+    complementarity = metrics["branch_complementarity"]
+    assert complementarity["endpoint_only_rows"] == 1
+    assert complementarity["tube_only_rows"] == 1
+    assert complementarity["both_rows"] == 1
+    assert complementarity["neither_rows"] == 2
+    assert complementarity["union_recall"] == pytest.approx(3 / 5)
+    z05 = metrics["counterfactual_geometry"]["learned_2_1_z05"]
+    assert z05["target_bearing_recall"] == pytest.approx(4 / 5)
+    assert z05["newly_recovered_vs_current_rows"] == 1
+    assert metrics["strata"]["recursive_age"] is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        (lambda row: row.pop("global_target_count_label"), "lacks fields"),
+        (lambda row: row.update({"support_xy_target_count": float("nan")}),
+         "non-finite"),
+        (lambda row: row.update({"pool_overlap_target_count": 1}),
+         "do not sum"),
+        (lambda row: row.update({
+            "cf_learned_3_1p5_z0_xyz_target_count": 0,
+            "cf_learned_3_1p5_z0_target_bearing": 0,
+            "cf_learned_3_1p5_z0_raw_point_count": 5,
+            "cf_learned_3_1p5_z0_background_count": 5}),
+         "not monotonic"),
+    ],
+)
+def test_b2_v2_report_fails_closed_on_invalid_rows(mutation, match):
+    row = _v2_acquisition_row(
+        1, support_xy=1, support_xyz=1, endpoint_target=1,
+        pool=1, sampled=1)
+    mutation(row)
+    with pytest.raises(ValueError, match=match):
+        build_acquisition_metrics([row])
+
+
+def test_b2_v2_report_rejects_mixed_schema_and_duplicate_stable_keys():
+    row = _v2_acquisition_row(1)
+    legacy = {
+        "partition": "dev", "candidate_id": 0,
+        "tracklet_id": 0, "frame_id": 2,
+        "base_target_count": 0, "expansion_target_count": 0,
+        "pool_target_count": 0, "sampled_target_count": 0,
+    }
+    with pytest.raises(ValueError, match="mixed acquisition schemas"):
+        build_acquisition_metrics([row, legacy])
+    missing_schema = dict(row)
+    missing_schema.pop("acquisition_schema_version")
+    with pytest.raises(ValueError, match="without a complete schema"):
+        build_acquisition_metrics([missing_schema])
+    duplicate = dict(row, tracklet_id=99)
+    with pytest.raises(ValueError, match="duplicate"):
+        build_acquisition_metrics([row, duplicate])
+
+
+def test_b2_v2_reference_comparison_reports_unpaired_keys():
+    primary = [
+        _v2_acquisition_row(1),
+        _v2_acquisition_row(2),
+    ]
+    reference = [
+        _v2_acquisition_row(2),
+        _v2_acquisition_row(3),
+    ]
+    comparison = build_reference_comparison(primary, reference)
+    assert comparison["paired_rows"] == 1
+    assert not comparison["row_sets_identical"]
+    assert comparison["primary_intersection_coverage"] == 0.5
+    assert comparison["reference_intersection_coverage"] == 0.5
+    assert comparison["missing_in_primary"] == [{
+        "tracklet_key": "scene/token", "frame_id": 3,
+        "candidate_id": 0}]
+    assert comparison["missing_in_reference"] == [{
+        "tracklet_key": "scene/token", "frame_id": 1,
+        "candidate_id": 0}]
