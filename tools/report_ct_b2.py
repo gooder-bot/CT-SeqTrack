@@ -62,9 +62,7 @@ def as_float(row, key):
     return value
 
 
-def build_metrics(
-        rows, raw_success, observation_success, margin=0.05,
-        action_epsilon=1e-8):
+def _validated_primary_rows(rows):
     if any("partition" not in row or "candidate_id" not in row
            or "tracklet_id" not in row or "frame_id" not in row
            for row in rows):
@@ -81,10 +79,125 @@ def build_metrics(
     if len(row_keys) != len(set(row_keys)):
         raise ValueError("B2 diagnostics contain duplicate rows")
     for row in rows:
+        base_count = as_float(row, "base_target_count")
+        expansion_count = as_float(row, "expansion_target_count")
         pool_count = as_float(row, "pool_target_count")
         sampled_count = as_float(row, "sampled_target_count")
-        if pool_count < 0 or sampled_count < 0 or sampled_count > pool_count:
-            raise ValueError("B2 diagnostics have invalid target counts")
+        if not (0.0 <= sampled_count <= pool_count <= expansion_count):
+            raise ValueError(
+                "B2 diagnostics require 0 <= sampled_target_count <= "
+                "pool_target_count <= expansion_target_count")
+        if base_count < 0.0:
+            raise ValueError("B2 diagnostics have negative base target count")
+    if not rows:
+        raise ValueError("B2 report population has no dev candidate0 rows")
+    return list(rows)
+
+
+def acquisition_stage(row, weak_base_limit=2.0):
+    base_count = as_float(row, "base_target_count")
+    expansion_count = as_float(row, "expansion_target_count")
+    pool_count = as_float(row, "pool_target_count")
+    sampled_count = as_float(row, "sampled_target_count")
+    if base_count > float(weak_base_limit):
+        return "base_sufficient"
+    if expansion_count <= 0.0:
+        return "geometry_miss"
+    if pool_count <= 0.0:
+        return "no_novel_target"
+    if sampled_count <= 0.0:
+        return "sampling_loss"
+    return "retained"
+
+
+def _ratio(numerator, denominator):
+    return numerator / denominator if denominator else None
+
+
+def _summarize_recovery_population(rows, name, definition):
+    support_rows = [
+        row for row in rows
+        if as_float(row, "expansion_target_count") > 0.0]
+    pool_rows = [
+        row for row in support_rows
+        if as_float(row, "pool_target_count") > 0.0]
+    sampled_rows = [
+        row for row in pool_rows
+        if as_float(row, "sampled_target_count") > 0.0]
+    pool_target_sum = sum(
+        as_float(row, "pool_target_count") for row in pool_rows)
+    sampled_target_sum = sum(
+        as_float(row, "sampled_target_count") for row in pool_rows)
+    return {
+        "name": name,
+        "definition": definition,
+        "rows": len(rows),
+        "geometry_miss_rows": len(rows) - len(support_rows),
+        "no_novel_target_rows": len(support_rows) - len(pool_rows),
+        "sampling_loss_rows": len(pool_rows) - len(sampled_rows),
+        "retained_rows": len(sampled_rows),
+        "support_row_recall": _ratio(len(support_rows), len(rows)),
+        "pool_row_recall": _ratio(len(pool_rows), len(support_rows)),
+        "sampling_row_recall": _ratio(
+            len(sampled_rows), len(pool_rows)),
+        "sampling_point_recall": _ratio(
+            sampled_target_sum, pool_target_sum),
+        "end_to_end_row_retention": _ratio(
+            len(sampled_rows), len(rows)),
+    }
+
+
+def _build_acquisition_metrics(primary):
+    eligible = [
+        row for row in primary
+        if as_float(row, "pool_target_count") > 0.0]
+    retained = [
+        row for row in eligible
+        if as_float(row, "sampled_target_count") > 0.0]
+    pool_sum = sum(
+        as_float(row, "pool_target_count") for row in eligible)
+    sampled_sum = sum(
+        as_float(row, "sampled_target_count") for row in eligible)
+    stages = {
+        name: 0 for name in (
+            "base_sufficient", "geometry_miss", "no_novel_target",
+            "sampling_loss", "retained")}
+    for row in primary:
+        stages[acquisition_stage(row)] += 1
+    weak_rows = [
+        row for row in primary
+        if as_float(row, "base_target_count") <= 2.0]
+    strict_rows = [
+        row for row in primary
+        if as_float(row, "base_target_count") == 0.0]
+    return {
+        "population": "dev_candidate0",
+        "diagnostic_rows": len(primary),
+        "diagnostic_tracklets": len({
+            int(float(row["tracklet_id"])) for row in primary}),
+        "acquisition_stage_counts": stages,
+        "acquisition_weak_recovery": _summarize_recovery_population(
+            weak_rows, "weak_recovery", "base_target_count <= 2"),
+        "acquisition_strict_miss": _summarize_recovery_population(
+            strict_rows, "strict_miss", "base_target_count == 0"),
+        # Preserve the original pool-to-sample summary for downstream users.
+        "acquisition_eligible_rows": len(eligible),
+        "acquisition_retained_rows": len(retained),
+        "acquisition_row_recall": _ratio(len(retained), len(eligible)),
+        "acquisition_point_recall": _ratio(sampled_sum, pool_sum),
+    }
+
+
+def build_acquisition_metrics(rows):
+    return _build_acquisition_metrics(_validated_primary_rows(rows))
+
+
+def build_metrics(
+        rows, raw_success, observation_success, margin=0.05,
+        action_epsilon=1e-8):
+    primary = _validated_primary_rows(rows)
+    acquisition_metrics = _build_acquisition_metrics(primary)
+    for row in primary:
         if as_float(row, "observation_error") < 0 or as_float(
                 row, "raw_search_error") < 0:
             raise ValueError("B2 diagnostics have negative errors")
@@ -95,20 +208,6 @@ def build_metrics(
         for key in ("observation_iou", "raw_search_iou", "selective_iou"):
             if not 0.0 <= as_float(row, key) <= 1.0:
                 raise ValueError(f"{key} must be in [0, 1]")
-    primary = [row for row in rows
-               if str(row["partition"]) == "dev"
-               and int(float(row["candidate_id"])) == 0]
-    if not primary:
-        raise ValueError("B2 report population has no dev candidate0 rows")
-    eligible = [row for row in primary
-                if as_float(row, "pool_target_count") > 0]
-    if not eligible:
-        raise RuntimeError("B2 report has zero eligible acquisition rows")
-    retained = [row for row in eligible
-                if as_float(row, "sampled_target_count") > 0]
-    pool_sum = sum(as_float(row, "pool_target_count") for row in eligible)
-    sampled_sum = sum(
-        as_float(row, "sampled_target_count") for row in eligible)
     raw_actions = [row for row in primary
                    if bool(int(as_float(row, "search_valid")))
                    and abs(as_float(row, "raw_search_error")
@@ -155,14 +254,7 @@ def build_metrics(
         raise ValueError(
             "--observation-success does not match candidate diagnostics")
     return {
-        "population": "dev_candidate0",
-        "diagnostic_rows": len(primary),
-        "diagnostic_tracklets": tracklet_count,
-        "acquisition_eligible_rows": len(eligible),
-        "acquisition_retained_rows": len(retained),
-        "acquisition_row_recall": len(retained) / len(eligible),
-        "acquisition_point_recall": (
-            sampled_sum / pool_sum if pool_sum > 0 else None),
+        **acquisition_metrics,
         "raw_action_count": action_count,
         "raw_action_rate": action_count / len(primary),
         "raw_helpful_precision": (
@@ -199,10 +291,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-diagnostics", nargs="+", required=True)
     parser.add_argument("--checkpoint", required=True,
-                        help="selected real-memory B2 checkpoint")
-    parser.add_argument("--raw-search-success", type=float, required=True)
-    parser.add_argument("--observation-success", type=float, required=True)
+                        help="source B1/B2 evaluation checkpoint")
+    parser.add_argument("--raw-search-success", type=float)
+    parser.add_argument("--observation-success", type=float)
     parser.add_argument("--help-margin", type=float, default=0.05)
+    parser.add_argument(
+        "--acquisition-only", action="store_true",
+        help="report support/pool/sample retention without B2 predictions")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     output = Path(args.output).resolve()
@@ -218,13 +313,25 @@ def main():
         raise ValueError(
             "candidate diagnostics do not match the selected checkpoint "
             f"epoch {selected_epoch}: observed {sorted(diagnostic_epochs)}")
-    metrics = build_metrics(
-        rows,
-        args.raw_search_success, args.observation_success,
-        margin=args.help_margin)
+    if args.acquisition_only:
+        metrics = build_acquisition_metrics(rows)
+    else:
+        missing = [
+            name for name, value in (
+                ("--raw-search-success", args.raw_search_success),
+                ("--observation-success", args.observation_success))
+            if value is None]
+        if missing:
+            parser.error(
+                "full B2 reporting requires " + ", ".join(missing))
+        metrics = build_metrics(
+            rows,
+            args.raw_search_success, args.observation_success,
+            margin=args.help_margin)
     metrics.update({
         "source_checkpoint_sha256": sha256_file(args.checkpoint),
         "source_checkpoint_epoch": selected_epoch,
+        "acquisition_only": bool(args.acquisition_only),
         "candidate_diagnostics_sha256": [
             sha256_file(path) for path in args.candidate_diagnostics],
     })

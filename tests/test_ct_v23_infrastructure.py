@@ -25,7 +25,12 @@ from utils.training_isolation import (
     partition_candidate_view_items,
     update_cumulative_binary_class_balance,
 )
-from tools.report_ct_b2 import build_metrics, success_auc
+from tools.report_ct_b2 import (
+    acquisition_stage,
+    build_acquisition_metrics,
+    build_metrics,
+    success_auc,
+)
 
 
 def base_config():
@@ -336,6 +341,7 @@ def test_b2_report_requires_explicit_unique_dev_candidate0_rows():
     row = {
         "partition": "dev", "candidate_id": 0,
         "tracklet_id": 0, "frame_id": 1,
+        "base_target_count": 0, "expansion_target_count": 3,
         "pool_target_count": 2, "sampled_target_count": 1,
         "search_valid": 1, "observation_error": 1.0,
         "raw_search_error": 0.5,
@@ -357,3 +363,96 @@ def test_b2_report_requires_explicit_unique_dev_candidate0_rows():
         build_metrics(
             [row, dict(row)], raw_success, observation_success,
             )
+
+
+def test_b2_acquisition_report_localizes_every_funnel_stage():
+    def row(frame_id, base, expansion, pool, sampled):
+        return {
+            "partition": "dev", "candidate_id": 0,
+            "tracklet_id": 0, "frame_id": frame_id,
+            "base_target_count": base,
+            "expansion_target_count": expansion,
+            "pool_target_count": pool,
+            "sampled_target_count": sampled,
+        }
+
+    rows = [
+        row(1, 5, 0, 0, 0),
+        row(2, 0, 0, 0, 0),
+        row(3, 0, 3, 0, 0),
+        row(4, 0, 3, 2, 0),
+        row(5, 0, 3, 2, 1),
+    ]
+    assert [acquisition_stage(item) for item in rows] == [
+        "base_sufficient", "geometry_miss", "no_novel_target",
+        "sampling_loss", "retained"]
+    metrics = build_acquisition_metrics(rows)
+    assert metrics["acquisition_stage_counts"] == {
+        "base_sufficient": 1,
+        "geometry_miss": 1,
+        "no_novel_target": 1,
+        "sampling_loss": 1,
+        "retained": 1,
+    }
+    weak = metrics["acquisition_weak_recovery"]
+    strict = metrics["acquisition_strict_miss"]
+    for key in (
+            "rows", "geometry_miss_rows", "no_novel_target_rows",
+            "sampling_loss_rows", "retained_rows", "support_row_recall",
+            "pool_row_recall", "sampling_row_recall",
+            "sampling_point_recall", "end_to_end_row_retention"):
+        assert weak[key] == strict[key]
+    assert weak["rows"] == 4
+    assert weak["support_row_recall"] == pytest.approx(0.75)
+    assert weak["pool_row_recall"] == pytest.approx(2 / 3)
+    assert weak["sampling_row_recall"] == pytest.approx(0.5)
+    assert weak["sampling_point_recall"] == pytest.approx(0.25)
+    assert weak["end_to_end_row_retention"] == pytest.approx(0.25)
+
+
+def test_b2_acquisition_report_uses_null_for_undefined_conditionals():
+    metrics = build_acquisition_metrics([{
+        "partition": "dev", "candidate_id": 0,
+        "tracklet_id": 0, "frame_id": 1,
+        "base_target_count": 0, "expansion_target_count": 0,
+        "pool_target_count": 0, "sampled_target_count": 0,
+    }])
+    weak = metrics["acquisition_weak_recovery"]
+    assert weak["support_row_recall"] == 0.0
+    assert weak["pool_row_recall"] is None
+    assert weak["sampling_row_recall"] is None
+    assert weak["sampling_point_recall"] is None
+    assert weak["end_to_end_row_retention"] == 0.0
+    assert metrics["acquisition_row_recall"] is None
+    assert metrics["acquisition_point_recall"] is None
+
+
+@pytest.mark.parametrize(
+    ("updates", "match"),
+    [
+        ({"base_target_count": -1}, "negative base target count"),
+        ({"expansion_target_count": 1, "pool_target_count": 2},
+         "0 <= sampled_target_count"),
+    ],
+)
+def test_b2_acquisition_report_rejects_invalid_counts(updates, match):
+    row = {
+        "partition": "dev", "candidate_id": 0,
+        "tracklet_id": 0, "frame_id": 1,
+        "base_target_count": 0, "expansion_target_count": 2,
+        "pool_target_count": 1, "sampled_target_count": 1,
+    }
+    row.update(updates)
+    with pytest.raises(ValueError, match=match):
+        build_acquisition_metrics([row])
+
+
+def test_b2_acquisition_report_requires_expansion_count():
+    row = {
+        "partition": "dev", "candidate_id": 0,
+        "tracklet_id": 0, "frame_id": 1,
+        "base_target_count": 0,
+        "pool_target_count": 1, "sampled_target_count": 1,
+    }
+    with pytest.raises(ValueError, match="expansion_target_count"):
+        build_acquisition_metrics([row])

@@ -587,8 +587,24 @@ class BaseModelMF(pl.LightningModule):
         return row
 
     def _build_ct_joint_diagnostic_row(
-            self, output, data_dict, this_box, reference_box, frame_id):
+            self, output, data_dict, this_box, reference_box, frame_id,
+            acquisition_diagnostics=None):
         """Export paper-facing joint-Full diagnostics; GT stays outside forward."""
+        if acquisition_diagnostics is None:
+            raise RuntimeError(
+                "joint B2 diagnostics require evaluation-only acquisition "
+                "counts")
+        required_acquisition_fields = (
+            "base_target_count", "expansion_target_count",
+            "pool_target_count", "sampled_target_count",
+            "extension_pool_count", "sampled_count")
+        missing_acquisition_fields = [
+            key for key in required_acquisition_fields
+            if key not in acquisition_diagnostics]
+        if missing_acquisition_fields:
+            raise RuntimeError(
+                "joint B2 acquisition diagnostics are missing: "
+                + ", ".join(missing_acquisition_fields))
         target_box = points_utils.transform_box(this_box, reference_box)
         target_xy = np.asarray(target_box.center[:2], dtype=np.float64)
 
@@ -742,22 +758,22 @@ class BaseModelMF(pl.LightningModule):
             "b2_version": "ct_joint_full",
             "candidate_id": int(self._proposal_scalar(
                 data_dict, "candidate_id", default=0.0)),
-            "base_target_count": self._proposal_scalar(
-                data_dict, "ct_acquisition_base_target_count"),
-            "pool_target_count": self._proposal_scalar(
-                data_dict,
-                "ct_acquisition_extension_pool_target_count"),
-            "sampled_target_count": self._proposal_scalar(
-                data_dict, "ct_acquisition_sampled_target_count"),
-            "extension_pool_count": self._proposal_scalar(
-                data_dict, "ct_acquisition_extension_pool_count"),
-            "sampled_count": self._proposal_scalar(
-                data_dict, "ct_acquisition_sampled_count"),
-            "target_in_support": int(self._proposal_scalar(
-                data_dict,
-                "ct_acquisition_extension_pool_target_count") > 0.0),
-            "current_target_points": self._proposal_scalar(
-                data_dict, "ct_acquisition_base_target_count"),
+            "base_target_count": int(
+                acquisition_diagnostics["base_target_count"]),
+            "expansion_target_count": int(
+                acquisition_diagnostics["expansion_target_count"]),
+            "pool_target_count": int(
+                acquisition_diagnostics["pool_target_count"]),
+            "sampled_target_count": int(
+                acquisition_diagnostics["sampled_target_count"]),
+            "extension_pool_count": int(
+                acquisition_diagnostics["extension_pool_count"]),
+            "sampled_count": int(
+                acquisition_diagnostics["sampled_count"]),
+            "target_in_support": int(
+                acquisition_diagnostics["expansion_target_count"] > 0),
+            "current_target_points": int(
+                acquisition_diagnostics["base_target_count"]),
             "recursive_age": self._proposal_scalar(
                 data_dict, "ct_recursive_state_age",
                 default=-1.0),
@@ -1154,6 +1170,12 @@ class BaseModelMF(pl.LightningModule):
                     sequence, frame_id, recursive_state.results_bbs,
                     recursive_state=recursive_state,
                     **build_kwargs)
+                acquisition_diagnostics = data_dict.pop(
+                    "_ct_acquisition_diagnostics", None)
+                if "_ct_acquisition_diagnostics" in data_dict:
+                    raise RuntimeError(
+                        "evaluation-only acquisition diagnostics leaked into "
+                        "the model input")
                 # run the tracker
                 if torch.sum(data_dict['points'][:,:,:3]) == 0:
                     results_bbs.append(ref_bb)
@@ -1205,6 +1227,8 @@ class BaseModelMF(pl.LightningModule):
                                 this_bb,
                                 ref_bb,
                                 frame_id,
+                                acquisition_diagnostics=
+                                acquisition_diagnostics,
                             ))
                     if (bool(getattr(
                             self.config, "export_b3_rollouts", False))
@@ -2019,6 +2043,9 @@ class MotionBaseModelMF(BaseModelMF):
                 )
         joint_extension_source = None
         joint_extension_sampling = None
+        extension_pool_points = np.empty(
+            (0, baseline_search_points.shape[1]),
+            dtype=baseline_search_points.dtype)
         if use_ct_joint_full and joint_contract_v3:
             joint_extension_seed = (
                 int(current_sampling_seed) * 22695477 + 1) & 0xFFFFFFFF
@@ -2035,7 +2062,8 @@ class MotionBaseModelMF(BaseModelMF):
                     self.config, 'ct_tube_quota', 128)),
                 seed=joint_extension_seed,
             )
-            joint_extension_sampling.pop('_pool_points', None)
+            extension_pool_points = joint_extension_sampling.pop(
+                '_pool_points', extension_pool_points)
             endpoint_quota = int(getattr(
                 self.config, 'ct_endpoint_quota', 128))
             search_v2_points = joint_extension_points[:endpoint_quota]
@@ -2049,6 +2077,40 @@ class MotionBaseModelMF(BaseModelMF):
                 joint_extension_valid_mask[endpoint_quota:])
             trajectory_search_point_source = (
                 trajectory_search_point_valid_mask > 0).astype(np.int64)
+        acquisition_diagnostics = None
+        if (use_ct_joint_full and joint_contract_v3 and bool(getattr(
+                self.config, "export_proposal_diagnostics", False))):
+            target_box = points_utils.transform_box(
+                this_frame["3d_bbox"], coordinate_anchor_box)
+            expansion_regions = np.concatenate((
+                search_v2_expanded_points, expanded_search_points), axis=0)
+            if len(expansion_regions):
+                _, unique_expansion_indices = np.unique(
+                    np.rint(
+                        expansion_regions[:, :3] / 1e-6).astype(np.int64),
+                    axis=0, return_index=True)
+                expansion_regions = expansion_regions[
+                    np.sort(unique_expansion_indices)]
+
+            def target_count(points):
+                if len(points) == 0:
+                    return 0
+                return int(np.sum(geometry_utils.points_in_box(
+                    target_box, points[:, :3].T, self.config.bb_scale)))
+
+            sampled_extension_points = joint_extension_points[
+                joint_extension_valid_mask > 0]
+            acquisition_diagnostics = {
+                "base_target_count": target_count(baseline_search_points),
+                "expansion_target_count": target_count(expansion_regions),
+                "pool_target_count": target_count(extension_pool_points),
+                "sampled_target_count": target_count(
+                    sampled_extension_points),
+                "extension_pool_count": int(
+                    joint_extension_sampling["available_count"]),
+                "sampled_count": int(
+                    joint_extension_sampling["sample_count"]),
+            }
         joint_support = combined_search_support_statistics(
             (search_v2_points, trajectory_search_points),
             (search_v2_point_valid_mask,
@@ -2288,6 +2350,11 @@ class MotionBaseModelMF(BaseModelMF):
                           [joint_support['extension_voxels']], device=self.device,
                           dtype=torch.float32),
                       }
+        if acquisition_diagnostics is not None:
+            # This private GT-only sidecar is removed in evaluate_one_sequence
+            # before evaluate_one_sample receives the model input.
+            data_dict["_ct_acquisition_diagnostics"] = (
+                acquisition_diagnostics)
         if use_ct_joint_full and joint_contract_v3:
             if joint_extension_source is None:
                 raise RuntimeError(
