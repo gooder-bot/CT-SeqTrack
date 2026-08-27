@@ -1,0 +1,326 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack b822 B0/B1 路径分叉诊断",
+    "description": "判断 b822 基线是否达到 SeqTrack 水平，并定位 B0、B1-GRU、B1-CfC 低分的最早分叉与可能原因。",
+    "generatedAt": "2026-08-27T00:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_b822_path_diagnosis",
+        "label": "CT-SeqTrack provenance、checkpoint 审计、TensorBoard 与 Git diff 派生快照",
+        "path": "artifacts/ct_checks/reports/20260827_b822_baseline_path_divergence/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b822_path_diagnosis_20260827'",
+          "tablesUsed": ["report_snapshot"]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "card_seqtrack",
+        "dataset": "headline",
+        "sourceId": "src_b822_path_diagnosis",
+        "description": "历史 SeqTrack reference 的 final Success；旧 evaluator，仅作描述性参考。",
+        "metrics": [{"label": "SeqTrack reference", "field": "seqtrack_reference_success", "format": "number"}]
+      },
+      {
+        "id": "card_high",
+        "dataset": "headline",
+        "sourceId": "src_b822_path_diagnosis",
+        "description": "049de82 的 Safe-SeqTrack v25 B0 高分轨迹。",
+        "metrics": [{"label": "v25 B0 high", "field": "v25_b0_high_success", "format": "number"}]
+      },
+      {
+        "id": "card_low",
+        "dataset": "headline",
+        "sourceId": "src_b822_path_diagnosis",
+        "description": "b8222bb 的匹配 B0 final Success。",
+        "metrics": [{"label": "b822 B0", "field": "b822_b0_success", "format": "number"}]
+      },
+      {
+        "id": "card_gap",
+        "dataset": "headline",
+        "sourceId": "src_b822_path_diagnosis",
+        "description": "v25 高分轨迹到 b822 低分轨迹的 final Success 差。",
+        "metrics": [{"label": "High→low gap", "field": "high_to_low_gap", "format": "number"}]
+      },
+      {
+        "id": "card_status",
+        "dataset": "headline",
+        "sourceId": "src_b822_path_diagnosis",
+        "description": "结合数值表现、稳定性和实验合同后的 B0 状态。",
+        "metrics": [{"label": "B0 status", "field": "b0_status"}]
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_final_success",
+        "title": "Final Success：参考、高分轨迹与 b822 三臂",
+        "subtitle": "SeqTrack reference 与 v25 evaluator 不同；柱形高度用于看量级，不构成严格同协议比较",
+        "intent": "comparison",
+        "question": "b822 的 B0/B1 top-line 是否仍在 SeqTrack 数值区间？",
+        "rationale": "同图显示一次可达到约51分，但 b822 三臂集中在27–31分。",
+        "type": "bar",
+        "dataset": "tracking_summary",
+        "sourceId": "src_b822_path_diagnosis",
+        "encodings": {
+          "x": {"field": "run", "type": "nominal", "label": "Run"},
+          "y": {"field": "final_success", "type": "quantitative", "label": "Final Success", "unit": "points"},
+          "color": {"field": "comparison_role", "type": "nominal", "label": "Comparison role"},
+          "tooltip": [
+            {"field": "final_precision", "type": "quantitative", "label": "Final Precision"},
+            {"field": "late3_success", "type": "quantitative", "label": "Late-3 Success"}
+          ]
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "table_tracking",
+        "title": "Tracking 结果与可比性",
+        "subtitle": "final/late-3；先看 comparison role 再解释分数",
+        "dataset": "tracking_summary",
+        "sourceId": "src_b822_path_diagnosis",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {"field": "run", "label": "Run", "type": "text"},
+          {"field": "commit", "label": "Commit", "type": "text"},
+          {"field": "comparison_role", "label": "可比性", "type": "text"},
+          {"field": "final_success", "label": "Final S", "format": "number"},
+          {"field": "late3_success", "label": "Late-3 S", "format": "number"},
+          {"field": "final_precision", "label": "Final P", "format": "number"},
+          {"field": "late3_precision", "label": "Late-3 P", "format": "number"}
+        ]
+      },
+      {
+        "id": "table_chain",
+        "title": "最早分叉链",
+        "subtitle": "从数据和初始化一路追到第一次 optimizer update",
+        "dataset": "divergence_chain",
+        "sourceId": "src_b822_path_diagnosis",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {"field": "stage", "label": "Stage", "type": "text"},
+          {"field": "high", "label": "v25 high", "type": "text"},
+          {"field": "low", "label": "b822 low", "type": "text"},
+          {"field": "equal", "label": "一致", "type": "text"},
+          {"field": "interpretation", "label": "解释", "type": "text"}
+        ]
+      },
+      {
+        "id": "table_timeline",
+        "title": "低分 run 与诊断提交时间线",
+        "subtitle": "用时间顺序检验“后来诊断导致已有低分”的因果可能性",
+        "dataset": "timeline",
+        "sourceId": "src_b822_path_diagnosis",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {"field": "time", "label": "时间", "type": "text"},
+          {"field": "event", "label": "事件", "type": "text"},
+          {"field": "relation", "label": "因果关系", "type": "text"}
+        ]
+      },
+      {
+        "id": "table_causes",
+        "title": "路径得分分歧的原因优先级",
+        "subtitle": "Verified、Likely 与 Unresolved 分开；不是把所有可能性等权罗列",
+        "dataset": "root_cause_ranking",
+        "sourceId": "src_b822_path_diagnosis",
+        "defaultSort": {"field": "rank", "direction": "asc"},
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {"field": "rank", "label": "优先级", "format": "number"},
+          {"field": "hypothesis", "label": "假设", "type": "text"},
+          {"field": "status", "label": "状态", "type": "text"},
+          {"field": "evidence", "label": "证据", "type": "text"},
+          {"field": "confidence", "label": "置信度", "type": "text"}
+        ]
+      },
+      {
+        "id": "table_protocol",
+        "title": "v25 B0 与原 SeqTrack 的合同差异",
+        "subtitle": "核心网络继承不等于训练事务与 evaluator 等价",
+        "dataset": "protocol_comparison",
+        "sourceId": "src_b822_path_diagnosis",
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {"field": "aspect", "label": "方面", "type": "text"},
+          {"field": "seqtrack", "label": "SeqTrack", "type": "text"},
+          {"field": "v25_b0", "label": "v25 B0", "type": "text"},
+          {"field": "equivalent", "label": "等价", "type": "text"},
+          {"field": "consequence", "label": "影响", "type": "text"}
+        ]
+      },
+      {
+        "id": "table_b1",
+        "title": "B1 mechanism 与 top-line 的分离解释",
+        "subtitle": "tracking score 主要跟随 B0 observation；mechanism 需看同一 endpoint 的 prior 指标",
+        "dataset": "b1_mechanism",
+        "sourceId": "src_b822_path_diagnosis",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {"field": "arm", "label": "Arm", "type": "text"},
+          {"field": "tracking_success", "label": "Tracking S", "format": "number"},
+          {"field": "learned_rmse", "label": "Learned RMSE", "format": "number"},
+          {"field": "cv_rmse", "label": "CV RMSE", "format": "number"},
+          {"field": "learned_minus_cv", "label": "Learned−CV", "format": "number"},
+          {"field": "bootstrap_ci", "label": "95% CI", "type": "text"},
+          {"field": "raw_coverage95", "label": "Raw C95", "format": "percent"},
+          {"field": "raw_ece", "label": "Raw ECE", "format": "percent"},
+          {"field": "interpretation", "label": "解释", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack b822 B0/B1 路径分叉诊断"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 结论先行\n\n**B0 已证明“能够达到”SeqTrack 数值量级，但还不能称为“已经稳定恢复”。** 049de82 的 v25 B0 达到 50.690 Success，与历史 SeqTrack 51.001 很接近；b822 的同 seed scratch B0 却只有 29.870。更准确的论文表述应是：B0 是能进入 SeqTrack-level 高分盆地的 Safe-SeqTrack-derived control，但训练事务尚未可复现，且与原 SeqTrack 的候选目标、RNG 和 evaluator 不等价。\n\n现有低分最早出现在第一次 backward/Adam 更新。数据 manifest、初始化、前100个 observation 指纹与首个 forward/loss 都相同；step1 后参数已不同。B1-GRU/CfC 的 tracking 分数主要跟随各自已经分叉的 B0 observation 路径，不能直接解释为 B1 mechanism 失败。"
+      },
+      {
+        "id": "metrics",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": ["card_seqtrack", "card_high", "card_low", "card_gap", "card_status"]
+      },
+      {"id": "success_chart", "type": "chart", "layout": "full", "chartId": "chart_final_success"},
+      {"id": "tracking_table", "type": "table", "layout": "full", "tableId": "table_tracking"},
+      {
+        "id": "divergence",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 1. 分叉发生在第一次 backward/Adam.step()\n\n首个 step 的 loss 完全相同，说明可见的前向计算和目标 reduction 已对齐。高分与低分 checkpoint 在 Adam step1 后的 B0 参数 hash 分别为 `7f547e5b4afd` 与 `cf88c167bc9f`，而第3个 batch 的 loss 才出现约0.0013差异。到 epoch5，Success 已相差13.880点。这是典型的早期浮点微差进入不同非凸盆地，再被递归跟踪反馈放大的形态。当前缺少 step 前的逐参数 gradient hash，所以还不能把 backward 与 Adam 二选一。"
+      },
+      {"id": "chain_table", "type": "table", "layout": "full", "tableId": "table_chain"},
+      {
+        "id": "diagnostics",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 2. 为什么不能把低分归因于“加了几个诊断”\n\n`b822` 中新增的 B0 相关审计主要是 step 后的参数/Adam 状态 hash 与最大梯度范数记录；审计发生在更新之后，没有改变启用状态下的 B0 forward/loss 定义，且 step1 参数在执行 post-step hash 之前已经不同。随后 `e9a2d6d` 与 `d384282` 的 B2 acquisition diagnostics 更是在三条低分 run 完成后才提交，时间上不可能造成这批结果。\n\n诊断仍可能在**未来** run 中通过 GPU 同步、显存 workspace 或未隔离 RNG 影响非确定性程序的执行时序，但这只能算次级放大条件；一个真正确定性的训练事务不应因为只读诊断而从51掉到30。"
+      },
+      {"id": "timeline_table", "type": "table", "layout": "full", "tableId": "table_timeline"},
+      {"id": "causes_table", "type": "table", "layout": "full", "tableId": "table_causes"},
+      {
+        "id": "seqtrack_level",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 3. B0 到底算不算恢复到 SeqTrack 水平\n\n分三层回答：\n\n1. **网络核心：基本恢复。** `CTSEQTRACK` 继承 `SEQTRACK3D`，B0 arm 关闭 B1/B2/B3；初始 B0 hash 与高分 v25 对齐。\n2. **可达到的数值量级：是。** v25 B0 曾跑到 50.690/59.280，说明安全 B0 的容量没有天然被锁死在30分。\n3. **稳定、可发表的基线：否。** b822 B0 只有29.870/30.398，而且原 SeqTrack 与 v25 的候选 loss、RNG、wrapper 和 evaluator 不同。当前只能称为 SeqTrack-derived，不应称为严格复刻。"
+      },
+      {"id": "protocol_table", "type": "table", "layout": "full", "tableId": "table_protocol"},
+      {
+        "id": "b1",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 4. B1-GRU 与 B1-CfC 为什么也低\n\n这两个 B1-only arm 的部署 tracking 输出仍是 B0 observation，所以 top-line 首先反映各自的 B0 训练轨迹。GRU 的 learned RMSE 比自身 CV 低0.208 m，tracklet bootstrap 95% CI 为 [-0.251, -0.171]；CfC 也比自身 CV 低0.369 m，CI 为 [-0.431, -0.318]。因此 B1 均值 prior 并没有塌掉。\n\nCfC 的 tracking 更低不能直接用于 GRU/CfC promotion：两者的 B0 在 step1 已分叉，最终有效 endpoint 数也不同（GRU 1956、CfC 1940）。当前正式方向应继续保留 GRU；两者 raw coverage95/ECE 均未通过 held-out calibration gate。"
+      },
+      {"id": "b1_table", "type": "table", "layout": "full", "tableId": "table_b1"},
+      {
+        "id": "next",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 5. 最小判别实验\n\n1. 同一张空闲 GPU 顺序跑 B0、B1-GRU、B1-CfC 的 2-step audit，不并发。\n2. optimizer.step 前记录逐参数 gradient SHA/范数；step 后记录参数、Adam `exp_avg/exp_avg_sq` SHA。\n3. 如果 gradient 已不同，优先查 PointNet2 CUDA backward；如果 gradient 相同而参数不同，固定 Adam `foreach=False`。\n4. 固定同一 resolved config 和 validation cadence，并记录 GPU UUID、driver、CUDA/cuDNN、torch、Lightning、PointNet2 build。\n5. 2-step 通过后再做100-step parity，然后才重跑60 epoch mini。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b822_path_diagnosis",
+        "body": "## 6. 限制\n\n现有 provenance 能证明数据选择 SHA、计数和采样指纹一致，但没有对原始 nuScenes 点云文件逐字节做全量 hash；因此“数据完全位级一致”仍不能绝对证明。旧高分与 b822 也不是同 commit、同 resolved config：validation cadence 为1与5。该差异不能解释首次 validation 之前的 step1 分叉，却阻止把历史50分当成严格单变量 control。当前所有结论仍基于 mini、单 seed。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-27T00:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "seqtrack_reference_success": 51.001094818115234,
+          "v25_b0_high_success": 50.690372467041016,
+          "b822_b0_success": 29.86980438232422,
+          "high_to_low_gap": -20.820568084716797,
+          "b0_status": "达到过 SeqTrack 数值量级，但尚未稳定恢复"
+        }
+      ],
+      "tracking_summary": [
+        {"run": "SeqTrack reference", "commit": "25586b27", "comparison_role": "历史描述性参考；旧 evaluator", "final_success": 51.001094818115234, "final_precision": 60.892784118652344, "late3_success": 48.41393280029297, "late3_precision": 54.81692250569662},
+        {"run": "v25 B0 high", "commit": "049de82b", "comparison_role": "Safe-SeqTrack 高分轨迹；非严格复现实验", "final_success": 50.690372467041016, "final_precision": 59.28009033203125, "late3_success": 50.18490219116211, "late3_precision": 57.03756586710612},
+        {"run": "b822 B0", "commit": "b8222bb2", "comparison_role": "当前匹配低分臂", "final_success": 29.86980438232422, "final_precision": 30.398250579833984, "late3_success": 30.536474227905273, "late3_precision": 31.430344263712566},
+        {"run": "b822 B1-GRU", "commit": "b8222bb2", "comparison_role": "当前低分臂；输出仍为 B0 observation", "final_success": 31.226476669311523, "final_precision": 32.286651611328125, "late3_success": 31.097375233968098, "late3_precision": 31.998542149861652},
+        {"run": "b822 B1-CfC", "commit": "b8222bb2", "comparison_role": "当前低分臂；输出仍为 B0 observation", "final_success": 26.9135684967041, "final_precision": 25.650983810424805, "late3_success": 26.669949213663738, "late3_precision": 25.03136444091797}
+      ],
+      "divergence_chain": [
+        {"stage": "数据选择", "high": "train/val manifest SHA 一致", "low": "train/val manifest SHA 一致", "equal": "是", "interpretation": "未发现样本集合或划分差异"},
+        {"stage": "B0 初始化", "high": "798a8def3e82", "low": "798a8def3e82", "equal": "是", "interpretation": "架构和 seeded initialization 一致"},
+        {"stage": "前100个 observation 指纹", "high": "100/100", "low": "100/100", "equal": "是", "interpretation": "已登记的候选、点采样和 batch 身份一致"},
+        {"stage": "首个 forward/loss", "high": "18.006416321", "low": "18.006416321", "equal": "是", "interpretation": "首个前向与 loss reduction 对齐"},
+        {"stage": "Adam step1 后 B0 参数", "high": "7f547e5b4afd", "low": "cf88c167bc9f", "equal": "否", "interpretation": "首次确认的分叉点；在任何 validation 之前"},
+        {"stage": "step3 loss", "high": "15.279096603", "low": "15.277811050", "equal": "否", "interpretation": "很小的更新差开始出现在可见 loss 中"},
+        {"stage": "epoch5 Success", "high": "34.671", "low": "20.791", "equal": "否", "interpretation": "递归裁剪/状态反馈将早期差异放大"}
+      ],
+      "timeline": [
+        {"time": "2026-08-25 19:30", "event": "提交 b8222bb", "relation": "B1 修复、CfC 与训练审计进入代码"},
+        {"time": "2026-08-25 19:31–19:32", "event": "B0、B1-GRU、B1-CfC 低分 run 启动", "relation": "三条 run 均记录 commit=b8222bb"},
+        {"time": "2026-08-26 12:24–12:27", "event": "三条低分 run 完成 last.ckpt", "relation": "观测到 29.87 / 31.23 / 26.91 Success"},
+        {"time": "2026-08-26 12:42", "event": "提交 e9a2d6d", "relation": "B2 acquisition funnel 诊断；晚于低分 run 完成"},
+        {"time": "2026-08-26 15:33", "event": "提交 d384282", "relation": "扩展 B2 acquisition diagnostics；晚于低分 run 完成"}
+      ],
+      "root_cause_ranking": [
+        {"rank": 1, "hypothesis": "PointNet2/custom CUDA backward 非确定性", "status": "最可能", "evidence": "训练未启用 deterministic；依赖 CUDA backward 使用 atomicAdd；分叉起点在首次 backward/step", "confidence": "中高"},
+        {"rank": 2, "hypothesis": "GPU/驱动/CUDA/PyTorch/PointNet2 build 或并发执行差异", "status": "可能的放大条件", "evidence": "run provenance 未记录这些身份；新臂并行置于不同 GPU", "confidence": "中"},
+        {"rank": 3, "hypothesis": "Adam 实现路径差异（foreach/参数组/状态更新）", "status": "尚未区分", "evidence": "仅有 post-step 参数和 Adam hash，没有 pre-step gradient hash", "confidence": "中"},
+        {"rank": 4, "hypothesis": "validation cadence 1 vs 5", "status": "不能解释首次分叉", "evidence": "step1 在首次 validation 前已分叉；只可能影响后续未隔离 RNG/模式状态", "confidence": "低（作为根因）"},
+        {"rank": 5, "hypothesis": "诊断代码直接改变 B0 数学目标", "status": "现有证据不支持", "evidence": "b822 diff 未改变启用中的 B0 forward/loss；哈希审计位于 step 后；e9/d384 在训练完成后提交", "confidence": "很低"},
+        {"rank": 6, "hypothesis": "数据划分/候选采样不一致", "status": "已基本排除", "evidence": "manifest SHA、初始化、前100指纹和 step0 loss 均一致；原始点云文件未做逐字节 hash", "confidence": "很低"}
+      ],
+      "protocol_comparison": [
+        {"aspect": "B0 核心网络", "seqtrack": "SEQTRACK3D", "v25_b0": "CTSEQTRACK 继承 SEQTRACK3D，B1/B2/B3 关闭", "equivalent": "基本是", "consequence": "说明 observation 容量仍来自 SeqTrack"},
+        {"aspect": "候选训练目标", "seqtrack": "4 candidates 普通 batch mean", "v25_b0": "0.5×view0 + 1/6×view1/2/3", "equivalent": "否", "consequence": "优化问题已经不同"},
+        {"aspect": "采样/RNG", "seqtrack": "全局 RNG 与普通 shuffle", "v25_b0": "stateless candidate/point sampling", "equivalent": "否", "consequence": "更可审计，但不是原事务复刻"},
+        {"aspect": "递归 evaluator", "seqtrack": "旧路径可能读取当前帧 GT box size", "v25_b0": "first-frame size + recursive prediction", "equivalent": "否", "consequence": "分数只能描述性比较"},
+        {"aspect": "运行/optimizer envelope", "seqtrack": "标准 Lightning path", "v25_b0": "safe_seqtrack_auto_v1 + named unified Adam group", "equivalent": "否", "consequence": "B0 是 Safe-SeqTrack-derived control，不是原版逐事务复刻"},
+        {"aspect": "当前数据选择", "seqtrack": "mini train/val 计数与选择 SHA", "v25_b0": "计数与选择 SHA 对齐", "equivalent": "强证据支持", "consequence": "20.8点差不应先归因于数据；原始文件字节仍未做全量 hash"}
+      ],
+      "b1_mechanism": [
+        {"arm": "B1-GRU", "tracking_success": 31.226476669311523, "learned_rmse": 9.525545757485297, "cv_rmse": 9.73394149433221, "learned_minus_cv": -0.2083957368469136, "bootstrap_ci": "[-0.251, -0.171]", "raw_coverage95": 0.8271077908217717, "raw_ece": 0.10823550337958021, "interpretation": "均值 prior 有效；不确定性校准未过门"},
+        {"arm": "B1-CfC", "tracking_success": 26.9135684967041, "learned_rmse": 9.79921829484909, "cv_rmse": 10.168516939883915, "learned_minus_cv": -0.36929864503482435, "bootstrap_ci": "[-0.431, -0.318]", "raw_coverage95": 0.7890204520990313, "raw_ece": 0.11454969501255825, "interpretation": "自身 CV 对照上有效，但 endpoint 集与 GRU 不同，不能直接宣称优于 GRU"}
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_b822_path_diagnosis",
+      "label": "CT-SeqTrack provenance、checkpoint 审计、TensorBoard 与 Git diff 派生快照",
+      "path": "artifacts/ct_checks/reports/20260827_b822_baseline_path_divergence/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b822_path_diagnosis_20260827'",
+        "tablesUsed": ["report_snapshot"]
+      }
+    }
+  ]
+}

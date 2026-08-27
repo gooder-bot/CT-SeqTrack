@@ -1,0 +1,300 @@
+{
+  "verdict": {
+    "b0_point_count_normal": true,
+    "point_count_caused_score_recovery": false,
+    "b0_descriptively_above_seqtrack_jul": true,
+    "causal_gain_claim_allowed": false,
+    "input_random_path_is_primary_cause": false,
+    "strict_cross_arm_fairness_passed": false,
+    "b2_schema_v2_evaluation_complete": false,
+    "retraining_required_for_v2_diagnostics": false
+  },
+  "headline": {
+    "b0_raw_vs_seqtrack_jul": 0.000334146780166078,
+    "b0_final_success": 54.826038,
+    "b0_success_delta_vs_seqtrack_jul": 1.4660829999999976,
+    "strict_fairness_audit": "FAIL",
+    "b2_schema_v2_available": "NOT YET RUN"
+  },
+  "point_summary": [
+    {
+      "run": "New B0",
+      "event_count": 75720,
+      "raw_mean": 344.828966,
+      "raw_median": 278.09375,
+      "raw_p05": 54.125,
+      "raw_p95": 892.75625,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 111.651789,
+      "soft_fg_mean": 446.781499,
+      "comparability": "B0 observation stream; directly comparable"
+    },
+    {
+      "run": "Old low-score B0",
+      "event_count": 75720,
+      "raw_mean": 344.828966,
+      "raw_median": 278.09375,
+      "raw_p05": 54.125,
+      "raw_p95": 892.75625,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 111.377579,
+      "soft_fg_mean": 446.645653,
+      "comparability": "Same observation point-count path as New B0"
+    },
+    {
+      "run": "New B1-GRU",
+      "event_count": 88500,
+      "raw_mean": 333.087879,
+      "raw_median": 261.4375,
+      "raw_p05": 46.9375,
+      "raw_p95": 896.69375,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 104.998466,
+      "soft_fg_mean": 467.623781,
+      "comparability": "Mixed 1262 observation + 213 mechanism steps/epoch"
+    },
+    {
+      "run": "New B1-CfC",
+      "event_count": 88500,
+      "raw_mean": 334.407871,
+      "raw_median": 261.8125,
+      "raw_p05": 47.625,
+      "raw_p95": 899.690625,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 104.397145,
+      "soft_fg_mean": 465.224521,
+      "comparability": "Mixed 1262 observation + 213 mechanism steps/epoch"
+    },
+    {
+      "run": "SeqTrack Jul",
+      "event_count": 75720,
+      "raw_mean": 344.713781,
+      "raw_median": 278.03125,
+      "raw_p05": 54.3125,
+      "raw_p95": 895.315625,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 116.190904,
+      "soft_fg_mean": 456.450858,
+      "comparability": "Historical SeqTrack descriptive reference"
+    },
+    {
+      "run": "SeqTrack Aug",
+      "event_count": 75720,
+      "raw_mean": 345.198383,
+      "raw_median": 276.9375,
+      "raw_p05": 54.3125,
+      "raw_p95": 893.378125,
+      "raw_zero_rate": 0.0,
+      "estimated_fg_mean": 117.327389,
+      "soft_fg_mean": 458.889564,
+      "comparability": "Historical SeqTrack descriptive reference"
+    }
+  ],
+  "tracking_summary": [
+    {
+      "run": "New B0",
+      "final_success": 54.826038,
+      "late3_success": 54.109049,
+      "final_precision": 66.340263,
+      "late3_precision": 64.023705,
+      "validation_points": 60,
+      "role": "Safe-SeqTrack-derived B0 host"
+    },
+    {
+      "run": "New B1-GRU",
+      "final_success": 30.734137,
+      "late3_success": 31.735596,
+      "final_precision": 29.62582,
+      "late3_precision": 30.924872,
+      "validation_points": 60,
+      "role": "B1-only; deployed output remains B0 observation"
+    },
+    {
+      "run": "New B1-CfC",
+      "final_success": 35.318382,
+      "late3_success": 35.315465,
+      "final_precision": 37.696938,
+      "late3_precision": 37.41065,
+      "validation_points": 60,
+      "role": "B1 ablation; not a promoted backend"
+    },
+    {
+      "run": "SeqTrack Jul",
+      "final_success": 53.359955,
+      "late3_success": 52.904814,
+      "final_precision": 64.381836,
+      "late3_precision": 63.104301,
+      "validation_points": 12,
+      "role": "Historical reference; validation every 5 epochs"
+    },
+    {
+      "run": "SeqTrack Aug",
+      "final_success": 51.001095,
+      "late3_success": 48.413933,
+      "final_precision": 60.892784,
+      "late3_precision": 54.816923,
+      "validation_points": 12,
+      "role": "Historical reference; different evaluator/contract"
+    }
+  ],
+  "fairness_audit": [
+    {
+      "stage": "Initial B0 parameters",
+      "B0": "798a8def3e82",
+      "GRU": "798a8def3e82",
+      "CfC": "798a8def3e82",
+      "all_equal": "Yes",
+      "meaning": "Same seeded B0 initialization"
+    },
+    {
+      "stage": "Initial B0 Adam state",
+      "B0": "57063755cb70",
+      "GRU": "57063755cb70",
+      "CfC": "57063755cb70",
+      "all_equal": "Yes",
+      "meaning": "Same initial optimizer state"
+    },
+    {
+      "stage": "First 100 full observation-batch fingerprints",
+      "B0": "100/100",
+      "GRU": "100/100",
+      "CfC": "100/100",
+      "all_equal": "Yes",
+      "meaning": "Input/candidate/point-sampling path matches"
+    },
+    {
+      "stage": "First B0 loss",
+      "B0": "18.006416321",
+      "GRU": "18.006416321",
+      "CfC": "18.006416321",
+      "all_equal": "Yes",
+      "meaning": "First forward and B0 loss agree"
+    },
+    {
+      "stage": "B0 parameters after step 1",
+      "B0": "850c94343bdd",
+      "GRU": "0578255bea00",
+      "CfC": "7b9edc83f6cc",
+      "all_equal": "No",
+      "meaning": "Strict fairness audit fails at first optimizer update"
+    },
+    {
+      "stage": "B0 parameters after step 100",
+      "B0": "54c5080699d3",
+      "GRU": "5a994a39eb1e",
+      "CfC": "90908dc24738",
+      "all_equal": "No",
+      "meaning": "Early numerical/update split persists"
+    }
+  ],
+  "b1_mechanism": [
+    {
+      "arm": "B1-GRU",
+      "rows": 1923,
+      "observation_error_mean": 6.0827,
+      "observation_iou_mean": 0.2468,
+      "learned_error_mean": 6.0599,
+      "kinematic_error_mean": 6.2349,
+      "nll_mean": 8.797,
+      "coverage50": 0.562,
+      "coverage80": 0.652,
+      "coverage95": 0.733,
+      "base_target_median": 2.0,
+      "expansion_target_median": 0.0,
+      "pool_target_mean": 0.1856
+    },
+    {
+      "arm": "B1-CfC",
+      "rows": 1927,
+      "observation_error_mean": 5.2406,
+      "observation_iou_mean": 0.3052,
+      "learned_error_mean": 5.175,
+      "kinematic_error_mean": 5.3345,
+      "nll_mean": 8.942,
+      "coverage50": 0.589,
+      "coverage80": 0.659,
+      "coverage95": 0.717,
+      "base_target_median": 2.0,
+      "expansion_target_median": 0.0,
+      "pool_target_mean": 0.0529
+    }
+  ],
+  "legacy_funnel": [
+    {
+      "arm": "B1-GRU",
+      "rows": 1923,
+      "base_zero_rows": 806,
+      "base_zero_rate": 0.41913676547061884,
+      "strict_geometry_bearing_rows": 1,
+      "strict_geometry_bearing_rate": 0.0012406947890818859,
+      "strict_pool_bearing_rows": 1,
+      "strict_sample_bearing_rows": 1,
+      "weak_base_le2_rows": 1010,
+      "weak_geometry_bearing_rows": 119,
+      "weak_pool_bearing_rows": 1
+    },
+    {
+      "arm": "B1-CfC",
+      "rows": 1927,
+      "base_zero_rows": 759,
+      "base_zero_rate": 0.39387649195640895,
+      "strict_geometry_bearing_rows": 1,
+      "strict_geometry_bearing_rate": 0.0013175230566534915,
+      "strict_pool_bearing_rows": 1,
+      "strict_sample_bearing_rows": 1,
+      "weak_base_le2_rows": 967,
+      "weak_geometry_bearing_rows": 120,
+      "weak_pool_bearing_rows": 2
+    }
+  ],
+  "diagnostic_plan": [
+    {
+      "order": 1,
+      "action": "Update evaluation code to d384282 and verify schema marker",
+      "gate": "rg finds acquisition_schema_version and learned_2_1_z0",
+      "reason": "Training runs were clean e9a2d6d and epoch_60.csv is schema v1"
+    },
+    {
+      "order": 2,
+      "action": "Evaluate B0, B1-GRU and B1-CfC last.ckpt on the same dev manifest",
+      "gate": "All finish with identical partition identity; B1 CSV schema=2",
+      "reason": "Existing checkpoints are reusable; diagnostics do not alter forward"
+    },
+    {
+      "order": 3,
+      "action": "Generate GRU funnel and CfC stable-key paired reference report",
+      "gate": "Report invariants pass; paired coverage is reported",
+      "reason": "Do not interpret unpaired recursive endpoints as backend promotion"
+    },
+    {
+      "order": 4,
+      "action": "Classify misses by observability, XY, z, geometry, novelty and sampling",
+      "gate": "One dominant failure stage is identified on label-visible rows",
+      "reason": "This selects the smallest B2 change that addresses the actual bottleneck"
+    },
+    {
+      "order": 5,
+      "action": "Implement one bounded B2 intervention only",
+      "gate": "Counterfactual recovery is material and background/support cost is acceptable",
+      "reason": "Avoid mixing z margin, shell, dual support and sampler changes"
+    }
+  ],
+  "source_paths": [
+    "output/20260826-1534-25_b0-b0_seed42_diag_v2/run_provenance.json",
+    "output/20260826-1534-25_b1-b1_gru_seed42_diag_v2/run_provenance.json",
+    "output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2/run_provenance.json",
+    "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5/run_provenance.json",
+    "output/20260725-2326-01_seqtrack3d_baseline-ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16/run_provenance.json",
+    "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42/run_provenance.json",
+    "output/20260826-1534-25_b0-b0_seed42_diag_v2/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260826-1534-25_b1-b1_gru_seed42_diag_v2/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2/lightning_logs/version_0/checkpoints/last.ckpt",
+    "output/20260826-1534-25_b1-b1_gru_seed42_diag_v2/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv",
+    "output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv"
+  ],
+  "generator": "artifacts/ct_checks/generate_20260827_b0_b1_b2_rerun_analysis.py",
+  "chart_contract_notes": {
+    "chart_points": "Grouped bar; shared point-count unit; B1 stream-composition caveat is visible.",
+    "chart_tracking": "Single-series bar; zero baseline; exact final and late-3 values remain in the table."
+  }
+}

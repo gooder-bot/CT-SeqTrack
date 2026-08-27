@@ -41,12 +41,22 @@ class MotionPriorOutput:
     log_sigma: Tensor
     valid: Tensor
     source: Tensor
+    # Search acquisition geometry is deliberately independent from the
+    # statistical covariance used for B1 calibration.  ``None`` preserves
+    # strict compatibility with v25 callers/checkpoints.
+    acquisition_margin_parallel_perp: Optional[Tensor] = None
 
     def detached(self):
-        return MotionPriorOutput(*(
-            value.detach() for value in (
-                self.center_xy, self.direction_xy, self.log_sigma,
-                self.valid, self.source)))
+        return MotionPriorOutput(
+            center_xy=self.center_xy.detach(),
+            direction_xy=self.direction_xy.detach(),
+            log_sigma=self.log_sigma.detach(),
+            valid=self.valid.detach(),
+            source=self.source.detach(),
+            acquisition_margin_parallel_perp=(
+                None if self.acquisition_margin_parallel_perp is None else
+                self.acquisition_margin_parallel_perp.detach()),
+        )
 
 
 def _rotate_xy(vectors, yaw):
@@ -126,6 +136,8 @@ def reexpress_motion_prior(
         log_sigma=prior.log_sigma,
         valid=prior.valid,
         source=prior.source,
+        acquisition_margin_parallel_perp=(
+            prior.acquisition_margin_parallel_perp),
     )
 
 

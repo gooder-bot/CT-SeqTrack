@@ -218,12 +218,27 @@ class B2EvidenceAcquirer(nn.Module):
             attention_dropout=0.0,
             presence_init_probability=0.1,
             presence_threshold=0.5,
+            relation_aware_sampling=False,
+            relation_topk=128,
+            coverage_count=96,
+            exploration_count=32,
+            robust_consensus_voting=False,
             utility_init_probability=None):
         super().__init__()
         self.feature_dim = int(feature_dim)
         self.num_heads = int(num_heads)
         self.max_vote_offset = float(max_vote_offset)
         self.presence_threshold = float(presence_threshold)
+        self.relation_aware_sampling = bool(relation_aware_sampling)
+        self.relation_topk = int(relation_topk)
+        self.coverage_count = int(coverage_count)
+        self.exploration_count = int(exploration_count)
+        self.selected_count = (
+            self.relation_topk + self.coverage_count
+            + self.exploration_count)
+        self.robust_consensus_voting = bool(robust_consensus_voting)
+        if self.relation_aware_sampling and self.selected_count != 256:
+            raise ValueError("v26 relation/spatial/random budgets must sum to 256")
         if self.feature_dim != 64:
             raise ValueError("contract-v3 B0 point features are fixed at 64d")
         if self.feature_dim % self.num_heads:
@@ -242,8 +257,13 @@ class B2EvidenceAcquirer(nn.Module):
         self.extension_encoder = mlp(5)
         # longitudinal, lateral, log(dt), gap ratio, B1 validity
         self.geometry_encoder = mlp(5)
-        self.source_embedding = nn.Embedding(4, 64)
+        self.source_embedding = nn.Embedding(
+            8 if self.relation_aware_sampling else 4, 64)
         self.memory_metadata_encoder = mlp(8)
+        if self.relation_aware_sampling:
+            self.relation_context_encoder = mlp(256)
+            self.relation_head = nn.Sequential(
+                nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
         self.query_norm = nn.LayerNorm(64)
         self.kv_norm = nn.LayerNorm(64)
         self.cross_attention = nn.MultiheadAttention(
@@ -265,6 +285,198 @@ class B2EvidenceAcquirer(nn.Module):
             nn.init.zeros_(head.weight)
             nn.init.constant_(
                 head.bias, math.log(probability / (1.0 - probability)))
+
+    @staticmethod
+    def _gather_rows(values, indices):
+        trailing = values.shape[2:]
+        expanded = indices.reshape(indices.shape + (1,) * len(trailing))
+        expanded = expanded.expand(indices.shape + trailing)
+        return torch.gather(values, 1, expanded)
+
+    def _hybrid_select(self, points, valid, relation_logits, source):
+        """Select relation/spatial/stateless-exploration rows without RNG."""
+        batch_indices = []
+        batch_valid = []
+        batch_group = []
+        for batch_index in range(points.shape[0]):
+            candidates = torch.nonzero(
+                valid[batch_index], as_tuple=False).flatten()
+            selected_flag = torch.zeros(
+                points.shape[1], dtype=torch.bool, device=points.device)
+            chosen_parts = []
+            group_parts = []
+
+            def append_rows(rows, budget, group):
+                budget = max(int(budget), 0)
+                if budget == 0 or rows.numel() == 0:
+                    return
+                available = rows[~selected_flag.index_select(0, rows)]
+                selected = available[:budget]
+                if selected.numel() == 0:
+                    return
+                selected_flag[selected] = True
+                chosen_parts.append(selected)
+                group_parts.append(torch.full_like(selected, int(group)))
+
+            relation_order = candidates.index_select(
+                0, torch.argsort(
+                    relation_logits[batch_index].index_select(0, candidates),
+                    descending=True, stable=True))
+            append_rows(relation_order, self.relation_topk, 1)
+
+            remaining = candidates[
+                ~selected_flag.index_select(0, candidates)]
+            if remaining.numel():
+                fps_local = _fps_indices(
+                    points[batch_index].index_select(0, remaining)[:, :2],
+                    self.coverage_count)
+                append_rows(remaining.index_select(0, fps_local),
+                            self.coverage_count, 2)
+
+            remaining = candidates[
+                ~selected_flag.index_select(0, candidates)]
+            if remaining.numel():
+                xyz = points[batch_index].index_select(0, remaining)[:, :3]
+                src = source[batch_index].index_select(
+                    0, remaining).to(xyz.dtype)
+                # A stable point-key hash supplies exploration diversity but
+                # consumes no global/B0 generator state.
+                hash_score = torch.frac(torch.abs(torch.sin(
+                    xyz[:, 0] * 12.9898 + xyz[:, 1] * 78.233
+                    + xyz[:, 2] * 37.719 + src * 19.19) * 43758.5453))
+                random_order = remaining.index_select(
+                    0, torch.argsort(hash_score, descending=True, stable=True))
+                append_rows(random_order, self.exploration_count, 3)
+
+            # Borrow unused group budgets from all still-unselected rows,
+            # preserving relation ordering as the deterministic tie-breaker.
+            chosen_count = sum(part.numel() for part in chosen_parts)
+            append_rows(
+                relation_order, self.selected_count - chosen_count, 4)
+            chosen = (torch.cat(chosen_parts) if chosen_parts else
+                      torch.empty(0, dtype=torch.long, device=points.device))
+            chosen_group = (torch.cat(group_parts) if group_parts else
+                            torch.empty(
+                                0, dtype=torch.long, device=points.device))
+            take = min(chosen.numel(), self.selected_count)
+            pad = self.selected_count - take
+            batch_indices.append(torch.cat((
+                chosen[:take], torch.zeros(
+                    pad, dtype=torch.long, device=points.device))))
+            batch_valid.append(torch.cat((
+                torch.ones(take, dtype=torch.bool, device=points.device),
+                torch.zeros(pad, dtype=torch.bool, device=points.device))))
+            batch_group.append(torch.cat((
+                chosen_group[:take], torch.zeros(
+                    pad, dtype=torch.long, device=points.device))))
+        return (torch.stack(batch_indices), torch.stack(batch_valid),
+                torch.stack(batch_group))
+
+    @staticmethod
+    def _consensus_vote(votes, weights, valid, observation_xy):
+        """K=3 mode-consistent Huber voting with finite diagnostics."""
+        raw_rows = []
+        consistency_rows = []
+        covariance_rows = []
+        inlier_ratio_rows = []
+        effective_mass_rows = []
+        margin_rows = []
+        compatible_rows = []
+        for batch_index in range(votes.shape[0]):
+            rows = torch.nonzero(valid[batch_index], as_tuple=False).flatten()
+            if rows.numel() == 0:
+                raw_rows.append(observation_xy[batch_index])
+                consistency_rows.append(votes.new_zeros(()))
+                covariance_rows.append(votes.new_zeros((2, 2)))
+                inlier_ratio_rows.append(votes.new_zeros(()))
+                effective_mass_rows.append(votes.new_zeros(()))
+                margin_rows.append(votes.new_zeros(()))
+                compatible_rows.append(votes.new_zeros(()))
+                continue
+            points = votes[batch_index].index_select(0, rows)
+            point_weights = weights[batch_index].index_select(
+                0, rows).clamp_min(0.0)
+            if not bool(point_weights.sum() > 0):
+                point_weights = torch.ones_like(point_weights)
+            seed_order = torch.argsort(
+                point_weights, descending=True, stable=True)
+            seeds = []
+            for seed in seed_order.detach().cpu().tolist():
+                if all(float(torch.linalg.norm(
+                        points[int(seed)] - points[old]).detach().cpu())
+                       > 0.75 for old in seeds):
+                    seeds.append(int(seed))
+                if len(seeds) == 3:
+                    break
+            hypotheses = []
+            total_mass = point_weights.sum().clamp_min(1e-6)
+            for seed in seeds:
+                center = points[seed]
+                inlier = torch.linalg.norm(
+                    points - center.unsqueeze(0), dim=1) <= 1.0
+                for _ in range(3):
+                    distance = torch.linalg.norm(
+                        points - center.unsqueeze(0), dim=1)
+                    inlier = distance <= 1.0
+                    huber = torch.where(
+                        distance <= 0.5, torch.ones_like(distance),
+                        0.5 / distance.clamp_min(1e-6))
+                    robust_weight = (
+                        point_weights * huber * inlier.to(point_weights.dtype))
+                    mass = robust_weight.sum()
+                    if bool(mass > 0):
+                        center = (
+                            robust_weight.unsqueeze(1) * points
+                        ).sum(dim=0) / mass
+                inlier = torch.linalg.norm(
+                    points - center.unsqueeze(0), dim=1) <= 1.0
+                robust_weight = point_weights * inlier.to(point_weights.dtype)
+                mass = robust_weight.sum().clamp_min(1e-6)
+                delta = points - center.unsqueeze(0)
+                covariance = (
+                    robust_weight[:, None, None]
+                    * delta[:, :, None] * delta[:, None, :]
+                ).sum(dim=0) / mass
+                if rows.numel() == 1:
+                    covariance = torch.zeros_like(covariance)
+                inlier_ratio = inlier.to(points.dtype).mean()
+                normalized_mass = mass / total_mass
+                consistency = (
+                    normalized_mass * inlier_ratio
+                    * torch.exp(-torch.trace(covariance).clamp_min(0.0)))
+                hypotheses.append((
+                    consistency, center, covariance, inlier_ratio, mass))
+            hypotheses.sort(
+                key=lambda value: float(value[0].detach().cpu()),
+                reverse=True)
+            top = hypotheses[0]
+            compatible = [value for value in hypotheses if float(
+                torch.linalg.norm(value[1] - top[1]).detach().cpu()) <= 0.75]
+            compatible_score = torch.stack(
+                [value[0] for value in compatible]).clamp_min(1e-6)
+            fused = (
+                torch.stack([value[1] for value in compatible])
+                * compatible_score.unsqueeze(1)).sum(dim=0) / (
+                    compatible_score.sum())
+            margin = (
+                top[0] - hypotheses[1][0]
+                if len(hypotheses) >= 2 else top[0].new_zeros(()))
+            raw_rows.append(fused)
+            consistency_rows.append(top[0])
+            covariance_rows.append(top[2])
+            inlier_ratio_rows.append(top[3])
+            effective_mass_rows.append(top[4])
+            margin_rows.append(margin)
+            compatible_rows.append(top[0].new_tensor(float(len(compatible))))
+        return {
+            "center": torch.stack(raw_rows),
+            "consistency": torch.stack(consistency_rows),
+            "covariance": torch.stack(covariance_rows),
+            "inlier_ratio": torch.stack(inlier_ratio_rows),
+            "effective_mass": torch.stack(effective_mass_rows),
+            "margin": torch.stack(margin_rows),
+            "compatible_count": torch.stack(compatible_rows),
+        }
 
     def forward(
             self,
@@ -333,7 +545,8 @@ class B2EvidenceAcquirer(nn.Module):
             b1_valid_f.unsqueeze(1).expand(-1, extension_count),
         ), dim=2)
         source = extension_source.reshape(
-            batch_size, extension_count).long().clamp(0, 3)
+            batch_size, extension_count).long().clamp(
+                0, 7 if self.relation_aware_sampling else 3)
         extension_feature = (
             self.extension_encoder(safe_points)
             + self.geometry_encoder(geometry)
@@ -345,6 +558,46 @@ class B2EvidenceAcquirer(nn.Module):
             memory_tokens.detach()
             + self.memory_metadata_encoder(memory_metadata.detach()))
         memory_features = memory_features * memory_mask.unsqueeze(2)
+        relation_logits_prepool = safe_points.new_zeros(
+            (batch_size, extension_count))
+        relation_probability = extension_mask.to(safe_points.dtype)
+        selected_indices = torch.arange(
+            extension_count, device=safe_points.device,
+            dtype=torch.long).unsqueeze(0).expand(batch_size, -1)
+        selected_group = torch.ones_like(selected_indices)
+        if self.relation_aware_sampling:
+            relation_context = self.relation_context_encoder(torch.cat((
+                _masked_mean(base_features, base_mask),
+                _masked_max(base_features, base_mask),
+                _masked_mean(memory_features, memory_mask),
+                _masked_max(memory_features, memory_mask),
+            ), dim=1))
+            relation_logits_prepool = self.relation_head(torch.cat((
+                extension_feature,
+                relation_context.unsqueeze(1).expand(
+                    -1, extension_count, -1),
+            ), dim=2)).squeeze(2)
+            relation_logits_prepool = relation_logits_prepool.masked_fill(
+                ~extension_mask, -20.0)
+            selected_indices, selected_mask, selected_group = (
+                self._hybrid_select(
+                    safe_points, extension_mask,
+                    relation_logits_prepool, source))
+            safe_points = self._gather_rows(safe_points, selected_indices)
+            source = self._gather_rows(
+                source.unsqueeze(2), selected_indices).squeeze(2)
+            extension_feature = self._gather_rows(
+                extension_feature, selected_indices)
+            relation_selected_logits = self._gather_rows(
+                relation_logits_prepool.unsqueeze(2),
+                selected_indices).squeeze(2)
+            extension_mask = selected_mask
+            relation_probability = (
+                torch.sigmoid(relation_selected_logits)
+                * extension_mask.to(relation_selected_logits.dtype))
+            extension_count = self.selected_count
+        else:
+            relation_selected_logits = relation_logits_prepool
         kv = torch.cat((base_features, memory_features), dim=1)
         kv_valid = torch.cat((base_mask, memory_mask), dim=1)
         no_context = ~kv_valid.any(dim=1)
@@ -371,14 +624,31 @@ class B2EvidenceAcquirer(nn.Module):
         scores = torch.sigmoid(logits) * extension_mask.to(logits.dtype)
         votes = safe_points[..., :2] + self.max_vote_offset * torch.tanh(
             self.vote_head(enriched))
-        weight_sum = scores.sum(dim=1, keepdim=True)
-        raw_xy = (scores.unsqueeze(2) * votes).sum(dim=1) / torch.clamp(
-            weight_sum, min=1e-6)
+        vote_weights = scores * relation_probability
+        weight_sum = vote_weights.sum(dim=1, keepdim=True)
+        if self.robust_consensus_voting:
+            consensus = self._consensus_vote(
+                votes, vote_weights, extension_mask,
+                observation_box[:, :2].detach())
+            raw_xy = consensus["center"]
+        else:
+            raw_xy = (vote_weights.unsqueeze(2) * votes).sum(
+                dim=1) / torch.clamp(weight_sum, min=1e-6)
+            zeros = raw_xy.new_zeros((batch_size,))
+            consensus = {
+                "consistency": zeros,
+                "covariance": raw_xy.new_zeros((batch_size, 2, 2)),
+                "inlier_ratio": zeros,
+                "effective_mass": zeros,
+                "margin": zeros,
+                "compatible_count": zeros,
+            }
         extension_point_count = extension_mask.sum(dim=1)
         availability = (
-            (b1_valid_f > 0)
-            & (extension_point_count > 0)
+            (extension_point_count > 0)
             & torch.isfinite(raw_xy).all(dim=1))
+        if not self.relation_aware_sampling:
+            availability = availability & (b1_valid_f > 0)
         observation_xy = observation_box[:, :2].detach()
         raw_xy = torch.where(availability.unsqueeze(1), raw_xy, observation_xy)
         raw_box = torch.cat((raw_xy, observation_box[:, 2:].detach()), dim=1)
@@ -403,7 +673,7 @@ class B2EvidenceAcquirer(nn.Module):
             extension_presence_probability >= self.presence_threshold)
         candidate_valid = availability & evidence_present
 
-        probability = scores / torch.clamp(weight_sum, min=1e-6)
+        probability = vote_weights / torch.clamp(weight_sum, min=1e-6)
         entropy = -(probability * torch.log(torch.clamp(
             probability, min=1e-8))).sum(dim=1)
         targetness_mean = scores.sum(dim=1) / torch.clamp(
@@ -419,6 +689,12 @@ class B2EvidenceAcquirer(nn.Module):
             "ct_memory_valid_mask": memory_mask,
             "ct_memory_metadata": memory_metadata,
             "ct_extension_query_features": enriched,
+            "ct_extension_selected_indices": selected_indices,
+            "ct_extension_selected_valid_mask": extension_mask.to(
+                enriched.dtype),
+            "ct_extension_selected_group": selected_group,
+            "ct_relation_logits_prepool": relation_logits_prepool,
+            "ct_relation_probability_selected": relation_probability,
             "ct_cross_attention_weights": attention_weights,
             "ct_b2_available": availability.to(enriched.dtype),
             "ct_b2_base_presence_logit": base_presence_logit,
@@ -450,6 +726,15 @@ class B2EvidenceAcquirer(nn.Module):
             "ct_search_normalized_ess": normalized_ess,
             "ct_search_extension_selected_count":
                 extension_point_count.to(enriched.dtype),
+            "ct_vote_consistency": consensus["consistency"],
+            "ct_vote_covariance_xx": consensus["covariance"][:, 0, 0],
+            "ct_vote_covariance_xy": consensus["covariance"][:, 0, 1],
+            "ct_vote_covariance_yy": consensus["covariance"][:, 1, 1],
+            "ct_vote_inlier_ratio": consensus["inlier_ratio"],
+            "ct_vote_effective_mass": consensus["effective_mass"],
+            "ct_vote_candidate_margin": consensus["margin"],
+            "ct_vote_compatible_hypothesis_count": consensus[
+                "compatible_count"],
         }
 
 class B3SelectiveUpdater(nn.Module):
@@ -472,6 +757,7 @@ class B3SelectiveUpdater(nn.Module):
             radius_per_second=0.5,
             radius_max=2.0,
             require_calibration=False,
+            consensus_features=False,
             helpful_init_probability=0.05,
             harmful_init_probability=0.5):
         super().__init__()
@@ -479,6 +765,7 @@ class B3SelectiveUpdater(nn.Module):
         self.radius_base = float(radius_base)
         self.radius_per_second = float(radius_per_second)
         self.radius_max = float(radius_max)
+        self.consensus_features = bool(consensus_features)
         self.register_buffer(
             "presence_threshold", torch.tensor(float(presence_threshold)),
             persistent=False)
@@ -494,8 +781,9 @@ class B3SelectiveUpdater(nn.Module):
         # observation/prior disagreement(3), observation/evidence
         # disagreement(3), uncertainty(2), dt/gap/age(3), observation
         # statistics(5), point evidence(6).
+        point_feature_count = 6 + (7 if self.consensus_features else 0)
         input_dim = 32 + 2 + 2 + 3 + 3 + 2 + 3 + int(
-            observation_stats_dim) + 6
+            observation_stats_dim) + point_feature_count
         self.risk_trunk = nn.Sequential(
             nn.Linear(input_dim, int(hidden_dim)),
             nn.GELU(),
@@ -558,6 +846,13 @@ class B3SelectiveUpdater(nn.Module):
             extension_voxel_count=None,
             targetness_mean=None,
             targetness_max=None,
+            vote_consistency=None,
+            vote_covariance_xx=None,
+            vote_covariance_xy=None,
+            vote_covariance_yy=None,
+            vote_inlier_ratio=None,
+            vote_candidate_margin=None,
+            compatible_hypothesis_count=None,
             h1_utility_logit=None,
             h1_expected_gain=None):
         observation = observation_box.detach()
@@ -603,6 +898,20 @@ class B3SelectiveUpdater(nn.Module):
             column(targetness_mean),
             column(targetness_max),
         ), dim=1)
+        if self.consensus_features:
+            covariance_xy = column(vote_covariance_xy)
+            consensus_evidence = torch.cat((
+                column(vote_consistency).clamp(0.0, 1.0),
+                torch.log1p(column(vote_covariance_xx).clamp(min=0.0)),
+                torch.sign(covariance_xy) * torch.log1p(
+                    torch.abs(covariance_xy)),
+                torch.log1p(column(vote_covariance_yy).clamp(min=0.0)),
+                column(vote_inlier_ratio).clamp(0.0, 1.0),
+                column(vote_candidate_margin),
+                column(compatible_hypothesis_count).clamp(0.0, 3.0) / 3.0,
+            ), dim=1)
+            point_evidence = torch.cat((
+                point_evidence, consensus_evidence), dim=1)
         features = torch.cat((
             evidence,
             base_presence_probability.detach().unsqueeze(1),

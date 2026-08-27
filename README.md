@@ -11,8 +11,8 @@ SeqTrack / B0 Observation
 ```
 
 B4 is retained as an isolated experiment and is disabled in every formal
-configuration. The Safe-SeqTrack v25 method has not completed its registered mini or
-full-nuScenes experiments, so this repository does not currently claim a gain,
+configuration. The v26 method has not completed its registered full-nuScenes
+experiments, so this repository does not currently claim a gain,
 stability, SOTA, or a causal benefit from physical time or memory.
 
 ## Method contract
@@ -21,11 +21,13 @@ stability, SOTA, or a causal benefit from physical time or memory.
 - B1 reads prediction-backed history boxes and physical timestamps. It supplies
   a prior and uncertainty but never replaces the observation.
 - B1 uses a fixed kinematic anchor plus a bounded normalized residual. Its
-  statistical sigma is trained by detached-mean beta-NLL and never changes the
-  fixed B2 crop geometry (`2m/1m`). GRU is the default temporal backend; the
-  parameter-matched CfC backend is an explicitly selected ablation.
-- B2 must recover identifiable evidence from extension-only points. Base points
-  and memory are context; they cannot independently regress the target center.
+  statistical sigma is separate from a q=0.90 bounded acquisition-margin head.
+  v26 adds a causal three-frame backup corridor for catastrophic drift. GRU is
+  the formal temporal backend for this round.
+- B2 must recover identifiable evidence from extension-only points. A
+  deterministic 768-point novel pre-pool is reduced to 256 points by relation,
+  spatial-coverage and stateless-exploration selection, then aggregated by
+  mode-consistent robust voting. Base points and memory are context only.
 - B3 consumes detached upstream evidence and may apply only a calibrated,
   bounded residual. Missing or mismatched calibration returns B0 exactly.
 
@@ -57,10 +59,13 @@ names. Required compatibility aliases remain part of the public runtime.
 | `full_minus_b3` | B0+B1+B2 | raw B2 search output |
 | `full` | B0+B1+B2+B3 | observation until calibrated selective evaluation |
 
-The active mini configs are `25_b0.yaml`, `25_b1.yaml`,
-`25_full_minus_b3.yaml` and `25_full.yaml`; the corresponding
-`25_*_nuscenes_full.yaml` files are used only after mini validation. The v24
-configs and outputs are frozen failure evidence and cannot resume into v25. B4 keeps
+The registered v26 full-nuScenes configs are
+`cfgs/26_seqtrack_strict_nuscenes_full.yaml`,
+`26_b0_nuscenes_full.yaml`, `26_b1_gru_nuscenes_full.yaml`,
+`26_b1_cfc_nuscenes_full.yaml`, `26_full_minus_b3_nuscenes_full.yaml`, and
+`26_full_nuscenes_full.yaml`. The two B1-only configs are backend diagnostics;
+CfC is not the v26 main method. The v24/v25 configs and outputs remain frozen
+evidence and cannot initialize v26. B4 keeps
 `cfgs/ct_v2/19_b4_decoder_alignment.yaml` and
 `20_b4_decoder_anticollapse.yaml`.
 
@@ -68,16 +73,18 @@ All formal arms use `scratch_only`. `--init_checkpoint` is forbidden.
 `--checkpoint` is accepted only for exact same-run epoch-boundary resume or
 for evaluation. Enabled B0/B1/B2/B3 parameters are never frozen.
 
-The B1 backend is selected without duplicating configs:
+The retained v25 B1 backend ablation is selected without duplicating configs:
 
 ```bash
 python main.py --cfg cfgs/ct_seqtrack/25_b1.yaml --path DATA_ROOT --tag b1_gru --b1-backend gru
 python main.py --cfg cfgs/ct_seqtrack/25_b1.yaml --path DATA_ROOT --tag b1_cfc --b1-backend cfc
 ```
 
-Both commands construct only the selected backend and train every enabled
-module from epoch 0. A calibrated B1 checkpoint is evaluation-only and cannot
-be used for resume or initialization.
+Both historical commands construct only the selected backend and train every
+enabled module from epoch 0. The v26 integrated arms use GRU; the separately
+registered v26 B1-CfC arm is a scratch-only backend diagnostic and never
+initializes another arm. A calibration checkpoint is evaluation-only and
+cannot be used for resume or initialization.
 
 ## Experiment order
 
@@ -86,22 +93,35 @@ The authoritative protocol is
 
 1. use the fixed candidate protocol in every arm: four B0 views and one
    canonical B2 view;
-2. screen B1-GRU and B1-CfC independently from epoch0 on mini seed42;
-3. fit B1 uncertainty on calibration tracklets and evaluate promotion on
-   independent dev tracklets;
-4. retrain the winning Full-B3 and Full arms independently from epoch0;
-5. after mini analysis, run full nuScenes seed42 and then seeds52/62.
+2. run the zero-step full-data launch preflight for each arm (no sample
+   forward and no checkpoint is created);
+3. train the requested B0, B1-GRU, B1-CfC, Full-B3 and Full arms independently
+   from epoch0 on full nuScenes, Car, seed42, for 60 epochs; SeqTrack-strict
+   remains the separately registered external reference;
+4. export disjoint calibration/dev action rows for every final/late-3 Full
+   checkpoint and install thresholds only after dev promotion;
+5. report final/late-3 and tracklet-paired intervals without a cross-seed claim.
 
-There is no training preflight, kill-test or intermediate stopping gate.
+The only v26 launch gate is `tools/preflight_v26_full.py`; it performs
+configuration, dependency, data-layout, model-construction and optimizer-group
+checks without training. There is no mini run, kill-test, warm-start checkpoint
+or intermediate metric stopping gate.
 B1 backend promotion is a post-run decision from held-out mechanism metrics;
 analysis artifacts never initialize another run or alter a run in progress.
 
 ## Validation
 
 ```bash
+python tools/preflight_v26_full.py --arm full --path FULL_NUSCENES_ROOT
 python tools/verify_ct_slimming.py verify
 python -m pytest -q
 ```
+
+Formal training explicitly sets `min_epochs=max_epochs=60`, `max_steps=-1`,
+validation every two epochs, one visible trainer device and no early-stopping
+callback. `last.ckpt` remains
+the same-run resume point; `formal_checkpoints/epoch=058.ckpt` through
+`epoch=060.ckpt` are retained for the registered late-3/final analysis.
 
 Real-batch forward/backward, 100-step/resume parity and point/box visualization
 are required server-side acceptance checks before a formal long run. They are not represented as
@@ -111,6 +131,7 @@ Engineering checkpoints are discarded and may not initialize formal runs.
 Detailed method and evidence boundaries:
 
 - [Safe-SeqTrack v25 runtime protocol](docs/SAFE_SEQTRACK_V25_PROTOCOL.md)
+- [v26 bounded evidence recovery](docs/CTSEQTRACK_V26_METHOD.md)
 - [B0--B3 method](docs/CTSEQTRACK_B0_B3_METHOD.md)
 - [formal experiment protocol](docs/EXPERIMENT_PROTOCOL.md)
 - [formal tooling](docs/FORMAL_TOOLING.md)

@@ -11,6 +11,10 @@ from utils.replay_cache import (
     b1_calibration_config_sha256,
     validate_b1_calibration_state,
 )
+from utils.action_calibration import (
+    action_calibration_config_identity,
+    sha256_json,
+)
 
 
 def apply_b1_calibration_contract(model, payload, state_dict):
@@ -60,7 +64,8 @@ def apply_b1_calibration_contract(model, payload, state_dict):
     return calibration
 
 
-def load_initial_weights(model, checkpoint_path, report_path=None):
+def load_initial_weights(
+        model, checkpoint_path, report_path=None, *, require_complete=False):
     """Load shape-compatible model tensors without importing ``main.py``.
 
     Offline exporters deliberately disable B2/B3 training paths, so they need
@@ -85,6 +90,17 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         if observed_b1_config != expected_b1_config:
             raise RuntimeError(
                 "checkpoint B1 backend/loss/config identity mismatch")
+    if bool(require_complete):
+        if not isinstance(saved_config, dict) or not saved_config:
+            raise RuntimeError(
+                "strict checkpoint restore requires saved resolved config")
+        observed_config = sha256_json(
+            action_calibration_config_identity(saved_config))
+        expected_config = sha256_json(
+            action_calibration_config_identity(model.config))
+        if observed_config != expected_config:
+            raise RuntimeError(
+                "strict checkpoint resolved-config identity mismatch")
     target = model.state_dict()
     candidates = [("none", source)]
     for prefix in ("model.", "module."):
@@ -102,6 +118,22 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         key: value for key, value in normalized.items()
         if key in target and target[key].shape == value.shape
     }
+    if bool(require_complete):
+        missing_keys = sorted(set(target).difference(matched))
+        mismatched_shapes = sorted(
+            key for key, value in normalized.items()
+            if key in target and target[key].shape != value.shape)
+        if missing_keys or mismatched_shapes:
+            details = []
+            if missing_keys:
+                details.append(
+                    "missing=" + ", ".join(missing_keys[:20]))
+            if mismatched_shapes:
+                details.append(
+                    "shape=" + ", ".join(mismatched_shapes[:20]))
+            raise RuntimeError(
+                "strict checkpoint restore is incomplete: "
+                + "; ".join(details))
     critical = (
         "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
         "feature_pointnet.", "Transformer.", "physical_motion_encoder.",
@@ -129,4 +161,5 @@ def load_initial_weights(model, checkpoint_path, report_path=None):
         "selected_prefix_strip": selected_prefix,
         "matched_tensor_count": len(matched),
         "target_tensor_count": len(target),
+        "complete": len(matched) == len(target),
     }

@@ -317,7 +317,9 @@ class SearchSupportStatisticsTest(unittest.TestCase):
             endpoint_xy=np.asarray([0.1, 0.1]),
             baseline_point_count=32, **common)
         far, _ = useful_search_coverage_need(
-            endpoint_xy=np.asarray([0.7, 0.1]),
+            # local-x is nuScenes length (wlh[1]), so this must exceed
+            # 0.6 * (length/2) rather than the old width-mapped threshold.
+            endpoint_xy=np.asarray([1.3, 0.1]),
             baseline_point_count=128, **common)
         self.assertFalse(ordinary)
         self.assertTrue(sparse)

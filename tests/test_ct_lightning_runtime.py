@@ -5,6 +5,7 @@ the formal GPU environment pins pytorch-lightning==2.0.2 and must run it.
 """
 
 import copy
+from pathlib import Path
 import random
 
 import numpy as np
@@ -19,6 +20,10 @@ from utils.training_isolation import (  # noqa: E402
     advance_lightning_manual_transaction,
     capture_global_rng_state,
     restore_global_rng_state,
+)
+from utils.lightning_runtime import (  # noqa: E402
+    DataLoaderGeneratorState,
+    FinalWindowCheckpoint,
 )
 
 
@@ -172,6 +177,38 @@ def test_real_lightning_epoch_resume_is_transaction_exact(tmp_path):
     actual = _snapshot(resumed, resumed_trainer)
     _assert_nested_equal(expected, actual)
     assert actual["global_step"] == 100
+
+
+def test_formal_dataloader_generator_callback_round_trip():
+    generator = torch.Generator().manual_seed(123)
+    callback = DataLoaderGeneratorState(observation=generator)
+    state = callback.state_dict()
+    expected = torch.rand(8, generator=generator)
+    generator.manual_seed(999)
+    callback.load_state_dict(state)
+    assert torch.equal(torch.rand(8, generator=generator), expected)
+
+
+def test_final_window_callback_saves_only_epochs_58_to_60(tmp_path):
+    class Trainer:
+        sanity_checking = False
+        max_epochs = 60
+        default_root_dir = str(tmp_path)
+
+        def __init__(self):
+            self.current_epoch = 0
+            self.saved = []
+
+        def save_checkpoint(self, path):
+            self.saved.append(Path(path))
+
+    trainer = Trainer()
+    callback = FinalWindowCheckpoint(keep=3)
+    for epoch in range(60):
+        trainer.current_epoch = epoch
+        callback.on_train_epoch_end(trainer, None)
+    assert [path.name for path in trainer.saved] == [
+        "epoch=058.ckpt", "epoch=059.ckpt", "epoch=060.ckpt"]
 
 
 @pytest.mark.skipif(

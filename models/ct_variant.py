@@ -56,10 +56,14 @@ def configure_ct_variant(config):
                 config, "ct_observation_rng_mode", "")) != "stateless_seqtrack":
             raise ValueError(
                 "safe_seqtrack_auto_v1 requires stateless_seqtrack RNG")
+        expected_batch_schema = (
+            "ct_seqtrack.train.v3" if bool(get_config(
+                config, "ct_enable_v26_recovery", False))
+            else "ct_seqtrack.train.v2")
         if str(get_config(config, "ct_batch_schema", "")) != (
-                "ct_seqtrack.train.v2"):
+                expected_batch_schema):
             raise ValueError(
-                "safe_seqtrack_auto_v1 requires ct_seqtrack.train.v2")
+                "safe_seqtrack_auto_v1 requires " + expected_batch_schema)
     forbidden = (
         "use_observability_gate", "use_dynamics_encoder", "use_ct_v2",
         "use_search_evidence_v2", "use_search_evidence_v21",

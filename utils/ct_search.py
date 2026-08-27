@@ -5,6 +5,8 @@ import math
 
 import numpy as np
 
+from utils.box_membership import axis_aligned_box_membership_mask
+
 
 def _finite_positive(value, fallback):
     try:
@@ -538,6 +540,7 @@ def build_b1_uncertainty_support(
         prediction,
         *,
         use_dynamic_sigma,
+        use_acquisition_margin=False,
         fixed_margins=(2.0, 1.0),
         coverage_scale=2.448,
         standardized_residual_quantile=(1.0, 1.0),
@@ -569,7 +572,19 @@ def build_b1_uncertainty_support(
             "reason": "invalid_standardized_residual_quantile",
             "source_id": int(prediction.get("source_id", 1)),
         }
-    if bool(use_dynamic_sigma):
+    if bool(use_acquisition_margin):
+        margins = np.asarray(
+            prediction.get("acquisition_margin_parallel_perp"),
+            dtype=np.float64).reshape(-1)
+        if (margins.size != 2 or not np.isfinite(margins).all()
+                or np.any(margins <= 0.0)):
+            return None, {
+                "valid": False,
+                "reason": "invalid_acquisition_margin",
+                "source_id": int(prediction.get("source_id", 1)),
+            }
+        sigma = margins / scale
+    elif bool(use_dynamic_sigma):
         log_sigma = np.asarray(
             prediction.get("log_sigma_parallel_perp"), dtype=np.float64)
         if log_sigma.size != 2 or not np.isfinite(log_sigma).all():
@@ -603,6 +618,8 @@ def build_b1_uncertainty_support(
     )
     diagnostics["standardized_residual_quantile"] = (
         residual_quantile.astype(np.float64).tolist())
+    diagnostics["acquisition_margin_parallel_perp"] = (
+        (sigma * scale).astype(np.float64).tolist())
     return support, diagnostics
 
 
@@ -614,6 +631,7 @@ def resolve_b1_search_support(
         prediction=None,
         use_b1_prepass=False,
         use_dynamic_sigma=False,
+        use_acquisition_margin=False,
         fixed_margins=(2.0, 1.0),
         coverage_scale=2.448,
         standardized_residual_quantile=(1.0, 1.0),
@@ -634,6 +652,7 @@ def resolve_b1_search_support(
         support, diagnostics = build_b1_uncertainty_support(
             history_boxes[0], prediction,
             use_dynamic_sigma=use_dynamic_sigma,
+            use_acquisition_margin=use_acquisition_margin,
             fixed_margins=fixed_margins,
             coverage_scale=coverage_scale,
             standardized_residual_quantile=(
@@ -715,6 +734,18 @@ def resolve_joint_search_geometry(
             float(endpoint.wlh[1]) + 2.0 * parallel_margin)
     else:
         endpoint = endpoint_or_tube
+        if bool(kwargs.get("use_acquisition_margin", False)):
+            # v26 invalid-B1 fallback is the same bounded 2m/1m CV support,
+            # not a target-sized endpoint plus an expanded tube only.
+            endpoint = copy.deepcopy(endpoint_or_tube)
+            endpoint.wlh = np.asarray(
+                endpoint.wlh, dtype=np.float64).copy()
+            endpoint.wlh[0] = min(
+                float(kwargs.get("max_width", 10.0)),
+                float(endpoint.wlh[0]) + 2.0 * fixed_margins[1])
+            endpoint.wlh[1] = min(
+                float(kwargs.get("max_length", 24.0)),
+                float(endpoint.wlh[1]) + 2.0 * fixed_margins[0])
         displacement_world = (
             np.asarray(endpoint.center, dtype=np.float64)
             - np.asarray(latest.center, dtype=np.float64))
@@ -1175,6 +1206,264 @@ def sample_joint_novel_extensions(
     }
 
 
+def sample_bounded_novel_prepool(
+        baseline_points, endpoint_points, tube_points, corridor_points,
+        local_quota=512, corridor_quota=256, voxel_size=0.2,
+        tolerance=1e-6):
+    """Build the deterministic v26 extension-only 768-point pre-pool.
+
+    Source provenance is a bitmask: endpoint=1, tube=2, corridor=4.  Exact
+    XYZ keys exclude B0 and deduplicate the union; voxel round-robin prevents
+    dense background cells from monopolising either nominal budget.  Unused
+    budget is borrowed by the other source family.
+    """
+    arrays = tuple(np.asarray(value) for value in (
+        baseline_points, endpoint_points, tube_points, corridor_points))
+    baseline_points, endpoint_points, tube_points, corridor_points = arrays
+    if any(value.ndim != 2 for value in arrays):
+        raise ValueError("v26 acquisition arrays must have shape [N,C]")
+    channels = baseline_points.shape[1]
+    if any(value.shape[1] != channels for value in arrays[1:]):
+        raise ValueError("v26 acquisition arrays must share channels")
+    local_quota = int(local_quota)
+    corridor_quota = int(corridor_quota)
+    if local_quota <= 0 or corridor_quota <= 0:
+        raise ValueError("v26 local/corridor quotas must be positive")
+    tolerance = _finite_positive(tolerance, 1e-6)
+    voxel_size = _finite_positive(voxel_size, 0.2)
+
+    def exact_keys(points):
+        return np.rint(points[:, :3] / tolerance).astype(np.int64)
+
+    base_keys = {tuple(row) for row in exact_keys(baseline_points)}
+    merged = {}
+    for bit, points in ((1, endpoint_points), (2, tube_points),
+                        (4, corridor_points)):
+        seen = set()
+        for point, key_row in zip(points, exact_keys(points)):
+            key = tuple(key_row)
+            if key in base_keys or key in seen:
+                continue
+            seen.add(key)
+            if key in merged:
+                merged[key] = (merged[key][0], merged[key][1] | bit)
+            else:
+                merged[key] = (point, bit)
+
+    ordered_keys = sorted(merged)
+
+    def voxel_round_robin(candidate_keys):
+        buckets = {}
+        for key in candidate_keys:
+            point = merged[key][0]
+            voxel = tuple(np.floor(
+                point[:3].astype(np.float64) / voxel_size).astype(np.int64))
+            buckets.setdefault(voxel, []).append(key)
+        for voxel in buckets:
+            buckets[voxel].sort()
+        voxels = sorted(buckets)
+        result = []
+        depth = 0
+        while voxels:
+            next_voxels = []
+            for voxel in voxels:
+                values = buckets[voxel]
+                if depth < len(values):
+                    result.append(values[depth])
+                if depth + 1 < len(values):
+                    next_voxels.append(voxel)
+            voxels = next_voxels
+            depth += 1
+        return result
+
+    local_order = voxel_round_robin([
+        key for key in ordered_keys if merged[key][1] & 3])
+    corridor_order = voxel_round_robin([
+        key for key in ordered_keys if merged[key][1] & 4])
+    selected = []
+    selected_set = set()
+
+    def take(order, count):
+        taken = 0
+        for key in order:
+            if key in selected_set:
+                continue
+            selected.append(key)
+            selected_set.add(key)
+            taken += 1
+            if taken >= count:
+                break
+        return taken
+
+    local_taken = take(local_order, local_quota)
+    corridor_taken = take(corridor_order, corridor_quota)
+    remaining = local_quota + corridor_quota - len(selected)
+    if remaining:
+        take(voxel_round_robin([
+            key for key in ordered_keys if key not in selected_set]), remaining)
+
+    output_size = local_quota + corridor_quota
+    output = np.zeros((output_size, channels), dtype=np.float32)
+    valid = np.zeros((output_size,), dtype=np.float32)
+    source = np.zeros((output_size,), dtype=np.int64)
+    for index, key in enumerate(selected[:output_size]):
+        point, bitmask = merged[key]
+        output[index] = point.astype(np.float32, copy=False)
+        valid[index] = 1.0
+        source[index] = int(bitmask)
+    pool_points = np.asarray(
+        [merged[key][0] for key in ordered_keys], dtype=np.float32
+    ).reshape(-1, channels)
+    pool_source = np.asarray(
+        [merged[key][1] for key in ordered_keys], dtype=np.int64)
+    return output, valid, source, {
+        "active": bool(selected),
+        "sample_count": int(min(len(selected), output_size)),
+        "available_count": int(len(merged)),
+        "local_available_count": int(sum(
+            bool(value[1] & 3) for value in merged.values())),
+        "corridor_available_count": int(sum(
+            bool(value[1] & 4) for value in merged.values())),
+        "selected_local_nominal_count": int(local_taken),
+        "selected_corridor_nominal_count": int(corridor_taken),
+        "_pool_points": pool_points,
+        "_pool_source": pool_source,
+    }
+
+
+def build_causal_history_corridor(
+        history_boxes, delta_t, valid_mask, *, enabled,
+        first_frame_size=None,
+        max_speed=20.0, max_acceleration=8.0,
+        max_displacement=12.0, max_length=16.0,
+        width_padding=2.0, max_width=6.0):
+    """Build a GT-free short-history backup corridor for catastrophic drift."""
+    if not bool(enabled):
+        return None, {"valid": False, "reason": "coverage_not_needed"}
+    if len(history_boxes) < 2 or len(delta_t) < 2:
+        return None, {"valid": False, "reason": "insufficient_history"}
+    valid_mask = (
+        [True] * len(history_boxes) if valid_mask is None else valid_mask)
+    query_gap = _finite_positive(delta_t[0], 0.0)
+    recent_gap = _finite_positive(delta_t[1], 0.0)
+    if (query_gap <= 0.0 or recent_gap <= 0.0
+            or not (bool(valid_mask[0]) and bool(valid_mask[1]))):
+        return None, {"valid": False, "reason": "invalid_recent_transition"}
+
+    centers = [np.asarray(box.center, dtype=np.float64)
+               for box in history_boxes[:3]]
+
+    def bounded_velocity(newer, older, gap):
+        velocity = (newer - older) / max(gap, 1e-6)
+        speed = float(np.linalg.norm(velocity[:2]))
+        clipped = speed > float(max_speed)
+        if clipped:
+            velocity *= float(max_speed) / max(speed, 1e-9)
+        return velocity, clipped
+
+    recent_velocity, speed_clipped = bounded_velocity(
+        centers[0], centers[1], recent_gap)
+    older_valid = (
+        len(centers) >= 3 and len(delta_t) >= 3
+        and len(valid_mask) >= 3 and bool(valid_mask[1])
+        and bool(valid_mask[2]))
+    acceleration_violation = False
+    use_older_anchor = False
+    anchor = centers[0].copy()
+    robust_velocity = recent_velocity
+    if older_valid:
+        older_gap = _finite_positive(delta_t[2], 0.0)
+        if older_gap > 0.0:
+            older_velocity, older_clipped = bounded_velocity(
+                centers[1], centers[2], older_gap)
+            acceleration_gap = max(0.5 * (recent_gap + older_gap), 1e-6)
+            acceleration = (
+                recent_velocity - older_velocity) / acceleration_gap
+            acceleration_violation = (
+                float(np.linalg.norm(acceleration[:2]))
+                > float(max_acceleration))
+            speed_clipped = speed_clipped or older_clipped
+            if acceleration_violation:
+                use_older_anchor = True
+                anchor = centers[1].copy()
+                robust_velocity = older_velocity
+                travel_time = recent_gap + query_gap
+            else:
+                robust_velocity = 0.5 * (
+                    recent_velocity + older_velocity)
+                travel_time = query_gap
+        else:
+            travel_time = query_gap
+    else:
+        travel_time = query_gap
+
+    endpoint = anchor + robust_velocity * travel_time
+    displacement = endpoint - centers[0]
+    displacement_norm = float(np.linalg.norm(displacement[:2]))
+    displacement_clipped = displacement_norm > float(max_displacement)
+    if displacement_clipped:
+        displacement *= float(max_displacement) / max(displacement_norm, 1e-9)
+        endpoint = centers[0] + displacement
+        displacement_norm = float(max_displacement)
+    first_size = np.asarray(
+        history_boxes[0].wlh if first_frame_size is None
+        else first_frame_size, dtype=np.float64).reshape(3).copy()
+    segment = endpoint - anchor
+    segment_norm = float(np.linalg.norm(segment[:2]))
+    requested_length = segment_norm + float(first_size[1])
+    maximum_segment = max(float(max_length) - float(first_size[1]), 0.0)
+    length_clipped = segment_norm > maximum_segment
+    if length_clipped and segment_norm > 1e-9:
+        segment *= maximum_segment / segment_norm
+        endpoint = anchor + segment
+        segment_norm = maximum_segment
+        displacement_norm = float(np.linalg.norm(
+            (endpoint - centers[0])[:2]))
+    if segment_norm <= 1e-6:
+        return None, {"valid": False, "reason": "stationary"}
+
+    length = segment_norm + float(first_size[1])
+    requested_width = float(first_size[0]) + float(width_padding)
+    width = min(float(max_width), requested_width)
+    corridor = copy.deepcopy(history_boxes[0])
+    center = 0.5 * (anchor + endpoint)
+    center[2] = centers[0][2]
+    corridor.center = center
+    yaw = math.atan2(segment[1], segment[0])
+    orientation_type = history_boxes[0].orientation.__class__
+    corridor.orientation = orientation_type(
+        axis=[0, 0, 1], radians=_wrap_radians(yaw))
+    corridor.wlh = first_size
+    corridor.wlh[0] = width
+    corridor.wlh[1] = length
+    return corridor, {
+        "valid": True,
+        "reason": "ok",
+        "source_id": 4,
+        "anchor_source": "older_consistent" if use_older_anchor else "recent",
+        "endpoint_center": endpoint.copy(),
+        "length": length,
+        "width": width,
+        "requested_length": requested_length,
+        "requested_width": requested_width,
+        "truncated": bool(
+            length + 1e-9 < requested_length
+            or width + 1e-9 < requested_width),
+        "constraint_clipped": bool(
+            speed_clipped or displacement_clipped
+            or length_clipped or acceleration_violation),
+        "acceleration_violation": bool(acceleration_violation),
+        "displacement": displacement_norm,
+        "query_delta_t": query_gap,
+    }
+
+
+def _box_local_xyz_size(wlh):
+    """Map nuScenes ``wlh`` to the crop frame's local x/y/z extents."""
+    size = np.asarray(wlh, dtype=np.float64).reshape(3)
+    return size[[1, 0, 2]]
+
+
 def diagnostic_points_in_oriented_support(
         points, support_box, *, scale=1.0, offset=0.0, ignore_z=False):
     """Return the exact crop-membership mask for a diagnostic support box.
@@ -1195,7 +1484,7 @@ def diagnostic_points_in_oriented_support(
             or not np.isfinite(offset) or offset < 0.0):
         raise ValueError("diagnostic support scale/offset must be finite")
     center = np.asarray(support_box.center, dtype=np.float64).reshape(3)
-    size = np.asarray(support_box.wlh, dtype=np.float64).reshape(3)
+    size = _box_local_xyz_size(support_box.wlh)
     rotation = np.asarray(
         support_box.rotation_matrix, dtype=np.float64).reshape(3, 3)
     if (not np.isfinite(center).all() or not np.isfinite(size).all()
@@ -1203,17 +1492,19 @@ def diagnostic_points_in_oriented_support(
         raise ValueError("diagnostic support box must be finite and positive")
     local = (rotation.T @ (
         points[:, :3].astype(np.float64, copy=False) - center).T).T
-    half_extent = 0.5 * size * scale + offset
-    mask = (
-        (local[:, 0] > -half_extent[0])
-        & (local[:, 0] < half_extent[0])
-        & (local[:, 1] > -half_extent[1])
-        & (local[:, 1] < half_extent[1]))
-    if not bool(ignore_z):
-        mask &= (
-            (local[:, 2] > -half_extent[2])
-            & (local[:, 2] < half_extent[2]))
-    return mask
+    local_box = copy.deepcopy(support_box)
+    # Use the exact same Box/corners membership implementation as the online
+    # crop.  This is what protects non-square wlh/local-axis diagnostics.
+    from pyquaternion import Quaternion
+    if hasattr(local_box, "translate") and hasattr(local_box, "rotate"):
+        local_box.translate(-center)
+        local_box.rotate(Quaternion(matrix=rotation.T))
+    else:
+        local_box.center = np.zeros((3,), dtype=np.float64)
+        local_box.orientation = Quaternion()
+    return axis_aligned_box_membership_mask(
+        local.T, local_box, scale=scale, offset=offset,
+        ignore_z=ignore_z)
 
 
 def diagnostic_oriented_support_union_volume(box_specs):
@@ -1230,7 +1521,7 @@ def diagnostic_oriented_support_union_volume(box_specs):
             continue
         scale = float(scale)
         offset = float(offset)
-        size = np.asarray(support_box.wlh, dtype=np.float64).reshape(3)
+        size = _box_local_xyz_size(support_box.wlh)
         center = np.asarray(
             support_box.center, dtype=np.float64).reshape(3)
         rotation = np.asarray(
@@ -1360,7 +1651,7 @@ def combined_search_support_statistics(
         selected = mask & finite
         if selected.any():
             valid_points.append(points[selected, :3])
-        extension = selected & (source == 1)
+        extension = selected & (source > 0)
         if extension.any():
             extension_points.append(points[extension, :3])
 
@@ -1401,6 +1692,10 @@ def useful_search_coverage_need(
         min_gap_ratio=1.5,
         min_endpoint_ratio=0.6,
         sparse_base_points=64,
+        inner_core_point_count=None,
+        min_inner_core_points=3,
+        b1_valid=True,
+        constraint_clipped=False,
         bb_scale=1.0,
         bb_offset=0.0):
     """Test whether a second crop can cover evidence missing from B0."""
@@ -1408,10 +1703,10 @@ def useful_search_coverage_need(
     size = np.asarray(reference_wlh, dtype=np.float64).reshape(-1)
     if size.size < 2 or not np.isfinite(endpoint).all():
         return False, 0.0
-    # nuScenes Box.wlh is width/length/height.  The local x/y axes use the
-    # corresponding half extents after the ordinary B0 crop expansion.
+    # nuScenes Box.wlh is width/length/height, while crop-local x/y are
+    # length/width.  Keep this mapping shared with diagnostic membership.
     half_extent = np.maximum(
-        0.5 * size[:2] * float(bb_scale) + float(bb_offset), 1e-3)
+        0.5 * size[[1, 0]] * float(bb_scale) + float(bb_offset), 1e-3)
     endpoint_ratio = float(np.max(np.abs(endpoint) / half_extent))
     irregular = (
         float(query_delta_t) >= float(min_delta_t)
@@ -1419,5 +1714,9 @@ def useful_search_coverage_need(
     needed = (
         irregular
         or endpoint_ratio >= float(min_endpoint_ratio)
-        or int(baseline_point_count) < int(sparse_base_points))
+        or int(baseline_point_count) < int(sparse_base_points)
+        or (inner_core_point_count is not None
+            and int(inner_core_point_count) < int(min_inner_core_points))
+        or not bool(b1_valid)
+        or bool(constraint_clipped))
     return bool(needed), endpoint_ratio

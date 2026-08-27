@@ -1,0 +1,1388 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack B2 acquisition funnel：根因判断与修改顺序",
+    "description": "基于 GRU/CfC dev diagnostics v2、短期计划、本地代码和 15 篇 3D SOT 论文判断 B2 搜索与采样瓶颈。",
+    "generatedAt": "2026-08-27T20:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_b2_analysis_20260827",
+        "label": "CT-SeqTrack GRU/CfC dev acquisition diagnostics v2 复算快照",
+        "path": "artifacts/ct_checks/reports/20260827_b2_acquisition_root_cause_and_literature/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b2_acquisition_root_cause_20260827'",
+          "tablesUsed": [
+            "report_snapshot"
+          ],
+          "description": "从已校验导入 CSV 计算 observability、实际 acquisition funnel、误差分解与 tracklet 集中度",
+          "metricDefinitions": {
+            "label_visible": "global_target_count_label > 0；完整当前帧按 bb_scale=1.25 至少有一个目标点",
+            "observable_strict_miss": "label_visible 且 base_raw_target_count = 0",
+            "geometry_recovered": "observable_strict_miss 且 actual expansion_target_count > 0",
+            "sampling_loss": "pool_target_count > 0 且 sampled_target_count = 0"
+          }
+        }
+      },
+      {
+        "id": "src_literature_20260827",
+        "label": "15 篇 3D SOT 搜索与采样论文的系统化综述",
+        "path": "artifacts/ct_checks/reports/20260827_b2_acquisition_root_cause_and_literature/literature_review.md"
+      }
+    ],
+    "cards": [
+      {
+        "id": "card_diagnosis",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "当前漏斗首先在搜索中心/几何覆盖处中断。",
+        "metrics": [
+          {
+            "label": "Primary bottleneck",
+            "field": "diagnosis"
+          }
+        ]
+      },
+      {
+        "id": "card_gru_miss",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "分母为 278 个 label-visible GRU dev 行。",
+        "metrics": [
+          {
+            "label": "GRU observable strict miss",
+            "field": "gru_strict_miss_rate",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "card_cfc_miss",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "分母为 277 个 label-visible CfC dev 行。",
+        "metrics": [
+          {
+            "label": "CfC observable strict miss",
+            "field": "cfc_strict_miss_rate",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "card_recovery",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "101+88 个 observable strict miss 中，实际 endpoint∪tube 获得目标的行数。",
+        "metrics": [
+          {
+            "label": "Strict misses recovered",
+            "field": "strict_support_recovered_rows",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_pool",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "两臂全部 621 行中 raw extension pool 含目标的行数。",
+        "metrics": [
+          {
+            "label": "Target-bearing pools",
+            "field": "pool_target_rows",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "card_bug",
+        "dataset": "headline",
+        "sourceId": "src_b2_analysis_20260827",
+        "description": "纯诊断 helper 与实际 crop 计数不一致；反事实 margin 暂不可解释。",
+        "metrics": [
+          {
+            "label": "Helper mismatch rows",
+            "field": "helper_mismatch_rows",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_funnel",
+        "title": "Label-visible 行的 acquisition 阶段保留率",
+        "subtitle": "B0 已捕获约 64%–68%；B0 严格 miss 中 B2 实际 support 恢复率为 0",
+        "intent": "progression",
+        "question": "漏斗在哪一阶段首先归零？",
+        "rationale": "以各臂 label-visible 行为共同分母，直接比较 B0 捕获、B2 几何恢复与 pool/sample 保留。",
+        "type": "bar",
+        "dataset": "funnel",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "encodings": {
+          "x": {
+            "field": "stage",
+            "type": "nominal",
+            "label": "Stage"
+          },
+          "y": {
+            "field": "rate_of_label_visible",
+            "type": "quantitative",
+            "label": "Rate of label-visible rows"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "tooltip": [
+            {
+              "field": "rows",
+              "type": "quantitative",
+              "label": "Rows"
+            },
+            {
+              "field": "label_visible_denominator",
+              "type": "quantitative",
+              "label": "Visible denominator"
+            }
+          ]
+        }
+      },
+      {
+        "id": "chart_errors",
+        "title": "Observable strict miss 的中心误差分解",
+        "subtitle": "单位为米，中位数；主误差沿运动平行方向，z 与 learned–CV 分歧都很小",
+        "intent": "comparison",
+        "question": "当前搜索具体错在中心、方向还是 z？",
+        "rationale": "同一批严格 miss 上比较 observation、learned endpoint 与方向分量。",
+        "type": "bar",
+        "dataset": "errors",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "encodings": {
+          "x": {
+            "field": "component",
+            "type": "nominal",
+            "label": "Error component"
+          },
+          "y": {
+            "field": "median_m",
+            "type": "quantitative",
+            "label": "Median error",
+            "unit": "m"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "tooltip": [
+            {
+              "field": "strict_miss_rows",
+              "type": "quantitative",
+              "label": "Strict miss rows"
+            }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "table_tracking",
+        "title": "实验结果口径汇总",
+        "subtitle": "训练期 final、dev diagnostics 与历史 SeqTrack 只作各自口径内的描述",
+        "dataset": "tracking",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "run",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "success",
+            "label": "Success",
+            "format": "number"
+          },
+          {
+            "field": "precision",
+            "label": "Precision",
+            "format": "number"
+          },
+          {
+            "field": "role",
+            "label": "Role / caveat",
+            "type": "text"
+          }
+        ],
+        "defaultSort": {
+          "field": "success",
+          "direction": "desc"
+        }
+      },
+      {
+        "id": "table_acquisition",
+        "title": "B2 acquisition funnel 精确计数",
+        "subtitle": "strict miss 分母仅含全帧 label-visible 行",
+        "dataset": "acquisition",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "label_visible",
+            "label": "Visible",
+            "format": "number"
+          },
+          {
+            "field": "sensor_unobservable",
+            "label": "Unobservable",
+            "format": "number"
+          },
+          {
+            "field": "base_strict_miss",
+            "label": "B0 strict miss",
+            "format": "number"
+          },
+          {
+            "field": "base_strict_miss_rate",
+            "label": "Miss rate",
+            "format": "percent"
+          },
+          {
+            "field": "global_ge6_strict_miss",
+            "label": "Miss with ≥6 global target pts",
+            "format": "number"
+          },
+          {
+            "field": "strict_support_target",
+            "label": "Support recovered",
+            "format": "number"
+          },
+          {
+            "field": "strict_pool_target",
+            "label": "Pool target",
+            "format": "number"
+          },
+          {
+            "field": "strict_sample_target",
+            "label": "Sample target",
+            "format": "number"
+          },
+          {
+            "field": "base_sampling_loss",
+            "label": "B0 sample loss",
+            "format": "number"
+          }
+        ],
+        "defaultSort": {
+          "field": "base_strict_miss",
+          "direction": "desc"
+        }
+      },
+      {
+        "id": "table_branch",
+        "title": "Endpoint 与 tube 的实际互补性",
+        "subtitle": "全部 target-bearing support 行都已被 B0 crop 覆盖",
+        "dataset": "branch",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "endpoint_bearing",
+            "label": "Endpoint",
+            "format": "number"
+          },
+          {
+            "field": "tube_bearing",
+            "label": "Tube",
+            "format": "number"
+          },
+          {
+            "field": "union_bearing",
+            "label": "Union",
+            "format": "number"
+          },
+          {
+            "field": "endpoint_only",
+            "label": "Endpoint only",
+            "format": "number"
+          },
+          {
+            "field": "tube_only",
+            "label": "Tube only",
+            "format": "number"
+          },
+          {
+            "field": "both",
+            "label": "Both",
+            "format": "number"
+          },
+          {
+            "field": "strict_union_bearing",
+            "label": "Strict union",
+            "format": "number"
+          },
+          {
+            "field": "all_support_targets_already_in_base",
+            "label": "Subset of B0",
+            "type": "boolean"
+          }
+        ],
+        "defaultSort": {
+          "field": "union_bearing",
+          "direction": "desc"
+        }
+      },
+      {
+        "id": "table_geometry",
+        "title": "当前 support 尺寸与方向超界",
+        "subtitle": "B0 尺寸由同一车辆尺寸和 bb_scale=1.25、bb_offset=2 反推",
+        "dataset": "geometry",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "endpoint_width_median",
+            "label": "Endpoint W",
+            "format": "number"
+          },
+          {
+            "field": "endpoint_length_median",
+            "label": "Endpoint L",
+            "format": "number"
+          },
+          {
+            "field": "derived_b0_width_median",
+            "label": "B0 W",
+            "format": "number"
+          },
+          {
+            "field": "derived_b0_length_median",
+            "label": "B0 L",
+            "format": "number"
+          },
+          {
+            "field": "tube_extra_length_median",
+            "label": "Tube extra L",
+            "format": "number"
+          },
+          {
+            "field": "parallel_only_exceed",
+            "label": "Parallel only exceed",
+            "format": "number"
+          },
+          {
+            "field": "both_exceed",
+            "label": "Both exceed",
+            "format": "number"
+          },
+          {
+            "field": "inside_current_margins",
+            "label": "Inside 2/1",
+            "format": "number"
+          }
+        ],
+        "defaultSort": {
+          "field": "parallel_only_exceed",
+          "direction": "desc"
+        }
+      },
+      {
+        "id": "table_tracklets",
+        "title": "严格 miss 的 tracklet 集中度",
+        "subtitle": "每臂按 strict miss 数取前 6；mini dev 仅 14 条 tracklet",
+        "dataset": "tracklets",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "tracklet",
+            "label": "Tracklet",
+            "type": "text"
+          },
+          {
+            "field": "visible_rows",
+            "label": "Visible",
+            "format": "number"
+          },
+          {
+            "field": "strict_misses",
+            "label": "Strict misses",
+            "format": "number"
+          },
+          {
+            "field": "strict_miss_rate",
+            "label": "Miss rate",
+            "format": "percent"
+          },
+          {
+            "field": "cumulative_miss_share",
+            "label": "Cumulative share",
+            "format": "percent"
+          }
+        ],
+        "defaultSort": {
+          "field": "strict_misses",
+          "direction": "desc"
+        }
+      },
+      {
+        "id": "table_quality",
+        "title": "数据质量与诊断可信度",
+        "subtitle": "反事实几何在修复长宽轴之前必须 fail closed",
+        "dataset": "quality",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "check",
+            "label": "Check",
+            "type": "text"
+          },
+          {
+            "field": "GRU",
+            "label": "GRU",
+            "type": "text"
+          },
+          {
+            "field": "CfC",
+            "label": "CfC",
+            "type": "text"
+          },
+          {
+            "field": "status",
+            "label": "Status",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ],
+        "defaultSort": {
+          "field": "check",
+          "direction": "asc"
+        }
+      },
+      {
+        "id": "table_literature",
+        "title": "文献结论到 B2 决策的映射",
+        "subtitle": "15 篇论文的详细注释与参考文献见 supporting review",
+        "dataset": "literature",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "theme",
+            "label": "Theme",
+            "type": "text"
+          },
+          {
+            "field": "papers",
+            "label": "Representative papers",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "Shared evidence",
+            "type": "text"
+          },
+          {
+            "field": "decision",
+            "label": "B2 decision",
+            "type": "text"
+          }
+        ],
+        "defaultSort": {
+          "field": "theme",
+          "direction": "asc"
+        }
+      },
+      {
+        "id": "table_next",
+        "title": "按短期计划推进的修改顺序",
+        "subtitle": "每一步只改变一个 acquisition 层级；25_* 正式配置保持不动",
+        "dataset": "next_steps",
+        "sourceId": "src_b2_analysis_20260827",
+        "layout": "full",
+        "density": "dense",
+        "columns": [
+          {
+            "field": "order",
+            "label": "#",
+            "format": "number"
+          },
+          {
+            "field": "action",
+            "label": "Action",
+            "type": "text"
+          },
+          {
+            "field": "implementation",
+            "label": "Implementation",
+            "type": "text"
+          },
+          {
+            "field": "gate",
+            "label": "Gate",
+            "type": "text"
+          },
+          {
+            "field": "changes_model",
+            "label": "Model change",
+            "type": "text"
+          }
+        ],
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack B2 acquisition funnel：根因判断与修改顺序"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 技术结论\n\n**当前主要问题是搜索中心/支持几何，不是采样，也不是数据集整体不可观测。** GRU/CfC 的完整当前帧分别有 278/277 个 label-visible 行，其中 B0 raw crop 严格遗漏 101/88 行；实际 endpoint∪tube 对这些遗漏恢复均为 0。更下游的 raw extension pool 在全部 621 行中没有一行含目标，所以 sampler 没有正点可保留。\n\n严格 miss 的 learned endpoint XY 误差中位数为 14.27 m（GRU）和 15.21 m（CfC），绝对平行误差中位数为 13.85/14.97 m，而 z 误差中位数仅 0.21/0.19 m；learned–CV 分歧也只有 0.77/0.48 m。问题本质上是递归 B0 锚点已经漂走，B1 和 CV 从同一个错误锚点做局部外推。简单换 sampler、加 vote、或把 learned 与 CV 两个相近中心并起来都不会解决。"
+      },
+      {
+        "id": "cards",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": [
+          "card_diagnosis",
+          "card_gru_miss",
+          "card_cfc_miss",
+          "card_recovery",
+          "card_pool",
+          "card_bug"
+        ]
+      },
+      {
+        "id": "results",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 实验数据说明：B0 已恢复，但本次 B1 dev 轨迹是长尾压力路径\n\nB0 epoch60 mini_val 为 54.83/66.34（Success/Precision），数值上略高于历史 SeqTrack Jul，但协议不是 transaction-equivalent，只能作描述性参照。当前 v2 funnel 对应的 GRU/CfC dev 结果为 28.80/28.24 与 32.15/38.18，明显低于 B0；两臂的递归 B0 轨迹也没有通过严格的同 GPU optimizer parity。因此这些 checkpoint 适合定位失踪后的 stress failure，不宜直接用来选择正常轨迹的最终 shell 尺寸或宣称 CfC 晋升。"
+      },
+      {
+        "id": "tracking_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_tracking"
+      },
+      {
+        "id": "funnel_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 漏斗在实际搜索几何处归零\n\n完整帧无 label 点只占 33/311 与 33/310（约 10.6%），不足以解释主要失败。更重要的是，GRU 的 101 个严格 miss 中有 75 个、CfC 的 88 个中有 71 个在完整帧里至少有 6 个目标点；因此不是只有 1–2 个点的极端传感器稀疏。B0 采样只各丢失 1 行，而 B2 support 对所有observable strict miss 都没有取得目标。"
+      },
+      {
+        "id": "funnel_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_funnel"
+      },
+      {
+        "id": "acquisition_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_acquisition"
+      },
+      {
+        "id": "center_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 具体错在递归锚点与纵向中心，而不是 z\n\n严格 miss 上 observation 本身的中心误差已经是 14.58/15.21 m；B1 learned endpoint 几乎没有改变这个量级。tube 相对 endpoint 的长度增量中位数只有 0.06/0.03 m，说明局部运动外推很短，而历史锚点已经远离真实目标。99/101 个 GRU miss 与全部 88 个 CfC miss 都越过 2 m 平行 margin；70/101 与 44/88 只在平行方向越界。"
+      },
+      {
+        "id": "errors_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "chart_errors"
+      },
+      {
+        "id": "geometry_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_geometry"
+      },
+      {
+        "id": "novelty_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## extension-only 不是采样失败，而是没有新增目标证据\n\n实际 endpoint/tube 在全部行中有目标时，这些目标点始终是 B0 crop 已包含的子集；去重后没有新增目标点。GRU/CfC 只有 27/11 行得到非空 extension pool，而且全部只含背景。tube 仅比 endpoint 多覆盖 4/2 个 target-bearing 行，且这些行也不是 strict miss。因此 relation-aware sampling、分支配额借用和 top-k voting 都应后置。"
+      },
+      {
+        "id": "branch_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_branch"
+      },
+      {
+        "id": "tracklet_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 长尾集中在少数 tracklet，说明是递归漂移而非统一 crop 尺寸不足\n\nGRU 前 4 条 tracklet 占 78.2% 严格 miss，CfC 前 4 条占 92.1%。同一 mini dev 中也有多条长 tracklet 保持接近零 miss。这种集中结构更符合某些轨迹进入错误递归盆地，而不是所有车辆都缺少同一个固定 margin。"
+      },
+      {
+        "id": "tracklet_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_tracklets"
+      },
+      {
+        "id": "quality_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 反事实 margin 目前不能用于选型：诊断 helper 交换了 width/length\n\n正式 crop 通过 `Box.corners()` 使用 local x=length、local y=width；纯诊断 helper 却按 `wlh[0], wlh[1]` 直接构造 x/y 半轴。车辆框非正方形，因此 GRU/CfC 分别有 124/129 行的 helper XYZ target count 与 actual expansion 不一致。报告工具的异常是正确的 fail-closed 行为。修复前不要解释 z05/z10、3/1.5、4/2、6/3、CV 或 learned+CV 的 recall/背景。"
+      },
+      {
+        "id": "quality_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_quality"
+      },
+      {
+        "id": "literature_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_literature_20260827",
+        "body": "## 文献结论支持“几何先于采样”\n\nP2B 的搜索中心消融显示递归预测中心相较 GT 中心可带来远大于多数下游模块的性能损失；PTTR 与 SyncTrack 的关系采样则明确作用于已经进入搜索区的点。M²-Track、DMT、SeqTrack3D、MBPTrack 和 StreamTrack 共同说明运动或历史可以改善局部跟踪，但错误递归状态仍会污染后续。所以你的短期计划方向正确，但 3A 不能只理解成围绕同一 learned center 加宽：若 corrected 6/3 仍失败，就必须转向有界备用中心/历史 corridor。"
+      },
+      {
+        "id": "literature_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_literature"
+      },
+      {
+        "id": "next_text",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 推荐修改顺序\n\n第一轮只修诊断并重跑 checkpoint 评估；第二轮只做 B2-G1 的 bounded geometry；第三轮只有在同中心加宽不足时才加入 causal alternate center；relation-aware sampling 必须等真实 pool 出现目标后再做。B0 observation crop、25_* YAML、B1 backend、B3 和递归 writer 本轮都不动。"
+      },
+      {
+        "id": "next_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "table_next"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_b2_analysis_20260827",
+        "body": "## 限制与进一步问题\n\n数据仅来自 nuScenes mini dev 的 14 条 tracklet 与两个未配对的递归 checkpoint；结论是机制诊断，不是正式性能因果结论。recursive_age 在本批没有有效行。修复 helper 后，仍需用同一稳定行键比较 corrected counterfactual，并在健康 B0/B1 轨迹上复核正常 shell；如果宽 shell 和备用中心都无法从完整帧恢复目标，下一步应查坐标变换、方向定义和 crop 实现，而不是训练 B2。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-27T20:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "diagnosis": "SEARCH CENTER / SUPPORT GEOMETRY",
+          "gru_strict_miss_rate": 0.36330935251798563,
+          "cfc_strict_miss_rate": 0.3176895306859206,
+          "strict_support_recovered_rows": 0,
+          "pool_target_rows": 0,
+          "base_sampling_loss_rows": 2,
+          "helper_mismatch_rows": 253
+        }
+      ],
+      "tracking": [
+        {
+          "run": "B0 epoch60 mini_val",
+          "success": 54.826038,
+          "precision": 66.340263,
+          "role": "健康宿主对照；训练期 final"
+        },
+        {
+          "run": "B1-GRU epoch60 mini_val",
+          "success": 30.734137,
+          "precision": 29.62582,
+          "role": "B1-only 递归轨迹；训练期 final"
+        },
+        {
+          "run": "B1-CfC epoch60 mini_val",
+          "success": 35.318382,
+          "precision": 37.696938,
+          "role": "CfC 消融；训练期 final"
+        },
+        {
+          "run": "B1-GRU dev diagnostic",
+          "success": 28.800577,
+          "precision": 28.236994,
+          "role": "本次 v2 funnel 的实际轨迹"
+        },
+        {
+          "run": "B1-CfC dev diagnostic",
+          "success": 32.153175,
+          "precision": 38.179188,
+          "role": "本次 v2 funnel 的实际轨迹"
+        },
+        {
+          "run": "SeqTrack Jul reference",
+          "success": 53.359955,
+          "precision": 64.381836,
+          "role": "历史描述性参考，协议并非严格等价"
+        }
+      ],
+      "funnel": [
+        {
+          "arm": "GRU",
+          "stage_order": 1,
+          "stage": "Label-visible",
+          "rows": 278,
+          "rate_of_label_visible": 1.0,
+          "label_visible_denominator": 278
+        },
+        {
+          "arm": "GRU",
+          "stage_order": 2,
+          "stage": "B0 raw captured",
+          "rows": 177,
+          "rate_of_label_visible": 0.6366906474820144,
+          "label_visible_denominator": 278
+        },
+        {
+          "arm": "GRU",
+          "stage_order": 3,
+          "stage": "B2 recovered strict miss",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 278
+        },
+        {
+          "arm": "GRU",
+          "stage_order": 4,
+          "stage": "Novel pool target-bearing",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 278
+        },
+        {
+          "arm": "GRU",
+          "stage_order": 5,
+          "stage": "Sample target-bearing",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 278
+        },
+        {
+          "arm": "CfC",
+          "stage_order": 1,
+          "stage": "Label-visible",
+          "rows": 277,
+          "rate_of_label_visible": 1.0,
+          "label_visible_denominator": 277
+        },
+        {
+          "arm": "CfC",
+          "stage_order": 2,
+          "stage": "B0 raw captured",
+          "rows": 189,
+          "rate_of_label_visible": 0.6823104693140795,
+          "label_visible_denominator": 277
+        },
+        {
+          "arm": "CfC",
+          "stage_order": 3,
+          "stage": "B2 recovered strict miss",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 277
+        },
+        {
+          "arm": "CfC",
+          "stage_order": 4,
+          "stage": "Novel pool target-bearing",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 277
+        },
+        {
+          "arm": "CfC",
+          "stage_order": 5,
+          "stage": "Sample target-bearing",
+          "rows": 0,
+          "rate_of_label_visible": 0.0,
+          "label_visible_denominator": 277
+        }
+      ],
+      "acquisition": [
+        {
+          "arm": "GRU",
+          "label_visible": 278,
+          "sensor_unobservable": 33,
+          "boundary_only": 3,
+          "base_strict_miss": 101,
+          "base_strict_miss_rate": 0.36330935251798563,
+          "base_sampling_loss": 1,
+          "strict_support_target": 0,
+          "strict_pool_target": 0,
+          "strict_sample_target": 0,
+          "pool_nonempty": 27,
+          "pool_background_only": 27,
+          "global_ge6_strict_miss": 75
+        },
+        {
+          "arm": "CfC",
+          "label_visible": 277,
+          "sensor_unobservable": 33,
+          "boundary_only": 3,
+          "base_strict_miss": 88,
+          "base_strict_miss_rate": 0.3176895306859206,
+          "base_sampling_loss": 1,
+          "strict_support_target": 0,
+          "strict_pool_target": 0,
+          "strict_sample_target": 0,
+          "pool_nonempty": 11,
+          "pool_background_only": 11,
+          "global_ge6_strict_miss": 71
+        }
+      ],
+      "errors": [
+        {
+          "arm": "GRU",
+          "component": "Observation center",
+          "median_m": 14.583904349146898,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "GRU",
+          "component": "Learned endpoint",
+          "median_m": 14.26618812674561,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "GRU",
+          "component": "Absolute parallel",
+          "median_m": 13.854119915165748,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "GRU",
+          "component": "Absolute perpendicular",
+          "median_m": 0.5036117115725888,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "GRU",
+          "component": "Z",
+          "median_m": 0.213861959695816,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "GRU",
+          "component": "Learned–CV disagreement",
+          "median_m": 0.7684106304948656,
+          "strict_miss_rows": 101
+        },
+        {
+          "arm": "CfC",
+          "component": "Observation center",
+          "median_m": 15.211101947323609,
+          "strict_miss_rows": 88
+        },
+        {
+          "arm": "CfC",
+          "component": "Learned endpoint",
+          "median_m": 15.208463658436866,
+          "strict_miss_rows": 88
+        },
+        {
+          "arm": "CfC",
+          "component": "Absolute parallel",
+          "median_m": 14.96798059330778,
+          "strict_miss_rows": 88
+        },
+        {
+          "arm": "CfC",
+          "component": "Absolute perpendicular",
+          "median_m": 0.9530069832533018,
+          "strict_miss_rows": 88
+        },
+        {
+          "arm": "CfC",
+          "component": "Z",
+          "median_m": 0.19242587536573405,
+          "strict_miss_rows": 88
+        },
+        {
+          "arm": "CfC",
+          "component": "Learned–CV disagreement",
+          "median_m": 0.47557728859369713,
+          "strict_miss_rows": 88
+        }
+      ],
+      "arm_summary": [
+        {
+          "arm": "GRU",
+          "rows": 311,
+          "tracklets": 14,
+          "schema_v2_rows": 311,
+          "duplicate_stable_keys": 0,
+          "nonfinite_numeric_values": 0,
+          "exact_visible_rows": 275,
+          "label_visible_rows": 278,
+          "sensor_unobservable_rows": 33,
+          "boundary_only_rows": 3,
+          "base_captured_rows": 177,
+          "base_strict_miss_rows": 101,
+          "base_strict_miss_rate": 0.36330935251798563,
+          "base_sampling_loss_rows": 1,
+          "strict_actual_geometry_bearing_rows": 0,
+          "strict_pool_bearing_rows": 0,
+          "strict_sample_bearing_rows": 0,
+          "pool_target_bearing_rows_all": 0,
+          "sample_target_bearing_rows_all": 0,
+          "extension_pool_nonempty_rows": 27,
+          "extension_pool_background_only_rows": 27,
+          "endpoint_target_bearing_rows": 149,
+          "tube_target_bearing_rows": 153,
+          "union_target_bearing_rows": 153,
+          "endpoint_only_bearing_rows": 0,
+          "tube_only_bearing_rows": 4,
+          "both_branch_bearing_rows": 149,
+          "strict_support_bearing_rows": 0,
+          "support_target_subset_of_base": true,
+          "observable_strict_miss_global_ge6": 75,
+          "strict_observation_error_median": 14.583904349146898,
+          "strict_learned_error_mean": 14.880364397815052,
+          "strict_learned_error_median": 14.26618812674561,
+          "strict_learned_error_p95": 23.256078405157577,
+          "strict_cv_error_median": 15.039396797757169,
+          "strict_abs_parallel_median": 13.854119915165748,
+          "strict_abs_parallel_p95": 23.19619140080362,
+          "strict_abs_perpendicular_median": 0.5036117115725888,
+          "strict_abs_perpendicular_p95": 4.126457982559547,
+          "strict_z_error_median": 0.213861959695816,
+          "strict_z_error_p95": 1.6257060179114342,
+          "strict_learned_cv_disagreement_median": 0.7684106304948656,
+          "strict_learned_cv_disagreement_p95": 1.6693431230528046,
+          "strict_gap_ratio_median": 1.0000200271606443,
+          "strict_gap_ratio_p95": 1.109119892120361,
+          "strict_parallel_only_exceed_rows": 70,
+          "strict_perpendicular_only_exceed_rows": 2,
+          "strict_both_axes_exceed_rows": 29,
+          "strict_inside_current_margins_rows": 0,
+          "strict_endpoint_width_median": 3.672,
+          "strict_endpoint_length_median": 8.478,
+          "strict_tube_extra_length_median": 0.06340919136943057,
+          "strict_derived_base_width_median": 6.09,
+          "strict_derived_base_length_median": 9.5975,
+          "helper_mismatch_rows": 124,
+          "recursive_age_valid_rows": 0
+        },
+        {
+          "arm": "CfC",
+          "rows": 310,
+          "tracklets": 14,
+          "schema_v2_rows": 310,
+          "duplicate_stable_keys": 0,
+          "nonfinite_numeric_values": 0,
+          "exact_visible_rows": 274,
+          "label_visible_rows": 277,
+          "sensor_unobservable_rows": 33,
+          "boundary_only_rows": 3,
+          "base_captured_rows": 189,
+          "base_strict_miss_rows": 88,
+          "base_strict_miss_rate": 0.3176895306859206,
+          "base_sampling_loss_rows": 1,
+          "strict_actual_geometry_bearing_rows": 0,
+          "strict_pool_bearing_rows": 0,
+          "strict_sample_bearing_rows": 0,
+          "pool_target_bearing_rows_all": 0,
+          "sample_target_bearing_rows_all": 0,
+          "extension_pool_nonempty_rows": 11,
+          "extension_pool_background_only_rows": 11,
+          "endpoint_target_bearing_rows": 155,
+          "tube_target_bearing_rows": 157,
+          "union_target_bearing_rows": 157,
+          "endpoint_only_bearing_rows": 0,
+          "tube_only_bearing_rows": 2,
+          "both_branch_bearing_rows": 155,
+          "strict_support_bearing_rows": 0,
+          "support_target_subset_of_base": true,
+          "observable_strict_miss_global_ge6": 71,
+          "strict_observation_error_median": 15.211101947323609,
+          "strict_learned_error_mean": 13.886843555492247,
+          "strict_learned_error_median": 15.208463658436866,
+          "strict_learned_error_p95": 21.262473038728935,
+          "strict_cv_error_median": 15.116077796866843,
+          "strict_abs_parallel_median": 14.96798059330778,
+          "strict_abs_parallel_p95": 20.907114723490587,
+          "strict_abs_perpendicular_median": 0.9530069832533018,
+          "strict_abs_perpendicular_p95": 4.033685395990914,
+          "strict_z_error_median": 0.19242587536573405,
+          "strict_z_error_p95": 1.1199763834327447,
+          "strict_learned_cv_disagreement_median": 0.47557728859369713,
+          "strict_learned_cv_disagreement_p95": 1.6138663688411792,
+          "strict_gap_ratio_median": 1.0000052452087402,
+          "strict_gap_ratio_p95": 1.1109270989894866,
+          "strict_parallel_only_exceed_rows": 44,
+          "strict_perpendicular_only_exceed_rows": 0,
+          "strict_both_axes_exceed_rows": 44,
+          "strict_inside_current_margins_rows": 0,
+          "strict_endpoint_width_median": 3.689,
+          "strict_endpoint_length_median": 8.594000000000001,
+          "strict_tube_extra_length_median": 0.0323877848639782,
+          "strict_derived_base_width_median": 6.11125,
+          "strict_derived_base_length_median": 9.742500000000001,
+          "helper_mismatch_rows": 129,
+          "recursive_age_valid_rows": 0
+        }
+      ],
+      "branch": [
+        {
+          "arm": "GRU",
+          "endpoint_bearing": 149,
+          "tube_bearing": 153,
+          "union_bearing": 153,
+          "endpoint_only": 0,
+          "tube_only": 4,
+          "both": 149,
+          "strict_union_bearing": 0,
+          "all_support_targets_already_in_base": true
+        },
+        {
+          "arm": "CfC",
+          "endpoint_bearing": 155,
+          "tube_bearing": 157,
+          "union_bearing": 157,
+          "endpoint_only": 0,
+          "tube_only": 2,
+          "both": 155,
+          "strict_union_bearing": 0,
+          "all_support_targets_already_in_base": true
+        }
+      ],
+      "geometry": [
+        {
+          "arm": "GRU",
+          "endpoint_width_median": 3.672,
+          "endpoint_length_median": 8.478,
+          "derived_b0_width_median": 6.09,
+          "derived_b0_length_median": 9.5975,
+          "tube_extra_length_median": 0.06340919136943057,
+          "parallel_only_exceed": 70,
+          "perpendicular_only_exceed": 2,
+          "both_exceed": 29,
+          "inside_current_margins": 0
+        },
+        {
+          "arm": "CfC",
+          "endpoint_width_median": 3.689,
+          "endpoint_length_median": 8.594000000000001,
+          "derived_b0_width_median": 6.11125,
+          "derived_b0_length_median": 9.742500000000001,
+          "tube_extra_length_median": 0.0323877848639782,
+          "parallel_only_exceed": 44,
+          "perpendicular_only_exceed": 0,
+          "both_exceed": 44,
+          "inside_current_margins": 0
+        }
+      ],
+      "tracklets": [
+        {
+          "arm": "GRU",
+          "tracklet": "856aeb4fa2024f1284c6290a44e9dec5",
+          "rows": 36,
+          "visible_rows": 35,
+          "strict_misses": 26,
+          "strict_miss_rate": 0.7428571428571429,
+          "cumulative_miss_share": 0.25742574257425743
+        },
+        {
+          "arm": "GRU",
+          "tracklet": "ec5241e32939433baeb2b3955920b28c",
+          "rows": 30,
+          "visible_rows": 30,
+          "strict_misses": 26,
+          "strict_miss_rate": 0.8666666666666667,
+          "cumulative_miss_share": 0.5148514851485149
+        },
+        {
+          "arm": "GRU",
+          "tracklet": "e73ba8faf67d40c8b6b653489393ef8b",
+          "rows": 21,
+          "visible_rows": 21,
+          "strict_misses": 14,
+          "strict_miss_rate": 0.6666666666666666,
+          "cumulative_miss_share": 0.6534653465346535
+        },
+        {
+          "arm": "GRU",
+          "tracklet": "11a08ff383a6451bbda6b9af56cfa6e2",
+          "rows": 30,
+          "visible_rows": 30,
+          "strict_misses": 13,
+          "strict_miss_rate": 0.43333333333333335,
+          "cumulative_miss_share": 0.7821782178217822
+        },
+        {
+          "arm": "GRU",
+          "tracklet": "eaaf60765ee8478f8e0bd4942571c6fb",
+          "rows": 38,
+          "visible_rows": 30,
+          "strict_misses": 10,
+          "strict_miss_rate": 0.3333333333333333,
+          "cumulative_miss_share": 0.8811881188118812
+        },
+        {
+          "arm": "GRU",
+          "tracklet": "77268b95b44a4b89ad17df89479de81c",
+          "rows": 23,
+          "visible_rows": 11,
+          "strict_misses": 7,
+          "strict_miss_rate": 0.6363636363636364,
+          "cumulative_miss_share": 0.9504950495049505
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "ec5241e32939433baeb2b3955920b28c",
+          "rows": 30,
+          "visible_rows": 30,
+          "strict_misses": 26,
+          "strict_miss_rate": 0.8666666666666667,
+          "cumulative_miss_share": 0.29545454545454547
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "856aeb4fa2024f1284c6290a44e9dec5",
+          "rows": 36,
+          "visible_rows": 35,
+          "strict_misses": 23,
+          "strict_miss_rate": 0.6571428571428571,
+          "cumulative_miss_share": 0.5568181818181818
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "11a08ff383a6451bbda6b9af56cfa6e2",
+          "rows": 30,
+          "visible_rows": 30,
+          "strict_misses": 18,
+          "strict_miss_rate": 0.6,
+          "cumulative_miss_share": 0.7613636363636364
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "e73ba8faf67d40c8b6b653489393ef8b",
+          "rows": 21,
+          "visible_rows": 21,
+          "strict_misses": 14,
+          "strict_miss_rate": 0.6666666666666666,
+          "cumulative_miss_share": 0.9204545454545454
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "eaaf60765ee8478f8e0bd4942571c6fb",
+          "rows": 38,
+          "visible_rows": 30,
+          "strict_misses": 5,
+          "strict_miss_rate": 0.16666666666666666,
+          "cumulative_miss_share": 0.9772727272727273
+        },
+        {
+          "arm": "CfC",
+          "tracklet": "2e84949acbd84ea3857ca2a04e50b6a4",
+          "rows": 13,
+          "visible_rows": 12,
+          "strict_misses": 2,
+          "strict_miss_rate": 0.16666666666666666,
+          "cumulative_miss_share": 1.0
+        }
+      ],
+      "quality": [
+        {
+          "check": "Schema v2 / stable key / finite",
+          "GRU": "311/311, 0 duplicate, 0 nonfinite",
+          "CfC": "310/310, 0 duplicate, 0 nonfinite",
+          "status": "PASS",
+          "interpretation": "原始 CSV 身份与基础数值质量可用"
+        },
+        {
+          "check": "Actual expansion vs pure helper XYZ",
+          "GRU": "124 mismatch rows",
+          "CfC": "129 mismatch rows",
+          "status": "FAIL CLOSED",
+          "interpretation": "长宽轴交换；所有 support_xy/xyz、center-inside 与 cf_* 暂停解释"
+        },
+        {
+          "check": "Actual support targets subset of B0 targets",
+          "GRU": "True",
+          "CfC": "True",
+          "status": "PASS",
+          "interpretation": "实际 support 没有带来任何新增目标点"
+        },
+        {
+          "check": "Recursive age",
+          "GRU": "0 valid rows",
+          "CfC": "0 valid rows",
+          "status": "UNAVAILABLE",
+          "interpretation": "本批不能做 recursive-age 分层"
+        },
+        {
+          "check": "Paired row coverage",
+          "GRU": "310/311 in intersection",
+          "CfC": "310/310 in intersection",
+          "status": "PARTIAL",
+          "interpretation": "global counts 配对一致；不可据未匹配 B0 轨迹晋升 backend"
+        }
+      ],
+      "literature": [
+        {
+          "theme": "搜索中心是上游硬边界",
+          "papers": "SC3D, P2B, BAT, M²-Track, DMT",
+          "evidence": "大多在上一预测附近做局部 crop；目标在区域外时下游无法恢复",
+          "decision": "先修中心/覆盖，再修采样"
+        },
+        {
+          "theme": "关系采样只保留池内目标",
+          "papers": "PTTR, SyncTrack",
+          "evidence": "RAS/APST 改善区域内稀疏点保留，同时受错误模板影响",
+          "decision": "pool_target>0 且 sample_target=0 后才启用"
+        },
+        {
+          "theme": "运动先验需要当前证据纠正",
+          "papers": "M²-Track, DMT",
+          "evidence": "粗运动中心有效，但局部精修存在有限捕获半径",
+          "decision": "B1 定位 acquisition；B2 只用实际点证据修正"
+        },
+        {
+          "theme": "历史有益但会污染",
+          "papers": "SeqTrack3D, M3SOT, MBPTrack, StreamTrack",
+          "evidence": "有限历史最佳；更长或错误历史会退化",
+          "decision": "必要时只加少量、可靠、可诊断备用锚点"
+        },
+        {
+          "theme": "上下文必须有界",
+          "papers": "CXTrack, CorpNet, STNet, MLVSNet",
+          "evidence": "上下文和多层保留改善区域内判别，但不能替代 crop recall",
+          "decision": "stable base + bounded shell，不做无约束全帧膨胀"
+        }
+      ],
+      "next_steps": [
+        {
+          "order": 1,
+          "action": "修复纯诊断几何的 wlh→local xyz 映射",
+          "implementation": "x 使用 length=wlh[1]，y 使用 width=wlh[0]；union volume 同步修复；增加非正方形旋转框测试",
+          "gate": "learned_2_1_z0 与 actual expansion 逐行一致",
+          "changes_model": "No"
+        },
+        {
+          "order": 2,
+          "action": "只重跑 GRU/CfC epoch60 checkpoint 的同一 dev 评估",
+          "implementation": "不重训，不改 25_* YAML；重新生成 v2 CSV/JSON",
+          "gate": "所有 v2 invariants 通过且 report 不再 fail closed",
+          "changes_model": "No"
+        },
+        {
+          "order": 3,
+          "action": "先判断 bounded local shell 是否有真实恢复",
+          "implementation": "比较 corrected 2/1、3/1.5、4/2、6/3、z05/z10 与 learned+CV；同时看背景 p95/volume",
+          "gate": "若 3–6 m shell 能恢复且背景可控，进入单独的 B2-G1 配置",
+          "changes_model": "Later"
+        },
+        {
+          "order": 4,
+          "action": "若 6/3 仍低召回，修改搜索中心而非继续扩大",
+          "implementation": "保留 B0 stable base；增加因果且有界的最后可靠锚点/短历史 corridor 反事实，再决定是否实现备用 support",
+          "gate": "备用中心显著优于同中心加宽；learned/CV 双中心因当前分歧很小不优先",
+          "changes_model": "Later"
+        },
+        {
+          "order": 5,
+          "action": "目标进入 raw extension pool 后再修采样",
+          "implementation": "relation top-k + spatial coverage + 少量随机探索；endpoint/tube 空余配额可借用",
+          "gate": "真实出现 pool_target>0 且 sampled_target=0 的非偶发损失",
+          "changes_model": "Later"
+        },
+        {
+          "order": 6,
+          "action": "采样稳定后再做 vote consistency / top-k 与 B3",
+          "implementation": "不在零 supply 阶段加入 decoder、voting 或 calibration",
+          "gate": "B2 target-bearing supply 与 retention 已通过",
+          "changes_model": "Later"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_b2_analysis_20260827",
+      "label": "CT-SeqTrack GRU/CfC dev acquisition diagnostics v2 复算快照",
+      "path": "artifacts/ct_checks/reports/20260827_b2_acquisition_root_cause_and_literature/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id = 'b2_acquisition_root_cause_20260827'",
+        "tablesUsed": [
+          "report_snapshot"
+        ],
+        "description": "从已校验导入 CSV 计算 observability、实际 acquisition funnel、误差分解与 tracklet 集中度",
+        "metricDefinitions": {
+          "label_visible": "global_target_count_label > 0；完整当前帧按 bb_scale=1.25 至少有一个目标点",
+          "observable_strict_miss": "label_visible 且 base_raw_target_count = 0",
+          "geometry_recovered": "observable_strict_miss 且 actual expansion_target_count > 0",
+          "sampling_loss": "pool_target_count > 0 且 sampled_target_count = 0"
+        }
+      }
+    },
+    {
+      "id": "src_literature_20260827",
+      "label": "15 篇 3D SOT 搜索与采样论文的系统化综述",
+      "path": "artifacts/ct_checks/reports/20260827_b2_acquisition_root_cause_and_literature/literature_review.md"
+    }
+  ]
+}

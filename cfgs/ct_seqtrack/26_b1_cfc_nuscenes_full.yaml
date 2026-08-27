@@ -1,0 +1,5 @@
+_base_: 26_b1_gru_nuscenes_full.yaml
+
+experiment_name: ct26_b1_cfc_nuscenes_full_scratch_seed42
+motion_v3_temporal_backend: cfc
+ct_v26_cfc_ablation: true

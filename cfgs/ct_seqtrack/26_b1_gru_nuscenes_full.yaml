@@ -1,0 +1,16 @@
+_base_: 26_formal_base.yaml
+ct_v26_full_formal_arm: true
+
+experiment_name: ct26_b1_gru_nuscenes_full_scratch_seed42
+ct_variant: b1
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+proposal_inference_mode: observation
+motion_v3_temporal_backend: gru
+ct_memory_mode: none
+checkpoint_monitor: b1_nll/mini_val
+checkpoint_mode: min
+ct_b0_steps_per_epoch: 0

@@ -35,6 +35,10 @@ from utils.training_isolation import (
     capture_global_rng_state,
     restore_global_rng_state,
 )
+from utils.lightning_runtime import (
+    DataLoaderGeneratorState,
+    FinalWindowCheckpoint,
+)
 from models import get_model
 from models.ct_variant import configure_ct_variant
 from utils.run_provenance import write_run_provenance
@@ -512,6 +516,10 @@ def parse_config():
         '--ct_calibration_tracklet_manifest_sha256', type=str,
         default=argparse.SUPPRESS,
         help='SHA256 identity of the held-out calibration tracklet manifest')
+    parser.add_argument(
+        '--ct_dev_tracklet_manifest_sha256', type=str,
+        default=argparse.SUPPRESS,
+        help='SHA256 identity of the disjoint B3 promotion-dev manifest')
     parser.add_argument('--log_dir', type=str, default=None, help='log location')
     parser.add_argument('--test', action='store_true', default=False, help='test mode')
     parser.add_argument('--preloading', action='store_true', default=False, help='preload dataset into memory')
@@ -753,8 +761,10 @@ if (bool(getattr(cfg, 'ct_online_recursive_training', False))
             raise ValueError(
                 "online recursive Joint Full must train from scratch; "
                 "--init_checkpoint is forbidden")
-    if cfg.checkpoint is not None:
-        validate_online_resume_checkpoint(cfg.checkpoint, cfg)
+if (not cfg.test and cfg.checkpoint is not None
+        and (bool(getattr(cfg, 'ct_online_recursive_training', False))
+             or bool(getattr(cfg, 'ct_formal_resume_contract', False)))):
+    validate_online_resume_checkpoint(cfg.checkpoint, cfg)
 if cfg.seed is not None:
     seed_everything(
         cfg.seed,
@@ -817,6 +827,7 @@ if not cfg.test:
 
     mechanism_data = None
     mechanism_loader = None
+    mechanism_generator = None
     mechanism_enabled = dual_stream and any(bool(getattr(
         cfg, f'ct_enable_{name}', False)) for name in ('b1', 'b2', 'b3'))
     mechanism_setup_rng = (
@@ -956,7 +967,8 @@ if not cfg.test:
         train_loader = DualStreamLoader(
             train_loader, mechanism_loader,
             schema=(
-                'ct_seqtrack.train.v2' if safe_auto
+                str(getattr(cfg, 'ct_batch_schema',
+                            'ct_seqtrack.train.v2')) if safe_auto
                 else 'ct_seqtrack.dual_stream.v1'),
             isolate_mechanism_rng=safe_auto)
     validation_generator = torch.Generator()
@@ -978,16 +990,41 @@ if not cfg.test:
         save_last=True,
         save_top_k=cfg.save_top_k)
     learningrate_callback = LearningRateMonitor(logging_interval="step")
+    dataloader_generator_callback = DataLoaderGeneratorState(
+        observation=loader_generator,
+        mechanism=mechanism_generator,
+        validation=validation_generator,
+    )
+    callbacks = [
+        checkpoint_callback,
+        learningrate_callback,
+        dataloader_generator_callback,
+    ]
+    final_window = int(getattr(
+        cfg, 'ct_keep_final_window_checkpoints', 0) or 0)
+    if final_window > 0:
+        callbacks.append(FinalWindowCheckpoint(keep=final_window))
 
     # init trainer
     # RecursiveTrackState is intentionally process-local.  Until an explicit
     # cross-rank state coordinator exists, multi-device DDP would duplicate
     # tracklets and let the canonical histories silently diverge.
-    trainer_devices = (
+    default_trainer_devices = (
         1 if (dual_stream or bool(getattr(
             cfg, 'ct_online_recursive_training', False))) else -1)
-    trainer = pl.Trainer(devices=trainer_devices, accelerator='auto', max_epochs=cfg.epoch,
-                         callbacks=[checkpoint_callback,learningrate_callback],
+    trainer_devices = int(getattr(
+        cfg, 'trainer_devices', default_trainer_devices))
+    if trainer_devices == 0 or trainer_devices < -1:
+        raise ValueError("trainer_devices must be -1 or a positive integer")
+    if ((dual_stream or bool(getattr(
+            cfg, 'ct_online_recursive_training', False)))
+            and trainer_devices != 1):
+        raise ValueError(
+            "recursive/dual-stream formal training requires exactly one GPU")
+    trainer = pl.Trainer(devices=trainer_devices, accelerator='auto',
+                         min_epochs=cfg.epoch, max_epochs=cfg.epoch,
+                         max_steps=-1,
+                         callbacks=callbacks,
                          default_root_dir=run_root_dir,
                          precision=int(getattr(cfg, 'precision', 32)),
                          check_val_every_n_epoch=cfg.check_val_every_n_epoch,
@@ -1034,7 +1071,12 @@ else:
     write_run_provenance(
         run_root_dir, cfg, {"test": test_data}, mode="test", root=project_root)
 
-    trainer = pl.Trainer(devices=-1, accelerator='auto', default_root_dir=run_root_dir)
+    evaluation_devices = int(getattr(cfg, 'trainer_devices', -1))
+    if evaluation_devices == 0 or evaluation_devices < -1:
+        raise ValueError("trainer_devices must be -1 or a positive integer")
+    trainer = pl.Trainer(
+        devices=evaluation_devices, accelerator='auto',
+        default_root_dir=run_root_dir)
 
     if cfg.checkpoint is None:
         net = get_model(cfg.net_model)(cfg)

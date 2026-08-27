@@ -51,6 +51,7 @@ from utils.candidate_utils import (
     validate_shared_se2_transform,
 )
 from utils.ct_search import (
+    build_causal_history_corridor,
     build_ordered_trajectory_search_box,
     build_time_guided_search_box,
     combined_search_support_statistics,
@@ -58,6 +59,7 @@ from utils.ct_search import (
     resolve_joint_search_geometry,
     sample_padded_search_extension,
     sample_joint_novel_extensions,
+    sample_bounded_novel_prepool,
     sample_source_aware_endpoint_points,
     sample_search_extension,
     stratified_search_sample,
@@ -809,6 +811,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         (0, baseline_search_points.shape[1]),
         dtype=baseline_search_points.dtype,
     )
+    corridor_box = None
+    corridor_points = np.empty(
+        (0, baseline_search_points.shape[1]),
+        dtype=baseline_search_points.dtype,
+    )
+    corridor_diagnostics = {
+        'valid': False, 'reason': 'v26_disabled', 'source_id': 0}
+    v26_recovery_enabled = bool(getattr(
+        config, 'ct_enable_v26_recovery', False))
+    inner_core_point_count = None
+    b1_prior_valid = True
     use_trajectory_search = (
         bool(getattr(config, 'use_trajectory_search', False))
         or use_ct_joint_full) and not observation_only
@@ -1022,6 +1035,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             use_b1_prepass=use_prepass_support,
             use_dynamic_sigma=bool(getattr(
                 config, 'search_v3_use_dynamic_sigma', False)),
+            use_acquisition_margin=bool(getattr(
+                config, 'ct_adaptive_acquisition_margin', False)),
             fixed_margins=(
                 float(getattr(
                     config, 'search_v3_fixed_margin_parallel', 2.0)),
@@ -1078,14 +1093,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         if search_v2_box is not None:
             learned_prior_support = (
                 search_v2_diagnostics.get('prior_source') == 'b1')
+            bounded_support = bool(
+                learned_prior_support or v26_recovery_enabled)
             search_v2_expanded_pc = (
                 points_utils.generate_subwindow_with_aroundboxs(
                     this_pc,
                     search_v2_box,
                     ref_boxs[0],
-                    scale=(1.0 if learned_prior_support
+                    scale=(1.0 if bounded_support
                            else config.bb_scale),
-                    offset=(0.0 if learned_prior_support
+                    offset=(0.0 if bounded_support
                             else config.bb_offset),
                 ))
             search_v2_expanded_points = search_v2_expanded_pc.points.T
@@ -1103,6 +1120,62 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     search_v2_box, ref_boxs[0])
                 search_v2_endpoint_xy = np.asarray(
                     search_v2_local_box.center[:2], dtype=np.float32)
+
+        if v26_recovery_enabled:
+            inner_core_pc = points_utils.generate_subwindow_with_aroundboxs(
+                this_pc, ref_boxs[0], ref_boxs[0], scale=1.0, offset=0.0)
+            b1_prior_valid = bool(
+                isinstance(support_prediction, dict)
+                and support_prediction.get('valid', False))
+            inner_core_point_count = len(inner_core_pc.points.T)
+            corridor_needed, _ = useful_search_coverage_need(
+                search_v2_diagnostics.get(
+                    'query_delta_t', effective_delta_t_list[0]),
+                search_v2_diagnostics.get('gap_ratio', 1.0),
+                search_v2_endpoint_xy,
+                ref_boxs[0].wlh,
+                len(baseline_search_points),
+                min_delta_t=float(getattr(
+                    config, 'trajectory_search_min_delta_t', 0.75)),
+                min_gap_ratio=float(getattr(
+                    config, 'trajectory_search_min_gap_ratio', 1.5)),
+                min_endpoint_ratio=float(getattr(
+                    config, 'ct_search_endpoint_ratio', 0.6)),
+                sparse_base_points=int(getattr(
+                    config, 'ct_search_sparse_base_points', 64)),
+                inner_core_point_count=inner_core_point_count,
+                min_inner_core_points=int(getattr(
+                    config, 'ct_corridor_min_inner_core_points', 3)),
+                b1_valid=b1_prior_valid,
+                constraint_clipped=bool(search_v2_diagnostics.get(
+                    'constraint_clipped', False)),
+                bb_scale=float(config.bb_scale),
+                bb_offset=float(config.bb_offset),
+            )
+            corridor_box, corridor_diagnostics = build_causal_history_corridor(
+                search_v2_history_boxes,
+                effective_delta_t_list,
+                valid_mask,
+                enabled=corridor_needed,
+                first_frame_size=data['first_frame']['3d_bbox'].wlh,
+                max_speed=float(getattr(
+                    config, 'ct_motion_max_speed', 20.0)),
+                max_acceleration=float(getattr(
+                    config, 'ct_motion_max_acceleration', 8.0)),
+                max_displacement=float(getattr(
+                    config, 'ct_motion_max_displacement', 12.0)),
+                max_length=float(getattr(
+                    config, 'ct_corridor_max_length', 16.0)),
+                width_padding=float(getattr(
+                    config, 'ct_corridor_width_padding', 2.0)),
+                max_width=float(getattr(
+                    config, 'ct_corridor_max_width', 6.0)),
+            )
+            if corridor_box is not None:
+                corridor_pc = points_utils.generate_subwindow_with_aroundboxs(
+                    this_pc, corridor_box, ref_boxs[0],
+                    scale=1.0, offset=0.0)
+                corridor_points = corridor_pc.points.T
 
     # Preserve the pre-normalization anchor: ref_boxs[0] becomes approximately
     # zero after transform_box(), so the normalized tensor cannot prove that
@@ -1271,33 +1344,52 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             if current_sampling_seed is not None else sample_index)
         joint_extension_seed = (
             int(independent_seed_base) * 22695477 + 1) & 0xFFFFFFFF
-        (joint_extension_points,
-         joint_extension_valid_mask,
-         joint_extension_source,
-         joint_extension_sampling) = sample_joint_novel_extensions(
-            baseline_search_points,
-            search_v2_expanded_points,
-            expanded_search_points,
-            endpoint_quota=int(getattr(config, 'ct_endpoint_quota', 128)),
-            tube_quota=int(getattr(config, 'ct_tube_quota', 128)),
-            seed=joint_extension_seed,
-        )
+        if v26_recovery_enabled:
+            (joint_extension_points,
+             joint_extension_valid_mask,
+             joint_extension_source,
+             joint_extension_sampling) = sample_bounded_novel_prepool(
+                baseline_search_points,
+                search_v2_expanded_points,
+                expanded_search_points,
+                corridor_points,
+                local_quota=(
+                    int(getattr(config, 'ct_endpoint_quota', 256))
+                    + int(getattr(config, 'ct_tube_quota', 256))),
+                corridor_quota=int(getattr(
+                    config, 'ct_corridor_quota', 256)),
+                voxel_size=float(getattr(
+                    config, 'ct_search_extension_voxel_size', 0.2)),
+            )
+        else:
+            (joint_extension_points,
+             joint_extension_valid_mask,
+             joint_extension_source,
+             joint_extension_sampling) = sample_joint_novel_extensions(
+                baseline_search_points,
+                search_v2_expanded_points,
+                expanded_search_points,
+                endpoint_quota=int(getattr(config, 'ct_endpoint_quota', 128)),
+                tube_quota=int(getattr(config, 'ct_tube_quota', 128)),
+                seed=joint_extension_seed,
+            )
         endpoint_quota = int(getattr(config, 'ct_endpoint_quota', 128))
         search_v2_points = joint_extension_points[:endpoint_quota]
         search_v2_point_valid_mask = joint_extension_valid_mask[
             :endpoint_quota]
-        search_v2_point_source = (
-            search_v2_point_valid_mask > 0).astype(np.int64)
+        search_v2_point_source = joint_extension_source[:endpoint_quota]
         trajectory_search_points = joint_extension_points[endpoint_quota:]
         trajectory_search_point_valid_mask = joint_extension_valid_mask[
             endpoint_quota:]
-        trajectory_search_point_source = (
-            trajectory_search_point_valid_mask > 0).astype(np.int64)
+        trajectory_search_point_source = joint_extension_source[endpoint_quota:]
         search_v2_sampling = {
             'active': bool(joint_extension_sampling['active']),
             'sample_count': int(search_v2_point_valid_mask.sum()),
             'available_count': int(
-                joint_extension_sampling['endpoint_available_count']),
+                joint_extension_sampling.get(
+                    'endpoint_available_count',
+                    joint_extension_sampling.get(
+                        'local_available_count', 0))),
             'extension_count': int(search_v2_point_valid_mask.sum()),
             'overlap_count': 0,
             'selected_extension_count': int(
@@ -1309,7 +1401,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'sample_count': int(
                 trajectory_search_point_valid_mask.sum()),
             'available_count': int(
-                joint_extension_sampling['tube_available_count']),
+                joint_extension_sampling.get(
+                    'tube_available_count',
+                    joint_extension_sampling.get(
+                        'corridor_available_count', 0))),
         }
     joint_support = combined_search_support_statistics(
         (search_v2_points, trajectory_search_points),
@@ -1334,6 +1429,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             config, 'ct_search_endpoint_ratio', 0.6)),
         sparse_base_points=int(getattr(
             config, 'ct_search_sparse_base_points', 64)),
+        inner_core_point_count=inner_core_point_count,
+        min_inner_core_points=int(getattr(
+            config, 'ct_corridor_min_inner_core_points', 3)),
+        b1_valid=(b1_prior_valid if v26_recovery_enabled else True),
+        constraint_clipped=(bool(search_v2_diagnostics.get(
+            'constraint_clipped', False)) if v26_recovery_enabled else False),
         bb_scale=float(config.bb_scale),
         bb_offset=float(config.bb_offset),
     )
@@ -1369,8 +1470,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         # Availability is a deterministic structural contract: valid B1
         # geometry plus at least one finite novel extension point.  No GT
         # label, learned score, density heuristic or utility estimate enters.
+        causal_support_valid = bool(
+            geometry_valid or (
+                v26_recovery_enabled
+                and corridor_diagnostics.get('valid', False)))
         search_support_valid = bool(
-            geometry_valid
+            causal_support_valid
             and joint_extension_sampling is not None
             and joint_extension_sampling['sample_count'] > 0)
     elif use_ct_joint_full and joint_contract_v2 and bool(getattr(
@@ -1410,7 +1515,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             (0, baseline_search_points.shape[1]), dtype=np.float32)
     base_target_count = int(np.sum(seg_label_this > 0))
     expansion_regions = np.concatenate((
-        search_v2_expanded_points, expanded_search_points), axis=0)
+        search_v2_expanded_points, expanded_search_points,
+        corridor_points), axis=0)
     if len(expansion_regions):
         _, unique_expansion_indices = np.unique(
             np.rint(expansion_regions[:, :3] / 1e-6).astype(np.int64),
@@ -1655,6 +1761,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             joint_support['extension_count']),
         'ct_search_extension_voxels': np.float32(
             joint_support['extension_voxels']),
+        'ct_corridor_valid': np.float32(
+            bool(corridor_diagnostics.get('valid', False))),
+        'ct_corridor_constraint_clipped': np.float32(
+            bool(corridor_diagnostics.get('constraint_clipped', False))),
+        'ct_corridor_source_id': np.int64(
+            corridor_diagnostics.get('source_id', 0)),
         'velocity_label': velocity_label,
         'dynamics_displacement_label': dynamics_displacement_label,
         'canonical_ref_boxs': canonical_ref_boxs,
@@ -1692,7 +1804,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'ct_extension_labels': extension_labels.astype('float32'),
             'ct_extension_valid_mask':
                 extension_valid_mask.astype('float32'),
-            # 0=padding, 1=endpoint, 2=tube, 3=both.
+            # v25: 0/1/2/3. v26 bitmask: endpoint=1,tube=2,corridor=4.
             'ct_extension_source': joint_extension_source.astype('int64'),
             'ct_acquisition_base_target_count': np.float32(
                 base_target_count),
@@ -1713,6 +1825,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'ct_recovery_positive': np.float32(recovery_positive),
             'ct_recovery_fallback': np.float32(recovery_fallback),
         })
+        if v26_recovery_enabled:
+            data_dict.update({
+                'ct_extension_prepool_points':
+                    extension_points.astype('float32'),
+                'ct_extension_prepool_labels':
+                    extension_labels.astype('float32'),
+                'ct_extension_prepool_valid_mask':
+                    extension_valid_mask.astype('float32'),
+                'ct_extension_prepool_source':
+                    joint_extension_source.astype('int64'),
+            })
     if (use_trajectory_search
             or bool(getattr(config, 'use_ordered_trajectory_encoder', False))):
         data_dict.update({

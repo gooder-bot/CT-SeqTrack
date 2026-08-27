@@ -5,6 +5,7 @@ import numpy as np
 from pyquaternion import Quaternion
 from datasets.data_classes import PointCloud
 from scipy.spatial.distance import cdist
+from utils.box_membership import axis_aligned_box_membership_mask
 
 
 def random_choice(num_samples, size, replacement=False, seed=None):
@@ -149,23 +150,8 @@ def crop_pc_axis_aligned(PC, box, offset=0, scale=1.0, return_mask=False):
     """
     crop the pc using the box in the axis-aligned manner
     """
-    box_tmp = copy.deepcopy(box)
-    box_tmp.wlh = box_tmp.wlh * scale
-    maxi = np.max(box_tmp.corners(), 1) + offset
-    mini = np.min(box_tmp.corners(), 1) - offset
-
-    x_filt_max = PC.points[0, :] < maxi[0]
-    x_filt_min = PC.points[0, :] > mini[0]
-    y_filt_max = PC.points[1, :] < maxi[1]
-    y_filt_min = PC.points[1, :] > mini[1]
-    z_filt_max = PC.points[2, :] < maxi[2]
-    z_filt_min = PC.points[2, :] > mini[2]
-
-    close = np.logical_and(x_filt_min, x_filt_max)
-    close = np.logical_and(close, y_filt_min)
-    close = np.logical_and(close, y_filt_max)
-    close = np.logical_and(close, z_filt_min)
-    close = np.logical_and(close, z_filt_max)
+    close = axis_aligned_box_membership_mask(
+        PC.points, box, offset=offset, scale=scale)
 
     new_PC = copy.deepcopy(PC)
     new_PC.points = PC.points[:, close]

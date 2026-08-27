@@ -1,5 +1,10 @@
 # CT-SeqTrack 正式工具面
 
+> v26 新增两个正式只读入口：`export_ct_action_rows.py` 按稳定且互斥的
+> calibration/dev tracklet 分区导出 action rows；`report_ct_b2_v26.py`
+> 验证 schema-v3 漏斗与反事实指标。`calibrate_ct_actions.py` 现在要求两份
+> rows 和两份 manifest，阈值只在 calibration 拟合并在 dev 锁定验证。
+
 当前工具只覆盖八类正式任务。报告工具只读取实验产物并写入用户指定的新路径，不作为训练门禁，也不生成跨实验初始化 checkpoint。
 
 | 类别 | 工具 | 职责 |

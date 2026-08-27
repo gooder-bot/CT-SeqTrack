@@ -1,0 +1,13 @@
+_base_: 26_full_minus_b3_nuscenes_full.yaml
+ct_v26_full_formal_arm: true
+
+experiment_name: ct26_full_nuscenes_full_scratch_seed42
+ct_variant: full
+ct_require_action_calibration: true
+ct_action_calibration_path: null
+ct_calibration_tracklet_manifest_sha256: null
+ct_dev_tracklet_manifest_sha256: null
+# Training/ordinary validation is observation-recursive.  After the matching
+# checkpoint passes calibration+dev promotion, evaluate with
+# ``--proposal_mode selective`` and the v2 artifact arguments.
+proposal_inference_mode: observation

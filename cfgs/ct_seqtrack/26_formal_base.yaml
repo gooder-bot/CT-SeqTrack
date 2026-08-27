@@ -1,0 +1,54 @@
+_base_: 25_formal_base.yaml
+
+# CT-SeqTrack v26 Observation-Anchored Bounded Evidence Recovery.
+ct_batch_schema: ct_seqtrack.train.v3
+ct_enable_v26_recovery: true
+motion_v3_temporal_backend: gru
+
+# B1 acquisition geometry is separate from statistical uncertainty.
+ct_adaptive_acquisition_margin: true
+ct_acquisition_margin_min: [2.0, 1.0]
+ct_acquisition_margin_max: [6.0, 3.0]
+ct_acquisition_margin_bias: -8.0
+ct_acquisition_margin_quantile: 0.90
+ct_acquisition_margin_weight: 0.05
+search_v3_use_dynamic_sigma: false
+search_v3_fixed_margin_parallel: 2.0
+search_v3_fixed_margin_perpendicular: 1.0
+
+# Deterministic 768-point novel pre-pool: local 512 + corridor 256.
+ct_expansion_point_count: 768
+ct_endpoint_quota: 256
+ct_tube_quota: 256
+ct_corridor_quota: 256
+ct_search_extension_voxel_size: 0.2
+ct_corridor_max_length: 16.0
+ct_corridor_width_padding: 2.0
+ct_corridor_max_width: 6.0
+ct_corridor_min_inner_core_points: 3
+ct_motion_max_speed: 20.0
+ct_motion_max_acceleration: 8.0
+ct_motion_max_displacement: 12.0
+
+# Relation-aware 768 -> 256 selection; only selected points enter attention.
+ct_relation_aware_sampling: true
+ct_relation_topk: 128
+ct_relation_coverage_count: 96
+ct_relation_exploration_count: 32
+ct_relation_weight: 0.25
+ct_robust_consensus_voting: true
+ct_b3_consensus_features: true
+ct_memory_mode: real
+
+# Every enabled module is trainable from epoch 0 in unified Adam.
+ct_initialization_policy: scratch_only
+ct_b0_initialization_policy: scratch_only
+ct_optimizer_topology: unified_auto
+ct_separate_optimizers: false
+epoch: 60
+seed: 42
+category_name: Car
+observation_safe_bbox_size: true
+trainer_devices: 1
+ct_keep_final_window_checkpoints: 3
+check_val_every_n_epoch: 2

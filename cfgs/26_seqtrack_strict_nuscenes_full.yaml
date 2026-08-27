@@ -1,0 +1,19 @@
+_base_: seqtrack3d_nuscenes_w0_shared_se2_scratch.yaml
+
+experiment_name: ct26_seqtrack_strict_nuscenes_full_scratch_seed42
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+seed: 42
+epoch: 60
+from_epoch: 0
+observation_safe_bbox_size: true
+save_top_k: 0
+ct_b0_initialization_policy: scratch_only
+ct_formal_resume_contract: true
+ct_v26_full_formal_arm: true
+trainer_devices: 1
+ct_keep_final_window_checkpoints: 3
+check_val_every_n_epoch: 2

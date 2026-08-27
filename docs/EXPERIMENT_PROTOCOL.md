@@ -1,5 +1,12 @@
 # CT-SeqTrack 正式实验协议
 
+> 2026-08-28：当前正式轮次升级为 v26。本轮请求运行 B0、B1-GRU、
+> B1-CfC、Full-B3、Full 五个 scratch-only 臂；集成主臂固定 GRU，CfC
+> 仅作为 B1 backend 诊断，SeqTrack-strict 保持为单独登记的外部参考。
+> held-out calibration/dev promotion 和结果边界以
+> [CTSEQTRACK_V26_METHOD.md](CTSEQTRACK_V26_METHOD.md) 为准。下文 v24/v25
+> 章节作为冻结历史协议保留，不得用于初始化或改写 v26。
+
 本文档是 mini、完整 nuScenes、校准和消融实验的唯一协议来源。README 只提供入口，`need_to_do.md` 只记录状态。
 
 > 2026-08-24 起，论文正式训练协议升级为 Safe-SeqTrack v25。

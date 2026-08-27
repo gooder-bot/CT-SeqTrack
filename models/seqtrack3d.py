@@ -50,6 +50,7 @@ from models.ct_v2.motion import (
     TrajectorySearchEvidenceV21,
     TrajectoryPointEncoder,
     ZeroInitTrajectoryAdapter,
+    acquisition_margin_pinball_loss,
     physical_motion_uncertainty_loss,
     recursive_gap_age_balanced_mean,
 )
@@ -180,6 +181,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.ct_enable_b1 = bool(getattr(config, 'ct_enable_b1', True))
         self.ct_enable_b2 = bool(getattr(config, 'ct_enable_b2', True))
         self.ct_enable_b3 = bool(getattr(config, 'ct_enable_b3', True))
+        self.ct_enable_v26_recovery = bool(getattr(
+            config, 'ct_enable_v26_recovery', False))
         self.ct_initialization_policy = str(getattr(
             config, 'ct_initialization_policy',
             getattr(config, 'ct_b0_initialization_policy', 'legacy')))
@@ -320,17 +323,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.ct_endpoint_quota = int(getattr(
             config, 'ct_endpoint_quota', 128))
         self.ct_tube_quota = int(getattr(config, 'ct_tube_quota', 128))
+        self.ct_corridor_quota = int(getattr(
+            config, 'ct_corridor_quota', 0))
         self.use_b1motion_v3 = bool(getattr(
             config, 'use_b1motion_v3', False))
         if self.use_ct_joint_full:
             if not self.use_b1motion_v3:
                 raise ValueError("CT joint Full requires use_b1motion_v3=True")
-            if self.ct_expansion_point_count != (
-                    self.ct_endpoint_quota + self.ct_tube_quota):
+            expected_expansion_count = (
+                self.ct_endpoint_quota + self.ct_tube_quota
+                + (self.ct_corridor_quota
+                   if self.ct_enable_v26_recovery else 0))
+            if self.ct_expansion_point_count != expected_expansion_count:
                 raise ValueError(
-                    "CT endpoint+tube quotas must equal expansion point count")
+                    "CT acquisition quotas must equal expansion point count")
             if min(self.ct_endpoint_quota, self.ct_tube_quota) <= 0:
                 raise ValueError("CT endpoint/tube quotas must be positive")
+            if (self.ct_enable_v26_recovery
+                    and self.ct_corridor_quota <= 0):
+                raise ValueError("v26 corridor quota must be positive")
             if not (self.ct_enable_shared_motion_anchor
                     and self.ct_enable_dynamic_residual_bound):
                 raise ValueError(
@@ -693,6 +704,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.motion_v3_aux_nll_weight = float(getattr(
             config, 'motion_v3_aux_nll_weight',
             self.motion_v3_nll_weight))
+        self.ct_acquisition_margin_weight = float(getattr(
+            config, 'ct_acquisition_margin_weight', 0.0))
+        self.ct_acquisition_margin_quantile = float(getattr(
+            config, 'ct_acquisition_margin_quantile', 0.90))
         self.motion_v3_beta_nll_beta = float(getattr(
             config, 'motion_v3_beta_nll_beta', 0.5))
         self.motion_v3_tail_direction_weight = float(getattr(
@@ -789,6 +804,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             config, 'ct_presence_balanced_loss', False))
         self.ct_targetness_weight = float(getattr(
             config, 'ct_targetness_weight', 0.2))
+        self.ct_relation_weight = float(getattr(
+            config, 'ct_relation_weight', 0.0))
         self.ct_vote_weight = float(getattr(config, 'ct_vote_weight', 1.0))
         self.ct_raw_search_weight = float(getattr(
             config, 'ct_raw_search_weight', 1.0))
@@ -865,6 +882,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise ValueError("B1motion-v3 auxiliary query gaps must be positive")
         if not 0.0 <= self.motion_v3_beta_nll_beta <= 1.0:
             raise ValueError("motion_v3_beta_nll_beta must be in [0,1]")
+        if (self.ct_acquisition_margin_weight < 0.0
+                or not 0.0 < self.ct_acquisition_margin_quantile < 1.0):
+            raise ValueError("v26 acquisition margin loss settings are invalid")
+        if self.ct_relation_weight < 0.0:
+            raise ValueError("relation loss weight must be non-negative")
         if (self.motion_v3_tail_direction_weight < 0
                 or not 0.0 <= self.motion_v3_tail_direction_margin <= 1.0):
             raise ValueError("B1 tail direction settings are invalid")
@@ -1151,6 +1173,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     config, 'motion_v3_temporal_backend', 'gru')),
                 cfc_backbone_units=int(getattr(
                     config, 'motion_v3_cfc_backbone_units', 105)),
+                adaptive_acquisition_margin=bool(getattr(
+                    config, 'ct_adaptive_acquisition_margin', False)),
+                acquisition_margin_min=tuple(getattr(
+                    config, 'ct_acquisition_margin_min', (2.0, 1.0))),
+                acquisition_margin_max=tuple(getattr(
+                    config, 'ct_acquisition_margin_max', (6.0, 3.0))),
+                acquisition_margin_bias=float(getattr(
+                    config, 'ct_acquisition_margin_bias', -8.0)),
                 log_sigma_min=float(getattr(
                     config, 'motion_v3_log_sigma_min',
                     -2.302585092994046)),
@@ -1211,6 +1241,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     presence_threshold=float(getattr(
                                         config,
                                         'ct_search_presence_threshold', 0.5)),
+                                    relation_aware_sampling=bool(getattr(
+                                        config,
+                                        'ct_relation_aware_sampling', False)),
+                                    relation_topk=int(getattr(
+                                        config, 'ct_relation_topk', 128)),
+                                    coverage_count=int(getattr(
+                                        config, 'ct_relation_coverage_count', 96)),
+                                    exploration_count=int(getattr(
+                                        config,
+                                        'ct_relation_exploration_count', 32)),
+                                    robust_consensus_voting=bool(getattr(
+                                        config,
+                                        'ct_robust_consensus_voting', False)),
                                     ))
                         if self.ct_enable_b3:
                             with isolated_constructor_rng(
@@ -1234,6 +1277,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                 require_calibration=bool(getattr(
                                     config, 'ct_require_action_calibration',
                                     False)),
+                                consensus_features=bool(getattr(
+                                    config, 'ct_b3_consensus_features', False)),
                                 )
                     else:
                         torch.manual_seed(plugin_seed + 24001)
@@ -1699,8 +1744,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     f"{prefix}")
 
     def on_save_checkpoint(self, checkpoint):
-        if bool(getattr(
-                self.config, 'ct_online_recursive_training', False)):
+        formal_resume = (
+            bool(getattr(
+                self.config, 'ct_online_recursive_training', False))
+            or bool(getattr(
+                self.config, 'ct_formal_resume_contract', False)))
+        if formal_resume:
             checkpoint['ct_online_resume_contract'] = (
                 build_online_resume_contract(self.config))
             checkpoint['ct_global_rng_state'] = capture_global_rng_state()
@@ -1831,8 +1880,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             checkpoint.get('ct_b0_optimizer_state_hashes', {}))
         self._ct_observation_batch_fingerprints = copy.deepcopy(
             checkpoint.get('ct_observation_batch_fingerprints', []))
-        if (bool(getattr(
+        if ((bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
+             or bool(getattr(
+                self.config, 'ct_formal_resume_contract', False)))
                 and not bool(getattr(self.config, 'test', False))):
             # Lightning performs additional setup between checkpoint loading
             # and the first resumed batch.  Restore at on_train_epoch_start,
@@ -2565,6 +2616,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "mu_xy": np.zeros(2, dtype=np.float32),
             "kinematic_prior_xy": np.zeros(2, dtype=np.float32),
             "log_sigma_parallel_perp": np.zeros(2, dtype=np.float32),
+            "acquisition_margin_parallel_perp": np.asarray(
+                (2.0, 1.0), dtype=np.float32),
             "covariance_xy": np.eye(2, dtype=np.float32),
             "basis_velocity_xy": np.zeros(2, dtype=np.float32),
             "direction_xy": np.asarray((1.0, 0.0), dtype=np.float32),
@@ -2596,7 +2649,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             result["current_delta_t"] = float(current_delta_t[row])
             finite_keys = (
                 "mu_xy", "log_sigma_parallel_perp", "direction_xy",
-                "velocity_xy")
+                "velocity_xy", "acquisition_margin_parallel_perp")
             numerically_valid = all(
                 key in result and bool(np.isfinite(result[key]).all())
                 for key in finite_keys)
@@ -2669,7 +2722,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         required = (
             'ct_base_evidence_points', 'ct_base_evidence_valid_mask',
             'ct_extension_points', 'ct_extension_valid_mask',
-            'ct_extension_source', 'search_v3_query_delta_t',
+            'ct_extension_source', 'ct_search_support_valid',
+            'search_v3_query_delta_t',
             'search_v3_gap_ratio', 'search_v3_support_anchor_xy',
             'motion_source_anchor', 'coordinate_anchor',
             'ref_boxs', 'bbox_size', 'valid_mask')
@@ -2734,13 +2788,28 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             device=current_base_features.device,
             dtype=current_base_features.dtype)
         extension_points = self.encode_point_time(extension_points)
-        if extension_points.shape[1:] != (256, 5):
-            raise ValueError("extension points must have shape [B,256,5]")
+        expected_extension_count = (
+            self.ct_expansion_point_count
+            if self.ct_enable_v26_recovery else 256)
+        if extension_points.shape[1:] != (expected_extension_count, 5):
+            raise ValueError(
+                "extension pre-pool points must have shape "
+                f"[B,{expected_extension_count},5]")
         recursive_age = input_dict.get('ct_recursive_state_age')
         if recursive_age is not None:
             recursive_age = recursive_age.to(
                 device=current_base_features.device,
                 dtype=current_base_features.dtype)
+        extension_valid_mask = input_dict[
+            'ct_extension_valid_mask'].to(current_base_features.device)
+        if self.ct_enable_v26_recovery:
+            causal_support_valid = input_dict[
+                'ct_search_support_valid'].to(
+                    device=current_base_features.device,
+                    dtype=extension_valid_mask.dtype).reshape(
+                        batch_size, 1)
+            extension_valid_mask = (
+                extension_valid_mask * causal_support_valid)
         canonical_prior_contract = MotionPriorOutput(
             center_xy=main_motion['prior_xy'].detach(),
             direction_xy=main_motion['motion_direction_xy'].detach(),
@@ -2748,6 +2817,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             valid=main_motion['valid'].detach(),
             source=input_dict['search_v3_prior_source_id'].to(
                 current_base_features.device).detach(),
+            acquisition_margin_parallel_perp=main_motion[
+                'acquisition_margin_parallel_perp'].detach(),
         )
         prior_contract = reexpress_motion_prior(
             canonical_prior_contract,
@@ -2763,9 +2834,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         with self.ct_plugin_rng.fork(current_base_features.device):
             joint_output = self.ct_joint_search_refiner(
                 extension_points=extension_points,
-                extension_valid_mask=input_dict[
-                    'ct_extension_valid_mask'].to(
-                        current_base_features.device),
+                extension_valid_mask=extension_valid_mask,
                 extension_source=input_dict[
                     'ct_extension_source'].to(current_base_features.device),
                 current_base_features=current_base_features,
@@ -2799,6 +2868,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'ess': joint_output['ct_search_normalized_ess'],
                 'count': joint_output[
                     'ct_search_extension_selected_count'],
+                'vote_consistency': joint_output['ct_vote_consistency'],
+                'covariance_xx': joint_output['ct_vote_covariance_xx'],
+                'covariance_xy': joint_output['ct_vote_covariance_xy'],
+                'covariance_yy': joint_output['ct_vote_covariance_yy'],
+                'inlier_ratio': joint_output['ct_vote_inlier_ratio'],
+                'effective_mass': joint_output['ct_vote_effective_mass'],
+                'candidate_margin': joint_output[
+                    'ct_vote_candidate_margin'],
+                'compatible_hypothesis_count': joint_output[
+                    'ct_vote_compatible_hypothesis_count'],
             },
         )
         raw_box = evidence_contract.raw_box
@@ -2883,6 +2962,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'ct_search_extension_voxels'),
                 targetness_mean=joint_output['ct_search_targetness_mean'],
                 targetness_max=joint_output['ct_search_targetness_max'],
+                vote_consistency=evidence_contract.point_diagnostics[
+                    'vote_consistency'],
+                vote_covariance_xx=evidence_contract.point_diagnostics[
+                    'covariance_xx'],
+                vote_covariance_xy=evidence_contract.point_diagnostics[
+                    'covariance_xy'],
+                vote_covariance_yy=evidence_contract.point_diagnostics[
+                    'covariance_yy'],
+                vote_inlier_ratio=evidence_contract.point_diagnostics[
+                    'inlier_ratio'],
+                vote_candidate_margin=evidence_contract.point_diagnostics[
+                    'candidate_margin'],
+                compatible_hypothesis_count=(
+                    evidence_contract.point_diagnostics[
+                        'compatible_hypothesis_count']),
             )
         else:
             dt = input_dict['search_v3_query_delta_t'].to(
@@ -2935,8 +3029,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     raw_box, observation_box)
             elif (self.ct_enable_b3 and mode in (
                     'full', 'full_selective', 'selective')):
-                require_selective_calibration(
-                    self.ct_joint_router.calibrated, mode)
+                # A missing/expired/mismatched artifact is a deployment
+                # no-op, never an uncalibrated action and never a crash after
+                # an expensive full-dataset evaluation has started.
+                if not bool(self.ct_joint_router.calibrated):
+                    final_box = observation_box
         decision_contract = DecisionOutput(
             final_box=final_box,
             help_logit=router_output['ct_b3_help_logit'],
@@ -3668,6 +3765,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'residual_unit_parallel_perp'],
                 'motion_prior_envelope_parallel_perp': main_motion[
                     'envelope_parallel_perp'],
+                'motion_prior_acquisition_margin_parallel_perp': main_motion[
+                    'acquisition_margin_parallel_perp'],
                 'motion_prior_valid': main_motion['valid'],
                 'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],
                 'motion_prior_log_sigma_parallel_perp': main_motion[
@@ -3846,6 +3945,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         aux_motion['residual_unit_parallel_perp'],
                     'motion_aux_prior_envelope_parallel_perp':
                         aux_motion['envelope_parallel_perp'],
+                    'motion_aux_prior_acquisition_margin_parallel_perp':
+                        aux_motion['acquisition_margin_parallel_perp'],
                     'motion_aux_prior_valid': aux_motion['valid'],
                     'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
                     'motion_aux_prior_log_sigma_xy':
@@ -4934,10 +5035,27 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         """B2 acquisition and detached B3 action-risk objectives."""
         dtype = output['ct_search_targetness_logits'].dtype
         device = output['ct_search_targetness_logits'].device
-        extension_labels = data['ct_extension_labels'].to(
+        prepool_labels = data['ct_extension_labels'].to(
             device=device, dtype=dtype)
-        extension_valid = data['ct_extension_valid_mask'].to(
+        prepool_valid = data['ct_extension_valid_mask'].to(
             device=device, dtype=dtype)
+        if self.ct_enable_v26_recovery:
+            prepool_valid = prepool_valid * data[
+                'ct_search_support_valid'].to(
+                    device=device, dtype=dtype).reshape(-1, 1)
+        selected_indices = output.get('ct_extension_selected_indices')
+        if selected_indices is not None:
+            selected_indices = selected_indices.to(device=device).long()
+            extension_labels = torch.gather(
+                prepool_labels, 1, selected_indices)
+            extension_valid = torch.gather(
+                prepool_valid, 1, selected_indices)
+            extension_valid = extension_valid * output.get(
+                'ct_extension_selected_valid_mask',
+                torch.ones_like(extension_valid)).to(dtype)
+        else:
+            extension_labels = prepool_labels
+            extension_valid = prepool_valid
         base_labels = data['ct_base_evidence_labels'].to(
             device=device, dtype=dtype)
         base_valid = data['ct_base_evidence_valid_mask'].to(
@@ -4972,6 +5090,61 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             + (1.0 - extension_labels) * negative_weight)
         loss_targetness = weighted_mean(
             targetness_error, extension_valid)
+        relation_error = F.binary_cross_entropy_with_logits(
+            output['ct_relation_logits_prepool'],
+            prepool_labels, reduction='none')
+        relation_error = relation_error * (
+            prepool_labels * positive_weight
+            + (1.0 - prepool_labels) * negative_weight)
+        loss_relation = weighted_mean(relation_error, prepool_valid)
+        relation_probability = torch.sigmoid(
+            output['ct_relation_logits_prepool'])
+        relation_select = prepool_valid > 0
+        relation_scores_flat = relation_probability[relation_select]
+        relation_targets_flat = prepool_labels[relation_select] > 0.5
+        relation_auroc = target_xy.new_tensor(0.5)
+        relation_auprc = target_xy.new_zeros(())
+        relation_ece = target_xy.new_zeros(())
+        positive_scores = relation_scores_flat[relation_targets_flat]
+        negative_scores = relation_scores_flat[~relation_targets_flat]
+        if positive_scores.numel() and negative_scores.numel():
+            ascending = torch.argsort(relation_scores_flat, stable=True)
+            ranks = torch.empty_like(ascending, dtype=dtype)
+            ranks[ascending] = torch.arange(
+                1, ascending.numel() + 1, device=device, dtype=dtype)
+            positive_count = positive_scores.numel()
+            negative_count = negative_scores.numel()
+            relation_auroc = (
+                ranks[relation_targets_flat].sum()
+                - 0.5 * positive_count * (positive_count + 1)) / float(
+                    positive_count * negative_count)
+        if positive_scores.numel():
+            order = torch.argsort(relation_scores_flat, descending=True)
+            ordered_target = relation_targets_flat[order].to(dtype)
+            precision_at_k = torch.cumsum(
+                ordered_target, dim=0) / torch.arange(
+                    1, ordered_target.numel() + 1,
+                    device=device, dtype=dtype)
+            relation_auprc = (
+                precision_at_k * ordered_target).sum() / torch.clamp(
+                    ordered_target.sum(), min=1.0)
+        if relation_scores_flat.numel():
+            ece_terms = []
+            for bin_index in range(10):
+                lower = bin_index / 10.0
+                upper = (bin_index + 1) / 10.0
+                in_bin = (
+                    (relation_scores_flat >= lower)
+                    & (relation_scores_flat < upper
+                       if bin_index < 9 else relation_scores_flat <= upper))
+                if bool(in_bin.any()):
+                    ece_terms.append(
+                        in_bin.to(dtype).mean()
+                        * torch.abs(
+                            relation_scores_flat[in_bin].mean()
+                            - relation_targets_flat[in_bin].to(dtype).mean()))
+            if ece_terms:
+                relation_ece = torch.stack(ece_terms).sum()
 
         foreground = extension_valid * extension_labels
         vote_target = target_xy.unsqueeze(1).expand_as(
@@ -4990,7 +5163,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         base_presence_target = (
             (base_labels * base_valid).sum(dim=1) > 0).to(dtype)
         extension_presence_target = (
-            (extension_labels * extension_valid).sum(dim=1) > 0).to(dtype)
+            (prepool_labels * prepool_valid).sum(dim=1) > 0).to(dtype)
         target_bearing = extension_target_bearing_mask(
             availability, extension_labels, extension_valid)
         # A raw candidate is identifiable as extension evidence only on rows
@@ -5107,23 +5280,43 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_acquisition_expansion_target_count')
         pool_target_count = acquisition_metric(
             'ct_acquisition_extension_pool_target_count')
-        sampled_target_count = acquisition_metric(
+        prepool_target_count = acquisition_metric(
             'ct_acquisition_sampled_target_count')
+        selected_target_count = (
+            extension_labels * extension_valid).sum(dim=1)
+        selected_group = output.get('ct_extension_selected_group')
+        if selected_group is None:
+            selected_group = torch.ones_like(extension_labels, dtype=torch.long)
+        else:
+            selected_group = selected_group.to(device=device).long()
+
+        def selected_group_target_rate(group_id):
+            group_valid = extension_valid * (
+                selected_group == int(group_id)).to(dtype)
+            return (extension_labels * group_valid).sum() / torch.clamp(
+                group_valid.sum(), min=1.0)
+
+        relation_selected_target_rate = selected_group_target_rate(1)
+        spatial_selected_target_rate = selected_group_target_rate(2)
+        exploration_selected_target_rate = selected_group_target_rate(3)
+        borrowed_selected_target_rate = selected_group_target_rate(4)
         recovery_positive = acquisition_metric('ct_recovery_positive')
         recovery_fallback = acquisition_metric('ct_recovery_fallback')
-        eligible_rows = pool_target_count > 0
-        retained_rows = eligible_rows & (sampled_target_count > 0)
+        eligible_rows = prepool_target_count > 0
+        retained_rows = eligible_rows & (selected_target_count > 0)
         eligible_row_count = eligible_rows.to(dtype).sum()
         retained_row_count = retained_rows.to(dtype).sum()
         acquisition_row_recall = retained_row_count / torch.clamp(
             eligible_row_count, min=1.0)
         pool_target_sum = pool_target_count.sum()
-        sampled_target_sum = sampled_target_count.sum()
-        acquisition_point_recall = sampled_target_sum / torch.clamp(
-            pool_target_sum, min=1.0)
+        prepool_target_sum = prepool_target_count.sum()
+        selected_target_sum = selected_target_count.sum()
+        acquisition_point_recall = selected_target_sum / torch.clamp(
+            prepool_target_sum, min=1.0)
 
         b2_total = (
             self.ct_targetness_weight * loss_targetness
+            + self.ct_relation_weight * loss_relation
             + self.ct_vote_weight * loss_vote
             + self.ct_raw_search_weight * loss_raw
             + self.ct_presence_weight * loss_presence)
@@ -5134,6 +5327,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'loss_ct_b2_total': b2_total,
             'loss_ct_b3_total': b3_total,
             'loss_ct_targetness': loss_targetness,
+            'loss_ct_relation': loss_relation,
+            'ct_relation_auroc': relation_auroc,
+            'ct_relation_ap': relation_auprc,
+            'ct_relation_auprc': relation_auprc,
+            'ct_relation_ece': relation_ece,
             'loss_ct_vote': loss_vote,
             'loss_ct_raw_search': loss_raw,
             'loss_ct_presence': loss_presence,
@@ -5156,6 +5354,41 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_h1_harmful_rate': weighted_mean(
                 harmful.to(dtype), b3_valid),
             'ct_b2_target_bearing_rate': target_bearing.mean(),
+            'ct_relation_selected_target_enrichment': (
+                (extension_labels * extension_valid).sum()
+                / torch.clamp(extension_valid.sum(), min=1.0)) / torch.clamp(
+                    (prepool_labels * prepool_valid).sum()
+                    / torch.clamp(prepool_valid.sum(), min=1.0), min=1e-6),
+            'ct_relation_group_target_rate': relation_selected_target_rate,
+            'ct_spatial_group_target_rate': spatial_selected_target_rate,
+            'ct_exploration_group_target_rate':
+                exploration_selected_target_rate,
+            'ct_borrowed_group_target_rate': borrowed_selected_target_rate,
+            'ct_relation_vs_spatial_enrichment': (
+                relation_selected_target_rate / torch.clamp(
+                    spatial_selected_target_rate, min=1e-6)),
+            'ct_relation_vs_exploration_enrichment': (
+                relation_selected_target_rate / torch.clamp(
+                    exploration_selected_target_rate, min=1e-6)),
+            'ct_vote_consistency_mean': output[
+                'ct_vote_consistency'].mean(),
+            'ct_vote_covariance_trace_mean': (
+                output['ct_vote_covariance_xx']
+                + output['ct_vote_covariance_yy']).mean(),
+            'ct_vote_covariance_anisotropy_mean': (
+                torch.abs(output['ct_vote_covariance_xx']
+                          - output['ct_vote_covariance_yy'])
+                / torch.clamp(
+                    output['ct_vote_covariance_xx']
+                    + output['ct_vote_covariance_yy'], min=1e-6)).mean(),
+            'ct_vote_inlier_ratio_mean': output[
+                'ct_vote_inlier_ratio'].mean(),
+            'ct_vote_effective_mass_mean': output[
+                'ct_vote_effective_mass'].mean(),
+            'ct_vote_candidate_margin_mean': output[
+                'ct_vote_candidate_margin'].mean(),
+            'ct_vote_compatible_hypothesis_count_mean': output[
+                'ct_vote_compatible_hypothesis_count'].mean(),
             'ct_no_extension_counterfactual_gain': target_xy.new_zeros(()),
             'ct_b2_availability_rate': availability.float().mean(),
             'ct_b2_base_presence_target_rate':
@@ -5177,11 +5410,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_acquisition_pool_presence_rate': (
                 pool_target_count > 0).to(dtype).mean(),
             'ct_acquisition_sampled_presence_rate': (
-                sampled_target_count > 0).to(dtype).mean(),
+                selected_target_count > 0).to(dtype).mean(),
             'ct_acquisition_eligible_row_count': eligible_row_count,
             'ct_acquisition_retained_row_count': retained_row_count,
             'ct_acquisition_pool_target_sum': pool_target_sum,
-            'ct_acquisition_sampled_target_sum': sampled_target_sum,
+            'ct_acquisition_prepool_target_sum': prepool_target_sum,
+            'ct_acquisition_sampled_target_sum': selected_target_sum,
             'ct_acquisition_row_recall': acquisition_row_recall,
             'ct_acquisition_point_recall': acquisition_point_recall,
             'ct_recovery_positive_row_count': recovery_positive.sum(),
@@ -5533,6 +5767,25 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             b1_transaction_loss = (
                 b1_transaction_loss
                 + self.motion_v3_prior_weight * loss_motion_v3_prior)
+            margin_terms = acquisition_margin_pinball_loss(
+                output['motion_prior_xy'],
+                main_target,
+                output['motion_prior_direction_xy'],
+                output['motion_prior_acquisition_margin_parallel_perp'],
+                main_valid,
+                quantile=self.ct_acquisition_margin_quantile,
+            )
+            loss_acquisition_margin = recursive_balanced_mean(
+                margin_terms['loss_per_sample'], margin_terms['valid'],
+                recursive_age=recursive_age,
+                recursive_age_valid=recursive_age_valid)
+            loss_total += (
+                self.ct_acquisition_margin_weight
+                * loss_acquisition_margin)
+            b1_transaction_loss = (
+                b1_transaction_loss
+                + self.ct_acquisition_margin_weight
+                * loss_acquisition_margin)
             if uncertainty_terms is not None:
                 loss_motion_v3_nll = recursive_balanced_mean(
                     uncertainty_terms['nll_per_sample'], main_valid,
@@ -5558,6 +5811,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             loss_dict.update({
                 'loss_total': loss_total,
                 'loss_motion_v3_prior': loss_motion_v3_prior,
+                'loss_ct_acquisition_margin': loss_acquisition_margin,
+                'ct_acquisition_margin_parallel_mean': masked_mean(
+                    output[
+                        'motion_prior_acquisition_margin_parallel_perp'][:, 0],
+                    main_valid),
+                'ct_acquisition_margin_perpendicular_mean': masked_mean(
+                    output[
+                        'motion_prior_acquisition_margin_parallel_perp'][:, 1],
+                    main_valid),
                 'motion_v3_prior_rmse': torch.sqrt(masked_mean(
                     main_prior_error.pow(2), main_valid)),
                 'motion_v3_kinematic_rmse': torch.sqrt(masked_mean(
@@ -7198,6 +7460,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         recorded_b1_weighted_loss = loss_total.new_zeros(())
         for key, weight in (
                 ('loss_motion_v3_prior', self.motion_v3_prior_weight),
+                ('loss_ct_acquisition_margin',
+                 self.ct_acquisition_margin_weight),
                 ('loss_motion_v3_nll', self.motion_v3_nll_weight),
                 ('loss_motion_v3_aux_prior',
                  self.motion_v3_aux_prior_weight),
@@ -7262,7 +7526,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if (isinstance(batch, dict)
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
-                    'ct_seqtrack.train.v2')):
+                    'ct_seqtrack.train.v2',
+                    'ct_seqtrack.train.v3')):
             transferred = {
                 'ct_stream_schema': batch['ct_stream_schema'],
                 'observation': self._move_batch_to_device(
@@ -8227,6 +8492,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'residual_unit_parallel_perp'],
             'motion_prior_envelope_parallel_perp': main_motion[
                 'envelope_parallel_perp'],
+            'motion_prior_acquisition_margin_parallel_perp': main_motion[
+                'acquisition_margin_parallel_perp'],
             'motion_prior_valid': main_motion['valid'],
             'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],
             'motion_prior_log_sigma_parallel_perp': main_motion[
@@ -8251,6 +8518,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'residual_unit_parallel_perp'],
                 'motion_aux_prior_envelope_parallel_perp': aux_motion[
                     'envelope_parallel_perp'],
+                'motion_aux_prior_acquisition_margin_parallel_perp': aux_motion[
+                    'acquisition_margin_parallel_perp'],
                 'motion_aux_prior_valid': aux_motion['valid'],
                 'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],
                 'motion_aux_prior_log_sigma_xy': aux_motion['log_sigma_xy'],
@@ -8295,7 +8564,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if (isinstance(batch, dict)
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
-                    'ct_seqtrack.train.v2')):
+                    'ct_seqtrack.train.v2',
+                    'ct_seqtrack.train.v3')):
             if getattr(self, '_ct_inside_dual_stream', False):
                 raise RuntimeError('nested dual-stream transaction')
             self._ct_inside_dual_stream = True

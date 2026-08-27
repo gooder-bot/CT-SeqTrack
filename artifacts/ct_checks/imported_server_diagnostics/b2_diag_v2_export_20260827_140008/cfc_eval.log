@@ -1,0 +1,40 @@
+nohup: ignoring input
+Global seed set to 42
+run provenance: output/20260827-1342-25_b1-b1_cfc_diag_v2_dev/run_provenance.json
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+Missing logger folder: output/20260827-1342-25_b1-b1_cfc_diag_v2_dev/lightning_logs
+Restoring states from the checkpoint path at output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2/lightning_logs/version_0/checkpoints/last.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [3]
+Loaded model weights from the checkpoint at output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2/lightning_logs/version_0/checkpoints/last.ckpt
+Testing: 0it [00:00, ?it/s]Testing:   0%|          | 0/14 [00:00<?, ?it/s]Testing DataLoader 0:   0%|          | 0/14 [00:00<?, ?it/s]Testing DataLoader 0:   7%|▋         | 1/14 [00:29<06:29, 29.97s/it]Testing DataLoader 0:  14%|█▍        | 2/14 [00:30<03:04, 15.36s/it]Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Testing DataLoader 0:  21%|██▏       | 3/14 [00:42<02:34, 14.07s/it]Testing DataLoader 0:  29%|██▊       | 4/14 [00:42<01:46, 10.66s/it]Empty pointcloud!
+Testing DataLoader 0:  36%|███▌      | 5/14 [00:56<01:42, 11.36s/it]Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Empty pointcloud!
+Testing DataLoader 0:  43%|████▎     | 6/14 [01:01<01:21, 10.17s/it]Testing DataLoader 0:  50%|█████     | 7/14 [01:11<01:11, 10.24s/it]Testing DataLoader 0:  57%|█████▋    | 8/14 [01:18<00:58,  9.76s/it]Testing DataLoader 0:  64%|██████▍   | 9/14 [01:21<00:45,  9.05s/it]Testing DataLoader 0:  71%|███████▏  | 10/14 [01:25<00:34,  8.58s/it]Testing DataLoader 0:  79%|███████▊  | 11/14 [01:29<00:24,  8.14s/it]Testing DataLoader 0:  86%|████████▌ | 12/14 [01:34<00:15,  7.86s/it]Empty pointcloud!
+Testing DataLoader 0:  93%|█████████▎| 13/14 [01:37<00:07,  7.52s/it]Testing DataLoader 0: 100%|██████████| 14/14 [01:49<00:00,  7.79s/it]Testing DataLoader 0: 100%|██████████| 14/14 [01:49<00:00,  7.79s/it]
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃        Test metric        ┃       DataLoader 0        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│      precision/test       │     38.1791877746582      │
+│       success/test        │    32.153175354003906     │
+└───────────────────────────┴───────────────────────────┘

@@ -1,10 +1,19 @@
-# CT-SeqTrack Safe-SeqTrack v25 当前状态
+# CT-SeqTrack v26 当前状态
 
 本文件只记录状态和下一步；实验定义以
-[docs/SAFE_SEQTRACK_V25_PROTOCOL.md](docs/SAFE_SEQTRACK_V25_PROTOCOL.md) 为当前协议来源；
-v24 仅作为只读失败证据。
+[docs/CTSEQTRACK_V26_METHOD.md](docs/CTSEQTRACK_V26_METHOD.md) 为当前协议来源；
+v24/v25 仅作为只读历史证据。
 
 ## 已完成
+
+- [x] 实现 observation-anchored bounded adaptive shell、三帧 causal backup corridor 与 B1-invalid 固定 `2m/1m` CV fallback。
+- [x] 实现 deterministic 768-point novel pre-pool、三位 source bitmask、relation/FPS/stateless 256-point selection 与 K=3 robust consensus voting。
+- [x] counterfactual schema 升级为 v3，修复 nuScenes wlh/local-axis 和 raw-vs-novel 支持统计，加入逐层集合不变量与 v26 报告工具。
+- [x] 恢复 B3 helpful/harmful action-confidence gate，加入 consensus/covariance/inlier/margin 特征与 calibration/dev promotion artifact v2。
+- [x] 新增 SeqTrack-strict、B0、B1-GRU、B1-CfC、Full-B3、Full 的 v26 full-nuScenes seed42/60-epoch scratch 配置；集成主臂固定 GRU，CfC 仅作为 B1 backend 诊断；所有启用模块从第一步参与 unified Adam。
+- [x] 修复 v26 B1 acquisition-margin 事务复算遗漏、corridor 长度截断中心偏移、Full action-export 非完整 checkpoint 误载入风险。
+- [x] 正式训练显式固定 `min_epochs=max_epochs=60`、`max_steps=-1`、单卡、全量 train/val batch，并保存 `last.ckpt` 与 epoch 58/59/60。
+- [x] 新增零训练步 `preflight_v26_full.py`，检查完整数据根、CUDA/PointNet++/Lightning、模型构造、优化器参数组和冻结状态。
 
 - [x] 固定 `main@001951a` 的 tracked-file、22 配置、测试和 `output/` 保护基线。
 - [x] 正式 v24 配置脱离历史 21/22/23 继承链，resolved-config 逐键一致。
@@ -26,28 +35,16 @@ v24 仅作为只读失败证据。
 
 ## 服务器验收（待执行）
 
-- [ ] 固定同一安全 batch，对比 SeqTrack control 与 CT B0 的输入、输出、loss、梯度和一次 Adam 更新。
-- [ ] B1-GRU/B1-CfC 各完成真实 batch forward 与至少 8-step train，确认所有启用组均有有限非零梯度且无 frozen 参数。
-- [ ] B0/B1-GRU/B1-CfC 从相同 seed42 完成 disposable 100-step，比较 initial/step1/step100 B0 参数和 Adam 状态 hash；选定后端后对 Full-B3/Full 重复审计。
-- [ ] 对比 validation cadence 1/5 的相同 observation-step B0 hash。
-- [ ] 完成 scratch 连续训练与 epoch-boundary resume 等价检查。
-- [ ] 对比各阶段 CUDA allocated/reserved/peak，并执行 B0 显存阈值门禁。
-- [ ] 可视化真实序列点云与逐帧预测框，确认非空、有限且帧数一致。
+- [ ] 分别对本轮五臂运行零训练步 preflight；它不运行 mini、不读训练样本、不产生 checkpoint。
+- [ ] 直接从 epoch 0 独立运行 v26 B0、B1-GRU、B1-CfC、Full-B3、Full 完整 nuScenes Car seed42；本轮不先跑 mini，也不从 smoke/其他 arm checkpoint 初始化；SeqTrack-strict 保持为单独登记的外部参考。
+- [ ] 对 final 与 late-3 的每个 Full checkpoint 分别导出互斥 calibration/dev rows、完成 promotion，并生成不可跨 checkpoint 复用的 artifact。
+- [ ] 报告 schema-v3 geometry/sampling/voting/B3 漏斗、final/late-3 tracking、耗时、显存及 tracklet-paired bootstrap CI。
 
 本机有可用 GPU，但没有发现正式 nuScenes 数据根，且当前 Python 环境缺少
 `easydict`、Lightning、torchmetrics 和 nuScenes devkit。上述真实门禁完成前，
 不得物理删除 `SEQTRACK3D` 中仍承载兼容行为的 dormant source branches。
 
-当前本地机器不具备真实 nuScenes/完整 Lightning 环境，因此这些服务器项目不得标记为“已通过”。任何 disposable smoke checkpoint 都不能用于正式实验初始化。
-
-## 瘦身完成后实验
-
-- [x] 固定 candidate 协议：B0 为 4 views，candidate0 权重 0.5；B2 只读取 canonical candidate0。
-- [ ] v25 B1-GRU/B1-CfC mini seed42 分别从 epoch0 跑满 60 epoch，并完成 paired-bootstrap 与独立 calibration/dev 门槛。
-- [ ] 选择胜出 backend 后，B0、Full-B3、Full mini seed42 分别从 epoch0 跑满 60 epoch。
-- [ ] 完成 B1、B2、B3 机制指标和 matched-prefix hash 审计。
-- [ ] mini 通过后运行完整 nuScenes 四臂 seed42。
-- [ ] 补完整 nuScenes 四臂 seeds52、62。
+当前本地机器不具备真实 nuScenes/完整 Lightning 环境，因此服务器 preflight 未运行前只能给出条件式 GO。任何工程或其他 arm checkpoint 都不能用于正式实验初始化。
 
 ## Claim guardrails
 

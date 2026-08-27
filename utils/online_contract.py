@@ -233,6 +233,67 @@ def build_online_resume_contract(config):
             config, "ct_targetness_positive_weight", 1.0)),
         "targetness_negative_weight": float(_get(
             config, "ct_targetness_negative_weight", 1.0)),
+        "enable_v26_recovery": bool(_get(
+            config, "ct_enable_v26_recovery", False)),
+        "v26_full_formal_arm": bool(_get(
+            config, "ct_v26_full_formal_arm", False)),
+        "adaptive_acquisition_margin": bool(_get(
+            config, "ct_adaptive_acquisition_margin", False)),
+        "acquisition_margin_min": tuple(float(value) for value in _get(
+            config, "ct_acquisition_margin_min", [2.0, 1.0])),
+        "acquisition_margin_max": tuple(float(value) for value in _get(
+            config, "ct_acquisition_margin_max", [6.0, 3.0])),
+        "acquisition_margin_bias": float(_get(
+            config, "ct_acquisition_margin_bias", -8.0)),
+        "acquisition_margin_quantile": float(_get(
+            config, "ct_acquisition_margin_quantile", 0.90)),
+        "acquisition_margin_weight": float(_get(
+            config, "ct_acquisition_margin_weight", 0.0)),
+        "expansion_point_count": int(_get(
+            config, "ct_expansion_point_count", 256)),
+        "endpoint_quota": int(_get(config, "ct_endpoint_quota", 128)),
+        "tube_quota": int(_get(config, "ct_tube_quota", 128)),
+        "corridor_quota": int(_get(config, "ct_corridor_quota", 0)),
+        "extension_voxel_size": float(_get(
+            config, "ct_search_extension_voxel_size", 0.2)),
+        "corridor_max_length": float(_get(
+            config, "ct_corridor_max_length", 16.0)),
+        "corridor_width_padding": float(_get(
+            config, "ct_corridor_width_padding", 2.0)),
+        "corridor_max_width": float(_get(
+            config, "ct_corridor_max_width", 6.0)),
+        "corridor_min_inner_core_points": int(_get(
+            config, "ct_corridor_min_inner_core_points", 3)),
+        "motion_max_speed": float(_get(
+            config, "ct_motion_max_speed", 20.0)),
+        "motion_max_acceleration": float(_get(
+            config, "ct_motion_max_acceleration", 8.0)),
+        "motion_max_displacement": float(_get(
+            config, "ct_motion_max_displacement", 12.0)),
+        "relation_aware_sampling": bool(_get(
+            config, "ct_relation_aware_sampling", False)),
+        "relation_topk": int(_get(config, "ct_relation_topk", 128)),
+        "relation_coverage_count": int(_get(
+            config, "ct_relation_coverage_count", 96)),
+        "relation_exploration_count": int(_get(
+            config, "ct_relation_exploration_count", 32)),
+        "relation_weight": float(_get(config, "ct_relation_weight", 0.0)),
+        "robust_consensus_voting": bool(_get(
+            config, "ct_robust_consensus_voting", False)),
+        "b3_consensus_features": bool(_get(
+            config, "ct_b3_consensus_features", False)),
+        "trainer_devices": int(_get(config, "trainer_devices", -1)),
+        "keep_final_window_checkpoints": int(_get(
+            config, "ct_keep_final_window_checkpoints", 0) or 0),
+        "formal_resume_contract": bool(_get(
+            config, "ct_formal_resume_contract", False)),
+        "observation_safe_bbox_size": bool(_get(
+            config, "observation_safe_bbox_size", False)),
+        "category_name": str(_get(config, "category_name", "")),
+        "dataset_version": str(_get(config, "version", "")),
+        "train_split": str(_get(config, "train_split", "")),
+        "val_split": str(_get(config, "val_split", "")),
+        "save_top_k": int(_get(config, "save_top_k", 0)),
     }
     return {"schema": schema, "fields": fields}
 
@@ -300,9 +361,53 @@ def validate_scratch_training_contract(config):
     if str(_get(config, "ct_protocol_status", "formal")) != "formal":
         raise ValueError(
             "historical diagnostic config is not a runnable formal protocol")
+    net_model = str(_get(config, "net_model", "seqtrack3d")).strip().lower()
+    if (net_model != "ctseqtrack"
+            and bool(_get(config, "ct_formal_resume_contract", False))):
+        errors = []
+
+        def require_strict_equal(key, expected, default=None):
+            observed = _get(config, key, default)
+            if _normal(observed) != _normal(expected):
+                errors.append(
+                    f"{key}={observed!r} (expected {expected!r})")
+
+        require_strict_equal("net_model", "seqtrack3d", "seqtrack3d")
+        require_strict_equal("version", "v1.0-trainval", "")
+        require_strict_equal("train_split", "train_track", "")
+        require_strict_equal("val_split", "val", "")
+        require_strict_equal("test_split", "val", "")
+        require_strict_equal("seed", 42, None)
+        require_strict_equal("epoch", 60, 0)
+        require_strict_equal("from_epoch", 0, 0)
+        require_strict_equal("optimizer", "Adam", "")
+        require_strict_equal("lr", 1e-4, None)
+        require_strict_equal("batch_size", 16, 0)
+        require_strict_equal("num_candidates", 4, 0)
+        require_strict_equal("trainer_devices", 1, None)
+        require_strict_equal("ct_keep_final_window_checkpoints", 3, 0)
+        require_strict_equal("ct_formal_resume_contract", True, False)
+        require_strict_equal("observation_safe_bbox_size", True, False)
+        require_strict_equal("save_top_k", 0, None)
+        require_strict_equal("check_val_every_n_epoch", 2, 1)
+        for limit_key in ("limit_train_batches", "limit_val_batches"):
+            limit_value = _get(config, limit_key, 1.0)
+            if (not isinstance(limit_value, float)
+                    or limit_value != 1.0):
+                errors.append(
+                    f"{limit_key} must be float 1.0 (all batches), "
+                    f"got {limit_value!r}")
+        if bool(_get(config, "ct_online_recursive_training", False)):
+            errors.append(
+                "SeqTrack-strict must not enable CT recursive training")
+        if errors:
+            raise ValueError(
+                "invalid SeqTrack-strict scratch contract: "
+                + "; ".join(errors))
+        return
     if not bool(_get(config, "ct_online_recursive_training", False)):
         raise ValueError(
-            "scratch-only v23 requires online recursive training")
+            "scratch-only CT requires online recursive training")
 
     errors = []
     runtime_protocol = str(_get(
@@ -367,7 +472,11 @@ def validate_scratch_training_contract(config):
         require_equal(
             "ct_validation_rng_mode", "stateless_tracklet_frame", "legacy")
         require_equal(
-            "ct_batch_schema", "ct_seqtrack.train.v2", "legacy")
+            "ct_batch_schema",
+            ("ct_seqtrack.train.v3" if bool(_get(
+                config, "ct_enable_v26_recovery", False))
+             else "ct_seqtrack.train.v2"),
+            "legacy")
         require_equal("ct_candidate_policy", "b2_raw", "legacy")
         require_equal(
             "ct_b0_loss_reduction", "candidate_weighted", "batch_mean")
@@ -385,6 +494,47 @@ def validate_scratch_training_contract(config):
                     config, f"ct_{module_name}_lr", base_lr)) != 1e-4:
                 errors.append(
                     f"safe_seqtrack_auto_v1 requires ct_{module_name}_lr=1e-4")
+        if bool(_get(config, "ct_v26_full_formal_arm", False)):
+            require_equal("version", "v1.0-trainval", "")
+            require_equal("train_split", "train_track", "")
+            require_equal("val_split", "val", "")
+            require_equal("test_split", "val", "")
+            require_equal("seed", 42, None)
+            require_equal("epoch", 60, 0)
+            require_equal("from_epoch", 0, 0)
+            require_equal("trainer_devices", 1, None)
+            require_equal("ct_keep_final_window_checkpoints", 3, 0)
+            require_equal("save_top_k", 0, None)
+            require_equal("check_val_every_n_epoch", 2, 1)
+            for limit_key in ("limit_train_batches", "limit_val_batches"):
+                limit_value = _get(config, limit_key, 1.0)
+                if (not isinstance(limit_value, float)
+                        or limit_value != 1.0):
+                    errors.append(
+                        f"{limit_key} must be float 1.0 (all batches), "
+                        f"got {limit_value!r}")
+            require_equal("ct_adaptive_acquisition_margin", True, False)
+            require_equal("ct_acquisition_margin_min", [2.0, 1.0], [])
+            require_equal("ct_acquisition_margin_max", [6.0, 3.0], [])
+            require_equal("ct_acquisition_margin_bias", -8.0, None)
+            require_equal("ct_acquisition_margin_quantile", 0.90, None)
+            require_equal("ct_acquisition_margin_weight", 0.05, None)
+            require_equal("ct_expansion_point_count", 768, 0)
+            require_equal("ct_endpoint_quota", 256, 0)
+            require_equal("ct_tube_quota", 256, 0)
+            require_equal("ct_corridor_quota", 256, 0)
+            require_equal("ct_relation_aware_sampling", True, False)
+            require_equal("ct_relation_topk", 128, 0)
+            require_equal("ct_relation_coverage_count", 96, 0)
+            require_equal("ct_relation_exploration_count", 32, 0)
+            require_equal("ct_relation_weight", 0.25, None)
+            require_equal("ct_robust_consensus_voting", True, False)
+            require_equal("ct_b3_consensus_features", True, False)
+            require_equal(
+                "motion_v3_temporal_backend",
+                ("cfc" if bool(_get(
+                    config, "ct_v26_cfc_ablation", False)) else "gru"),
+                "")
 
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))

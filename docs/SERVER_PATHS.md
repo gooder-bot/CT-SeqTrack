@@ -21,7 +21,14 @@
 
 ## 完整 nuScenes
 
-完整数据根必须在服务器运行前显式确认，并通过 `--path DATA_ROOT` 覆盖配置。
+当前用户指定的完整数据根为：
+
+```text
+/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+```
+
+它必须包含 `v1.0-trainval/` 与 `samples/LIDAR_TOP/`，并在服务器运行前
+通过 `tools/preflight_v26_full.py` 验证。通过 `--path` 显式覆盖配置。
 不得把 mini 路径用于 `25_*_nuscenes_full.yaml`；v25 full 配置固定为
 `version: v1.0-trainval`。
 

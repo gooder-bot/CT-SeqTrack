@@ -1,0 +1,12 @@
+_base_: 26_formal_base.yaml
+ct_v26_full_formal_arm: true
+
+experiment_name: ct26_b0_nuscenes_full_scratch_seed42
+ct_variant: b0
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+proposal_inference_mode: observation
+ct_b0_steps_per_epoch: 0

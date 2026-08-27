@@ -1,0 +1,239 @@
+{
+  "verdict": {
+    "primary_bottleneck": "search_center_and_support_geometry",
+    "sampling_is_current_bottleneck": false,
+    "dataset_unobservability_is_primary": false,
+    "z_clip_is_primary": false,
+    "simple_learned_cv_dual_center_is_promising_on_current_misses": false,
+    "counterfactual_margin_selection_valid": false,
+    "retraining_needed_after_diagnostic_fix": false
+  },
+  "headline": {
+    "diagnosis": "SEARCH CENTER / SUPPORT GEOMETRY",
+    "gru_strict_miss_rate": 0.36330935251798563,
+    "cfc_strict_miss_rate": 0.3176895306859206,
+    "strict_support_recovered_rows": 0,
+    "pool_target_rows": 0,
+    "base_sampling_loss_rows": 2,
+    "helper_mismatch_rows": 253
+  },
+  "arm_summary": [
+    {
+      "arm": "GRU",
+      "rows": 311,
+      "tracklets": 14,
+      "schema_v2_rows": 311,
+      "duplicate_stable_keys": 0,
+      "nonfinite_numeric_values": 0,
+      "exact_visible_rows": 275,
+      "label_visible_rows": 278,
+      "sensor_unobservable_rows": 33,
+      "boundary_only_rows": 3,
+      "base_captured_rows": 177,
+      "base_strict_miss_rows": 101,
+      "base_strict_miss_rate": 0.36330935251798563,
+      "base_sampling_loss_rows": 1,
+      "strict_actual_geometry_bearing_rows": 0,
+      "strict_pool_bearing_rows": 0,
+      "strict_sample_bearing_rows": 0,
+      "pool_target_bearing_rows_all": 0,
+      "sample_target_bearing_rows_all": 0,
+      "extension_pool_nonempty_rows": 27,
+      "extension_pool_background_only_rows": 27,
+      "endpoint_target_bearing_rows": 149,
+      "tube_target_bearing_rows": 153,
+      "union_target_bearing_rows": 153,
+      "endpoint_only_bearing_rows": 0,
+      "tube_only_bearing_rows": 4,
+      "both_branch_bearing_rows": 149,
+      "strict_support_bearing_rows": 0,
+      "support_target_subset_of_base": true,
+      "observable_strict_miss_global_ge6": 75,
+      "strict_observation_error_median": 14.583904349146898,
+      "strict_learned_error_mean": 14.880364397815052,
+      "strict_learned_error_median": 14.26618812674561,
+      "strict_learned_error_p95": 23.256078405157577,
+      "strict_cv_error_median": 15.039396797757169,
+      "strict_abs_parallel_median": 13.854119915165748,
+      "strict_abs_parallel_p95": 23.19619140080362,
+      "strict_abs_perpendicular_median": 0.5036117115725888,
+      "strict_abs_perpendicular_p95": 4.126457982559547,
+      "strict_z_error_median": 0.213861959695816,
+      "strict_z_error_p95": 1.6257060179114342,
+      "strict_learned_cv_disagreement_median": 0.7684106304948656,
+      "strict_learned_cv_disagreement_p95": 1.6693431230528046,
+      "strict_gap_ratio_median": 1.0000200271606443,
+      "strict_gap_ratio_p95": 1.109119892120361,
+      "strict_parallel_only_exceed_rows": 70,
+      "strict_perpendicular_only_exceed_rows": 2,
+      "strict_both_axes_exceed_rows": 29,
+      "strict_inside_current_margins_rows": 0,
+      "strict_endpoint_width_median": 3.672,
+      "strict_endpoint_length_median": 8.478,
+      "strict_tube_extra_length_median": 0.06340919136943057,
+      "strict_derived_base_width_median": 6.09,
+      "strict_derived_base_length_median": 9.5975,
+      "helper_mismatch_rows": 124,
+      "recursive_age_valid_rows": 0
+    },
+    {
+      "arm": "CfC",
+      "rows": 310,
+      "tracklets": 14,
+      "schema_v2_rows": 310,
+      "duplicate_stable_keys": 0,
+      "nonfinite_numeric_values": 0,
+      "exact_visible_rows": 274,
+      "label_visible_rows": 277,
+      "sensor_unobservable_rows": 33,
+      "boundary_only_rows": 3,
+      "base_captured_rows": 189,
+      "base_strict_miss_rows": 88,
+      "base_strict_miss_rate": 0.3176895306859206,
+      "base_sampling_loss_rows": 1,
+      "strict_actual_geometry_bearing_rows": 0,
+      "strict_pool_bearing_rows": 0,
+      "strict_sample_bearing_rows": 0,
+      "pool_target_bearing_rows_all": 0,
+      "sample_target_bearing_rows_all": 0,
+      "extension_pool_nonempty_rows": 11,
+      "extension_pool_background_only_rows": 11,
+      "endpoint_target_bearing_rows": 155,
+      "tube_target_bearing_rows": 157,
+      "union_target_bearing_rows": 157,
+      "endpoint_only_bearing_rows": 0,
+      "tube_only_bearing_rows": 2,
+      "both_branch_bearing_rows": 155,
+      "strict_support_bearing_rows": 0,
+      "support_target_subset_of_base": true,
+      "observable_strict_miss_global_ge6": 71,
+      "strict_observation_error_median": 15.211101947323609,
+      "strict_learned_error_mean": 13.886843555492247,
+      "strict_learned_error_median": 15.208463658436866,
+      "strict_learned_error_p95": 21.262473038728935,
+      "strict_cv_error_median": 15.116077796866843,
+      "strict_abs_parallel_median": 14.96798059330778,
+      "strict_abs_parallel_p95": 20.907114723490587,
+      "strict_abs_perpendicular_median": 0.9530069832533018,
+      "strict_abs_perpendicular_p95": 4.033685395990914,
+      "strict_z_error_median": 0.19242587536573405,
+      "strict_z_error_p95": 1.1199763834327447,
+      "strict_learned_cv_disagreement_median": 0.47557728859369713,
+      "strict_learned_cv_disagreement_p95": 1.6138663688411792,
+      "strict_gap_ratio_median": 1.0000052452087402,
+      "strict_gap_ratio_p95": 1.1109270989894866,
+      "strict_parallel_only_exceed_rows": 44,
+      "strict_perpendicular_only_exceed_rows": 0,
+      "strict_both_axes_exceed_rows": 44,
+      "strict_inside_current_margins_rows": 0,
+      "strict_endpoint_width_median": 3.689,
+      "strict_endpoint_length_median": 8.594000000000001,
+      "strict_tube_extra_length_median": 0.0323877848639782,
+      "strict_derived_base_width_median": 6.11125,
+      "strict_derived_base_length_median": 9.742500000000001,
+      "helper_mismatch_rows": 129,
+      "recursive_age_valid_rows": 0
+    }
+  ],
+  "paired": {
+    "intersection_rows": 310,
+    "gru_rows": 311,
+    "cfc_rows": 310,
+    "global_label_counts_equal": true,
+    "pool_target_counts_equal": true,
+    "missing_gru_keys": [
+      {
+        "tracklet_key": "nuscenes_mf/v1.0-mini/mini_val/325cef682f064c55a255f2625c533b75/2e84949acbd84ea3857ca2a04e50b6a4",
+        "frame_id": 14,
+        "candidate_id": 0
+      }
+    ]
+  },
+  "tracking_summary": [
+    {
+      "run": "B0 epoch60 mini_val",
+      "success": 54.826038,
+      "precision": 66.340263,
+      "role": "健康宿主对照；训练期 final"
+    },
+    {
+      "run": "B1-GRU epoch60 mini_val",
+      "success": 30.734137,
+      "precision": 29.62582,
+      "role": "B1-only 递归轨迹；训练期 final"
+    },
+    {
+      "run": "B1-CfC epoch60 mini_val",
+      "success": 35.318382,
+      "precision": 37.696938,
+      "role": "CfC 消融；训练期 final"
+    },
+    {
+      "run": "B1-GRU dev diagnostic",
+      "success": 28.800577,
+      "precision": 28.236994,
+      "role": "本次 v2 funnel 的实际轨迹"
+    },
+    {
+      "run": "B1-CfC dev diagnostic",
+      "success": 32.153175,
+      "precision": 38.179188,
+      "role": "本次 v2 funnel 的实际轨迹"
+    },
+    {
+      "run": "SeqTrack Jul reference",
+      "success": 53.359955,
+      "precision": 64.381836,
+      "role": "历史描述性参考，协议并非严格等价"
+    }
+  ],
+  "next_steps": [
+    {
+      "order": 1,
+      "action": "修复纯诊断几何的 wlh→local xyz 映射",
+      "implementation": "x 使用 length=wlh[1]，y 使用 width=wlh[0]；union volume 同步修复；增加非正方形旋转框测试",
+      "gate": "learned_2_1_z0 与 actual expansion 逐行一致",
+      "changes_model": "No"
+    },
+    {
+      "order": 2,
+      "action": "只重跑 GRU/CfC epoch60 checkpoint 的同一 dev 评估",
+      "implementation": "不重训，不改 25_* YAML；重新生成 v2 CSV/JSON",
+      "gate": "所有 v2 invariants 通过且 report 不再 fail closed",
+      "changes_model": "No"
+    },
+    {
+      "order": 3,
+      "action": "先判断 bounded local shell 是否有真实恢复",
+      "implementation": "比较 corrected 2/1、3/1.5、4/2、6/3、z05/z10 与 learned+CV；同时看背景 p95/volume",
+      "gate": "若 3–6 m shell 能恢复且背景可控，进入单独的 B2-G1 配置",
+      "changes_model": "Later"
+    },
+    {
+      "order": 4,
+      "action": "若 6/3 仍低召回，修改搜索中心而非继续扩大",
+      "implementation": "保留 B0 stable base；增加因果且有界的最后可靠锚点/短历史 corridor 反事实，再决定是否实现备用 support",
+      "gate": "备用中心显著优于同中心加宽；learned/CV 双中心因当前分歧很小不优先",
+      "changes_model": "Later"
+    },
+    {
+      "order": 5,
+      "action": "目标进入 raw extension pool 后再修采样",
+      "implementation": "relation top-k + spatial coverage + 少量随机探索；endpoint/tube 空余配额可借用",
+      "gate": "真实出现 pool_target>0 且 sampled_target=0 的非偶发损失",
+      "changes_model": "Later"
+    },
+    {
+      "order": 6,
+      "action": "采样稳定后再做 vote consistency / top-k 与 B3",
+      "implementation": "不在零 supply 阶段加入 decoder、voting 或 calibration",
+      "gate": "B2 target-bearing supply 与 retention 已通过",
+      "changes_model": "Later"
+    }
+  ],
+  "source_paths": [
+    "artifacts/ct_checks/imported_server_diagnostics/b2_diag_v2_export_20260827_140008/gru_proposal_endpoints_v2.csv",
+    "artifacts/ct_checks/imported_server_diagnostics/b2_diag_v2_export_20260827_140008/cfc_proposal_endpoints_v2.csv"
+  ],
+  "generator": "artifacts/ct_checks/generate_20260827_b2_acquisition_root_cause.py"
+}
