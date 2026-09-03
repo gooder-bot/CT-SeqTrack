@@ -22,6 +22,7 @@ from utils.action_calibration import (
 from utils.config import load_yaml_config
 from utils.online_contract import validate_scratch_training_contract
 from utils.ct_search import (
+    bounded_novel_support_pool,
     build_causal_history_corridor,
     diagnostic_points_in_oriented_support,
     resolve_joint_search_geometry,
@@ -98,6 +99,28 @@ def test_v26_prepool_is_novel_unique_bitmasked_and_deterministic():
     assert source_by_x[3.0] == 2
     assert source_by_x[4.0] == 4
     assert diagnostics["available_count"] == 4
+
+
+def test_v26_diagnostic_pool_uses_exact_online_union_primitive():
+    baseline = np.asarray([
+        [0.0, 0.0, 0.0], [0.2, 0.0, 0.0]], dtype=np.float32)
+    endpoint = np.asarray([
+        [0.2, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
+    tube = np.asarray([
+        [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float32)
+    corridor = np.asarray([
+        [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]], dtype=np.float32)
+    expected_points, expected_source = bounded_novel_support_pool(
+        baseline, endpoint, tube, corridor)
+    _, _, _, diagnostics = sample_bounded_novel_prepool(
+        baseline, endpoint, tube, corridor,
+        local_quota=4, corridor_quota=2)
+    np.testing.assert_array_equal(
+        diagnostics["_pool_points"], expected_points)
+    np.testing.assert_array_equal(
+        diagnostics["_pool_source"], expected_source)
+    np.testing.assert_array_equal(expected_points[:, 0], [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(expected_source, [3, 6, 4])
 
 
 def test_acquisition_margin_is_bounded_initially_near_two_one_and_isolated():

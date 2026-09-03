@@ -32,6 +32,7 @@ from utils.ct_search import (
     build_causal_history_corridor,
     build_ordered_trajectory_search_box,
     build_time_guided_search_box,
+    bounded_novel_support_pool,
     combined_search_support_statistics,
     diagnostic_oriented_support_union_volume,
     diagnostic_points_in_oriented_support,
@@ -795,6 +796,18 @@ class BaseModelMF(pl.LightningModule):
         if len(sampled_extension_source) != len(sampled_extension_points):
             raise RuntimeError("sampled extension diagnostics lost source alignment")
         if schema_v3:
+            # Recompute the active online pool from the exact crop arrays via
+            # the same stable-key primitive as the sampler.  The independent
+            # world-space box masks below remain useful counterfactuals, but
+            # they traverse a different float transform and must not be used
+            # as a byte-exact online invariant.
+            (diagnostic_pool_points,
+             diagnostic_pool_source) = bounded_novel_support_pool(
+                baseline_points, endpoint_points, tube_points,
+                corridor_points, tolerance=1e-6)
+            diagnostic_pool_keys = [tuple(row) for row in np.rint(
+                diagnostic_pool_points[:, :3] / 1e-6
+            ).astype(np.int64)]
             pool_keys = [tuple(row) for row in np.rint(
                 np.asarray(extension_pool_points)[:, :3] / 1e-6
             ).astype(np.int64)]
@@ -807,6 +820,11 @@ class BaseModelMF(pl.LightningModule):
                 raise RuntimeError("v26 novel pool intersects the B0 stable base")
             if not set(sampled_keys).issubset(set(pool_keys)):
                 raise RuntimeError("v26 pre-pool is not a subset of novel support")
+            if (diagnostic_pool_keys != pool_keys
+                    or not np.array_equal(
+                        diagnostic_pool_source, extension_pool_source)):
+                raise RuntimeError(
+                    "v26 diagnostic novel support disagrees with online pool")
             if (len(extension_pool_source)
                     and not np.isin(extension_pool_source,
                                     np.arange(1, 8)).all()):
@@ -815,14 +833,31 @@ class BaseModelMF(pl.LightningModule):
                     and not np.isin(sampled_extension_source,
                                     np.arange(1, 8)).all()):
                 raise RuntimeError("v26 pre-pool contains an invalid source bitmask")
-            if int(active_measure["support_novel_point_count"]) != len(
-                    extension_pool_points):
-                raise RuntimeError(
-                    "v26 diagnostic novel support disagrees with online pool")
-            if int(active_measure["support_novel_target_count"]) != int(
+            diagnostic_pool_target_mask = target_mask(
+                diagnostic_pool_points)
+            if int(np.sum(diagnostic_pool_target_mask)) != int(
                     np.sum(pool_target_mask)):
                 raise RuntimeError(
                     "v26 diagnostic target support disagrees with online pool")
+
+            # Active support funnel values describe the evidence the online
+            # acquisition path actually exposed.  Geometry-only masks remain
+            # available through counterfactual_* and XY/z-clip fields.
+            raw_target_count = int(np.sum(expansion_target_mask))
+            novel_target_count = int(np.sum(diagnostic_pool_target_mask))
+            active_measure.update({
+                "support_raw_target_count": raw_target_count,
+                "support_raw_point_count": int(len(expansion_points)),
+                "support_raw_background_count": int(
+                    len(expansion_points) - raw_target_count),
+                "support_novel_target_count": novel_target_count,
+                "support_novel_point_count": int(
+                    len(diagnostic_pool_points)),
+                "support_novel_background_count": int(
+                    len(diagnostic_pool_points) - novel_target_count),
+                "raw_target_bearing": int(raw_target_count > 0),
+                "novel_target_bearing": int(novel_target_count > 0),
+            })
 
         def source_target_count(mask, source, source_id):
             return int(np.sum(mask & (source == int(source_id))))
@@ -941,13 +976,35 @@ class BaseModelMF(pl.LightningModule):
                     len(sampled_extension_points)
                     - np.sum(sampled_target_mask)),
             })
-            for label, support_box, scale, offset in (
-                    ("endpoint", active_endpoint_box,
-                     endpoint_scale, endpoint_offset),
-                    ("tube", active_tube_box, 1.0, 0.0),
-                    ("corridor", active_corridor_box, 1.0, 0.0)):
-                source_measure = measure_support(((
-                    support_box, scale, offset),))
+            for label, source_points in (
+                    ("endpoint", endpoint_points),
+                    ("tube", tube_points),
+                    ("corridor", corridor_points)):
+                source_raw = unique_rows(source_points)
+                source_raw_targets = int(np.sum(target_mask(source_raw)))
+                empty = np.empty(
+                    (0, np.asarray(baseline_points).shape[1]),
+                    dtype=np.float32)
+                source_novel, _ = bounded_novel_support_pool(
+                    baseline_points,
+                    source_raw if label == "endpoint" else empty,
+                    source_raw if label == "tube" else empty,
+                    source_raw if label == "corridor" else empty,
+                    tolerance=1e-6)
+                source_novel_targets = int(np.sum(target_mask(source_novel)))
+                source_measure = {
+                    "support_raw_target_count": source_raw_targets,
+                    "support_raw_point_count": int(len(source_raw)),
+                    "support_raw_background_count": int(
+                        len(source_raw) - source_raw_targets),
+                    "support_novel_target_count": source_novel_targets,
+                    "support_novel_point_count": int(len(source_novel)),
+                    "support_novel_background_count": int(
+                        len(source_novel) - source_novel_targets),
+                    "raw_target_bearing": int(source_raw_targets > 0),
+                    "novel_target_bearing": int(
+                        source_novel_targets > 0),
+                }
                 for key in (
                         "support_raw_target_count",
                         "support_raw_point_count",

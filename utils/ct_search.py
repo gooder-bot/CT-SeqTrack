@@ -1206,6 +1206,69 @@ def sample_joint_novel_extensions(
     }
 
 
+def _merge_bounded_novel_sources(
+        baseline_points, source_points, tolerance=1e-6):
+    """Return the stable-key v26 novel union shared by sampling/diagnosis."""
+    baseline_points = np.asarray(baseline_points)
+    source_points = tuple(
+        (int(bit), np.asarray(points)) for bit, points in source_points)
+    arrays = (baseline_points,) + tuple(points for _, points in source_points)
+    if any(value.ndim != 2 for value in arrays):
+        raise ValueError("v26 acquisition arrays must have shape [N,C]")
+    channels = baseline_points.shape[1]
+    if any(value.shape[1] != channels for value in arrays[1:]):
+        raise ValueError("v26 acquisition arrays must share channels")
+    valid_bits = {1, 2, 4}
+    if (not source_points
+            or any(bit not in valid_bits for bit, _ in source_points)):
+        raise ValueError("v26 source bits must be endpoint/tube/corridor")
+    tolerance = _finite_positive(tolerance, 1e-6)
+
+    def exact_keys(points):
+        return np.rint(points[:, :3] / tolerance).astype(np.int64)
+
+    base_keys = {tuple(row) for row in exact_keys(baseline_points)}
+    merged = {}
+    for bit, points in source_points:
+        seen = set()
+        for point, key_row in zip(points, exact_keys(points)):
+            key = tuple(key_row)
+            if key in base_keys or key in seen:
+                continue
+            seen.add(key)
+            if key in merged:
+                merged[key] = (merged[key][0], merged[key][1] | bit)
+            else:
+                merged[key] = (point, bit)
+    return merged
+
+
+def bounded_novel_support_pool(
+        baseline_points, endpoint_points, tube_points, corridor_points,
+        tolerance=1e-6):
+    """Return the complete deterministic v26 novel pool and bitmask.
+
+    This is the single stable-key implementation used by both the online
+    sampler and the evaluation-only acquisition diagnostic.  Keeping the
+    diagnostic on the actual online crop arrays avoids false fail-fast
+    mismatches caused by recomputing oriented support membership through a
+    different floating-point transform path.
+    """
+    baseline_points = np.asarray(baseline_points)
+    merged = _merge_bounded_novel_sources(
+        baseline_points,
+        ((1, endpoint_points), (2, tube_points), (4, corridor_points)),
+        tolerance=tolerance)
+    ordered_keys = sorted(merged)
+    return (
+        np.asarray(
+            [merged[key][0] for key in ordered_keys], dtype=np.float32
+        ).reshape(-1, baseline_points.shape[1]),
+        np.asarray(
+            [merged[key][1] for key in ordered_keys], dtype=np.int64),
+    )
+
+
 def sample_bounded_novel_prepool(
         baseline_points, endpoint_points, tube_points, corridor_points,
         local_quota=512, corridor_quota=256, voxel_size=0.2,
@@ -1217,38 +1280,21 @@ def sample_bounded_novel_prepool(
     dense background cells from monopolising either nominal budget.  Unused
     budget is borrowed by the other source family.
     """
-    arrays = tuple(np.asarray(value) for value in (
-        baseline_points, endpoint_points, tube_points, corridor_points))
-    baseline_points, endpoint_points, tube_points, corridor_points = arrays
-    if any(value.ndim != 2 for value in arrays):
-        raise ValueError("v26 acquisition arrays must have shape [N,C]")
+    baseline_points = np.asarray(baseline_points)
+    endpoint_points = np.asarray(endpoint_points)
+    tube_points = np.asarray(tube_points)
+    corridor_points = np.asarray(corridor_points)
     channels = baseline_points.shape[1]
-    if any(value.shape[1] != channels for value in arrays[1:]):
-        raise ValueError("v26 acquisition arrays must share channels")
     local_quota = int(local_quota)
     corridor_quota = int(corridor_quota)
     if local_quota <= 0 or corridor_quota <= 0:
         raise ValueError("v26 local/corridor quotas must be positive")
     tolerance = _finite_positive(tolerance, 1e-6)
     voxel_size = _finite_positive(voxel_size, 0.2)
-
-    def exact_keys(points):
-        return np.rint(points[:, :3] / tolerance).astype(np.int64)
-
-    base_keys = {tuple(row) for row in exact_keys(baseline_points)}
-    merged = {}
-    for bit, points in ((1, endpoint_points), (2, tube_points),
-                        (4, corridor_points)):
-        seen = set()
-        for point, key_row in zip(points, exact_keys(points)):
-            key = tuple(key_row)
-            if key in base_keys or key in seen:
-                continue
-            seen.add(key)
-            if key in merged:
-                merged[key] = (merged[key][0], merged[key][1] | bit)
-            else:
-                merged[key] = (point, bit)
+    merged = _merge_bounded_novel_sources(
+        baseline_points,
+        ((1, endpoint_points), (2, tube_points), (4, corridor_points)),
+        tolerance=tolerance)
 
     ordered_keys = sorted(merged)
 
