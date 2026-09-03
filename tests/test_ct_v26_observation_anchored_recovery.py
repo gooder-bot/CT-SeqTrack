@@ -12,6 +12,7 @@ from models.ct_v2.motion import (
     acquisition_margin_pinball_loss,
     compose_b1_transaction_loss,
 )
+from models.ct_variant import configure_ct_variant
 from utils.action_calibration import (
     CONSENSUS_FEATURE_SCHEMA,
     action_calibration_config_identity,
@@ -372,6 +373,37 @@ def test_v26_formal_configs_are_full_nuscenes_scratch_and_unfrozen():
     assert strict["save_top_k"] == 0
     assert strict["check_val_every_n_epoch"] == 2
     validate_scratch_training_contract(strict)
+
+
+def test_v26_mini_configs_are_registered_scratch_arms():
+    expected = {
+        "26_b0.yaml": ("b0", "gru", "observation"),
+        "26_b1_gru.yaml": ("b1", "gru", "observation"),
+        "26_b1_cfc.yaml": ("b1", "cfc", "observation"),
+        "26_full_minus_b3.yaml": (
+            "full_minus_b3", "gru", "raw_search"),
+        "26_full.yaml": ("full", "gru", "observation"),
+    }
+    for filename, (variant, backend, proposal_mode) in expected.items():
+        config = load_yaml_config(
+            ROOT / "cfgs" / "ct_seqtrack" / filename)
+        configure_ct_variant(config)
+        validate_scratch_training_contract(config)
+        assert config["ct_variant"] == variant
+        assert config["motion_v3_temporal_backend"] == backend
+        assert config["proposal_inference_mode"] == proposal_mode
+        assert config["version"] == "v1.0-mini"
+        assert config["train_split"] == "mini_train"
+        assert config["val_split"] == "mini_val"
+        assert config["test_split"] == "mini_val"
+        assert config["path"] == "/home/lishengjie/data/nuscenes-mini"
+        assert config["epoch"] == 60
+        assert config["batch_size"] == 16
+        assert config["seed"] == 42
+        assert config["check_val_every_n_epoch"] == 2
+        assert config["ct_keep_final_window_checkpoints"] == 3
+        assert config["save_top_k"] == 0
+        assert not config.get("ct_v26_full_formal_arm", False)
 
 
 def test_v26_zero_step_preflight_accepts_all_registered_arms(tmp_path):

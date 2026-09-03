@@ -1,0 +1,12 @@
+_base_: 26_full_minus_b3.yaml
+
+# CT-SeqTrack v26 mini, B0+B1+B2+B3 scratch arm. Training and ordinary
+# validation stay observation-recursive until checkpoint-specific held-out
+# calibration/dev promotion enables selective evaluation.
+experiment_name: ct26_full_mini_scratch_seed42
+ct_variant: full
+ct_require_action_calibration: true
+ct_action_calibration_path: null
+ct_calibration_tracklet_manifest_sha256: null
+ct_dev_tracklet_manifest_sha256: null
+proposal_inference_mode: observation

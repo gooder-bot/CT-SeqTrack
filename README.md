@@ -59,13 +59,13 @@ names. Required compatibility aliases remain part of the public runtime.
 | `full_minus_b3` | B0+B1+B2 | raw B2 search output |
 | `full` | B0+B1+B2+B3 | observation until calibrated selective evaluation |
 
-The registered v26 full-nuScenes configs are
-`cfgs/26_seqtrack_strict_nuscenes_full.yaml`,
-`26_b0_nuscenes_full.yaml`, `26_b1_gru_nuscenes_full.yaml`,
-`26_b1_cfc_nuscenes_full.yaml`, `26_full_minus_b3_nuscenes_full.yaml`, and
-`26_full_nuscenes_full.yaml`. The two B1-only configs are backend diagnostics;
-CfC is not the v26 main method. The v24/v25 configs and outputs remain frozen
-evidence and cannot initialize v26. B4 keeps
+The registered v26 mini configs are `26_b0.yaml`, `26_b1_gru.yaml`,
+`26_b1_cfc.yaml`, `26_full_minus_b3.yaml`, and `26_full.yaml` under
+`cfgs/ct_seqtrack/`. Their matching full-nuScenes configs use the
+`*_nuscenes_full.yaml` suffix; the separate external reference is
+`cfgs/26_seqtrack_strict_nuscenes_full.yaml`. The two B1-only configs are
+backend diagnostics; CfC is not the v26 main method. The v24/v25 configs and
+outputs remain frozen evidence and cannot initialize v26. B4 keeps
 `cfgs/ct_v2/19_b4_decoder_alignment.yaml` and
 `20_b4_decoder_anticollapse.yaml`.
 

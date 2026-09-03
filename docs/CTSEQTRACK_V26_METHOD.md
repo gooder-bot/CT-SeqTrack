@@ -77,9 +77,19 @@ action_score = sigmoid(help_logit) * (1 - sigmoid(harm_logit))
 
 缺失、未通过、schema/hash/checkpoint/config/code/manifest 任一不匹配时不安装阈值，B3 精确返回 B0。每个 final/late-3 checkpoint 单独导出两份 rows 并生成自己的 artifact，禁止跨 checkpoint 复用。
 
-## 7. 完整 nuScenes 注册臂
+## 7. nuScenes 注册臂
 
-本轮按用户指定直接运行完整 nuScenes、Car、seed42、60 epoch，不先跑 mini，也不生成可迁移的 smoke checkpoint。集成主臂固定 GRU，B1-CfC 只作为 backend 诊断：
+本轮最新实验顺序先运行 mini、Car、seed42、60 epoch；mini 完成并分析后再从 epoch 0 运行匹配的完整 nuScenes 五臂。集成主臂固定 GRU，B1-CfC 只作为 backend 诊断。mini 注册命令为：
+
+```bash
+python main.py --cfg cfgs/ct_seqtrack/26_b0.yaml --path MINI_NUSCENES_ROOT --tag ct26_b0_mini_seed42
+python main.py --cfg cfgs/ct_seqtrack/26_b1_gru.yaml --path MINI_NUSCENES_ROOT --tag ct26_b1_gru_mini_seed42
+python main.py --cfg cfgs/ct_seqtrack/26_b1_cfc.yaml --path MINI_NUSCENES_ROOT --tag ct26_b1_cfc_mini_seed42
+python main.py --cfg cfgs/ct_seqtrack/26_full_minus_b3.yaml --path MINI_NUSCENES_ROOT --tag ct26_full_b3_mini_seed42
+python main.py --cfg cfgs/ct_seqtrack/26_full.yaml --path MINI_NUSCENES_ROOT --tag ct26_full_mini_seed42
+```
+
+匹配的完整 nuScenes 注册命令为：
 
 ```bash
 python main.py --cfg cfgs/26_seqtrack_strict_nuscenes_full.yaml --path FULL_NUSCENES_ROOT --tag ct26_seqtrack_strict_seed42

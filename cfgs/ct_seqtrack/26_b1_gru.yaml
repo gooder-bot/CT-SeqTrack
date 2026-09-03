@@ -1,0 +1,10 @@
+_base_: 26_formal_base.yaml
+
+# CT-SeqTrack v26 mini, B1-only GRU backend diagnostic.
+experiment_name: ct26_b1_gru_mini_scratch_seed42
+ct_variant: b1
+proposal_inference_mode: observation
+motion_v3_temporal_backend: gru
+ct_memory_mode: none
+checkpoint_monitor: b1_nll/mini_val
+checkpoint_mode: min

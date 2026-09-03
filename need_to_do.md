@@ -35,8 +35,8 @@ v24/v25 仅作为只读历史证据。
 
 ## 服务器验收（待执行）
 
-- [ ] 分别对本轮五臂运行零训练步 preflight；它不运行 mini、不读训练样本、不产生 checkpoint。
-- [ ] 直接从 epoch 0 独立运行 v26 B0、B1-GRU、B1-CfC、Full-B3、Full 完整 nuScenes Car seed42；本轮不先跑 mini，也不从 smoke/其他 arm checkpoint 初始化；SeqTrack-strict 保持为单独登记的外部参考。
+- [ ] 从 epoch 0 独立运行 v26 mini B0、B1-GRU、B1-CfC、Full-B3、Full，Car、seed42、60 epoch；不从 smoke/其他 arm checkpoint 初始化。
+- [ ] mini 完成并分析后，再从 epoch 0 独立运行匹配的完整 nuScenes 五臂；SeqTrack-strict 保持为单独登记的外部参考。
 - [ ] 对 final 与 late-3 的每个 Full checkpoint 分别导出互斥 calibration/dev rows、完成 promotion，并生成不可跨 checkpoint 复用的 artifact。
 - [ ] 报告 schema-v3 geometry/sampling/voting/B3 漏斗、final/late-3 tracking、耗时、显存及 tracklet-paired bootstrap CI。
 

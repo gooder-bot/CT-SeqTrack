@@ -1,0 +1,11 @@
+_base_: 26_formal_base.yaml
+
+# CT-SeqTrack v26 mini, integrated B0+B1+B2 arm (raw B2 output).
+experiment_name: ct26_full_minus_b3_mini_scratch_seed42
+ct_variant: full_minus_b3
+proposal_inference_mode: raw_search
+ct_targetness_class_weight_source: online_canonical_preflight
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0
+checkpoint_monitor: success_raw_search/mini_val
+checkpoint_mode: max
