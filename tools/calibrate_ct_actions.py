@@ -131,4 +131,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--v27" in sys.argv[1:]:
+        from tools.ct_action_v27_runtime import calibrate_main
+        calibrate_main()
+    else:
+        main()

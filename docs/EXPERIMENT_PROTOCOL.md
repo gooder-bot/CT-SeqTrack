@@ -1,5 +1,37 @@
 # CT-SeqTrack 正式实验协议
 
+## v27 当前协议（2026-09-05）
+
+本节及 [CTSEQTRACK_V27_METHOD.md](CTSEQTRACK_V27_METHOD.md) 定义当前轮次；
+下方 v24/v25/v26 段落保留为历史协议。
+
+- 顺序：mini Car 五臂 B0、B1-GRU、B1-CfC、Full−B3、Full → 完整nuScenes
+  Car/Pedestrian/Truck/Trailer/Bus，每类每臂独立从epoch0训练60epoch、seed42。
+- 配置：`cfgs/ct_seqtrack/27_*.yaml`；单入口`main.py`；禁止跨run/seed/类别/版本
+  checkpoint初始化，resume只允许同run epoch边界。所有启用模块从第一步参与训练。
+- B0四视图权重`[.5,1/6,1/6,1/6]`，机制流只用canonical view0；运行合同保持
+  `safe_seqtrack_auto_v1`和unified Adam，batch schema升级`ct_seqtrack.train.v4`。
+  `ct_b0_steps_per_epoch=0`按数据长度运行；禁用GT reseed；B0/B1/B2/B3 detach所有权不变。
+- 场景：mini_train八scene按稳定seed42拆6训练/1阈值拟合/1锁定诊断，官方mini_val
+  两scene只评测；full的train_track350scene全部参与参数训练，其内17scene拟合阈值、
+  另18scene诊断，官方val150scene只评测。full明确记录参数训练重叠，不能称为未见数据校准。
+- B1两个backend共用获取接口、监督和预算；集成默认GRU，后端诊断不能从不同B0轨迹总分归因。
+- Full−B3评测`bounded_always`，Full评测`selective`；两者训练均observation-recursive。
+  B3只有整体S/P效用策略，不再使用v26的presence双门或risk-promotion门。
+- v27校准在calibration候选策略上进行真实闭环比较，再锁定到dev诊断；policy显式包括
+  always/never，artifact绑定checkpoint/config/code/scene manifest/metric定义。
+  artifact缺失或不匹配则observation fallback。
+- 固定final=60与late-3=58/59/60；不挑选每臂不同best epoch。每个Full checkpoint独立校准。
+- mini五个CT臂本次启动使用workers=4、preloading、每5轮内部dev诊断；
+  last按完整epoch保存、late-3额外保存，不依赖验证间隔。具体后台命令见
+  [mini启动说明](CTSEQTRACK_V27_MINI_LAUNCH.md)。完整数据配置保留原12 workers/每轮诊断默认值。
+- 另行报告`cfgs/27_seqtrack_reference{_nuscenes_full}.yaml`外部架构参考：公共修复、
+  independent candidate、普通SeqTrack loss、全部CT模块关闭，与CT B0加权目标区分。
+- 主指标`benchmark_compat`，另报`geometry_exact`审计；全臂同口径，所有endpoint包括
+  空点/fallback必须进入分母。尚未完成实验前不声明涨分、SOTA或因果时间/memory收益。
+
+## 以下为历史 v24/v25/v26 协议
+
 > 2026-08-28：当前正式轮次升级为 v26。本轮请求运行 B0、B1-GRU、
 > B1-CfC、Full-B3、Full 五个 scratch-only 臂；集成主臂固定 GRU，CfC
 > 仅作为 B1 backend 诊断，SeqTrack-strict 保持为单独登记的外部参考。

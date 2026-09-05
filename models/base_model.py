@@ -1119,6 +1119,8 @@ class BaseModelMF(pl.LightningModule):
             self, output, data_dict, this_box, reference_box, frame_id,
             acquisition_diagnostics=None):
         """Export paper-facing joint-Full diagnostics; GT stays outside forward."""
+        is_v27 = bool(getattr(self.config, 'ct_enable_v27', False))
+        evidence_label_scale = 1.0 if is_v27 else self.config.bb_scale
         if acquisition_diagnostics is None:
             raise RuntimeError(
                 "joint B2 diagnostics require evaluation-only acquisition "
@@ -1196,7 +1198,7 @@ class BaseModelMF(pl.LightningModule):
             points_np = points.detach().cpu().numpy()[0, :, :3]
             mask_np = mask.detach().cpu().numpy().reshape(-1) > 0
             foreground = geometry_utils.points_in_box(
-                target_box, points_np.T, self.config.bb_scale)
+                target_box, points_np.T, evidence_label_scale)
             if source_key is not None:
                 source = data_dict.get(source_key)
                 if source is None:
@@ -1247,7 +1249,7 @@ class BaseModelMF(pl.LightningModule):
             source_np = prepool_source.detach().cpu().numpy().reshape(-1)
             prepool_foreground = geometry_utils.points_in_box(
                 target_box, points_np.T,
-                self.config.bb_scale).astype(bool)
+                evidence_label_scale).astype(bool)
             relation_logits = output.get("ct_relation_logits_prepool")
             if relation_logits is not None and np.any(prepool_valid_np):
                 logits_np = relation_logits.detach().cpu().numpy().reshape(-1)
@@ -1313,7 +1315,7 @@ class BaseModelMF(pl.LightningModule):
             )[selected_valid_np]
             selected_foreground = geometry_utils.points_in_box(
                 target_box, selected_points_np.T,
-                self.config.bb_scale).astype(bool)
+                evidence_label_scale).astype(bool)
             selected_target_count = int(np.sum(selected_foreground))
             selected_point_count = int(len(valid_indices))
             for label, bit in (("endpoint", 1), ("tube", 2),
@@ -1399,7 +1401,7 @@ class BaseModelMF(pl.LightningModule):
         bounded_iou = float(estimateOverlap(
             this_box, bounded_world, dim=self.config.IoU_space,
             up_axis=self.config.up_axis))
-        return {
+        row = {
             "frame_id": int(frame_id),
             "b2_version": "ct_joint_full",
             "candidate_id": int(self._proposal_scalar(
@@ -1655,6 +1657,21 @@ class BaseModelMF(pl.LightningModule):
                 output, "ct_vote_compatible_hypothesis_count"),
             **acquisition_diagnostics,
         }
+        if is_v27:
+            from utils.tracking_metrics_v27 import action_metric_gains
+            gain = action_metric_gains(observation_world, bounded_world, this_box,
+                up_axis=self.config.up_axis, dim=self.config.IoU_space,
+                mode='benchmark_compat')
+            row.pop('expected_center_gain')
+            row.pop('expected_iou_gain')
+            row.update(b2_version='ct_joint_full.v27', evidence_label_scale=1.0,
+                expected_success_gain=self._proposal_scalar(output, 'ct_b3_expected_success_gain'),
+                expected_precision_gain=self._proposal_scalar(output, 'ct_b3_expected_precision_gain'),
+                success_gain=gain['success_gain'], precision_gain=gain['precision_gain'],
+                utility_gain=gain['utility_gain'],
+                action_help_label=int(gain['utility_gain'] > 1e-6),
+                action_harm_label=int(gain['utility_gain'] < -1e-6))
+        return row
 
     @staticmethod
     def _write_csv_rows(path, rows):
@@ -1663,7 +1680,8 @@ class BaseModelMF(pl.LightningModule):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8") as output_file:
-            writer = csv.DictWriter(output_file, fieldnames=list(rows[0]))
+            fieldnames = list(dict.fromkeys(key for row in rows for key in row))
+            writer = csv.DictWriter(output_file, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
 
@@ -1701,6 +1719,17 @@ class BaseModelMF(pl.LightningModule):
                 selected = [
                     row for row in group
                     if bool(row["router_applied_gate"])]
+                if bool(getattr(self.config, 'ct_enable_v27', False)):
+                    tracklet_rows.append({
+                        'tracklet_id': tracklet_id, 'endpoint_count': len(group),
+                        'structural_available_rate': finite_mean('structural_available'),
+                        'router_applied_rate': finite_mean('router_applied_gate'),
+                        'selected_helpful_precision': float(np.mean([r['utility_gain'] > 1e-6 for r in selected])) if selected else None,
+                        'selected_harm_rate': float(np.mean([r['utility_gain'] < -1e-6 for r in selected])) if selected else None,
+                        'one_step_net_utility': float(np.mean([r['utility_gain'] * bool(r['router_applied_gate']) for r in group])),
+                        'metric_mode': 'benchmark_compat',
+                    })
+                    continue
                 helpful_margin = float(getattr(
                     self.config, "ct_router_help_margin", 0.05))
                 tracklet_rows.append({
@@ -1786,6 +1815,9 @@ class BaseModelMF(pl.LightningModule):
             log_dir = Path(save_dir) / "proposal_diagnostics"
         output_dir = Path(log_dir) / "proposal_diagnostics"
         self._write_csv_rows(output_dir / "tracking_endpoints.csv", rows)
+        if bool(getattr(self.config, 'ct_enable_v27', False)):
+            from utils.v27_eval_reporting import write_endpoint_diagnostics
+            write_endpoint_diagnostics(output_dir / 'v27_endpoint_summary.json', rows)
 
     def _write_b3_test_rollouts(self):
         rows = self._b3_test_rollouts
@@ -1829,6 +1861,9 @@ class BaseModelMF(pl.LightningModule):
             output_file.write("\n")
 
     def evaluate_one_sequence(self, sequence):
+        if bool(getattr(self.config, 'ct_enable_v27', False)):
+            from utils.v27_evaluation import evaluate_sequence_v27
+            return evaluate_sequence_v27(self, sequence)
         """
         :param sequence: a sequence of annos {"pc": pc, "3d_bbox": bb, 'meta': anno}
         :return:
@@ -1968,6 +2003,7 @@ class BaseModelMF(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         sequence = batch[0]  # unwrap the batch with batch size = 1
+        metric_partition = 'dev' if bool(getattr(self.config, 'ct_enable_v27', False)) else 'mini_val'
         start_time = time.time()
         ious, distances, *_ = self.evaluate_one_sequence(sequence)
         epoch_number = int(getattr(self, "current_epoch", 0)) + 1
@@ -1980,8 +2016,15 @@ class BaseModelMF(pl.LightningModule):
                 row = dict(row)
                 row["tracklet_id"] = int(batch_idx)
                 row["epoch"] = epoch_number
-                row["partition"] = "mini_val"
+                row["partition"] = metric_partition
                 self._v3_validation_proposal_diagnostics.append(row)
+        if bool(getattr(self.config, 'ct_enable_v27', False)):
+            if not hasattr(self, '_ct_v27_validation_endpoints'):
+                self._ct_v27_validation_endpoints = []
+            for endpoint in self._ct_v27_sequence_endpoints:
+                row = dict(endpoint, tracklet_id=str(batch_idx), epoch=epoch_number,
+                           partition='dev', parameter_training_overlap=str(getattr(self.config, 'version', 'v1.0-mini')) != 'v1.0-mini')
+                self._ct_v27_validation_endpoints.append(row)
         end_time = time.time()
         runtime = end_time-start_time
         n_frames = len(sequence)
@@ -1991,8 +2034,8 @@ class BaseModelMF(pl.LightningModule):
         self.success_step(torch.tensor(ious, device=self.device))
         self.prec_step(torch.tensor(distances, device=self.device))
 
-        self.log('success/mini_val', self.success, on_epoch=True)
-        self.log('precision/mini_val', self.prec, on_epoch=True)
+        self.log(f'success/{metric_partition}', self.success, on_epoch=True)
+        self.log(f'precision/{metric_partition}', self.prec, on_epoch=True)
         proposal_rows = getattr(self, '_proposal_sequence_diagnostics', [])
         b1_rows = [
             row for row in proposal_rows
@@ -2016,13 +2059,13 @@ class BaseModelMF(pl.LightningModule):
                  for row in b1_rows],
                 device=self.device, dtype=torch.float32).mean()
             self.log(
-                'b1_nll/mini_val', b1_nll, on_step=False, on_epoch=True,
+                f'b1_nll/{metric_partition}', b1_nll, on_step=False, on_epoch=True,
                 batch_size=len(b1_rows))
             self.log(
-                'b1_learned_motion_mse/mini_val', learned_mse,
+                f'b1_learned_motion_mse/{metric_partition}', learned_mse,
                 on_step=False, on_epoch=True, batch_size=len(b1_rows))
             self.log(
-                'b1_kinematic_mse/mini_val', kinematic_mse,
+                f'b1_kinematic_mse/{metric_partition}', kinematic_mse,
                 on_step=False, on_epoch=True, batch_size=len(b1_rows))
         if (hasattr(self, 'ct_observation_success') and proposal_rows
                 and all('observation_iou' in row
@@ -2043,14 +2086,15 @@ class BaseModelMF(pl.LightningModule):
             self.ct_observation_success(observation_ious)
             self.ct_raw_search_success(raw_search_ious)
             self.log(
-                'success_observation/mini_val', self.ct_observation_success,
+                f'success_observation/{metric_partition}', self.ct_observation_success,
                 on_epoch=True, batch_size=len(proposal_rows) + 1)
             self.log(
-                'success_raw_search/mini_val', self.ct_raw_search_success,
+                f'success_raw_search/{metric_partition}', self.ct_raw_search_success,
                 on_epoch=True, batch_size=len(proposal_rows) + 1)
 
-        self.log('success/test_step', self.success_step, on_step=True, on_epoch=False)
-        self.log('precision/test_step', self.prec_step, on_step=True, on_epoch=False)
+        step_partition = 'dev_step' if metric_partition == 'dev' else 'test_step'
+        self.log(f'success/{step_partition}', self.success_step, on_step=True, on_epoch=False)
+        self.log(f'precision/{step_partition}', self.prec_step, on_step=True, on_epoch=False)
 
         self.runtime(torch.tensor(runtime, device=self.device),
                      torch.tensor(n_frames, device=self.device))
@@ -2059,7 +2103,8 @@ class BaseModelMF(pl.LightningModule):
         self.prec_step.reset()
 
     def on_validation_epoch_end(self):
-        self.logger.experiment.add_scalars('metrics/mini_val',
+        metric_partition = 'dev' if bool(getattr(self.config, 'ct_enable_v27', False)) else 'mini_val'
+        self.logger.experiment.add_scalars(f'metrics/{metric_partition}',
                                     {'success': self.success.compute(),
                                         'precision': self.prec.compute(),},
                                     global_step=self.global_step)
@@ -2081,6 +2126,16 @@ class BaseModelMF(pl.LightningModule):
                 rows,
             )
         self._v3_validation_proposal_diagnostics = []
+        endpoints = getattr(self, '_ct_v27_validation_endpoints', [])
+        if endpoints and int(getattr(self, 'global_rank', 0)) == 0:
+            from utils.v27_eval_reporting import write_endpoint_diagnostics
+            logger = getattr(self, 'logger', None)
+            log_dir = getattr(logger, 'log_dir', None) or getattr(logger, 'save_dir', '.')
+            epoch_number = int(getattr(self, 'current_epoch', 0)) + 1
+            directory = Path(log_dir) / 'dev_diagnostics'
+            self._write_csv_rows(directory / f'epoch_{epoch_number:02d}_endpoints.csv', endpoints)
+            write_endpoint_diagnostics(directory / f'epoch_{epoch_number:02d}_summary.json', endpoints)
+        self._ct_v27_validation_endpoints = []
 
 
     def test_step(self, batch, batch_idx):
@@ -2108,13 +2163,20 @@ class BaseModelMF(pl.LightningModule):
             tracklet_key = f"tracklet/{int(batch_idx)}"
         for frame_id, (overlap, distance) in enumerate(
                 zip(ious, distances)):
-            self._tracking_test_endpoints.append({
+            endpoint = {}
+            if bool(getattr(self.config, 'ct_enable_v27', False)):
+                if len(self._ct_v27_sequence_endpoints) != len(sequence):
+                    raise RuntimeError('v27 evaluation must export every frame exactly once')
+                endpoint.update(self._ct_v27_sequence_endpoints[frame_id])
+                endpoint['partition'] = str(getattr(self.config, 'ct_eval_partition', 'test'))
+            endpoint.update({
                 "tracklet_id": int(batch_idx),
                 "tracklet_key": str(tracklet_key),
                 "frame_id": int(frame_id),
                 "final_iou": float(overlap),
                 "final_distance": float(distance),
             })
+            self._tracking_test_endpoints.append(endpoint)
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
@@ -2186,12 +2248,15 @@ class BaseModelMF(pl.LightningModule):
         if bool(getattr(
                 self.config, "export_proposal_diagnostics", False)):
             self._write_proposal_test_diagnostics()
+        if (bool(getattr(self.config, 'ct_enable_v27', False))
+                or bool(getattr(self.config, 'export_proposal_diagnostics', False))):
             self._write_tracking_test_endpoints()
         if bool(getattr(self.config, "export_b3_rollouts", False)):
             self._write_b3_test_rollouts()
 
     def on_validation_epoch_start(self):
         self._v3_validation_proposal_diagnostics = []
+        self._ct_v27_validation_endpoints = []
 
 class MotionBaseModelMF(BaseModelMF):
     def __init__(self, config, **kwargs):
@@ -2199,6 +2264,12 @@ class MotionBaseModelMF(BaseModelMF):
         self.save_hyperparameters()
 
     def build_input_dict(self, sequence, frame_id, results_bbs, **kwargs): # Note: There may be cases of input with empty point clouds
+        if bool(getattr(self.config, 'ct_enable_v27', False)):
+            from utils.v27_input import build_v27_eval_input
+            return build_v27_eval_input(self, sequence, frame_id, results_bbs,
+                recursive_state=kwargs.get('recursive_state'),
+                motion_prediction=kwargs.get('motion_prediction'),
+                diagnostic_sidecar=kwargs.get('_ct_diagnostic_sidecar'))
         diagnostic_sidecar = kwargs.pop("_ct_diagnostic_sidecar", None)
         if (diagnostic_sidecar is not None
                 and not isinstance(diagnostic_sidecar, dict)):

@@ -9,7 +9,7 @@ from pyquaternion import Quaternion
 
 class PointCloud:
 
-    def __init__(self, points):
+    def __init__(self, points, point_ids=None):
         """
         Class for manipulating and viewing point clouds.
         :param points: <np.float: 4, n>. Input point cloud matrix.
@@ -17,6 +17,10 @@ class PointCloud:
         self.points = points
         if self.points.shape[0] > 3:
             self.points = self.points[0:3, :]
+        self.point_ids = (np.arange(self.points.shape[1], dtype=np.int64)
+                          if point_ids is None else np.asarray(point_ids, dtype=np.int64))
+        if self.point_ids.shape != (self.points.shape[1],):
+            raise ValueError("point IDs must align with coordinates")
 
     @staticmethod
     def load_pcd_bin(file_name):
@@ -62,6 +66,7 @@ class PointCloud:
         selected_ind = np.random.choice(np.arange(0, self.nbr_points()),
                                         size=int(self.nbr_points() * ratio))
         self.points = self.points[:, selected_ind]
+        self.point_ids = self.point_ids[selected_ind]
 
     def remove_close(self, radius):
         """
@@ -74,6 +79,7 @@ class PointCloud:
         y_filt = np.abs(self.points[1, :]) < radius
         not_close = np.logical_not(np.logical_and(x_filt, y_filt))
         self.points = self.points[:, not_close]
+        self.point_ids = self.point_ids[not_close]
 
     def translate(self, x):
         """

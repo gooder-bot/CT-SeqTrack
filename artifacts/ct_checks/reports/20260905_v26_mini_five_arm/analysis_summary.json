@@ -1,0 +1,342 @@
+{
+  "scope": {
+    "runs": {
+      "B0": "output/20260903-2301-26_b0-ct26_b0_mini_car_seed42_60ep_bs16_20260903_225946",
+      "B1-GRU": "output/20260903-2301-26_b1_gru-ct26_b1_gru_mini_car_seed42_60ep_bs16_20260903_225946",
+      "B1-CfC": "output/20260903-2301-26_b1_cfc-ct26_b1_cfc_mini_car_seed42_60ep_bs16_20260903_225946",
+      "Full-minus-B3": "output/20260903-2301-26_full_minus_b3-ct26_full_b3_mini_car_seed42_60ep_bs16_20260903_225946",
+      "Full": "output/20260903-2301-26_full-ct26_full_mini_car_seed42_60ep_bs16_20260903_225946"
+    }
+  },
+  "tracking": [
+    {
+      "arm": "B0",
+      "status": "complete",
+      "last_complete_epoch": 60,
+      "success": 26.902624130249023,
+      "precision": 25.600656509399414,
+      "tail3_observed_success": 27.871992111206055,
+      "tail3_observed_precision": 26.599198659261067,
+      "runtime_fps": 7.915044784545898,
+      "validation_points": 30,
+      "formal_late3_available": false,
+      "descriptive_delta_success_vs_b0": 0.0,
+      "descriptive_delta_precision_vs_b0": 0.0
+    },
+    {
+      "arm": "B1-GRU",
+      "status": "complete",
+      "last_complete_epoch": 60,
+      "success": 51.972652435302734,
+      "precision": 61.95296096801758,
+      "tail3_observed_success": 51.29941940307617,
+      "tail3_observed_precision": 60.04194259643555,
+      "runtime_fps": 2.001248598098755,
+      "validation_points": 30,
+      "formal_late3_available": false,
+      "descriptive_delta_success_vs_b0": 25.07002830505371,
+      "descriptive_delta_precision_vs_b0": 36.352304458618164
+    },
+    {
+      "arm": "B1-CfC",
+      "status": "complete",
+      "last_complete_epoch": 60,
+      "success": 28.79540252685547,
+      "precision": 28.017505645751953,
+      "tail3_observed_success": 29.922320048014324,
+      "tail3_observed_precision": 29.075493494669598,
+      "runtime_fps": 1.9488615989685059,
+      "validation_points": 30,
+      "formal_late3_available": false,
+      "descriptive_delta_success_vs_b0": 1.8927783966064453,
+      "descriptive_delta_precision_vs_b0": 2.416849136352539
+    },
+    {
+      "arm": "Full-minus-B3",
+      "status": "partial: crash in epoch-10 validation",
+      "last_complete_epoch": 8,
+      "success": 28.211158752441406,
+      "precision": 29.42888641357422,
+      "tail3_observed_success": 30.441647211710613,
+      "tail3_observed_precision": 31.350112279256184,
+      "runtime_fps": 1.2403985261917114,
+      "validation_points": 4,
+      "formal_late3_available": false,
+      "descriptive_delta_success_vs_b0": 1.3085346221923828,
+      "descriptive_delta_precision_vs_b0": 3.8282299041748047
+    },
+    {
+      "arm": "Full",
+      "status": "complete",
+      "last_complete_epoch": 60,
+      "success": 48.80196762084961,
+      "precision": 54.88840866088867,
+      "tail3_observed_success": 47.994529724121094,
+      "tail3_observed_precision": 52.70715204874674,
+      "runtime_fps": 1.7973424196243286,
+      "validation_points": 30,
+      "formal_late3_available": false,
+      "descriptive_delta_success_vs_b0": 21.899343490600586,
+      "descriptive_delta_precision_vs_b0": 29.287752151489258
+    }
+  ],
+  "b1": [
+    {
+      "arm": "B1-GRU",
+      "epoch": 60,
+      "valid_rows": 1844,
+      "learned_rmse_m": 6.314978,
+      "cv_rmse_m": 6.302485,
+      "learned_minus_cv_m": 0.012494,
+      "bootstrap_ci_low_m": -0.000166,
+      "bootstrap_ci_high_m": 0.02682,
+      "target_in_support": 0.7115,
+      "coverage_50": 0.9154,
+      "coverage_80": 0.9295,
+      "coverage_95": 0.9376,
+      "promotion": "FAIL"
+    },
+    {
+      "arm": "B1-CfC",
+      "epoch": 60,
+      "valid_rows": 1831,
+      "learned_rmse_m": 12.491975,
+      "cv_rmse_m": 12.758745,
+      "learned_minus_cv_m": -0.266769,
+      "bootstrap_ci_low_m": -0.303133,
+      "bootstrap_ci_high_m": -0.229701,
+      "target_in_support": 0.4194,
+      "coverage_50": 0.4304,
+      "coverage_80": 0.527,
+      "coverage_95": 0.6029,
+      "promotion": "UNPAIRED / under-calibrated"
+    },
+    {
+      "arm": "Full",
+      "epoch": 60,
+      "valid_rows": 1846,
+      "learned_rmse_m": 6.455751,
+      "cv_rmse_m": 6.446156,
+      "learned_minus_cv_m": 0.009595,
+      "bootstrap_ci_low_m": -0.004154,
+      "bootstrap_ci_high_m": 0.026046,
+      "target_in_support": 0.721,
+      "coverage_50": 0.8456,
+      "coverage_80": 0.8987,
+      "coverage_95": 0.9247,
+      "promotion": "FAIL"
+    },
+    {
+      "arm": "Full-minus-B3",
+      "epoch": 8,
+      "valid_rows": 1870,
+      "learned_rmse_m": 12.010901,
+      "cv_rmse_m": 12.33011,
+      "learned_minus_cv_m": -0.319209,
+      "bootstrap_ci_low_m": -0.36942,
+      "bootstrap_ci_high_m": -0.271992,
+      "target_in_support": 0.4102,
+      "coverage_50": 0.4818,
+      "coverage_80": 0.5663,
+      "coverage_95": 0.6508,
+      "promotion": "PARTIAL / under-calibrated"
+    }
+  ],
+  "b2": [
+    {
+      "arm": "Full",
+      "epoch": 60,
+      "status": "complete",
+      "csv_rows": 1928,
+      "csv_tracklets": 102,
+      "missing_nonfirst_endpoints": 251,
+      "global_need_rows": 1676,
+      "novel_pool_target_recall": 0.06324582338902147,
+      "mechanism_threshold": 0.15,
+      "mechanism_passed": false,
+      "selection_eligible_rows": 106,
+      "selection_row_recall": 1.0,
+      "selection_point_recall": 0.9738219895287958,
+      "relation_auroc_row_mean": 0.5055469909301546,
+      "relation_ap_row_mean": 0.05075701228849318,
+      "available_rows": 249,
+      "available_rate": 0.129149377593361,
+      "available_center_gain_m": -0.5255784671751996,
+      "available_iou_gain": -0.15642439087837015,
+      "available_harm_rate": 0.6024096385542169,
+      "no_target_available_rows": 143,
+      "no_target_center_gain_m": -1.127360615504983,
+      "no_target_harm_rate": 0.8251748251748252,
+      "strict_miss_rows": 123,
+      "strict_novel_recovered_rows": 1,
+      "strict_novel_recall": 0.008130081300813009,
+      "strict_observation_error_median_m": 18.937969967275656,
+      "strict_observation_error_p90_m": 37.569961563036244,
+      "active_b1_prior_rows": 0,
+      "fallback_cv_rows": 1846,
+      "coverage_need_rate": 1.0,
+      "corridor_valid_rate": 0.9403526970954357,
+      "prepool_points_median": 0.0,
+      "b3_calibrated_rate": 0.0,
+      "b3_action_coverage": 0.0
+    },
+    {
+      "arm": "Full-minus-B3",
+      "epoch": 8,
+      "status": "partial",
+      "csv_rows": 1952,
+      "csv_tracklets": 102,
+      "missing_nonfirst_endpoints": 227,
+      "global_need_rows": 1702,
+      "novel_pool_target_recall": 0.08401880141010576,
+      "mechanism_threshold": 0.15,
+      "mechanism_passed": false,
+      "selection_eligible_rows": 143,
+      "selection_row_recall": 1.0,
+      "selection_point_recall": 0.7351797862001944,
+      "relation_auroc_row_mean": 0.5200104303533553,
+      "relation_ap_row_mean": 0.06698587855085458,
+      "available_rows": 851,
+      "available_rate": 0.4359631147540984,
+      "available_center_gain_m": -0.13314071024058666,
+      "available_iou_gain": -0.0560745314101393,
+      "available_harm_rate": 0.5675675675675675,
+      "no_target_available_rows": 708,
+      "no_target_center_gain_m": -0.574243798276825,
+      "no_target_harm_rate": 0.6313559322033898,
+      "strict_miss_rows": 759,
+      "strict_novel_recovered_rows": 28,
+      "strict_novel_recall": 0.03689064558629776,
+      "strict_observation_error_median_m": 15.457817683763864,
+      "strict_observation_error_p90_m": 24.914562438132418,
+      "active_b1_prior_rows": 0,
+      "fallback_cv_rows": 1870,
+      "coverage_need_rate": 1.0,
+      "corridor_valid_rate": 0.9415983606557377,
+      "prepool_points_median": 0.0,
+      "b3_calibrated_rate": 0.0,
+      "b3_action_coverage": 0.0
+    }
+  ],
+  "contract_audit": [
+    {
+      "arm": "B0",
+      "initial_equal": true,
+      "input100_equal": true,
+      "step1": "126580d7",
+      "step100": "4231eff7",
+      "b0_updates": 75720,
+      "plugin_updates": 0,
+      "frozen": false
+    },
+    {
+      "arm": "B1-GRU",
+      "initial_equal": true,
+      "input100_equal": true,
+      "step1": "6b901e2f",
+      "step100": "ab98b21c",
+      "b0_updates": 75720,
+      "plugin_updates": 12780,
+      "frozen": false
+    },
+    {
+      "arm": "B1-CfC",
+      "initial_equal": true,
+      "input100_equal": true,
+      "step1": "726e7516",
+      "step100": "dc9467bf",
+      "b0_updates": 75720,
+      "plugin_updates": 12780,
+      "frozen": false
+    },
+    {
+      "arm": "Full-minus-B3",
+      "initial_equal": true,
+      "input100_equal": true,
+      "step1": "b875c2ab",
+      "step100": "8e6910b0",
+      "b0_updates": 10096,
+      "plugin_updates": 1704,
+      "frozen": false
+    },
+    {
+      "arm": "Full",
+      "initial_equal": true,
+      "input100_equal": true,
+      "step1": "2d036f20",
+      "step100": "d94bb0c3",
+      "b0_updates": 75720,
+      "plugin_updates": 12780,
+      "frozen": false
+    }
+  ],
+  "issues": [
+    {
+      "priority": "P0",
+      "area": "B1 acquisition",
+      "finding": "motion prepass omits acquisition_margin_parallel_perp; all online B1 priors are invalid",
+      "impact": "learned mean/margin never controls the B2 crop; coverage-need is always on",
+      "required_action": "return and unbatch the margin field; add online source/margin contract test"
+    },
+    {
+      "priority": "P0",
+      "area": "Hybrid FPS",
+      "finding": "identical-XY candidates can repeat index 0",
+      "impact": "Full-minus-B3 crashes with selected rows are not unique",
+      "required_action": "mask selected indices and test identical XY / different Z plus quota borrowing"
+    },
+    {
+      "priority": "P0",
+      "area": "Matched B0",
+      "finding": "B0 parameter and Adam hashes diverge at step 1 despite identical inputs",
+      "impact": "cross-arm deltas have no module-level causal attribution",
+      "required_action": "sequential same-GPU step1/100 gradient and optimizer-state audit"
+    },
+    {
+      "priority": "P0",
+      "area": "Empty crop",
+      "finding": "empty B0 crop returns before B2 and before writing diagnostics",
+      "impact": "recovery is disabled on the hardest frames; CSV misses 10–12% endpoints",
+      "required_action": "run extension-only recovery and always emit a diagnostic endpoint row"
+    },
+    {
+      "priority": "P1",
+      "area": "Counterfactual v3",
+      "finding": "float32 local B0 keys are compared with re-transformed float64 global points at 1e-6",
+      "impact": "counterfactual raw and novel target counts become identical",
+      "required_action": "reuse exact online crop arrays/key path and assert row-wise equivalence"
+    },
+    {
+      "priority": "P1",
+      "area": "Acquisition",
+      "finding": "novel target recall is 6.32% (Full) / 8.40% (partial), below 15%",
+      "impact": "selection cannot recover evidence that never enters the bounded support",
+      "required_action": "repair B1 path first, then reevaluate bounded support; do not enlarge blindly"
+    },
+    {
+      "priority": "P1",
+      "area": "Consensus voting",
+      "finding": "coherent background often gets high consistency/inlier scores",
+      "impact": "Full available candidates have negative mean gain and high harm",
+      "required_action": "penalize sparse effective support and expose count/mass to held-out B3 calibration"
+    },
+    {
+      "priority": "P1",
+      "area": "B3",
+      "finding": "no held-out calibration/dev artifact",
+      "impact": "action coverage is zero and Full score is observation output",
+      "required_action": "calibrate each late-3 checkpoint only after upstream retraining"
+    },
+    {
+      "priority": "P2",
+      "area": "Formal evaluation",
+      "finding": "epoch59 is not independently evaluated; SeqTrack-strict v26 is absent; one seed only",
+      "impact": "no formal late-3, paired CI, external comparison, or stability claim",
+      "required_action": "test e58/e59/e60, add SeqTrack-strict, then full dataset"
+    }
+  ],
+  "decision": {
+    "ready_for_full_nuscenes": false,
+    "reason": "P0 acquisition, uniqueness, empty-crop and matched-prefix failures"
+  }
+}

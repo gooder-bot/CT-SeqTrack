@@ -9,6 +9,13 @@ import math
 import torch
 from torch import nn
 
+from models.ct_v2.evidence_v27 import (
+    ExtensionLocalGeometry,
+    evidence_box_geometry,
+    unique_point_mask,
+    validate_point_ids,
+)
+
 
 def _masked_mean(features, mask):
     weights = mask.to(features.dtype).unsqueeze(-1)
@@ -23,22 +30,29 @@ def _masked_max(features, mask):
         mask.any(dim=1, keepdim=True), result, torch.zeros_like(result))
 
 
-def _fps_indices(xyz, count):
+def _fps_indices(xyz, count, point_ids=None):
     """Deterministic farthest-point indices for one finite point set."""
     if xyz.numel() == 0 or count <= 0:
         return torch.empty(0, dtype=torch.long, device=xyz.device)
     count = min(int(count), int(xyz.shape[0]))
+    order = (torch.arange(xyz.shape[0], device=xyz.device)
+             if point_ids is None else torch.argsort(point_ids, stable=True))
+    xyz = xyz.index_select(0, order)
     centroid = xyz.mean(dim=0, keepdim=True)
     distance_to_centroid = torch.sum((xyz - centroid).pow(2), dim=1)
-    first = int(torch.argmax(distance_to_centroid).item())
-    selected = [first]
+    first = torch.argmax(distance_to_centroid)
+    selected = torch.empty(count, dtype=torch.long, device=xyz.device)
+    selected[0] = first
     min_distance = torch.sum((xyz - xyz[first]).pow(2), dim=1)
-    for _ in range(1, count):
-        index = int(torch.argmax(min_distance).item())
-        selected.append(index)
+    min_distance[first] = -1.0
+    for step in range(1, count):
+        index = torch.argmax(min_distance)
+        selected[step] = index
         candidate_distance = torch.sum((xyz - xyz[index]).pow(2), dim=1)
         min_distance = torch.minimum(min_distance, candidate_distance)
-    return torch.as_tensor(selected, dtype=torch.long, device=xyz.device)
+        # 同 XY/XYZ 的不同点仍必须各选一次，已选索引永远不可再次入选。
+        min_distance[index] = -1.0
+    return order.index_select(0, selected)
 
 
 def build_box_memory_tokens(
@@ -53,7 +67,12 @@ def build_box_memory_tokens(
         history_timestamps=None,
         current_timestamp=None,
         current_box=None,
-        return_metadata=False):
+        return_metadata=False,
+        v27_enabled=False,
+        history_point_ids=None,
+        history_point_valid_mask=None,
+        history_unique_mask=None,
+        return_point_ids=False):
     """Select causal foreground/context tokens from predicted history boxes.
 
     No segmentation labels, current GT, or future frames are consumed.  Each
@@ -76,10 +95,28 @@ def build_box_memory_tokens(
     # labels.
     metadata = history_features.new_zeros(
         (batch_size, history_count * per_frame, 8))
+    memory_point_ids = torch.full(
+        (batch_size, history_count * per_frame), -1, dtype=torch.long,
+        device=history_features.device)
     points_xyz = history_points[..., :3].detach()
     features = history_features.detach()
     boxes = history_boxes.detach()
     sizes = box_size.detach()
+    if v27_enabled:
+        if history_count != 3 or int(foreground_tokens) != 8 or int(context_tokens) != 4:
+            raise ValueError("v27 memory requires exactly 3*(8+4) slots")
+        evidence_box_geometry(box_size, batch_size, history_features)
+        if (history_point_valid_mask is None
+                or history_point_valid_mask.shape != history_features.shape[:3]):
+            raise ValueError("v27 history point valid mask must have shape [B,H,N]")
+        point_valid = history_point_valid_mask.detach().to(
+            device=history_features.device, dtype=torch.bool)
+        history_point_ids = validate_point_ids(
+            history_point_ids, point_valid, name="history_point_ids")
+        point_unique = unique_point_mask(
+            history_point_ids, point_valid, history_unique_mask)
+    elif return_point_ids:
+        raise ValueError("memory original point IDs are available only in v27")
     history_valid = history_valid_mask.reshape(
         batch_size, history_count).to(torch.bool)
     if history_timestamps is None:
@@ -103,12 +140,17 @@ def build_box_memory_tokens(
             dtype=history_features.dtype).reshape(batch_size, 4)
 
     for batch_index in range(batch_size):
-        size_xy = torch.clamp(sizes[batch_index, :2], min=1e-3)
+        size_xy = torch.clamp(
+            sizes[batch_index, [1, 0]] if v27_enabled else sizes[batch_index, :2],
+            min=1e-3)
         for history_index in range(history_count):
             if not bool(history_valid[batch_index, history_index]):
                 continue
             xyz = points_xyz[batch_index, history_index]
             finite = torch.isfinite(xyz).all(dim=1)
+            if v27_enabled:
+                finite = (finite & point_unique[batch_index, history_index]
+                          & torch.isfinite(features[batch_index, history_index]).all(dim=1))
             box = boxes[batch_index, history_index]
             delta = xyz[:, :2] - box[:2]
             yaw = box[3]
@@ -133,12 +175,16 @@ def build_box_memory_tokens(
             foreground_pick = foreground_rows.index_select(
                 0, _fps_indices(
                     xyz.index_select(0, foreground_rows),
-                    foreground_tokens)) if foreground_rows.numel() else (
+                    foreground_tokens,
+                    history_point_ids[batch_index, history_index].index_select(
+                        0, foreground_rows) if v27_enabled else None)) if foreground_rows.numel() else (
                         foreground_rows)
             context_pick = context_rows.index_select(
                 0, _fps_indices(
                     xyz.index_select(0, context_rows),
-                    context_tokens)) if context_rows.numel() else context_rows
+                    context_tokens,
+                    history_point_ids[batch_index, history_index].index_select(
+                        0, context_rows) if v27_enabled else None)) if context_rows.numel() else context_rows
             block_start = history_index * per_frame
             for offset, rows in ((0, foreground_pick),
                                  (int(foreground_tokens), context_pick)):
@@ -153,6 +199,10 @@ def build_box_memory_tokens(
                     batch_index, history_index].index_select(0, rows[:take])
                 valid[batch_index, output_rows] = True
                 selected = rows[:take]
+                if v27_enabled:
+                    memory_point_ids[batch_index, output_rows] = (
+                        history_point_ids[batch_index, history_index].index_select(
+                            0, selected))
                 physical_age = torch.clamp(
                     current_timestamp[batch_index]
                     - history_timestamps[batch_index, history_index], min=0.0)
@@ -170,7 +220,11 @@ def build_box_memory_tokens(
                 metadata[batch_index, output_rows, 7] = float(
                     history_index + 1) / max(float(history_count), 1.0)
     if return_metadata:
+        if return_point_ids:
+            return tokens, valid, metadata, memory_point_ids
         return tokens, valid, metadata
+    if return_point_ids:
+        return tokens, valid, memory_point_ids
     return tokens, valid
 
 
@@ -223,12 +277,16 @@ class B2EvidenceAcquirer(nn.Module):
             coverage_count=96,
             exploration_count=32,
             robust_consensus_voting=False,
-            utility_init_probability=None):
+            utility_init_probability=None,
+            v27_enabled=False,
+            exploration_seed=42):
         super().__init__()
         self.feature_dim = int(feature_dim)
         self.num_heads = int(num_heads)
         self.max_vote_offset = float(max_vote_offset)
         self.presence_threshold = float(presence_threshold)
+        self.v27_enabled = bool(v27_enabled)
+        self.exploration_seed = int(exploration_seed)
         self.relation_aware_sampling = bool(relation_aware_sampling)
         self.relation_topk = int(relation_topk)
         self.coverage_count = int(coverage_count)
@@ -239,6 +297,11 @@ class B2EvidenceAcquirer(nn.Module):
         self.robust_consensus_voting = bool(robust_consensus_voting)
         if self.relation_aware_sampling and self.selected_count != 256:
             raise ValueError("v26 relation/spatial/random budgets must sum to 256")
+        if self.v27_enabled and (
+                not self.relation_aware_sampling or not self.robust_consensus_voting
+                or (self.relation_topk, self.coverage_count, self.exploration_count)
+                != (128, 96, 32)):
+            raise ValueError("v27 requires relation 128/96/32 selection and consensus voting")
         if self.feature_dim != 64:
             raise ValueError("contract-v3 B0 point features are fixed at 64d")
         if self.feature_dim % self.num_heads:
@@ -261,9 +324,14 @@ class B2EvidenceAcquirer(nn.Module):
             8 if self.relation_aware_sampling else 4, 64)
         self.memory_metadata_encoder = mlp(8)
         if self.relation_aware_sampling:
-            self.relation_context_encoder = mlp(256)
+            self.relation_context_encoder = mlp(384 if self.v27_enabled else 256)
             self.relation_head = nn.Sequential(
-                nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
+                nn.Linear(132 if self.v27_enabled else 128, 64),
+                nn.GELU(), nn.Linear(64, 1))
+        if self.v27_enabled:
+            self.local_geometry = ExtensionLocalGeometry(neighbor_count=16)
+            self.relation_query_projection = nn.Linear(64, 64, bias=False)
+            self.relation_memory_projection = nn.Linear(64, 64, bias=False)
         self.query_norm = nn.LayerNorm(64)
         self.kv_norm = nn.LayerNorm(64)
         self.cross_attention = nn.MultiheadAttention(
@@ -274,11 +342,13 @@ class B2EvidenceAcquirer(nn.Module):
         self.targetness_head = nn.Sequential(
             nn.Linear(64, 64), nn.GELU(), nn.Linear(64, 1))
         self.vote_head = nn.Sequential(
-            nn.Linear(64, 64), nn.GELU(), nn.Linear(64, 2))
+            nn.Linear(68 if self.v27_enabled else 64, 64),
+            nn.GELU(), nn.Linear(64, 2))
         self.base_presence_head = nn.Sequential(
             nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
         self.extension_presence_head = nn.Sequential(
-            nn.Linear(130, 64), nn.GELU(), nn.Linear(64, 1))
+            nn.Linear(134 if self.v27_enabled else 130, 64),
+            nn.GELU(), nn.Linear(64, 1))
         for head, probability in (
                 (self.base_presence_head[-1], presence_init_probability),
                 (self.extension_presence_head[-1], presence_init_probability)):
@@ -293,7 +363,7 @@ class B2EvidenceAcquirer(nn.Module):
         expanded = expanded.expand(indices.shape + trailing)
         return torch.gather(values, 1, expanded)
 
-    def _hybrid_select(self, points, valid, relation_logits, source):
+    def _hybrid_select(self, points, valid, relation_logits, source, point_ids=None):
         """Select relation/spatial/stateless-exploration rows without RNG."""
         batch_indices = []
         batch_valid = []
@@ -301,6 +371,9 @@ class B2EvidenceAcquirer(nn.Module):
         for batch_index in range(points.shape[0]):
             candidates = torch.nonzero(
                 valid[batch_index], as_tuple=False).flatten()
+            if point_ids is not None:
+                candidates = candidates.index_select(0, torch.argsort(
+                    point_ids[batch_index].index_select(0, candidates), stable=True))
             selected_flag = torch.zeros(
                 points.shape[1], dtype=torch.bool, device=points.device)
             chosen_parts = []
@@ -329,7 +402,9 @@ class B2EvidenceAcquirer(nn.Module):
             if remaining.numel():
                 fps_local = _fps_indices(
                     points[batch_index].index_select(0, remaining)[:, :2],
-                    self.coverage_count)
+                    self.coverage_count,
+                    point_ids[batch_index].index_select(0, remaining)
+                    if point_ids is not None else None)
                 append_rows(remaining.index_select(0, fps_local),
                             self.coverage_count, 2)
 
@@ -341,9 +416,17 @@ class B2EvidenceAcquirer(nn.Module):
                     0, remaining).to(xyz.dtype)
                 # A stable point-key hash supplies exploration diversity but
                 # consumes no global/B0 generator state.
-                hash_score = torch.frac(torch.abs(torch.sin(
-                    xyz[:, 0] * 12.9898 + xyz[:, 1] * 78.233
-                    + xyz[:, 2] * 37.719 + src * 19.19) * 43758.5453))
+                if point_ids is not None:
+                    # 整数 ID/来源/私有 seed 的无状态顺序，不消费 B0 RNG。
+                    ids = point_ids[batch_index].index_select(0, remaining)
+                    hash_score = torch.remainder(
+                        ids * 1103515245 + source[batch_index].index_select(
+                            0, remaining).long() * 12345 + self.exploration_seed,
+                        2147483647)
+                else:
+                    hash_score = torch.frac(torch.abs(torch.sin(
+                        xyz[:, 0] * 12.9898 + xyz[:, 1] * 78.233
+                        + xyz[:, 2] * 37.719 + src * 19.19) * 43758.5453))
                 random_order = remaining.index_select(
                     0, torch.argsort(hash_score, descending=True, stable=True))
                 append_rows(random_order, self.exploration_count, 3)
@@ -373,7 +456,8 @@ class B2EvidenceAcquirer(nn.Module):
                 torch.stack(batch_group))
 
     @staticmethod
-    def _consensus_vote(votes, weights, valid, observation_xy):
+    def _consensus_vote(votes, weights, valid, observation_xy,
+                        identity_margin=None, point_ids=None):
         """K=3 mode-consistent Huber voting with finite diagnostics."""
         raw_rows = []
         consistency_rows = []
@@ -382,9 +466,18 @@ class B2EvidenceAcquirer(nn.Module):
         effective_mass_rows = []
         margin_rows = []
         compatible_rows = []
+        mode_count_rows = []
+        mode_score_rows = []
+        mode_identity_rows = []
+        mode_inlier_rows = []
         for batch_index in range(votes.shape[0]):
             rows = torch.nonzero(valid[batch_index], as_tuple=False).flatten()
-            if rows.numel() == 0:
+            if point_ids is not None:
+                rows = rows.index_select(0, torch.argsort(
+                    point_ids[batch_index].index_select(0, rows), stable=True))
+            if rows.numel() == 0 or (
+                    identity_margin is not None
+                    and not bool(weights[batch_index].index_select(0, rows).sum() > 0)):
                 raw_rows.append(observation_xy[batch_index])
                 consistency_rows.append(votes.new_zeros(()))
                 covariance_rows.append(votes.new_zeros((2, 2)))
@@ -392,6 +485,10 @@ class B2EvidenceAcquirer(nn.Module):
                 effective_mass_rows.append(votes.new_zeros(()))
                 margin_rows.append(votes.new_zeros(()))
                 compatible_rows.append(votes.new_zeros(()))
+                mode_count_rows.append(votes.new_zeros(()))
+                mode_score_rows.append(votes.new_zeros(()))
+                mode_identity_rows.append(votes.new_zeros(()))
+                mode_inlier_rows.append(torch.zeros_like(valid[batch_index], dtype=torch.bool))
                 continue
             points = votes[batch_index].index_select(0, rows)
             point_weights = weights[batch_index].index_select(
@@ -445,7 +542,7 @@ class B2EvidenceAcquirer(nn.Module):
                     normalized_mass * inlier_ratio
                     * torch.exp(-torch.trace(covariance).clamp_min(0.0)))
                 hypotheses.append((
-                    consistency, center, covariance, inlier_ratio, mass))
+                    consistency, center, covariance, inlier_ratio, mass, inlier))
             hypotheses.sort(
                 key=lambda value: float(value[0].detach().cpu()),
                 reverse=True)
@@ -468,6 +565,17 @@ class B2EvidenceAcquirer(nn.Module):
             effective_mass_rows.append(top[4])
             margin_rows.append(margin)
             compatible_rows.append(top[0].new_tensor(float(len(compatible))))
+            mode_count = top[5].sum().to(votes.dtype)
+            mode_count_rows.append(mode_count)
+            selected_inliers = torch.zeros_like(valid[batch_index], dtype=torch.bool)
+            selected_inliers[rows] = top[5]
+            mode_inlier_rows.append(selected_inliers)
+            mode_score_rows.append((point_weights * top[5]).sum() / mode_count.clamp_min(1.0))
+            if identity_margin is None:
+                mode_identity_rows.append(votes.new_zeros(()))
+            else:
+                identity = identity_margin[batch_index].index_select(0, rows)
+                mode_identity_rows.append((identity * top[5]).sum() / mode_count.clamp_min(1.0))
         return {
             "center": torch.stack(raw_rows),
             "consistency": torch.stack(consistency_rows),
@@ -476,6 +584,10 @@ class B2EvidenceAcquirer(nn.Module):
             "effective_mass": torch.stack(effective_mass_rows),
             "margin": torch.stack(margin_rows),
             "compatible_count": torch.stack(compatible_rows),
+            "mode_unique_count": torch.stack(mode_count_rows),
+            "mode_mean_targetness": torch.stack(mode_score_rows),
+            "mode_mean_identity_margin": torch.stack(mode_identity_rows),
+            "mode_inlier_mask": torch.stack(mode_inlier_rows),
         }
 
     def forward(
@@ -496,7 +608,11 @@ class B2EvidenceAcquirer(nn.Module):
             query_delta_t,
             gap_ratio,
             recursive_age=None,
-            memory_metadata=None):
+            memory_metadata=None,
+            first_box_size_wlh=None,
+            extension_point_ids=None,
+            current_base_point_ids=None,
+            current_base_unique_mask=None):
         batch_size, extension_count, _ = extension_points.shape
         if current_base_features.shape != (
                 batch_size, 1024, self.feature_dim):
@@ -505,18 +621,40 @@ class B2EvidenceAcquirer(nn.Module):
             raise ValueError("history memory must be [B,36,64]")
         extension_mask = extension_valid_mask.reshape(
             batch_size, extension_count).to(torch.bool)
-        extension_mask &= torch.isfinite(extension_points).all(dim=2)
         base_mask = current_base_valid_mask.reshape(
             batch_size, 1024).to(torch.bool)
-        base_mask &= torch.isfinite(current_base_features).all(dim=2)
+        if self.v27_enabled:
+            if extension_count != 768:
+                raise ValueError("v27 extension pre-pool must contain 768 padded slots")
+            extension_point_ids = validate_point_ids(
+                extension_point_ids, extension_mask,
+                name="extension_point_ids", require_unique=True)
+            current_base_point_ids = validate_point_ids(
+                current_base_point_ids, base_mask, name="current_base_point_ids")
+            base_mask = unique_point_mask(
+                current_base_point_ids, base_mask, current_base_unique_mask)
+            for row in range(batch_size):
+                if bool(torch.isin(
+                        extension_point_ids[row, extension_mask[row]],
+                        current_base_point_ids[row, base_mask[row]]).any()):
+                    raise ValueError("v27 extension IDs intersect B0 sampled point IDs")
+            size_lwh, local_radius, vote_radius = evidence_box_geometry(
+                first_box_size_wlh, batch_size, extension_points)
+        extension_mask = extension_mask & torch.isfinite(extension_points).all(dim=2)
+        base_mask = base_mask & torch.isfinite(current_base_features).all(dim=2)
         memory_mask = memory_valid_mask.reshape(
             batch_size, 36).to(torch.bool)
         if memory_metadata is None:
             memory_metadata = memory_tokens.new_zeros((batch_size, 36, 8))
         if memory_metadata.shape != (batch_size, 36, 8):
             raise ValueError("history memory metadata must be [B,36,8]")
+        memory_mask = (memory_mask & torch.isfinite(memory_tokens).all(dim=2)
+                       & torch.isfinite(memory_metadata).all(dim=2))
 
-        safe_points = torch.nan_to_num(extension_points)
+        safe_points = torch.nan_to_num(
+            extension_points.detach() if self.v27_enabled else extension_points)
+        if self.v27_enabled:
+            safe_points = safe_points.masked_fill(~extension_mask.unsqueeze(2), 0.0)
         direction = torch.nan_to_num(b1_direction_xy.detach())
         direction_norm = torch.linalg.norm(direction, dim=1, keepdim=True)
         default_direction = torch.zeros_like(direction)
@@ -534,9 +672,9 @@ class B2EvidenceAcquirer(nn.Module):
             delta * direction.unsqueeze(1)).sum(2) / sigma[:, 0:1]
         lateral = (
             delta * perpendicular.unsqueeze(1)).sum(2) / sigma[:, 1:2]
-        dt = torch.clamp(query_delta_t.reshape(batch_size), min=0.0)
-        gap = torch.clamp(gap_ratio.reshape(batch_size), min=0.0)
-        b1_valid_f = b1_valid.reshape(batch_size).to(safe_points.dtype)
+        dt = torch.clamp(query_delta_t.detach().reshape(batch_size), min=0.0)
+        gap = torch.clamp(gap_ratio.detach().reshape(batch_size), min=0.0)
+        b1_valid_f = b1_valid.detach().reshape(batch_size).to(safe_points.dtype)
         geometry = torch.stack((
             longitudinal,
             lateral,
@@ -547,16 +685,31 @@ class B2EvidenceAcquirer(nn.Module):
         source = extension_source.reshape(
             batch_size, extension_count).long().clamp(
                 0, 7 if self.relation_aware_sampling else 3)
+        if self.v27_enabled:
+            raw_source = extension_source.reshape(batch_size, extension_count)
+            if bool((((raw_source < 1) | (raw_source > 7)) & extension_mask).any()):
+                raise ValueError("v27 valid extension source must be a 1..7 bitmask")
         extension_feature = (
             self.extension_encoder(safe_points)
             + self.geometry_encoder(geometry)
             + self.source_embedding(source))
         extension_feature = extension_feature * extension_mask.unsqueeze(2)
+        neighbor_counts = torch.zeros_like(extension_mask, dtype=torch.long)
+        if self.v27_enabled:
+            extension_feature, neighbor_counts = self.local_geometry(
+                extension_feature, safe_points[..., :3], extension_mask,
+                extension_point_ids, local_radius)
 
         base_features = current_base_features.detach()
+        safe_metadata = memory_metadata.detach()
+        if self.v27_enabled:
+            base_features = torch.nan_to_num(base_features).masked_fill(
+                ~base_mask.unsqueeze(2), 0.0)
+            safe_metadata = torch.nan_to_num(safe_metadata).masked_fill(
+                ~memory_mask.unsqueeze(2), 0.0)
         memory_features = (
-            memory_tokens.detach()
-            + self.memory_metadata_encoder(memory_metadata.detach()))
+            torch.nan_to_num(memory_tokens.detach())
+            + self.memory_metadata_encoder(safe_metadata))
         memory_features = memory_features * memory_mask.unsqueeze(2)
         relation_logits_prepool = safe_points.new_zeros(
             (batch_size, extension_count))
@@ -565,24 +718,53 @@ class B2EvidenceAcquirer(nn.Module):
             extension_count, device=safe_points.device,
             dtype=torch.long).unsqueeze(0).expand(batch_size, -1)
         selected_group = torch.ones_like(selected_indices)
+        identity_margin_prepool = safe_points.new_zeros((batch_size, extension_count))
+        identity_margin_selected = identity_margin_prepool
+        selected_point_ids = None
         if self.relation_aware_sampling:
-            relation_context = self.relation_context_encoder(torch.cat((
+            context_parts = [
                 _masked_mean(base_features, base_mask),
-                _masked_max(base_features, base_mask),
-                _masked_mean(memory_features, memory_mask),
-                _masked_max(memory_features, memory_mask),
-            ), dim=1))
-            relation_logits_prepool = self.relation_head(torch.cat((
+                _masked_max(base_features, base_mask)]
+            if self.v27_enabled:
+                foreground_memory = memory_mask & (safe_metadata[..., 6] > 0.5)
+                context_memory = memory_mask & ~foreground_memory
+                foreground_mean = _masked_mean(memory_features, foreground_memory)
+                context_mean = _masked_mean(memory_features, context_memory)
+                context_parts.extend((
+                    foreground_mean, _masked_max(memory_features, foreground_memory),
+                    context_mean, _masked_max(memory_features, context_memory)))
+                role_valid = torch.stack((foreground_memory.any(dim=1),
+                                          context_memory.any(dim=1)), dim=1)
+                query = torch.nn.functional.normalize(
+                    self.relation_query_projection(extension_feature), dim=2)
+                prototypes = torch.nn.functional.normalize(
+                    self.relation_memory_projection(torch.stack(
+                        (foreground_mean, context_mean), dim=1)), dim=2)
+                similarities = torch.einsum('bpc,bkc->bpk', query, prototypes)
+                similarities = similarities * role_valid.unsqueeze(1)
+                identity_margin_prepool = (similarities[..., 0] - similarities[..., 1])
+            else:
+                context_parts.extend((
+                    _masked_mean(memory_features, memory_mask),
+                    _masked_max(memory_features, memory_mask)))
+            relation_context = self.relation_context_encoder(torch.cat(context_parts, dim=1))
+            relation_parts = [
                 extension_feature,
                 relation_context.unsqueeze(1).expand(
                     -1, extension_count, -1),
-            ), dim=2)).squeeze(2)
+            ]
+            if self.v27_enabled:
+                relation_parts.extend((similarities, role_valid.to(safe_points.dtype)
+                                       .unsqueeze(1).expand(-1, extension_count, -1)))
+            relation_logits_prepool = self.relation_head(
+                torch.cat(relation_parts, dim=2)).squeeze(2)
             relation_logits_prepool = relation_logits_prepool.masked_fill(
                 ~extension_mask, -20.0)
             selected_indices, selected_mask, selected_group = (
                 self._hybrid_select(
                     safe_points, extension_mask,
-                    relation_logits_prepool, source))
+                    relation_logits_prepool, source,
+                    extension_point_ids if self.v27_enabled else None))
             safe_points = self._gather_rows(safe_points, selected_indices)
             source = self._gather_rows(
                 source.unsqueeze(2), selected_indices).squeeze(2)
@@ -595,6 +777,13 @@ class B2EvidenceAcquirer(nn.Module):
             relation_probability = (
                 torch.sigmoid(relation_selected_logits)
                 * extension_mask.to(relation_selected_logits.dtype))
+            if self.v27_enabled:
+                selected_point_ids = self._gather_rows(
+                    extension_point_ids.unsqueeze(2), selected_indices).squeeze(2)
+                selected_point_ids = selected_point_ids.masked_fill(~extension_mask, -1)
+                identity_margin_selected = self._gather_rows(
+                    identity_margin_prepool.unsqueeze(2), selected_indices).squeeze(2)
+                identity_margin_selected = identity_margin_selected * extension_mask
             extension_count = self.selected_count
         else:
             relation_selected_logits = relation_logits_prepool
@@ -622,14 +811,24 @@ class B2EvidenceAcquirer(nn.Module):
         logits = self.targetness_head(enriched).squeeze(2)
         logits = logits.masked_fill(~extension_mask, -20.0)
         scores = torch.sigmoid(logits) * extension_mask.to(logits.dtype)
-        votes = safe_points[..., :2] + self.max_vote_offset * torch.tanh(
-            self.vote_head(enriched))
-        vote_weights = scores * relation_probability
+        if self.v27_enabled:
+            size_features = torch.cat((size_lwh.log(), vote_radius.log().unsqueeze(1)), dim=1)
+            vote_input = torch.cat((enriched, size_features.unsqueeze(1).expand(
+                -1, extension_count, -1)), dim=2)
+            normalized_vote_offset = torch.tanh(self.vote_head(vote_input))
+            votes = safe_points[..., :2] + vote_radius[:, None, None] * normalized_vote_offset
+            vote_weights = scores
+        else:
+            normalized_vote_offset = torch.tanh(self.vote_head(enriched))
+            votes = safe_points[..., :2] + self.max_vote_offset * normalized_vote_offset
+            vote_weights = scores * relation_probability
         weight_sum = vote_weights.sum(dim=1, keepdim=True)
         if self.robust_consensus_voting:
             consensus = self._consensus_vote(
                 votes, vote_weights, extension_mask,
-                observation_box[:, :2].detach())
+                observation_box[:, :2].detach(),
+                identity_margin=identity_margin_selected if self.v27_enabled else None,
+                point_ids=selected_point_ids)
             raw_xy = consensus["center"]
         else:
             raw_xy = (vote_weights.unsqueeze(2) * votes).sum(
@@ -659,12 +858,21 @@ class B2EvidenceAcquirer(nn.Module):
         extension_max = _masked_max(enriched, extension_mask)
         base_presence_logit = self.base_presence_head(torch.cat((
             base_mean, base_max), dim=1)).squeeze(1)
-        extension_presence_logit = self.extension_presence_head(torch.cat((
+        presence_parts = [
             extension_mean,
             extension_max,
             torch.log1p(extension_point_count.to(enriched.dtype)).unsqueeze(1),
             b1_valid_f.unsqueeze(1),
-        ), dim=1)).squeeze(1)
+        ]
+        if self.v27_enabled:
+            presence_parts.append(torch.stack((
+                torch.log1p(consensus["effective_mass"]),
+                torch.log1p(consensus["mode_unique_count"]),
+                consensus["mode_mean_targetness"],
+                consensus["mode_mean_identity_margin"] / 2.0,
+            ), dim=1))
+        extension_presence_logit = self.extension_presence_head(
+            torch.cat(presence_parts, dim=1)).squeeze(1)
         base_presence_probability = torch.sigmoid(base_presence_logit)
         extension_presence_probability = (
             torch.sigmoid(extension_presence_logit)
@@ -683,7 +891,10 @@ class B2EvidenceAcquirer(nn.Module):
             probability.pow(2).sum(dim=1)
             * torch.clamp(extension_point_count.to(scores.dtype), min=1.0),
             min=1e-6)
-        return {
+        if self.v27_enabled:
+            normalized_ess = torch.where(availability, normalized_ess,
+                                         torch.zeros_like(normalized_ess))
+        result = {
             "b0_current_base_features_detached": base_features,
             "ct_memory_tokens": memory_tokens,
             "ct_memory_valid_mask": memory_mask,
@@ -736,6 +947,23 @@ class B2EvidenceAcquirer(nn.Module):
             "ct_vote_compatible_hypothesis_count": consensus[
                 "compatible_count"],
         }
+        if self.v27_enabled:
+            result.update({
+                "ct_extension_selected_point_ids": selected_point_ids,
+                "ct_base_unique_valid_mask": base_mask,
+                "ct_relation_identity_margin_prepool": identity_margin_prepool,
+                "ct_relation_identity_margin_selected": identity_margin_selected,
+                "ct_local_neighbor_count_prepool": neighbor_counts,
+                "ct_local_geometry_radius": local_radius,
+                "ct_search_vote_radius": vote_radius,
+                "ct_search_normalized_vote_offset": normalized_vote_offset,
+                "ct_search_vote_weights": vote_weights,
+                "ct_vote_mode_unique_count": consensus["mode_unique_count"],
+                "ct_vote_mode_mean_targetness": consensus["mode_mean_targetness"],
+                "ct_vote_mode_mean_identity_margin": consensus["mode_mean_identity_margin"],
+                "ct_vote_mode_inlier_mask": consensus["mode_inlier_mask"],
+            })
+        return result
 
 class B3SelectiveUpdater(nn.Module):
     """B3 action-level reliability model with exact observation fallback.

@@ -1,0 +1,2229 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "CT-SeqTrack v26 五组 mini 实验审计",
+    "description": "完成状态、跟踪分数、B0 公平性、B1/B2/B3 机制漏斗及 full nuScenes 准入判断",
+    "generatedAt": "2026-09-05T12:00:00+08:00",
+    "sources": [
+      {
+        "id": "src_v26_five_arm",
+        "label": "v26 mini five-arm TensorBoard, checkpoints and candidate diagnostics",
+        "path": "artifacts/ct_checks/reports/20260905_v26_mini_five_arm/report_data.sqlite",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id='v26_five_arm'",
+          "tables_used": [
+            "report_snapshot"
+          ],
+          "executed_at": "2026-09-05T12:00:00+08:00"
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "completion",
+        "dataset": "headline",
+        "sourceId": "src_v26_five_arm",
+        "description": "五组中只有四组完成 60 epoch；Full-minus-B3 在 epoch-10 validation 中止。",
+        "metrics": [
+          {
+            "label": "完成臂",
+            "field": "completed_arms",
+            "format": "number"
+          },
+          {
+            "label": "计划臂",
+            "field": "requested_arms",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "acquisition",
+        "dataset": "headline",
+        "sourceId": "src_v26_five_arm",
+        "description": "globally-observable need rows 中 novel pre-pool 的 target-bearing 比例。",
+        "metrics": [
+          {
+            "label": "Full novel recall",
+            "field": "full_novel_recall",
+            "format": "percent"
+          },
+          {
+            "label": "最低门槛",
+            "field": "required_novel_recall",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "harm",
+        "dataset": "headline",
+        "sourceId": "src_v26_five_arm",
+        "description": "Full epoch60 中 available raw B2 candidate 比 observation 恶化超过 0.1 m 的比例。",
+        "metrics": [
+          {
+            "label": "B2 harmful",
+            "field": "full_b2_harm",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "calibration",
+        "dataset": "headline",
+        "sourceId": "src_v26_five_arm",
+        "description": "缺少 held-out calibration artifact，B3 按合同 fail closed。",
+        "metrics": [
+          {
+            "label": "B3 action coverage",
+            "field": "b3_action_coverage",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "success_curve",
+        "title": "mini_val Success 曲线",
+        "subtitle": "每两 epoch 验证；Full-minus-B3 曲线在 epoch8 结束",
+        "intent": "trend",
+        "question": "五组训练各自达到什么水平，哪一组未跑完？",
+        "rationale": "时间序列同时展示训练波动和中止位置；跨臂差值只作描述。",
+        "type": "line",
+        "dataset": "validation_curves",
+        "sourceId": "src_v26_five_arm",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "success",
+            "type": "quantitative",
+            "label": "Success",
+            "unit": "points"
+          },
+          "color": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "tooltip": [
+            {
+              "field": "precision",
+              "type": "quantitative",
+              "label": "Precision"
+            },
+            {
+              "field": "runtime_fps",
+              "type": "quantitative",
+              "label": "FPS"
+            },
+            {
+              "field": "run_status",
+              "type": "text",
+              "label": "Status"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "tracking_bar",
+        "title": "最后完整验证点的 Success / Precision",
+        "subtitle": "四个完整臂为 epoch60；Full-minus-B3 为 partial epoch8，不能视为 final",
+        "intent": "comparison",
+        "question": "最后可读分数是多少？",
+        "rationale": "分组柱图仅比较已观测读数，并在 tooltip 标明 epoch/status。",
+        "type": "bar",
+        "dataset": "tracking_bars",
+        "sourceId": "src_v26_five_arm",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "label": "Score",
+            "unit": "points"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Metric"
+          },
+          "tooltip": [
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "status",
+              "type": "text",
+              "label": "Status"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "b1_rmse",
+        "title": "B1 learned prior 与 CV 的中心 RMSE",
+        "subtitle": "验证 candidate rows；越低越好，单位 m",
+        "intent": "comparison",
+        "question": "学习先验是否稳定优于 CV？",
+        "rationale": "同臂同 endpoint 的 learned/CV 并列比较最直接。",
+        "type": "bar",
+        "dataset": "b1_chart",
+        "sourceId": "src_v26_five_arm",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "y": {
+            "field": "rmse_m",
+            "type": "quantitative",
+            "label": "RMSE",
+            "unit": "m"
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "Prior"
+          },
+          "tooltip": [
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "promotion",
+              "type": "text",
+              "label": "Promotion"
+            }
+          ]
+        },
+        "layout": "full"
+      },
+      {
+        "id": "b2_recall",
+        "title": "B2 novel evidence acquisition",
+        "subtitle": "globally-observable need rows；15% 为注册最低门槛",
+        "intent": "comparison",
+        "question": "目标是否真正进入 novel pre-pool？",
+        "rationale": "采样 row/point recall 只有在 acquisition 成功后才有意义，因此主图只显示最上游 novel recall。",
+        "type": "bar",
+        "dataset": "b2_chart",
+        "sourceId": "src_v26_five_arm",
+        "encodings": {
+          "x": {
+            "field": "arm",
+            "type": "nominal",
+            "label": "Arm"
+          },
+          "y": {
+            "field": "novel_pool_target_recall",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Novel target recall"
+          },
+          "tooltip": [
+            {
+              "field": "strict_novel_recall",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "Strict miss recovery"
+            },
+            {
+              "field": "selection_row_recall",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "Selection row recall"
+            },
+            {
+              "field": "selection_point_recall",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "Selection point recall"
+            }
+          ]
+        },
+        "referenceLines": [
+          {
+            "axis": "y",
+            "value": 0.15,
+            "label": "registered minimum 15%",
+            "lineStyle": "dashed",
+            "color": "danger"
+          }
+        ],
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "tracking_table",
+        "title": "运行完成状态与最后可读指标",
+        "subtitle": "tail-3 observed 是最后三个已记录偶数 epoch，不能替代正式 e58/e59/e60 late-3",
+        "dataset": "tracking_summary",
+        "sourceId": "src_v26_five_arm",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "status",
+            "label": "Status",
+            "type": "text"
+          },
+          {
+            "field": "last_complete_epoch",
+            "label": "Epoch",
+            "format": "number"
+          },
+          {
+            "field": "success",
+            "label": "Success",
+            "format": "number"
+          },
+          {
+            "field": "precision",
+            "label": "Precision",
+            "format": "number"
+          },
+          {
+            "field": "tail3_observed_success",
+            "label": "Tail-3 obs S",
+            "format": "number"
+          },
+          {
+            "field": "tail3_observed_precision",
+            "label": "Tail-3 obs P",
+            "format": "number"
+          },
+          {
+            "field": "runtime_fps",
+            "label": "FPS",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "b2_table",
+        "title": "B2 acquisition 与 raw candidate",
+        "subtitle": "Full-minus-B3 仅为 epoch8；harm/gain 只统计 available 行",
+        "dataset": "b2_summary",
+        "sourceId": "src_v26_five_arm",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "epoch",
+            "label": "Epoch",
+            "format": "number"
+          },
+          {
+            "field": "novel_pool_target_recall",
+            "label": "Novel recall",
+            "format": "percent"
+          },
+          {
+            "field": "strict_novel_recall",
+            "label": "Strict recovery",
+            "format": "percent"
+          },
+          {
+            "field": "selection_row_recall",
+            "label": "Selection row",
+            "format": "percent"
+          },
+          {
+            "field": "selection_point_recall",
+            "label": "Selection point",
+            "format": "percent"
+          },
+          {
+            "field": "available_rate",
+            "label": "Available",
+            "format": "percent"
+          },
+          {
+            "field": "available_center_gain_m",
+            "label": "Center gain m",
+            "format": "number"
+          },
+          {
+            "field": "available_harm_rate",
+            "label": "Harm",
+            "format": "percent"
+          },
+          {
+            "field": "active_b1_prior_rows",
+            "label": "Online B1 rows",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "audit_table",
+        "title": "共享 B0 前缀审计",
+        "subtitle": "initial 和输入指纹一致，但 step1/step100 参数 hash 全部分叉",
+        "dataset": "contract_audit",
+        "sourceId": "src_v26_five_arm",
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "arm",
+            "label": "Arm",
+            "type": "text"
+          },
+          {
+            "field": "initial_equal",
+            "label": "Initial",
+            "type": "text"
+          },
+          {
+            "field": "input100_equal",
+            "label": "Input100",
+            "type": "text"
+          },
+          {
+            "field": "step1",
+            "label": "Step1",
+            "type": "text"
+          },
+          {
+            "field": "step100",
+            "label": "Step100",
+            "type": "text"
+          },
+          {
+            "field": "b0_updates",
+            "label": "B0 updates",
+            "format": "number"
+          },
+          {
+            "field": "plugin_updates",
+            "label": "Plugin updates",
+            "format": "number"
+          },
+          {
+            "field": "frozen",
+            "label": "Frozen",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "issues_table",
+        "title": "未解决问题与修复顺序",
+        "subtitle": "P0 会阻止正确训练/公平归因；P1 阻止机制和论文结论；P2 是正式报告缺口",
+        "dataset": "issues",
+        "sourceId": "src_v26_five_arm",
+        "density": "spacious",
+        "layout": "full",
+        "defaultSort": {
+          "field": "priority",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "priority",
+            "label": "Priority",
+            "type": "text"
+          },
+          {
+            "field": "area",
+            "label": "Area",
+            "type": "text"
+          },
+          {
+            "field": "finding",
+            "label": "Finding",
+            "type": "text"
+          },
+          {
+            "field": "impact",
+            "label": "Impact",
+            "type": "text"
+          },
+          {
+            "field": "required_action",
+            "label": "Required action",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# CT-SeqTrack v26 五组 mini 实验审计"
+      },
+      {
+        "id": "notice",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "> **准入结论：目前不能开始正式 full nuScenes。** 四臂完成 60 epoch，但 Full-minus-B3 在第 10 轮验证中崩溃；更关键的是，在线 B1 acquisition prepass 恒为 invalid，五臂 B0 又从 step1 起分叉。因此当前结果适合定位工程问题，不支持模块涨分或论文因果结论。"
+      },
+      {
+        "id": "metrics",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": [
+          "completion",
+          "acquisition",
+          "harm",
+          "calibration"
+        ]
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 1. 一句话结果\n\nB1-GRU 的最后读数最高（51.973 Success / 61.953 Precision），Full 为 48.802 / 54.888，B0 为 26.903 / 25.601；但 matched-prefix 失败意味着这些差值是不同 B0 优化轨迹的混合结果。Full 的 B3 没有 calibration artifact，action coverage=0，所以 Full 指标其实是该 checkpoint 的 observation 输出。"
+      },
+      {
+        "id": "tracking",
+        "type": "table",
+        "layout": "full",
+        "tableId": "tracking_table"
+      },
+      {
+        "id": "curve",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "success_curve"
+      },
+      {
+        "id": "bar",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "tracking_bar"
+      },
+      {
+        "id": "contract",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 2. 训练合同\n\n五组都从随机初始化开始，没有 init checkpoint；启用模块均有非零有限梯度和更新计数，未发现冻结。共同 initial hash 和前 100 个 observation batch 指纹一致，但第一次 Adam 更新后 B0 参数与 Adam hash 已全部不同。按项目实验协议，跨臂分数只能描述，不能归因。"
+      },
+      {
+        "id": "audit",
+        "type": "table",
+        "layout": "full",
+        "tableId": "audit_table"
+      },
+      {
+        "id": "b1_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 3. B1 没有真正驱动在线搜索\n\n`predict_motion_from_history()` 没有返回 acquisition margin，但 unbatch prepass 把它当作必需字段，因此在线 prior 被全部降级为 fallback-CV/base-only。CSV 中的 `b1_valid=1` 是 crop 之后的 B1 forward，不能证明 acquisition 使用了 B1。结果是 learned mean/margin 从未控制 shell，coverage-need 变成 100%，corridor 近乎常开。CfC 在自身 survivor rows 上优于 CV，但与 GRU endpoint 身份不一致且 coverage 严重偏低，不能据此正式选择后端。"
+      },
+      {
+        "id": "b1chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "b1_rmse"
+      },
+      {
+        "id": "b2_text",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 4. B2 瓶颈仍是 acquisition，不是后端 selection\n\nFull 的 globally-observable need novel recall 只有 6.32%，partial Full-minus-B3 为 8.40%，均未过 15% 门槛。目标一旦进入 pre-pool，selection row recall 为 100%，Full point recall 为 97.38%；但严格 B0 miss 的恢复率仅约 0.8%（Full），且 median observation error 接近 19 m。说明 bounded evidence 区域仍抓不到灾难长尾。Full available 行的 raw candidate 平均让中心误差恶化约 0.53 m，背景-only available 行恶化更明显；高 vote consistency 不能排除一致背景。"
+      },
+      {
+        "id": "b2chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "b2_recall"
+      },
+      {
+        "id": "b2table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "b2_table"
+      },
+      {
+        "id": "quality",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 5. 诊断数据限制\n\n空 B0 crop 会在模型和诊断前直接 fallback，导致 epoch60 CSV 只覆盖 102/106 tracklets，并漏掉约 10%–12% 非首帧 endpoint；机制指标因此有 survivorship bias。反事实 v3 的 B0 novelty subtraction 又混用了 float32 local keys 与重新变换的 float64 global points，`raw` 与 `novel` 计数异常相同，所以当前 fixed/adaptive/dual counterfactual novel recall 不可引用。所有 CSV/TensorBoard 数值已检查为有限值，这不等于统计口径完整。"
+      },
+      {
+        "id": "issues",
+        "type": "table",
+        "layout": "full",
+        "tableId": "issues_table"
+      },
+      {
+        "id": "next",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 6. 下一轮准入顺序\n\n1. 修复 B1 prepass margin 接口与 FPS 唯一性，并补相应回归测试。\n2. 让 empty-crop 帧仍能进入 extension-only B2，并总是写完整 endpoint diagnostic。\n3. 复用在线 crop/key 路径修复 counterfactual；补 recursive-age 诊断。\n4. 在同一 GPU 顺序跑 step1/100，审计 B0 gradient、Adam state 与参数 hash，直到五臂 matched-prefix 通过。\n5. 核心路径改变后五组 mini 必须从 epoch0 重训，不能续用当前 Full-minus-B3 checkpoint。\n6. mini 过机制门槛后，再给 e58/e59/e60 各自做互斥 calibration/dev promotion、正式 test、paired CI 和 SeqTrack-strict；最后才启动 full nuScenes。"
+      },
+      {
+        "id": "method",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "src_v26_five_arm",
+        "body": "## 7. 口径\n\n数据来自 commit `b445ecd` 下五个 2026-09-03 v26 mini run 的 TensorBoard scalars、`last.ckpt`/formal checkpoint audit、candidate diagnostics 与 acquisition report。Success/Precision 为所有 endpoint 的 micro-average；frame0 GT 也计入。所谓 tail-3 observed 是 epoch56/58/60 的训练期验证均值，不是正式 late-3；正式口径必须分别测试 epoch58/59/60。当前只有 seed42，不作跨 seed 稳定性声明。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-09-05T12:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "completed_arms": 4,
+          "requested_arms": 5,
+          "full_novel_recall": 0.06324582338902147,
+          "required_novel_recall": 0.15,
+          "full_b2_harm": 0.6024096385542169,
+          "b3_action_coverage": 0.0
+        }
+      ],
+      "validation_curves": [
+        {
+          "arm": "B0",
+          "epoch": 2,
+          "global_step": 2524,
+          "success": 23.780086517333984,
+          "precision": 25.295406341552734,
+          "runtime_fps": 7.728955268859863,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 4,
+          "global_step": 5048,
+          "success": 18.81072425842285,
+          "precision": 20.09299659729004,
+          "runtime_fps": 7.615871429443359,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 6,
+          "global_step": 7572,
+          "success": 25.009845733642578,
+          "precision": 26.728662490844727,
+          "runtime_fps": 7.789762020111084,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 8,
+          "global_step": 10096,
+          "success": 24.370899200439453,
+          "precision": 23.967178344726562,
+          "runtime_fps": 7.820164203643799,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 24.68161964416504,
+          "precision": 22.447484970092773,
+          "runtime_fps": 7.846601963043213,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 12,
+          "global_step": 15144,
+          "success": 25.082054138183594,
+          "precision": 24.361051559448242,
+          "runtime_fps": 7.950327396392822,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 14,
+          "global_step": 17668,
+          "success": 22.94639015197754,
+          "precision": 21.925601959228516,
+          "runtime_fps": 8.190322875976562,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 16,
+          "global_step": 20192,
+          "success": 24.038291931152344,
+          "precision": 23.10175132751465,
+          "runtime_fps": 8.095555305480957,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 18,
+          "global_step": 22716,
+          "success": 29.858863830566406,
+          "precision": 34.537200927734375,
+          "runtime_fps": 8.01801586151123,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 26.4102840423584,
+          "precision": 25.15864372253418,
+          "runtime_fps": 7.9852728843688965,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 22,
+          "global_step": 27764,
+          "success": 30.34682846069336,
+          "precision": 29.216632843017578,
+          "runtime_fps": 7.896344184875488,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 24,
+          "global_step": 30288,
+          "success": 28.001094818115234,
+          "precision": 26.41465950012207,
+          "runtime_fps": 7.884654521942139,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 26,
+          "global_step": 32812,
+          "success": 27.799781799316406,
+          "precision": 25.60175132751465,
+          "runtime_fps": 7.858532428741455,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 28,
+          "global_step": 35336,
+          "success": 28.77790069580078,
+          "precision": 27.411376953125,
+          "runtime_fps": 7.801934719085693,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 28.180524826049805,
+          "precision": 26.37089729309082,
+          "runtime_fps": 7.817440509796143,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 32,
+          "global_step": 40384,
+          "success": 28.97702407836914,
+          "precision": 27.49125099182129,
+          "runtime_fps": 7.946969032287598,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 34,
+          "global_step": 42908,
+          "success": 28.977027893066406,
+          "precision": 28.2352294921875,
+          "runtime_fps": 7.926208019256592,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 36,
+          "global_step": 45432,
+          "success": 28.421226501464844,
+          "precision": 27.422317504882812,
+          "runtime_fps": 7.911153316497803,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 38,
+          "global_step": 47956,
+          "success": 27.108314514160156,
+          "precision": 26.357769012451172,
+          "runtime_fps": 7.908891201019287,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 26.887306213378906,
+          "precision": 25.882932662963867,
+          "runtime_fps": 7.874166965484619,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 42,
+          "global_step": 53004,
+          "success": 28.07549285888672,
+          "precision": 26.578777313232422,
+          "runtime_fps": 7.862951755523682,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 44,
+          "global_step": 55528,
+          "success": 27.012035369873047,
+          "precision": 25.752735137939453,
+          "runtime_fps": 8.06469440460205,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 46,
+          "global_step": 58052,
+          "success": 28.06892967224121,
+          "precision": 26.56455421447754,
+          "runtime_fps": 8.039607048034668,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 48,
+          "global_step": 60576,
+          "success": 27.50656509399414,
+          "precision": 26.203500747680664,
+          "runtime_fps": 8.016315460205078,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 27.246171951293945,
+          "precision": 25.916851043701172,
+          "runtime_fps": 7.988195896148682,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 52,
+          "global_step": 65624,
+          "success": 28.173961639404297,
+          "precision": 26.48906135559082,
+          "runtime_fps": 7.949793338775635,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 54,
+          "global_step": 68148,
+          "success": 28.250547409057617,
+          "precision": 26.932167053222656,
+          "runtime_fps": 7.921833515167236,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 56,
+          "global_step": 70672,
+          "success": 27.994531631469727,
+          "precision": 26.859956741333008,
+          "runtime_fps": 7.905757904052734,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 58,
+          "global_step": 73196,
+          "success": 28.718820571899414,
+          "precision": 27.33698272705078,
+          "runtime_fps": 7.874927520751953,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B0",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 26.902624130249023,
+          "precision": 25.600656509399414,
+          "runtime_fps": 7.915044784545898,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 2,
+          "global_step": 2524,
+          "success": 30.184904098510742,
+          "precision": 47.67177200317383,
+          "runtime_fps": 1.7307616472244263,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 4,
+          "global_step": 5048,
+          "success": 22.543766021728516,
+          "precision": 21.664113998413086,
+          "runtime_fps": 1.8244110345840454,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 6,
+          "global_step": 7572,
+          "success": 30.165210723876953,
+          "precision": 39.108314514160156,
+          "runtime_fps": 1.7961819171905518,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 8,
+          "global_step": 10096,
+          "success": 24.14113998413086,
+          "precision": 19.14223289489746,
+          "runtime_fps": 1.772902011871338,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 32.93763732910156,
+          "precision": 31.83150863647461,
+          "runtime_fps": 1.7478458881378174,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 12,
+          "global_step": 15144,
+          "success": 48.32275390625,
+          "precision": 55.48359298706055,
+          "runtime_fps": 1.741720199584961,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 14,
+          "global_step": 17668,
+          "success": 30.985780715942383,
+          "precision": 27.429977416992188,
+          "runtime_fps": 1.7243380546569824,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 16,
+          "global_step": 20192,
+          "success": 35.38402557373047,
+          "precision": 43.47921371459961,
+          "runtime_fps": 1.7116485834121704,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 18,
+          "global_step": 22716,
+          "success": 35.88949966430664,
+          "precision": 46.705692291259766,
+          "runtime_fps": 1.7076895236968994,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 43.96608352661133,
+          "precision": 59.846832275390625,
+          "runtime_fps": 1.7572991847991943,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 22,
+          "global_step": 27764,
+          "success": 46.677242279052734,
+          "precision": 46.89715576171875,
+          "runtime_fps": 1.786415934562683,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 24,
+          "global_step": 30288,
+          "success": 49.580963134765625,
+          "precision": 64.38184356689453,
+          "runtime_fps": 1.8215606212615967,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 26,
+          "global_step": 32812,
+          "success": 47.65755081176758,
+          "precision": 53.352294921875,
+          "runtime_fps": 1.8626123666763306,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 28,
+          "global_step": 35336,
+          "success": 48.8501091003418,
+          "precision": 55.45732879638672,
+          "runtime_fps": 1.8867131471633911,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 47.59190368652344,
+          "precision": 50.71772766113281,
+          "runtime_fps": 1.8897547721862793,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 32,
+          "global_step": 40384,
+          "success": 44.495628356933594,
+          "precision": 48.27899169921875,
+          "runtime_fps": 1.9075220823287964,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 34,
+          "global_step": 42908,
+          "success": 40.830413818359375,
+          "precision": 45.32713317871094,
+          "runtime_fps": 1.9259477853775024,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 36,
+          "global_step": 45432,
+          "success": 47.14332580566406,
+          "precision": 49.619258880615234,
+          "runtime_fps": 1.940133810043335,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 38,
+          "global_step": 47956,
+          "success": 52.73413848876953,
+          "precision": 64.12144470214844,
+          "runtime_fps": 1.949671983718872,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 44.21772384643555,
+          "precision": 46.51860046386719,
+          "runtime_fps": 1.961240530014038,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 42,
+          "global_step": 53004,
+          "success": 51.349021911621094,
+          "precision": 58.96717834472656,
+          "runtime_fps": 1.9673782587051392,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 44,
+          "global_step": 55528,
+          "success": 50.241790771484375,
+          "precision": 57.706787109375,
+          "runtime_fps": 1.9683486223220825,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 46,
+          "global_step": 58052,
+          "success": 49.13457489013672,
+          "precision": 55.26039505004883,
+          "runtime_fps": 1.9830223321914673,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 48,
+          "global_step": 60576,
+          "success": 49.74945068359375,
+          "precision": 57.33369445800781,
+          "runtime_fps": 1.9759308099746704,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 52.117069244384766,
+          "precision": 61.78993606567383,
+          "runtime_fps": 1.9829293489456177,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 52,
+          "global_step": 65624,
+          "success": 50.799781799316406,
+          "precision": 58.12910842895508,
+          "runtime_fps": 1.993497371673584,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 54,
+          "global_step": 68148,
+          "success": 52.18708419799805,
+          "precision": 61.82057189941406,
+          "runtime_fps": 1.9867488145828247,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 56,
+          "global_step": 70672,
+          "success": 50.810726165771484,
+          "precision": 58.49671936035156,
+          "runtime_fps": 1.9812203645706177,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 58,
+          "global_step": 73196,
+          "success": 51.1148796081543,
+          "precision": 59.6761474609375,
+          "runtime_fps": 1.987802505493164,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 51.972652435302734,
+          "precision": 61.95296096801758,
+          "runtime_fps": 2.001248598098755,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 2,
+          "global_step": 2524,
+          "success": 30.241792678833008,
+          "precision": 35.781185150146484,
+          "runtime_fps": 1.6686863899230957,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 4,
+          "global_step": 5048,
+          "success": 27.22866439819336,
+          "precision": 31.1487979888916,
+          "runtime_fps": 1.7694817781448364,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 6,
+          "global_step": 7572,
+          "success": 30.89824867248535,
+          "precision": 34.21881866455078,
+          "runtime_fps": 1.733585000038147,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 8,
+          "global_step": 10096,
+          "success": 34.506568908691406,
+          "precision": 39.31509780883789,
+          "runtime_fps": 1.7136256694793701,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 30.318382263183594,
+          "precision": 30.036104202270508,
+          "runtime_fps": 1.6788967847824097,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 12,
+          "global_step": 15144,
+          "success": 27.679431915283203,
+          "precision": 27.10612678527832,
+          "runtime_fps": 1.6858952045440674,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 14,
+          "global_step": 17668,
+          "success": 28.74070167541504,
+          "precision": 31.1455135345459,
+          "runtime_fps": 1.6694395542144775,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 16,
+          "global_step": 20192,
+          "success": 30.095186233520508,
+          "precision": 37.934349060058594,
+          "runtime_fps": 1.6535111665725708,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 18,
+          "global_step": 22716,
+          "success": 30.121444702148438,
+          "precision": 30.698030471801758,
+          "runtime_fps": 1.6636266708374023,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 23.974836349487305,
+          "precision": 24.466081619262695,
+          "runtime_fps": 1.741938829421997,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 22,
+          "global_step": 27764,
+          "success": 29.7669620513916,
+          "precision": 29.63566780090332,
+          "runtime_fps": 1.7713043689727783,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 24,
+          "global_step": 30288,
+          "success": 29.055801391601562,
+          "precision": 28.750547409057617,
+          "runtime_fps": 1.7931784391403198,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 26,
+          "global_step": 32812,
+          "success": 31.33150863647461,
+          "precision": 30.70131492614746,
+          "runtime_fps": 1.8173173666000366,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 28,
+          "global_step": 35336,
+          "success": 27.60065460205078,
+          "precision": 26.596277236938477,
+          "runtime_fps": 1.839651346206665,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 30.808534622192383,
+          "precision": 30.22209930419922,
+          "runtime_fps": 1.8507750034332275,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 32,
+          "global_step": 40384,
+          "success": 29.379650115966797,
+          "precision": 28.922319412231445,
+          "runtime_fps": 1.8725160360336304,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 34,
+          "global_step": 42908,
+          "success": 27.6159725189209,
+          "precision": 27.293216705322266,
+          "runtime_fps": 1.8758841753005981,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 36,
+          "global_step": 45432,
+          "success": 31.040483474731445,
+          "precision": 31.21444320678711,
+          "runtime_fps": 1.8906022310256958,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 38,
+          "global_step": 47956,
+          "success": 30.70787811279297,
+          "precision": 30.068927764892578,
+          "runtime_fps": 1.8936703205108643,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 28.25492286682129,
+          "precision": 27.52297592163086,
+          "runtime_fps": 1.915224313735962,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 42,
+          "global_step": 53004,
+          "success": 29.714441299438477,
+          "precision": 28.690370559692383,
+          "runtime_fps": 1.9183846712112427,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 44,
+          "global_step": 55528,
+          "success": 29.206785202026367,
+          "precision": 28.80743980407715,
+          "runtime_fps": 1.927327275276184,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 46,
+          "global_step": 58052,
+          "success": 29.806344985961914,
+          "precision": 29.094093322753906,
+          "runtime_fps": 1.9282915592193604,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 48,
+          "global_step": 60576,
+          "success": 31.25273323059082,
+          "precision": 30.696937561035156,
+          "runtime_fps": 1.9115971326828003,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 30.35995864868164,
+          "precision": 29.409191131591797,
+          "runtime_fps": 1.9306429624557495,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 52,
+          "global_step": 65624,
+          "success": 29.76039695739746,
+          "precision": 28.71116065979004,
+          "runtime_fps": 1.934272289276123,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 54,
+          "global_step": 68148,
+          "success": 29.699125289916992,
+          "precision": 28.921226501464844,
+          "runtime_fps": 1.9372628927230835,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 56,
+          "global_step": 70672,
+          "success": 29.747264862060547,
+          "precision": 29.021883010864258,
+          "runtime_fps": 1.954942226409912,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 58,
+          "global_step": 73196,
+          "success": 31.224292755126953,
+          "precision": 30.187091827392578,
+          "runtime_fps": 1.9563922882080078,
+          "run_status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 28.79540252685547,
+          "precision": 28.017505645751953,
+          "runtime_fps": 1.9488615989685059,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 2,
+          "global_step": 2524,
+          "success": 32.47812271118164,
+          "precision": 46.030635833740234,
+          "runtime_fps": 1.2133203744888306,
+          "run_status": "partial"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 4,
+          "global_step": 5048,
+          "success": 27.30962562561035,
+          "precision": 29.02516746520996,
+          "runtime_fps": 1.355074405670166,
+          "run_status": "partial"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 6,
+          "global_step": 7572,
+          "success": 35.80415725708008,
+          "precision": 35.596282958984375,
+          "runtime_fps": 1.281798243522644,
+          "run_status": "partial"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 8,
+          "global_step": 10096,
+          "success": 28.211158752441406,
+          "precision": 29.42888641357422,
+          "runtime_fps": 1.2403985261917114,
+          "run_status": "partial"
+        },
+        {
+          "arm": "Full",
+          "epoch": 2,
+          "global_step": 2524,
+          "success": 38.04486083984375,
+          "precision": 54.605037689208984,
+          "runtime_fps": 1.5461347103118896,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 4,
+          "global_step": 5048,
+          "success": 33.1498908996582,
+          "precision": 60.53610610961914,
+          "runtime_fps": 1.6182900667190552,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 6,
+          "global_step": 7572,
+          "success": 45.75164031982422,
+          "precision": 58.65645980834961,
+          "runtime_fps": 1.644357442855835,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 8,
+          "global_step": 10096,
+          "success": 23.34463882446289,
+          "precision": 19.20897102355957,
+          "runtime_fps": 1.7062063217163086,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 10,
+          "global_step": 12620,
+          "success": 32.847923278808594,
+          "precision": 27.286651611328125,
+          "runtime_fps": 1.773585319519043,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 12,
+          "global_step": 15144,
+          "success": 44.60065841674805,
+          "precision": 46.52735137939453,
+          "runtime_fps": 1.819716215133667,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 14,
+          "global_step": 17668,
+          "success": 26.462799072265625,
+          "precision": 24.950767517089844,
+          "runtime_fps": 1.9032658338546753,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 16,
+          "global_step": 20192,
+          "success": 39.05580139160156,
+          "precision": 61.72539138793945,
+          "runtime_fps": 1.9207342863082886,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 18,
+          "global_step": 22716,
+          "success": 38.051422119140625,
+          "precision": 50.96608352661133,
+          "runtime_fps": 1.922213077545166,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 20,
+          "global_step": 25240,
+          "success": 42.19803237915039,
+          "precision": 51.76258087158203,
+          "runtime_fps": 1.9251415729522705,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 22,
+          "global_step": 27764,
+          "success": 42.54158020019531,
+          "precision": 40.21006774902344,
+          "runtime_fps": 1.9144846200942993,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 24,
+          "global_step": 30288,
+          "success": 44.419036865234375,
+          "precision": 51.405906677246094,
+          "runtime_fps": 1.8991589546203613,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 26,
+          "global_step": 32812,
+          "success": 46.0273551940918,
+          "precision": 49.25382995605469,
+          "runtime_fps": 1.8722834587097168,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 28,
+          "global_step": 35336,
+          "success": 45.44310760498047,
+          "precision": 48.78446578979492,
+          "runtime_fps": 1.8716468811035156,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 30,
+          "global_step": 37860,
+          "success": 42.99015426635742,
+          "precision": 42.505470275878906,
+          "runtime_fps": 1.860293984413147,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 32,
+          "global_step": 40384,
+          "success": 38.839168548583984,
+          "precision": 38.27680587768555,
+          "runtime_fps": 1.8516899347305298,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 34,
+          "global_step": 42908,
+          "success": 38.19365692138672,
+          "precision": 40.184898376464844,
+          "runtime_fps": 1.8343077898025513,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 36,
+          "global_step": 45432,
+          "success": 40.10612869262695,
+          "precision": 38.95295715332031,
+          "runtime_fps": 1.8253697156906128,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 38,
+          "global_step": 47956,
+          "success": 48.50437545776367,
+          "precision": 58.46389389038086,
+          "runtime_fps": 1.8175071477890015,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 40,
+          "global_step": 50480,
+          "success": 43.67942810058594,
+          "precision": 46.6509895324707,
+          "runtime_fps": 1.8218222856521606,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 42,
+          "global_step": 53004,
+          "success": 47.48686981201172,
+          "precision": 51.30087661743164,
+          "runtime_fps": 1.815506935119629,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 44,
+          "global_step": 55528,
+          "success": 46.50656509399414,
+          "precision": 49.87746047973633,
+          "runtime_fps": 1.8014297485351562,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 46,
+          "global_step": 58052,
+          "success": 46.78009033203125,
+          "precision": 51.083152770996094,
+          "runtime_fps": 1.7925738096237183,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 48,
+          "global_step": 60576,
+          "success": 48.18708801269531,
+          "precision": 53.98468780517578,
+          "runtime_fps": 1.7880765199661255,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 50,
+          "global_step": 63100,
+          "success": 48.31400680541992,
+          "precision": 53.005470275878906,
+          "runtime_fps": 1.7773982286453247,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 52,
+          "global_step": 65624,
+          "success": 48.32057189941406,
+          "precision": 52.43436050415039,
+          "runtime_fps": 1.785007357597351,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 54,
+          "global_step": 68148,
+          "success": 48.793212890625,
+          "precision": 54.3555793762207,
+          "runtime_fps": 1.7851431369781494,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 56,
+          "global_step": 70672,
+          "success": 48.12800979614258,
+          "precision": 52.333702087402344,
+          "runtime_fps": 1.786702036857605,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 58,
+          "global_step": 73196,
+          "success": 47.053611755371094,
+          "precision": 50.89934539794922,
+          "runtime_fps": 1.7947393655776978,
+          "run_status": "complete"
+        },
+        {
+          "arm": "Full",
+          "epoch": 60,
+          "global_step": 75720,
+          "success": 48.80196762084961,
+          "precision": 54.88840866088867,
+          "runtime_fps": 1.7973424196243286,
+          "run_status": "complete"
+        }
+      ],
+      "tracking_summary": [
+        {
+          "arm": "B0",
+          "status": "complete",
+          "last_complete_epoch": 60,
+          "success": 26.902624130249023,
+          "precision": 25.600656509399414,
+          "tail3_observed_success": 27.871992111206055,
+          "tail3_observed_precision": 26.599198659261067,
+          "runtime_fps": 7.915044784545898,
+          "validation_points": 30,
+          "formal_late3_available": false,
+          "descriptive_delta_success_vs_b0": 0.0,
+          "descriptive_delta_precision_vs_b0": 0.0
+        },
+        {
+          "arm": "B1-GRU",
+          "status": "complete",
+          "last_complete_epoch": 60,
+          "success": 51.972652435302734,
+          "precision": 61.95296096801758,
+          "tail3_observed_success": 51.29941940307617,
+          "tail3_observed_precision": 60.04194259643555,
+          "runtime_fps": 2.001248598098755,
+          "validation_points": 30,
+          "formal_late3_available": false,
+          "descriptive_delta_success_vs_b0": 25.07002830505371,
+          "descriptive_delta_precision_vs_b0": 36.352304458618164
+        },
+        {
+          "arm": "B1-CfC",
+          "status": "complete",
+          "last_complete_epoch": 60,
+          "success": 28.79540252685547,
+          "precision": 28.017505645751953,
+          "tail3_observed_success": 29.922320048014324,
+          "tail3_observed_precision": 29.075493494669598,
+          "runtime_fps": 1.9488615989685059,
+          "validation_points": 30,
+          "formal_late3_available": false,
+          "descriptive_delta_success_vs_b0": 1.8927783966064453,
+          "descriptive_delta_precision_vs_b0": 2.416849136352539
+        },
+        {
+          "arm": "Full-minus-B3",
+          "status": "partial: crash in epoch-10 validation",
+          "last_complete_epoch": 8,
+          "success": 28.211158752441406,
+          "precision": 29.42888641357422,
+          "tail3_observed_success": 30.441647211710613,
+          "tail3_observed_precision": 31.350112279256184,
+          "runtime_fps": 1.2403985261917114,
+          "validation_points": 4,
+          "formal_late3_available": false,
+          "descriptive_delta_success_vs_b0": 1.3085346221923828,
+          "descriptive_delta_precision_vs_b0": 3.8282299041748047
+        },
+        {
+          "arm": "Full",
+          "status": "complete",
+          "last_complete_epoch": 60,
+          "success": 48.80196762084961,
+          "precision": 54.88840866088867,
+          "tail3_observed_success": 47.994529724121094,
+          "tail3_observed_precision": 52.70715204874674,
+          "runtime_fps": 1.7973424196243286,
+          "validation_points": 30,
+          "formal_late3_available": false,
+          "descriptive_delta_success_vs_b0": 21.899343490600586,
+          "descriptive_delta_precision_vs_b0": 29.287752151489258
+        }
+      ],
+      "tracking_bars": [
+        {
+          "arm": "B0",
+          "metric": "Success",
+          "value": 26.902624130249023,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "B0",
+          "metric": "Precision",
+          "value": 25.600656509399414,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "metric": "Success",
+          "value": 51.972652435302734,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "B1-GRU",
+          "metric": "Precision",
+          "value": 61.95296096801758,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "Success",
+          "value": 28.79540252685547,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "Precision",
+          "value": 28.017505645751953,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "metric": "Success",
+          "value": 28.211158752441406,
+          "epoch": 8,
+          "status": "partial: crash in epoch-10 validation"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "metric": "Precision",
+          "value": 29.42888641357422,
+          "epoch": 8,
+          "status": "partial: crash in epoch-10 validation"
+        },
+        {
+          "arm": "Full",
+          "metric": "Success",
+          "value": 48.80196762084961,
+          "epoch": 60,
+          "status": "complete"
+        },
+        {
+          "arm": "Full",
+          "metric": "Precision",
+          "value": 54.88840866088867,
+          "epoch": 60,
+          "status": "complete"
+        }
+      ],
+      "b1_summary": [
+        {
+          "arm": "B1-GRU",
+          "epoch": 60,
+          "valid_rows": 1844,
+          "learned_rmse_m": 6.314978,
+          "cv_rmse_m": 6.302485,
+          "learned_minus_cv_m": 0.012494,
+          "bootstrap_ci_low_m": -0.000166,
+          "bootstrap_ci_high_m": 0.02682,
+          "target_in_support": 0.7115,
+          "coverage_50": 0.9154,
+          "coverage_80": 0.9295,
+          "coverage_95": 0.9376,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "B1-CfC",
+          "epoch": 60,
+          "valid_rows": 1831,
+          "learned_rmse_m": 12.491975,
+          "cv_rmse_m": 12.758745,
+          "learned_minus_cv_m": -0.266769,
+          "bootstrap_ci_low_m": -0.303133,
+          "bootstrap_ci_high_m": -0.229701,
+          "target_in_support": 0.4194,
+          "coverage_50": 0.4304,
+          "coverage_80": 0.527,
+          "coverage_95": 0.6029,
+          "promotion": "UNPAIRED / under-calibrated"
+        },
+        {
+          "arm": "Full",
+          "epoch": 60,
+          "valid_rows": 1846,
+          "learned_rmse_m": 6.455751,
+          "cv_rmse_m": 6.446156,
+          "learned_minus_cv_m": 0.009595,
+          "bootstrap_ci_low_m": -0.004154,
+          "bootstrap_ci_high_m": 0.026046,
+          "target_in_support": 0.721,
+          "coverage_50": 0.8456,
+          "coverage_80": 0.8987,
+          "coverage_95": 0.9247,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 8,
+          "valid_rows": 1870,
+          "learned_rmse_m": 12.010901,
+          "cv_rmse_m": 12.33011,
+          "learned_minus_cv_m": -0.319209,
+          "bootstrap_ci_low_m": -0.36942,
+          "bootstrap_ci_high_m": -0.271992,
+          "target_in_support": 0.4102,
+          "coverage_50": 0.4818,
+          "coverage_80": 0.5663,
+          "coverage_95": 0.6508,
+          "promotion": "PARTIAL / under-calibrated"
+        }
+      ],
+      "b1_chart": [
+        {
+          "arm": "B1-GRU",
+          "metric": "Learned",
+          "rmse_m": 6.314978,
+          "epoch": 60,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "B1-GRU",
+          "metric": "CV",
+          "rmse_m": 6.302485,
+          "epoch": 60,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "Learned",
+          "rmse_m": 12.491975,
+          "epoch": 60,
+          "promotion": "UNPAIRED / under-calibrated"
+        },
+        {
+          "arm": "B1-CfC",
+          "metric": "CV",
+          "rmse_m": 12.758745,
+          "epoch": 60,
+          "promotion": "UNPAIRED / under-calibrated"
+        },
+        {
+          "arm": "Full",
+          "metric": "Learned",
+          "rmse_m": 6.455751,
+          "epoch": 60,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "Full",
+          "metric": "CV",
+          "rmse_m": 6.446156,
+          "epoch": 60,
+          "promotion": "FAIL"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "metric": "Learned",
+          "rmse_m": 12.010901,
+          "epoch": 8,
+          "promotion": "PARTIAL / under-calibrated"
+        },
+        {
+          "arm": "Full-minus-B3",
+          "metric": "CV",
+          "rmse_m": 12.33011,
+          "epoch": 8,
+          "promotion": "PARTIAL / under-calibrated"
+        }
+      ],
+      "b2_summary": [
+        {
+          "arm": "Full",
+          "epoch": 60,
+          "status": "complete",
+          "csv_rows": 1928,
+          "csv_tracklets": 102,
+          "missing_nonfirst_endpoints": 251,
+          "global_need_rows": 1676,
+          "novel_pool_target_recall": 0.06324582338902147,
+          "mechanism_threshold": 0.15,
+          "mechanism_passed": false,
+          "selection_eligible_rows": 106,
+          "selection_row_recall": 1.0,
+          "selection_point_recall": 0.9738219895287958,
+          "relation_auroc_row_mean": 0.5055469909301546,
+          "relation_ap_row_mean": 0.05075701228849318,
+          "available_rows": 249,
+          "available_rate": 0.129149377593361,
+          "available_center_gain_m": -0.5255784671751996,
+          "available_iou_gain": -0.15642439087837015,
+          "available_harm_rate": 0.6024096385542169,
+          "no_target_available_rows": 143,
+          "no_target_center_gain_m": -1.127360615504983,
+          "no_target_harm_rate": 0.8251748251748252,
+          "strict_miss_rows": 123,
+          "strict_novel_recovered_rows": 1,
+          "strict_novel_recall": 0.008130081300813009,
+          "strict_observation_error_median_m": 18.937969967275656,
+          "strict_observation_error_p90_m": 37.569961563036244,
+          "active_b1_prior_rows": 0,
+          "fallback_cv_rows": 1846,
+          "coverage_need_rate": 1.0,
+          "corridor_valid_rate": 0.9403526970954357,
+          "prepool_points_median": 0.0,
+          "b3_calibrated_rate": 0.0,
+          "b3_action_coverage": 0.0
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 8,
+          "status": "partial",
+          "csv_rows": 1952,
+          "csv_tracklets": 102,
+          "missing_nonfirst_endpoints": 227,
+          "global_need_rows": 1702,
+          "novel_pool_target_recall": 0.08401880141010576,
+          "mechanism_threshold": 0.15,
+          "mechanism_passed": false,
+          "selection_eligible_rows": 143,
+          "selection_row_recall": 1.0,
+          "selection_point_recall": 0.7351797862001944,
+          "relation_auroc_row_mean": 0.5200104303533553,
+          "relation_ap_row_mean": 0.06698587855085458,
+          "available_rows": 851,
+          "available_rate": 0.4359631147540984,
+          "available_center_gain_m": -0.13314071024058666,
+          "available_iou_gain": -0.0560745314101393,
+          "available_harm_rate": 0.5675675675675675,
+          "no_target_available_rows": 708,
+          "no_target_center_gain_m": -0.574243798276825,
+          "no_target_harm_rate": 0.6313559322033898,
+          "strict_miss_rows": 759,
+          "strict_novel_recovered_rows": 28,
+          "strict_novel_recall": 0.03689064558629776,
+          "strict_observation_error_median_m": 15.457817683763864,
+          "strict_observation_error_p90_m": 24.914562438132418,
+          "active_b1_prior_rows": 0,
+          "fallback_cv_rows": 1870,
+          "coverage_need_rate": 1.0,
+          "corridor_valid_rate": 0.9415983606557377,
+          "prepool_points_median": 0.0,
+          "b3_calibrated_rate": 0.0,
+          "b3_action_coverage": 0.0
+        }
+      ],
+      "b2_chart": [
+        {
+          "arm": "Full",
+          "epoch": 60,
+          "novel_pool_target_recall": 0.06324582338902147,
+          "strict_novel_recall": 0.008130081300813009,
+          "selection_row_recall": 1.0,
+          "selection_point_recall": 0.9738219895287958
+        },
+        {
+          "arm": "Full-minus-B3",
+          "epoch": 8,
+          "novel_pool_target_recall": 0.08401880141010576,
+          "strict_novel_recall": 0.03689064558629776,
+          "selection_row_recall": 1.0,
+          "selection_point_recall": 0.7351797862001944
+        }
+      ],
+      "contract_audit": [
+        {
+          "arm": "B0",
+          "initial_equal": true,
+          "input100_equal": true,
+          "step1": "126580d7",
+          "step100": "4231eff7",
+          "b0_updates": 75720,
+          "plugin_updates": 0,
+          "frozen": false
+        },
+        {
+          "arm": "B1-GRU",
+          "initial_equal": true,
+          "input100_equal": true,
+          "step1": "6b901e2f",
+          "step100": "ab98b21c",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "frozen": false
+        },
+        {
+          "arm": "B1-CfC",
+          "initial_equal": true,
+          "input100_equal": true,
+          "step1": "726e7516",
+          "step100": "dc9467bf",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "frozen": false
+        },
+        {
+          "arm": "Full-minus-B3",
+          "initial_equal": true,
+          "input100_equal": true,
+          "step1": "b875c2ab",
+          "step100": "8e6910b0",
+          "b0_updates": 10096,
+          "plugin_updates": 1704,
+          "frozen": false
+        },
+        {
+          "arm": "Full",
+          "initial_equal": true,
+          "input100_equal": true,
+          "step1": "2d036f20",
+          "step100": "d94bb0c3",
+          "b0_updates": 75720,
+          "plugin_updates": 12780,
+          "frozen": false
+        }
+      ],
+      "issues": [
+        {
+          "priority": "P0",
+          "area": "B1 acquisition",
+          "finding": "motion prepass omits acquisition_margin_parallel_perp; all online B1 priors are invalid",
+          "impact": "learned mean/margin never controls the B2 crop; coverage-need is always on",
+          "required_action": "return and unbatch the margin field; add online source/margin contract test"
+        },
+        {
+          "priority": "P0",
+          "area": "Hybrid FPS",
+          "finding": "identical-XY candidates can repeat index 0",
+          "impact": "Full-minus-B3 crashes with selected rows are not unique",
+          "required_action": "mask selected indices and test identical XY / different Z plus quota borrowing"
+        },
+        {
+          "priority": "P0",
+          "area": "Matched B0",
+          "finding": "B0 parameter and Adam hashes diverge at step 1 despite identical inputs",
+          "impact": "cross-arm deltas have no module-level causal attribution",
+          "required_action": "sequential same-GPU step1/100 gradient and optimizer-state audit"
+        },
+        {
+          "priority": "P0",
+          "area": "Empty crop",
+          "finding": "empty B0 crop returns before B2 and before writing diagnostics",
+          "impact": "recovery is disabled on the hardest frames; CSV misses 10–12% endpoints",
+          "required_action": "run extension-only recovery and always emit a diagnostic endpoint row"
+        },
+        {
+          "priority": "P1",
+          "area": "Counterfactual v3",
+          "finding": "float32 local B0 keys are compared with re-transformed float64 global points at 1e-6",
+          "impact": "counterfactual raw and novel target counts become identical",
+          "required_action": "reuse exact online crop arrays/key path and assert row-wise equivalence"
+        },
+        {
+          "priority": "P1",
+          "area": "Acquisition",
+          "finding": "novel target recall is 6.32% (Full) / 8.40% (partial), below 15%",
+          "impact": "selection cannot recover evidence that never enters the bounded support",
+          "required_action": "repair B1 path first, then reevaluate bounded support; do not enlarge blindly"
+        },
+        {
+          "priority": "P1",
+          "area": "Consensus voting",
+          "finding": "coherent background often gets high consistency/inlier scores",
+          "impact": "Full available candidates have negative mean gain and high harm",
+          "required_action": "penalize sparse effective support and expose count/mass to held-out B3 calibration"
+        },
+        {
+          "priority": "P1",
+          "area": "B3",
+          "finding": "no held-out calibration/dev artifact",
+          "impact": "action coverage is zero and Full score is observation output",
+          "required_action": "calibrate each late-3 checkpoint only after upstream retraining"
+        },
+        {
+          "priority": "P2",
+          "area": "Formal evaluation",
+          "finding": "epoch59 is not independently evaluated; SeqTrack-strict v26 is absent; one seed only",
+          "impact": "no formal late-3, paired CI, external comparison, or stability claim",
+          "required_action": "test e58/e59/e60, add SeqTrack-strict, then full dataset"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "src_v26_five_arm",
+      "label": "v26 mini five-arm TensorBoard, checkpoints and candidate diagnostics",
+      "path": "artifacts/ct_checks/reports/20260905_v26_mini_five_arm/report_data.sqlite",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT snapshot_json FROM report_snapshot WHERE snapshot_id='v26_five_arm'",
+        "tables_used": [
+          "report_snapshot"
+        ],
+        "executed_at": "2026-09-05T12:00:00+08:00"
+      }
+    }
+  ]
+}

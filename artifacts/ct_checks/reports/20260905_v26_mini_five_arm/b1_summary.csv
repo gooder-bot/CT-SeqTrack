@@ -1,0 +1,5 @@
+﻿arm,epoch,valid_rows,learned_rmse_m,cv_rmse_m,learned_minus_cv_m,bootstrap_ci_low_m,bootstrap_ci_high_m,target_in_support,coverage_50,coverage_80,coverage_95,promotion
+B1-GRU,60,1844,6.314978,6.302485,0.012494,-0.000166,0.02682,0.7115,0.9154,0.9295,0.9376,FAIL
+B1-CfC,60,1831,12.491975,12.758745,-0.266769,-0.303133,-0.229701,0.4194,0.4304,0.527,0.6029,UNPAIRED / under-calibrated
+Full,60,1846,6.455751,6.446156,0.009595,-0.004154,0.026046,0.721,0.8456,0.8987,0.9247,FAIL
+Full-minus-B3,8,1870,12.010901,12.33011,-0.319209,-0.36942,-0.271992,0.4102,0.4818,0.5663,0.6508,PARTIAL / under-calibrated

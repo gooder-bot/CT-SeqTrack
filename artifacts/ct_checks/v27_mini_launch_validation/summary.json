@@ -1,0 +1,44 @@
+{
+  "date": "2026-09-05",
+  "scope": "mini workers=4 / preloading / validation interval 5 launch, model transaction, calibration config identity and checkpoint resume",
+  "pytest_exit_code": 0,
+  "elapsed_seconds": 28.67,
+  "command": [
+    "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v27_runtime_env\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "-q",
+    "-rs",
+    "--disable-warnings",
+    "tests/test_ct_lightning_runtime.py",
+    "tests/test_ct_v27_checkpoint_runtime.py",
+    "tests/test_ct_v27_checkpoint_loading.py",
+    "tests/test_ct_v27_full_checkpoint.py",
+    "tests/test_ct_v27_launch.py",
+    "tests/test_ct_v27_configs.py",
+    "tests/test_ct_v27_matrix.py",
+    "tests/test_ct_v27_full_model.py::test_actual_lightning_full_dual_stream_training_and_epoch_checkpoint"
+  ],
+  "tail": [
+    "....ss................................                                   [100%]",
+    "=========================== short test summary info ===========================",
+    "SKIPPED [2] tests\\test_ct_lightning_runtime.py:214: CUDA AMP overflow smoke",
+    "36 passed, 2 skipped, 27 warnings in 27.12s"
+  ],
+  "server_experiments_started": false,
+  "cuda_four_process_capacity_tested": false,
+  "runtime_resume_test_workers": 0,
+  "compileall": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff_check": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'datasets/protocol_utils.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/EXPERIMENT_PROTOCOL.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/FORMAL_TOOLING.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/evidence_memory.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/motion.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/pipeline.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/pipeline_contracts.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_variant.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ctseqtrack.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'need_to_do.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tools/calibrate_ct_actions.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tools/export_ct_action_rows.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/checkpoint_loading.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/ct_search.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/dual_stream.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/lightning_runtime.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/online_contract.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/recursive_state.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/run_provenance.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/sampling_utils.py', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "pytest_passed": 36,
+  "pytest_skipped": 2,
+  "launch_document": "docs/CTSEQTRACK_V27_MINI_LAUNCH.md"
+}

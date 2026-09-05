@@ -6,6 +6,7 @@ import math
 import numpy as np
 
 from utils.box_membership import axis_aligned_box_membership_mask
+from utils.b1_acquisition import acquisition_axis, projected_box_half_extents
 
 
 def _finite_positive(value, fallback):
@@ -418,7 +419,7 @@ def build_uncertainty_prior_tube(
         max_length=24.0,
         max_width=10.0,
         source_id=1,
-        direction_xy=None):
+        direction_xy=None, enable_v27=False, first_frame_size=None):
     """Build a base-preserving prior tube from a learned local B1 state.
 
     ``mu_xy`` and ``velocity_xy`` are expressed in the latest recursive box
@@ -460,7 +461,9 @@ def build_uncertainty_prior_tube(
     world_velocity = local_to_world(velocity_xy)
     displacement_norm = float(np.linalg.norm(world_displacement))
     speed = float(np.linalg.norm(world_velocity))
-    if direction_xy is not None:
+    if bool(enable_v27):
+        _, direction_yaw, _ = acquisition_axis(world_displacement, latest_yaw)
+    elif direction_xy is not None:
         local_direction = np.asarray(direction_xy, dtype=np.float64).reshape(-1)
         if local_direction.size != 2 or not np.isfinite(local_direction).all():
             return None, {
@@ -483,9 +486,16 @@ def build_uncertainty_prior_tube(
     else:
         direction_yaw = latest_yaw
 
-    size = np.asarray(latest_box.wlh, dtype=np.float64)
+    size = np.asarray(
+        latest_box.wlh if first_frame_size is None else first_frame_size,
+        dtype=np.float64)
     object_width = max(float(size[0]), 1e-3)
     object_length = max(float(size[1]), 1e-3)
+    if bool(enable_v27):
+        projected_half = projected_box_half_extents(size, latest_yaw, direction_yaw)
+        object_length, object_width = 2. * projected_half[:2]
+        max_length = object_length + displacement_norm + 12.
+        max_width = object_width + 6.
     parallel_half_extent = (
         0.5 * displacement_norm + 0.5 * object_length
         + coverage_scale * float(sigma[0]))
@@ -529,6 +539,10 @@ def build_uncertainty_prior_tube(
         "requested_length": requested_length,
         "requested_width": requested_width,
         "truncated": bool(truncated),
+        "acquisition_direction_world_xy": np.asarray(
+            (math.cos(direction_yaw), math.sin(direction_yaw))),
+        "base_projected_length": float(object_length),
+        "base_projected_width": float(object_width),
         "endpoint_center": (
             np.asarray(latest_box.center, dtype=np.float64)
             + np.r_[world_displacement, 0.0]),
@@ -546,7 +560,7 @@ def build_b1_uncertainty_support(
         standardized_residual_quantile=(1.0, 1.0),
         min_direction_speed=0.2,
         max_length=24.0,
-        max_width=10.0):
+        max_width=10.0, enable_v27=False, first_frame_size=None):
     """Pure B1-to-support contract shared by training and inference.
 
     ``prediction`` is a frozen box-only B1 result in the latest recursive
@@ -615,6 +629,7 @@ def build_b1_uncertainty_support(
         max_width=float(max_width),
         source_id=int(prediction.get("source_id", 1)),
         direction_xy=prediction.get("direction_xy"),
+        enable_v27=enable_v27, first_frame_size=first_frame_size,
     )
     diagnostics["standardized_residual_quantile"] = (
         residual_quantile.astype(np.float64).tolist())
@@ -644,7 +659,8 @@ def resolve_b1_search_support(
         fallback_acceleration_weight=0.5,
         fallback_max_yaw_rate=math.pi / 2.0,
         fallback_min_displacement=0.2,
-        fallback_require_recent_transition=False):
+        fallback_require_recent_transition=False,
+        enable_v27=False, first_frame_size=None):
     """Resolve the identical B1/fallback/base-only support in all paths."""
     query_delta_t = float(delta_t[0]) if len(delta_t) else 0.0
     if (bool(use_b1_prepass) and isinstance(prediction, dict)
@@ -660,6 +676,7 @@ def resolve_b1_search_support(
             min_direction_speed=min_direction_speed,
             max_length=max_length,
             max_width=max_width,
+            enable_v27=enable_v27, first_frame_size=first_frame_size,
         )
         if support is not None:
             diagnostics.update({
@@ -684,6 +701,20 @@ def resolve_b1_search_support(
     diagnostics["prior_source"] = (
         "fallback_cv" if support is not None else "base_only")
     diagnostics["source_id"] = 2 if support is not None else 0
+    if support is not None and bool(enable_v27):
+        latest = history_boxes[0]
+        displacement = np.asarray(support.center[:2]) - np.asarray(latest.center[:2])
+        axis, yaw, _ = acquisition_axis(displacement, _signed_box_yaw(latest))
+        size = np.asarray(latest.wlh if first_frame_size is None
+                          else first_frame_size, dtype=np.float64).copy()
+        half = projected_box_half_extents(size, _signed_box_yaw(latest), yaw)
+        margins = np.clip(np.asarray(fixed_margins, dtype=np.float64), (2., 1.), (6., 3.))
+        support.orientation = latest.orientation.__class__(axis=[0, 0, 1], radians=yaw)
+        support.wlh = np.asarray((2. * half[1] + 2. * margins[1],
+                                  2. * half[0] + 2. * margins[0], size[2]))
+        diagnostics.update(acquisition_direction_world_xy=axis,
+                           base_projected_length=2. * half[0],
+                           base_projected_width=2. * half[1])
     diagnostics.setdefault("query_delta_t", query_delta_t)
     diagnostics.setdefault("gap_ratio", 1.0)
     return support, diagnostics
@@ -718,6 +749,11 @@ def resolve_joint_search_geometry(
             diagnostics["endpoint_center"], dtype=np.float64).copy()
         endpoint.orientation = copy.deepcopy(tube.orientation)
         endpoint.wlh = np.asarray(latest.wlh, dtype=np.float64).copy()
+        if bool(kwargs.get('enable_v27', False)):
+            if kwargs.get('first_frame_size') is not None:
+                endpoint.wlh = np.asarray(kwargs['first_frame_size'], dtype=np.float64).copy()
+            endpoint.wlh[0] = diagnostics['base_projected_width']
+            endpoint.wlh[1] = diagnostics['base_projected_length']
         support_scale = max(float(diagnostics.get(
             "coverage_scale", kwargs.get("coverage_scale", 2.448))), 0.0)
         parallel_margin = support_scale * float(diagnostics.get(
@@ -727,10 +763,12 @@ def resolve_joint_search_geometry(
             "sigma_perpendicular", fixed_margins[1] / max(
                 support_scale, 1e-6)))
         endpoint.wlh[0] = min(
-            float(kwargs.get("max_width", 10.0)),
+            (float(endpoint.wlh[0]) + 6. if kwargs.get('enable_v27', False)
+             else float(kwargs.get("max_width", 10.0))),
             float(endpoint.wlh[0]) + 2.0 * perpendicular_margin)
         endpoint.wlh[1] = min(
-            float(kwargs.get("max_length", 24.0)),
+            (float(endpoint.wlh[1]) + 12. if kwargs.get('enable_v27', False)
+             else float(kwargs.get("max_length", 24.0))),
             float(endpoint.wlh[1]) + 2.0 * parallel_margin)
     else:
         endpoint = endpoint_or_tube
@@ -768,6 +806,8 @@ def resolve_joint_search_geometry(
             max_width=float(kwargs.get("max_width", 10.0)),
             source_id=int(diagnostics.get("source_id", 2)),
             direction_xy=local_velocity,
+            enable_v27=bool(kwargs.get('enable_v27', False)),
+            first_frame_size=kwargs.get('first_frame_size'),
         )
         if tube is None:
             return endpoint, None, {
@@ -776,6 +816,13 @@ def resolve_joint_search_geometry(
                 "reason": tube_diagnostics.get(
                     "reason", "invalid_fallback_tube"),
             }
+        if bool(kwargs.get('enable_v27', False)):
+            endpoint.orientation = copy.deepcopy(tube.orientation)
+            endpoint.wlh = np.asarray(
+                latest.wlh if kwargs.get('first_frame_size') is None
+                else kwargs['first_frame_size'], dtype=np.float64).copy()
+            endpoint.wlh[0] = tube_diagnostics['base_projected_width'] + 2. * min(fixed_margins[1], 3.)
+            endpoint.wlh[1] = tube_diagnostics['base_projected_length'] + 2. * min(fixed_margins[0], 6.)
         diagnostics = {**tube_diagnostics, **diagnostics}
     diagnostics.update({
         "valid": True,
@@ -1207,7 +1254,8 @@ def sample_joint_novel_extensions(
 
 
 def _merge_bounded_novel_sources(
-        baseline_points, source_points, tolerance=1e-6):
+        baseline_points, source_points, tolerance=1e-6,
+        baseline_ids=None, source_ids=None, enable_v27=False):
     """Return the stable-key v26 novel union shared by sampling/diagnosis."""
     baseline_points = np.asarray(baseline_points)
     source_points = tuple(
@@ -1223,6 +1271,32 @@ def _merge_bounded_novel_sources(
             or any(bit not in valid_bits for bit, _ in source_points)):
         raise ValueError("v26 source bits must be endpoint/tube/corridor")
     tolerance = _finite_positive(tolerance, 1e-6)
+
+    if bool(enable_v27) and (baseline_ids is None or source_ids is None):
+        raise ValueError('v27 acquisition requires original point IDs for every crop')
+    use_ids = baseline_ids is not None or source_ids is not None
+    if use_ids:
+        if baseline_ids is None or source_ids is None or len(source_ids) != len(source_points):
+            raise ValueError('point IDs must be supplied for all acquisition arrays')
+        def checked_ids(value, size):
+            ids = np.asarray(value)
+            if ids.shape != (size,) or ids.dtype.kind not in 'iu' or np.any(ids < 0):
+                raise ValueError('raw point IDs must be nonnegative aligned integer vectors')
+            return ids.astype(np.int64, copy=False)
+        base_keys = set(checked_ids(baseline_ids, len(baseline_points)).tolist())
+        all_source_keys = [checked_ids(ids, len(points))
+                           for ids, (_, points) in zip(source_ids, source_points)]
+        merged = {}
+        for (bit, points), ids in zip(source_points, all_source_keys):
+            for point, point_id in zip(points, ids):
+                key = int(point_id)
+                if key in base_keys or not np.isfinite(point[:3]).all():
+                    continue
+                if key in merged:
+                    merged[key] = (merged[key][0], merged[key][1] | bit)
+                else:
+                    merged[key] = (point, bit)
+        return merged
 
     def exact_keys(points):
         return np.rint(points[:, :3] / tolerance).astype(np.int64)
@@ -1245,7 +1319,8 @@ def _merge_bounded_novel_sources(
 
 def bounded_novel_support_pool(
         baseline_points, endpoint_points, tube_points, corridor_points,
-        tolerance=1e-6):
+        tolerance=1e-6, *, baseline_ids=None, endpoint_ids=None,
+        tube_ids=None, corridor_ids=None, enable_v27=False, return_ids=False):
     """Return the complete deterministic v26 novel pool and bitmask.
 
     This is the single stable-key implementation used by both the online
@@ -1258,21 +1333,31 @@ def bounded_novel_support_pool(
     merged = _merge_bounded_novel_sources(
         baseline_points,
         ((1, endpoint_points), (2, tube_points), (4, corridor_points)),
-        tolerance=tolerance)
+        tolerance=tolerance, baseline_ids=baseline_ids,
+        source_ids=(None if all(value is None for value in
+                    (endpoint_ids, tube_ids, corridor_ids)) else
+                    (endpoint_ids, tube_ids, corridor_ids)),
+        enable_v27=enable_v27)
     ordered_keys = sorted(merged)
-    return (
+    result = (
         np.asarray(
             [merged[key][0] for key in ordered_keys], dtype=np.float32
         ).reshape(-1, baseline_points.shape[1]),
         np.asarray(
             [merged[key][1] for key in ordered_keys], dtype=np.int64),
     )
+    if return_ids:
+        if baseline_ids is None:
+            raise ValueError('return_ids requires original point IDs')
+        return (*result, np.asarray(ordered_keys, dtype=np.int64))
+    return result
 
 
 def sample_bounded_novel_prepool(
         baseline_points, endpoint_points, tube_points, corridor_points,
         local_quota=512, corridor_quota=256, voxel_size=0.2,
-        tolerance=1e-6):
+        tolerance=1e-6, *, baseline_ids=None, endpoint_ids=None,
+        tube_ids=None, corridor_ids=None, enable_v27=False):
     """Build the deterministic v26 extension-only 768-point pre-pool.
 
     Source provenance is a bitmask: endpoint=1, tube=2, corridor=4.  Exact
@@ -1294,7 +1379,11 @@ def sample_bounded_novel_prepool(
     merged = _merge_bounded_novel_sources(
         baseline_points,
         ((1, endpoint_points), (2, tube_points), (4, corridor_points)),
-        tolerance=tolerance)
+        tolerance=tolerance, baseline_ids=baseline_ids,
+        source_ids=(None if all(value is None for value in
+                    (endpoint_ids, tube_ids, corridor_ids)) else
+                    (endpoint_ids, tube_ids, corridor_ids)),
+        enable_v27=enable_v27)
 
     ordered_keys = sorted(merged)
 
@@ -1362,7 +1451,7 @@ def sample_bounded_novel_prepool(
     ).reshape(-1, channels)
     pool_source = np.asarray(
         [merged[key][1] for key in ordered_keys], dtype=np.int64)
-    return output, valid, source, {
+    diagnostics = {
         "active": bool(selected),
         "sample_count": int(min(len(selected), output_size)),
         "available_count": int(len(merged)),
@@ -1375,6 +1464,12 @@ def sample_bounded_novel_prepool(
         "_pool_points": pool_points,
         "_pool_source": pool_source,
     }
+    if baseline_ids is not None:
+        selected_ids = np.full(output_size, -1, dtype=np.int64)
+        selected_ids[:min(len(selected), output_size)] = selected[:output_size]
+        diagnostics['_selected_point_ids'] = selected_ids
+        diagnostics['_pool_point_ids'] = np.asarray(ordered_keys, dtype=np.int64)
+    return output, valid, source, diagnostics
 
 
 def build_causal_history_corridor(
@@ -1382,7 +1477,7 @@ def build_causal_history_corridor(
         first_frame_size=None,
         max_speed=20.0, max_acceleration=8.0,
         max_displacement=12.0, max_length=16.0,
-        width_padding=2.0, max_width=6.0):
+        width_padding=2.0, max_width=6.0, enable_v27=False):
     """Build a GT-free short-history backup corridor for catastrophic drift."""
     if not bool(enabled):
         return None, {"valid": False, "reason": "coverage_not_needed"}
@@ -1456,8 +1551,15 @@ def build_causal_history_corridor(
         else first_frame_size, dtype=np.float64).reshape(3).copy()
     segment = endpoint - anchor
     segment_norm = float(np.linalg.norm(segment[:2]))
-    requested_length = segment_norm + float(first_size[1])
-    maximum_segment = max(float(max_length) - float(first_size[1]), 0.0)
+    base_length, base_width = float(first_size[1]), float(first_size[0])
+    if bool(enable_v27):
+        _, support_yaw, _ = acquisition_axis(segment[:2], _signed_box_yaw(history_boxes[0]))
+        half = projected_box_half_extents(
+            first_size, _signed_box_yaw(history_boxes[0]), support_yaw)
+        base_length, base_width = 2. * half[:2]
+    requested_length = segment_norm + base_length
+    maximum_segment = (12. if bool(enable_v27)
+                       else max(float(max_length) - base_length, 0.0))
     length_clipped = segment_norm > maximum_segment
     if length_clipped and segment_norm > 1e-9:
         segment *= maximum_segment / segment_norm
@@ -1468,9 +1570,9 @@ def build_causal_history_corridor(
     if segment_norm <= 1e-6:
         return None, {"valid": False, "reason": "stationary"}
 
-    length = segment_norm + float(first_size[1])
-    requested_width = float(first_size[0]) + float(width_padding)
-    width = min(float(max_width), requested_width)
+    length = segment_norm + base_length
+    requested_width = base_width + float(width_padding)
+    width = requested_width if bool(enable_v27) else min(float(max_width), requested_width)
     corridor = copy.deepcopy(history_boxes[0])
     center = 0.5 * (anchor + endpoint)
     center[2] = centers[0][2]
@@ -1672,7 +1774,7 @@ def combined_search_support_statistics(
         point_arrays,
         valid_masks,
         support_sources,
-        voxel_size=0.2):
+        voxel_size=0.2, *, point_ids=None):
     """Summarize real endpoint/tube support after sampling.
 
     ``support_sources`` uses the stable contract 0=already present in the B0
@@ -1684,8 +1786,11 @@ def combined_search_support_statistics(
         raise ValueError("search support arrays/masks/sources must align")
     valid_points = []
     extension_points = []
-    for points, mask, source in zip(
-            point_arrays, valid_masks, support_sources):
+    valid_ids, extension_ids = [], []
+    if point_ids is not None and len(point_ids) != len(point_arrays):
+        raise ValueError('search raw point IDs must align with branches')
+    for index, (points, mask, source) in enumerate(zip(
+            point_arrays, valid_masks, support_sources)):
         points = np.asarray(points)
         mask = np.asarray(mask).reshape(-1) > 0
         source = np.asarray(source).reshape(-1)
@@ -1695,11 +1800,21 @@ def combined_search_support_statistics(
             raise ValueError("search support source must match points")
         finite = np.isfinite(points[:, :min(3, points.shape[1])]).all(axis=1)
         selected = mask & finite
+        ids = None if point_ids is None else np.asarray(point_ids[index])
+        if ids is not None:
+            if ids.shape != mask.shape or ids.dtype.kind not in 'iu':
+                raise ValueError('search raw point IDs must be aligned integers')
+            if np.any(ids[selected] < 0):
+                raise ValueError('valid search slots require original raw IDs')
         if selected.any():
             valid_points.append(points[selected, :3])
+            if ids is not None:
+                valid_ids.append(ids[selected])
         extension = selected & (source > 0)
         if extension.any():
             extension_points.append(points[extension, :3])
+            if ids is not None:
+                extension_ids.append(ids[extension])
 
     valid = (
         np.concatenate(valid_points, axis=0)
@@ -1708,12 +1823,14 @@ def combined_search_support_statistics(
         np.concatenate(extension_points, axis=0)
         if extension_points else np.empty((0, 3), dtype=np.float32))
     if len(valid):
-        valid_keys = np.rint(valid / 1e-6).astype(np.int64)
+        valid_keys = (np.concatenate(valid_ids) if point_ids is not None
+                      else np.rint(valid / 1e-6).astype(np.int64))
         total_count = int(np.unique(valid_keys, axis=0).shape[0])
     else:
         total_count = 0
     if len(extension):
-        exact_keys = np.rint(extension / 1e-6).astype(np.int64)
+        exact_keys = (np.concatenate(extension_ids) if point_ids is not None
+                      else np.rint(extension / 1e-6).astype(np.int64))
         extension_count = int(np.unique(exact_keys, axis=0).shape[0])
         safe_voxel = max(float(voxel_size), 1e-6)
         voxel_keys = np.floor(extension / safe_voxel).astype(np.int64)

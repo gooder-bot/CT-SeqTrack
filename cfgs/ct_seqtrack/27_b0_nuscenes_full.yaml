@@ -1,0 +1,9 @@
+_base_: 27_b0.yaml
+experiment_name: ct27_b0_nuscenes_full_scratch_seed42
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+workers: 12
+check_val_every_n_epoch: 1

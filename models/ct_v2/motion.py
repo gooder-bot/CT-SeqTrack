@@ -1,6 +1,7 @@
 """Ordered, observation-safe trajectory components for CT-SeqTrack v2."""
 
 import math
+import hashlib
 
 import torch
 from torch import nn
@@ -241,6 +242,28 @@ def compose_b1_transaction_loss(
         if value is not None:
             total = total + float(weight) * value
     return total
+
+
+def acquisition_margin_target_loss(
+        predicted_margin, target_margin, valid, quantile=.90):
+    """v27 loss-only geometry labels; never steer the mean or crop selection."""
+    if predicted_margin.ndim != 2 or predicted_margin.shape[1] != 2:
+        raise ValueError('predicted acquisition margin must have shape [B,2]')
+    target = torch.as_tensor(target_margin, device=predicted_margin.device,
+                             dtype=predicted_margin.dtype).detach()
+    if target.shape != predicted_margin.shape or not 0 < float(quantile) < 1:
+        raise ValueError('acquisition target shape/quantile is invalid')
+    difference = target - predicted_margin
+    axis_loss = torch.maximum(float(quantile) * difference,
+                              (float(quantile) - 1.) * difference)
+    finite = torch.isfinite(axis_loss).all(1)
+    mask = torch.as_tensor(valid, device=predicted_margin.device,
+                           dtype=predicted_margin.dtype).reshape(-1)
+    if mask.numel() != predicted_margin.shape[0]:
+        raise ValueError('acquisition validity must have one value per row')
+    return dict(loss_per_sample=torch.nan_to_num(axis_loss).mean(1),
+                target_parallel_perp=torch.nan_to_num(target),
+                valid=mask * finite.to(mask.dtype))
 
 
 def recursive_gap_age_balanced_mean(
@@ -548,9 +571,12 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             acquisition_margin_max=(6.0, 3.0),
             acquisition_margin_bias=-8.0,
             log_sigma_min=math.log(0.1),
-            log_sigma_max=2.5):
+            log_sigma_max=2.5,
+            enable_v27=False,
+            initialization_seed=42):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
+        self.enable_v27 = bool(enable_v27)
         self.step_dim = int(step_dim)
         self.eps = float(eps)
         self.time_scale = max(float(time_scale), self.eps)
@@ -638,11 +664,33 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.velocity_residual_head = nn.Linear(self.hidden_dim, 2)
         self.log_sigma_head = nn.Linear(self.hidden_dim, 2)
         if self.adaptive_acquisition_margin:
-            self.acquisition_margin_head = nn.Linear(self.hidden_dim, 2)
-            nn.init.zeros_(self.acquisition_margin_head.weight)
+            if self.enable_v27:
+                self.acquisition_margin_head = nn.Sequential(
+                    nn.Linear(self.hidden_dim + 17, 64),
+                    nn.LayerNorm(64), nn.ReLU(inplace=True),
+                    nn.Linear(64, 2))
+            else:
+                self.acquisition_margin_head = nn.Linear(self.hidden_dim, 2)
+        if self.enable_v27:
+            # Named RNG scopes keep every shared component identical across
+            # GRU/CfC without advancing the caller's random stream.
+            for name, module in self.named_modules():
+                if isinstance(module, (nn.Linear, nn.LayerNorm, nn.GRU)):
+                    seed_bytes = hashlib.sha256(
+                        f'{int(initialization_seed)}::b1::{name}'.encode()).digest()
+                    with torch.random.fork_rng(devices=[]):
+                        torch.manual_seed(int.from_bytes(seed_bytes[:8], 'big')
+                                          % (2 ** 63 - 1))
+                        module.reset_parameters()
+                        if name.startswith('cfc.') and isinstance(module, nn.Linear):
+                            nn.init.xavier_uniform_(module.weight)
+        if self.adaptive_acquisition_margin:
+            margin_last = (self.acquisition_margin_head[-1]
+                           if self.enable_v27 else self.acquisition_margin_head)
+            nn.init.zeros_(margin_last.weight)
             nn.init.constant_(
-                self.acquisition_margin_head.bias,
-                float(acquisition_margin_bias))
+                margin_last.bias,
+                -4.6 if self.enable_v27 else float(acquisition_margin_bias))
         nn.init.zeros_(self.velocity_residual_head.weight)
         nn.init.zeros_(self.velocity_residual_head.bias)
         nn.init.zeros_(self.log_sigma_head.weight)
@@ -735,7 +783,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             self.log_sigma_head(context.detach()))
         return torch.log(torch.clamp(sigma, max=sigma_max))
 
-    def _acquisition_margin(self, context):
+    def _acquisition_margin(self, context, acquisition_features=None):
         minimum = self.acquisition_margin_min.to(
             device=context.device, dtype=context.dtype).unsqueeze(0)
         maximum = self.acquisition_margin_max.to(
@@ -744,8 +792,18 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             return minimum.expand(context.shape[0], -1)
         # Search size learns from B1 temporal context but cannot backpropagate
         # into the temporal mean/covariance path.
-        fraction = torch.sigmoid(
-            self.acquisition_margin_head(context.detach()))
+        head_input = context.detach()
+        if self.enable_v27:
+            if acquisition_features is None:
+                raise ValueError('v27 B1 requires acquisition_features [B,17]')
+            acquisition_features = torch.as_tensor(
+                acquisition_features, device=context.device, dtype=context.dtype)
+            if acquisition_features.shape != (context.shape[0], 17):
+                raise ValueError('v27 acquisition_features must have shape [B,17]')
+            if not bool(torch.isfinite(acquisition_features).all()):
+                raise ValueError('v27 acquisition_features must be finite')
+            head_input = torch.cat((head_input, acquisition_features.detach()), 1)
+        fraction = torch.sigmoid(self.acquisition_margin_head(head_input))
         return minimum + (maximum - minimum) * fraction
 
     def _encode_transitions(
@@ -915,7 +973,8 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         }
 
     def forward(
-            self, ref_boxs, delta_t, valid_mask, current_delta_t=None):
+            self, ref_boxs, delta_t, valid_mask, current_delta_t=None,
+            acquisition_features=None):
         if ref_boxs.dim() != 3 or ref_boxs.shape[-1] != 4:
             raise ValueError("motion ref_boxs must have shape [B,H,4]")
         batch_size, history_length, _ = ref_boxs.shape
@@ -963,7 +1022,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
                 "residual_xy": zeros_xy,
                 "envelope_parallel_perp": zeros_xy,
                 "acquisition_margin_parallel_perp": self._acquisition_margin(
-                    zeros_feature),
+                    zeros_feature, acquisition_features),
                 **uncertainty,
                 "direction_xy": uncertainty["motion_direction_xy"],
                 "valid": ref_boxs.new_zeros((batch_size,)),
@@ -1171,7 +1230,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             "residual_xy": residual_xy,
             "envelope_parallel_perp": envelope,
             "acquisition_margin_parallel_perp": self._acquisition_margin(
-                context),
+                context, acquisition_features),
             **uncertainty,
             "direction_xy": uncertainty["motion_direction_xy"],
             "valid": valid,

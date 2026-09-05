@@ -1,0 +1,110 @@
+{
+  "consensus_scale_probe": [
+    {
+      "input_weight_scale": 1.0,
+      "center": [
+        [
+          4.046666622161865,
+          0.0
+        ]
+      ],
+      "consistency": [
+        0.6234463453292847
+      ],
+      "inlier_ratio": [
+        0.6666666865348816
+      ],
+      "effective_mass": [
+        1.5
+      ]
+    },
+    {
+      "input_weight_scale": 0.01,
+      "center": [
+        [
+          4.046666622161865,
+          0.0
+        ]
+      ],
+      "consistency": [
+        0.6234463453292847
+      ],
+      "inlier_ratio": [
+        0.6666666865348816
+      ],
+      "effective_mass": [
+        0.015000000596046448
+      ]
+    }
+  ],
+  "margin_training_scalars": [
+    {
+      "run": "output/20260903-2301-26_b1_cfc-ct26_b1_cfc_mini_car_seed42_60ep_bs16_20260903_225946",
+      "scalars": {
+        "loss_ct_acquisition_margin_parallel_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 3.0649752616882324,
+            "max_logged_batch": 5.8148884773254395,
+            "logged_batch_count": 12780
+          }
+        },
+        "loss_ct_acquisition_margin_perpendicular_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 1.0021404027938843,
+            "max_logged_batch": 1.134130835533142,
+            "logged_batch_count": 12780
+          }
+        }
+      }
+    },
+    {
+      "run": "output/20260903-2301-26_b1_gru-ct26_b1_gru_mini_car_seed42_60ep_bs16_20260903_225946",
+      "scalars": {
+        "loss_ct_acquisition_margin_parallel_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 2.0126543045043945,
+            "max_logged_batch": 5.889277935028076,
+            "logged_batch_count": 12781
+          }
+        },
+        "loss_ct_acquisition_margin_perpendicular_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 1.0021165609359741,
+            "max_logged_batch": 2.45414137840271,
+            "logged_batch_count": 12780
+          }
+        }
+      }
+    },
+    {
+      "run": "output/20260903-2301-26_full-ct26_full_mini_car_seed42_60ep_bs16_20260903_225946",
+      "scalars": {
+        "loss_ct_acquisition_margin_parallel_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 2.017194986343384,
+            "max_logged_batch": 5.406795978546143,
+            "logged_batch_count": 12780
+          }
+        },
+        "loss_ct_acquisition_margin_perpendicular_mean": {
+          "loss": {
+            "first_logged_batch": 0.0,
+            "last_logged_batch": 1.002213716506958,
+            "max_logged_batch": 2.176177501678467,
+            "logged_batch_count": 12780
+          }
+        }
+      }
+    }
+  ],
+  "interpretation_limits": [
+    "These batch means are not epoch means or held-out coverage.",
+    "The consensus example illustrates scale sensitivity, not a real-scene error rate.",
+    "A trained margin head can change its outputs even when prepass omits the field."
+  ]
+}

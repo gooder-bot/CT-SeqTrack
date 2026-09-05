@@ -1,0 +1,4 @@
+....ss................................                                   [100%]
+=========================== short test summary info ===========================
+SKIPPED [2] tests\test_ct_lightning_runtime.py:214: CUDA AMP overflow smoke
+36 passed, 2 skipped, 27 warnings in 27.12s

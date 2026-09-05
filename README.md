@@ -1,5 +1,42 @@
 # CT-SeqTrack
 
+## 当前轮次：v27（2026-09-05）
+
+当前实现与实验入口以 [v27 方法](docs/CTSEQTRACK_V27_METHOD.md) 和
+[正式协议](docs/EXPERIMENT_PROTOCOL.md) 顶部为准。先运行 mini Car 的
+`27_b0`、`27_b1_gru`、`27_b1_cfc`、`27_full_minus_b3`、`27_full` 五臂；
+再使用对应 `*_nuscenes_full.yaml` 对 Car、Pedestrian、Truck、Trailer、Bus
+分别从 epoch0 训练。每臂60 epoch、seed42，所有启用模块同时训练。
+
+v27 修复原始 point ID、稀疏输入、B1 获取接口与几何语义，新增选点前局部几何和
+目标/上下文条件；B2 仍只让新增点投票，长车投票范围由首帧尺寸决定。
+Full−B3 评测为 `bounded_always`，Full 使用绑定 checkpoint 的 v27 效用策略。
+训练仍统一 observation-recursive；B1 不直接混入输出，B0 host 独占状态写入。
+
+mini 的训练/阈值拟合/诊断为6/1/1 scenes，官方2个mini_val只评测；full使用
+train_track全部350 scenes，17/18阈值拟合与诊断scene也参与参数训练，官方150个val
+只评测。外部参考是 `cfgs/27_seqtrack_reference{_nuscenes_full}.yaml`，使用普通
+SeqTrack loss并关闭CT模块。主指标为benchmark兼容口径，另报精确几何审计。
+
+入口仍为 `main.py`，例如：
+
+```bash
+python main.py --cfg cfgs/ct_seqtrack/27_full.yaml --path /home/lishengjie/data/nuscenes-mini --tag ct27_full_mini_car_seed42
+```
+
+v27 正式训练、涨分与论文主张均尚待实验验证。v24/v25/v26配置和输出保持历史证据，
+不能用于初始化v27。新增核心接口为 `models/ct_v2/evidence_v27.py`、
+`models/ct_v2/action_v27.py`、`utils/b1_acquisition.py`、`utils/v27_protocol.py`。
+
+实际模型训练、checkpoint保存与同运行恢复的二次审计和使用说明见
+[训练就绪记录](docs/CTSEQTRACK_V27_TRAINING_READINESS.md)。
+本次GPU2/GPU3五臂mini后台命令见[mini启动说明](docs/CTSEQTRACK_V27_MINI_LAUNCH.md)。
+
+## 历史 v24—v26 说明
+
+以下正文保留历史记录；其中的“当前”、实验顺序与旧promotion条件只对应其原始版本，
+不覆盖上面的v27协议。
+
 CT-SeqTrack studies observation-anchored evidence recovery for irregular-time
 3D single-object tracking. The active repository contains one formal chain:
 

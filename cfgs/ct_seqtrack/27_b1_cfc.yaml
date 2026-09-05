@@ -1,0 +1,4 @@
+_base_: 27_b1_gru.yaml
+experiment_name: ct27_b1_cfc_mini_car_scratch_seed42
+motion_v3_temporal_backend: cfc
+

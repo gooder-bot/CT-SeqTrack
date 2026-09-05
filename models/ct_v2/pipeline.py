@@ -2,7 +2,7 @@
 
 from torch import nn
 
-from models.ct_v2.pipeline_contracts import ObservationOutput
+from models.ct_v2.pipeline_contracts import ObservationOutput, B1Input, AcquisitionRecord
 from models.ct_v2.motion import OrderedPhysicalMotionEncoder
 from models.ct_v2.evidence_memory import (
     B2EvidenceAcquirer,
@@ -27,9 +27,15 @@ class B0Observation(nn.Module):
 class B1PhysicalTimePrior(OrderedPhysicalMotionEncoder):
     """Paper-facing name for the physical-time prior implementation."""
 
+    def forward_input(self, inputs):
+        if not isinstance(inputs, B1Input):
+            raise TypeError('B1 forward_input requires the shared B1Input contract')
+        return self(**inputs.encoder_kwargs())
+
 
 __all__ = [
     "B0Observation", "B1PhysicalTimePrior", "B2EvidenceAcquirer",
     "B3SelectiveUpdater",
+    "B1Input", "AcquisitionRecord",
 ]
 

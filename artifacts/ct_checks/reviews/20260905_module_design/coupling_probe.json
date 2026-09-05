@@ -1,0 +1,21 @@
+{
+  "scope": "Actual _forward_safe_mechanism B0 prefix and actual BN isolation helper; synthetic host, not full model/data execution.",
+  "observations": [
+    {
+      "grad_enabled": false,
+      "bn_training": false,
+      "transformer_dropout_training": true
+    },
+    {
+      "grad_enabled": false,
+      "bn_training": false,
+      "transformer_dropout_training": true
+    }
+  ],
+  "consecutive_no_grad_outputs_equal": false,
+  "flags_restored": {
+    "host_training": true,
+    "bn_training": true,
+    "dropout_training": true
+  }
+}

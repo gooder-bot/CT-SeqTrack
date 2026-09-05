@@ -499,6 +499,9 @@ def parse_config():
         default=argparse.SUPPRESS,
         help='evaluate only one atomic CT tracklet partition')
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint location')
+    parser.add_argument('--category_name', default=argparse.SUPPRESS,
+                        choices=('Car', 'Pedestrian', 'Truck', 'Trailer', 'Bus'),
+                        help='train/evaluate one registered nuScenes category')
     parser.add_argument(
         '--init_checkpoint', type=str, default=None,
         help='model-only initialization; does not restore optimizer/trainer state')
@@ -643,7 +646,7 @@ def parse_config():
             'obs_motion_search', 'full_selective',
             'obs_only', 'obs_vs_motion', 'obs_vs_refined', 'obs_vs_all',
             'observation', 'motion', 'raw_search', 'legacy_clipped',
-            'selective'),
+            'selective', 'bounded_always'),
         default=argparse.SUPPRESS,
         help='Evaluation-only B2 proposal attribution mode.')
 
@@ -710,6 +713,12 @@ def parse_config():
 
 
 cfg = parse_config()
+if bool(getattr(cfg, 'ct_enable_v27', False)):
+    from nuscenes.utils.splits import create_splits_scenes
+    from utils.v27_protocol import build_scene_manifest
+    scene_manifest = build_scene_manifest(create_splits_scenes(), cfg.version,
+        int(getattr(cfg, 'ct_partition_seed', 42)))
+    cfg.ct_scene_manifest_sha256 = scene_manifest['content_sha256']
 if str(getattr(cfg, 'net_model', '')).strip().lower() == 'ctseqtrack':
     configure_ct_variant(cfg)
 if cfg.checkpoint is not None and cfg.init_checkpoint is not None:
@@ -815,7 +824,8 @@ if not cfg.test:
     # Paper-facing tracking metrics always use the untouched validation split.
     # Atomic mini_train/dev remains a mechanism-analysis partition only.
     val_data = get_dataset(
-        cfg, type='test', split=cfg.val_split, protocol_role='val')
+        cfg, type='test', split=cfg.val_split,
+        protocol_role=('dev' if bool(getattr(cfg, 'ct_enable_v27', False)) else 'val'))
     loader_seed = int(cfg.seed or 42)
     loader_generator = torch.Generator()
     loader_generator.manual_seed(loader_seed + 31001)
@@ -988,6 +998,9 @@ if not cfg.test:
         monitor=str(getattr(cfg, 'checkpoint_monitor', 'precision/mini_val')),
         mode=str(getattr(cfg, 'checkpoint_mode', 'max')),
         save_last=True,
+        # v27 的可续训状态由 host.on_train_epoch_end 提交；验证间隔不能
+        # 把 last.ckpt 移到收尾前的 validation_end，也不能跳过未验证的 epoch。
+        save_on_train_epoch_end=(True if bool(getattr(cfg, 'ct_enable_v27', False)) else None),
         save_top_k=cfg.save_top_k)
     learningrate_callback = LearningRateMonitor(logging_interval="step")
     dataloader_generator_callback = DataLoaderGeneratorState(
@@ -1056,9 +1069,11 @@ if not cfg.test:
     trainer.fit(net, train_loader, val_loader, ckpt_path=cfg.checkpoint)
 else:
     source_test_data = get_dataset(
-        cfg, type='test', split=cfg.test_split, protocol_role='test')
+        cfg, type='test', split=cfg.test_split,
+        protocol_role=(getattr(cfg, 'ct_eval_partition', None) or 'test')
+        if bool(getattr(cfg, 'ct_enable_v27', False)) else 'test')
     eval_partition = getattr(cfg, 'ct_eval_partition', None)
-    if eval_partition is not None:
+    if eval_partition is not None and not bool(getattr(cfg, 'ct_enable_v27', False)):
         source_dataset = getattr(source_test_data, 'dataset', None)
         if source_dataset is None:
             raise RuntimeError(

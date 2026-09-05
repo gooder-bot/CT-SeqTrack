@@ -46,6 +46,9 @@ def dataset_provenance(wrapped):
         "version": getattr(dataset, "version", None),
         "split": getattr(dataset, "split", None),
         "protocol_role": getattr(dataset, "protocol_role", None),
+        "scene_protocol_role": getattr(dataset, "ct_scene_role", None),
+        "scene_names": list(getattr(dataset, "ct_scene_names", []) or []),
+        "scene_manifest": getattr(dataset, "ct_scene_manifest", None),
         "kitti_hv_intervals": getattr(
             dataset, "kitti_hv_intervals", None),
         "tracklets": dataset.get_num_tracklets(),
@@ -151,5 +154,12 @@ def write_run_provenance(output_dir, cfg, datasets, mode, root):
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True, default=str)
         handle.write("\n")
+    if bool(getattr(cfg, 'ct_enable_v27', False)):
+        import yaml
+        # 可直接传给 main --cfg / calibrate --config；保留 CLI 覆盖后的
+        # 顶层配置，避免把 provenance 或 Lightning hparams 的嵌套结构误载。
+        (output_dir / 'resolved_config.yaml').write_text(
+            yaml.safe_dump(json.loads(resolved_config_json), sort_keys=True, allow_unicode=True),
+            encoding='utf-8')
     print(f"run provenance: {path}")
     return path

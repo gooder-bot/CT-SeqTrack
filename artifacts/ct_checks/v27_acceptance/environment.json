@@ -1,0 +1,13 @@
+{
+  "torch": "2.3.0+cpu",
+  "cuda_available": false,
+  "packages": {
+    "pytorch_lightning": false,
+    "nuscenes": false,
+    "pointnet2_ops": false
+  },
+  "nuScenes_data_available": false,
+  "server_real_batch": "not_run",
+  "server_100_step": "not_run",
+  "formal_runs": "not_started"
+}

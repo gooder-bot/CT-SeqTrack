@@ -1,0 +1,9 @@
+_base_: 27_formal_base.yaml
+experiment_name: ct27_full_minus_b3_mini_car_scratch_seed42
+ct_variant: full_minus_b3
+ct_enable_b1: true
+ct_enable_b2: true
+ct_enable_b3: false
+ct_require_action_calibration: false
+proposal_inference_mode: bounded_always
+

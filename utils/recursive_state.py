@@ -86,6 +86,7 @@ def build_recursive_input_contract(
         **state_contract,
         "history_frame_ids": frame_ids,
         "history_offsets": offsets,
+        "recursive_age": state.rollout_age(frame_id),
         "candidate_id": candidate_id,
         "candidate_shared_transform": deterministic_candidate_offset(
             candidate_id, config, *seed_parts, 'coherent_recursive_view'),
@@ -131,25 +132,28 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
         self.tracklet_ids = []
         self.prediction_frames = 0
         base = dataset.dataset
+        self.full_epoch_coverage = getattr(base, 'ct_scene_manifest', None) is not None
         for tracklet_id in range(base.get_num_tracklets()):
             key = (
                 base.get_tracklet_key(tracklet_id)
                 if hasattr(base, "get_tracklet_key") else str(tracklet_id))
-            if (stable_tracklet_partition(key, self.partition_seed)
+            if (not self.full_epoch_coverage
+                    and stable_tracklet_partition(key, self.partition_seed)
                     != self.partition):
                 continue
             frame_count = int(base.get_num_frames_tracklet(tracklet_id))
             if frame_count > 1:
                 self.tracklet_ids.append(tracklet_id)
                 self.prediction_frames += frame_count - 1
-        if len(self.tracklet_ids) < self.slots:
+        if self.full_epoch_coverage and not self.tracklet_ids:
+            raise ValueError("online recursive dataset has no eligible prediction tracklets")
+        if not self.full_epoch_coverage and len(self.tracklet_ids) < self.slots:
             raise ValueError(
                 "online recursive partition has fewer tracklets than slots")
         self.slot_tracklets = [[] for _ in range(self.slots)]
         self.slot_prediction_frames = [0 for _ in range(self.slots)]
-        # Longest-first greedy assignment keeps the four causal slots close
-        # in workload, which minimizes the final tail that cannot form a full
-        # 4-slot/16-view optimizer batch.
+        # Longest-first assignment balances causal slot workloads. Legacy
+        # drops the incomplete tail; v27 emits every remaining active slot.
         ordered_tracklets = sorted(
             self.tracklet_ids,
             key=lambda item: int(base.get_num_frames_tracklet(item)),
@@ -163,7 +167,8 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
                 int(base.get_num_frames_tracklet(tracklet_id)) - 1)
 
     def __len__(self):
-        return min(self.slot_prediction_frames)
+        aggregate = max if self.full_epoch_coverage else min
+        return aggregate(self.slot_prediction_frames)
 
     def set_epoch(self, epoch):
         epoch = int(epoch)
@@ -181,9 +186,11 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
             [queue.pop(0), 1] if queue else None for queue in queues]
         batch_index = 0
         try:
-            # A partial set of slots would silently change the nominal batch
-            # size and H=3 overhead. Drop only the irreducible balanced tail.
-            while all(item is not None for item in active):
+            # v27's scene protocol requires every eligible endpoint exactly
+            # once. Its final batches have only the still-active causal slots.
+            # Historical runs retain their original full-slot/drop-tail rule.
+            keep_running = any if self.full_epoch_coverage else all
+            while keep_running(item is not None for item in active):
                 active_slots = [
                     slot for slot, item in enumerate(active)
                     if item is not None]
@@ -249,6 +256,7 @@ class RecursiveTrackState:
     first_box: object
     timestamps: dict[int, float | None] = field(default_factory=dict)
     predictions: dict[int, object] = field(default_factory=dict)
+    quality: dict[int, object] = field(default_factory=dict)
     # Training-only rollout metadata.  Inference never calls ``reseed_history``
     # and therefore keeps the original append-only state transition contract.
     rollout_horizon: int | None = None
@@ -266,7 +274,7 @@ class RecursiveTrackState:
     def clone(self):
         return copy.deepcopy(self)
 
-    def append(self, frame_id, box, timestamp=None):
+    def append(self, frame_id, box, timestamp=None, quality=None):
         frame_id = int(frame_id)
         if frame_id <= 0:
             raise ValueError("recursive predictions may only append frame_id>0")
@@ -276,6 +284,8 @@ class RecursiveTrackState:
                 f"recursive state expected frame {expected}, got {frame_id}")
         self.predictions[frame_id] = copy.deepcopy(box)
         self.timestamps[frame_id] = timestamp
+        if quality is not None:
+            self.quality[frame_id] = np.asarray(quality, dtype=np.float32).copy()
 
     def reseed_history(
             self, frame_ids, boxes, timestamps=None, *, before_frame_id,
@@ -313,6 +323,7 @@ class RecursiveTrackState:
                     f"reseed cannot introduce unseen frame {frame_id}")
             self.predictions[frame_id] = copy.deepcopy(box)
             self.timestamps[frame_id] = timestamp
+            self.quality.pop(frame_id, None)
         self.rollout_horizon = rollout_horizon
         self.last_reseed_before_frame = before_frame_id
         self.reseed_count += 1
@@ -348,6 +359,10 @@ class RecursiveTrackState:
                 self.timestamps.get(int(frame_id)) for frame_id in frame_ids],
             "target_size": self.target_size,
             "tracklet_key": self.tracklet_key,
+            "history_quality": np.stack([
+                np.asarray(self.quality.get(int(index), np.zeros(4)), dtype=np.float32)
+                if int(valid) else np.zeros(4, dtype=np.float32)
+                for index, valid in zip(frame_ids, valid_mask)]),
         }
 
     @property

@@ -17,6 +17,59 @@ Tensor = torch.Tensor
 
 
 @dataclass(frozen=True)
+class B1Input:
+    """One causal tensor contract reused by prepass and trainable B1."""
+
+    ref_boxs: Tensor
+    delta_t: Tensor
+    valid_mask: Tensor
+    current_delta_t: Tensor
+    acquisition_features: Optional[Tensor] = None
+
+    def encoder_kwargs(self):
+        return dict(ref_boxs=self.ref_boxs, delta_t=self.delta_t,
+                    valid_mask=self.valid_mask,
+                    current_delta_t=self.current_delta_t,
+                    acquisition_features=self.acquisition_features)
+
+    def detached(self):
+        return B1Input(**{
+            key: None if value is None else value.detach()
+            for key, value in self.encoder_kwargs().items()})
+
+
+@dataclass(frozen=True)
+class AcquisitionRecord:
+    """Actual resolved acquisition geometry, distinct from learned B1 output.
+
+    Both directions are explicit: the acquisition frame follows the resolved
+    displacement, while statistical uncertainty retains its original basis.
+    No current annotation or training target belongs to this record.
+    """
+
+    endpoint_xy: Tensor
+    direction_xy: Tensor
+    acquisition_margin_parallel_perp: Tensor
+    valid: Tensor
+    source: Tensor
+    source_anchor: Tensor
+    coordinate_anchor: Tensor
+    query_delta_t: Tensor
+    statistical_direction_xy: Optional[Tensor] = None
+    statistical_log_sigma: Optional[Tensor] = None
+    learned_valid: Optional[Tensor] = None
+    gap_ratio: Optional[Tensor] = None
+    real_timestamp: Optional[Tensor] = None
+    input_digest: str = ''
+    parameter_revision: int = 0
+    fallback_reason: str = ''
+
+    def detached(self):
+        return AcquisitionRecord(**{
+            key: value.detach() if torch.is_tensor(value) else value
+            for key, value in self.__dict__.items()})
+
+@dataclass(frozen=True)
 class ObservationOutput:
     box: Tensor
     statistics: Tensor

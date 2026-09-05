@@ -1,0 +1,52 @@
+{
+  "prepass_contract": {
+    "encoder_valid": true,
+    "public_margin_present": false,
+    "unbatched_valid": false,
+    "unbatched_source": 0
+  },
+  "hybrid_fps_duplicate": {
+    "selected_slots": 256,
+    "unique_indices": 161,
+    "fps_first_eight": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "memory_wlh_axis_swap": {
+    "expected_inside_feature": 101,
+    "actual_inside_feature": 202,
+    "expected_context_feature": 202,
+    "actual_context_feature": 101
+  },
+  "b3_iou_label_sign_flip": {
+    "observation_xy": [
+      1.5,
+      0.0
+    ],
+    "action_xy": [
+      1.0,
+      0.5
+    ],
+    "proxy_gain_wlh_as_xy": 0.1371428519487381,
+    "correct_axis_aligned_gain": -0.06324112415313721
+  },
+  "robust_vote_gradient_not_disconnected": {
+    "votes_finite_nonzero": true,
+    "weights_finite_nonzero": true
+  },
+  "online_extension_false_novel_points": {
+    "same_original_points": 100,
+    "base_points": 100,
+    "endpoint_points": 100,
+    "expected_novel_count": 0,
+    "actual_novel_count": 8,
+    "max_local_coordinate_difference_m": 4.76837158203125e-07
+  }
+}

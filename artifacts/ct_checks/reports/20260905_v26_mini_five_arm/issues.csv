@@ -1,0 +1,10 @@
+﻿priority,area,finding,impact,required_action
+P0,B1 acquisition,motion prepass omits acquisition_margin_parallel_perp; all online B1 priors are invalid,learned mean/margin never controls the B2 crop; coverage-need is always on,return and unbatch the margin field; add online source/margin contract test
+P0,Hybrid FPS,identical-XY candidates can repeat index 0,Full-minus-B3 crashes with selected rows are not unique,mask selected indices and test identical XY / different Z plus quota borrowing
+P0,Matched B0,B0 parameter and Adam hashes diverge at step 1 despite identical inputs,cross-arm deltas have no module-level causal attribution,sequential same-GPU step1/100 gradient and optimizer-state audit
+P0,Empty crop,empty B0 crop returns before B2 and before writing diagnostics,recovery is disabled on the hardest frames; CSV misses 10–12% endpoints,run extension-only recovery and always emit a diagnostic endpoint row
+P1,Counterfactual v3,float32 local B0 keys are compared with re-transformed float64 global points at 1e-6,counterfactual raw and novel target counts become identical,reuse exact online crop arrays/key path and assert row-wise equivalence
+P1,Acquisition,"novel target recall is 6.32% (Full) / 8.40% (partial), below 15%",selection cannot recover evidence that never enters the bounded support,"repair B1 path first, then reevaluate bounded support; do not enlarge blindly"
+P1,Consensus voting,coherent background often gets high consistency/inlier scores,Full available candidates have negative mean gain and high harm,penalize sparse effective support and expose count/mass to held-out B3 calibration
+P1,B3,no held-out calibration/dev artifact,action coverage is zero and Full score is observation output,calibrate each late-3 checkpoint only after upstream retraining
+P2,Formal evaluation,epoch59 is not independently evaluated; SeqTrack-strict v26 is absent; one seed only,"no formal late-3, paired CI, external comparison, or stability claim","test e58/e59/e60, add SeqTrack-strict, then full dataset"

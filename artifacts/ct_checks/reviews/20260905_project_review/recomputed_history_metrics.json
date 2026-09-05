@@ -1,0 +1,306 @@
+[
+  {
+    "run": "output/20260725-2326-01_seqtrack3d_baseline-ctv2_d86990c_b0_baseline_car_seed42_60ep_bs16",
+    "commit": "d86990ce5304258822c1748d17f997f6ec003e9c",
+    "cadence": 5,
+    "scores": {
+      "metrics_test_success": {
+        "n": 12,
+        "step": 75720,
+        "value": 53.359954833984375,
+        "observed_last3_mean": 52.90481440226237
+      },
+      "metrics_test_precision": {
+        "n": 12,
+        "step": 75720,
+        "value": 64.3818359375,
+        "observed_last3_mean": 63.10430145263672
+      }
+    }
+  },
+  {
+    "run": "output/20260813-0116-01_seqtrack3d_baseline-scratch_ct21_b0_car_60ep_bs16_s42",
+    "commit": "25586b27f3b1411de479e99e0ac25b087e4248b1",
+    "cadence": 5,
+    "scores": {
+      "metrics_test_success": {
+        "n": 12,
+        "step": 75720,
+        "value": 51.001094818115234,
+        "observed_last3_mean": 48.41393280029297
+      },
+      "metrics_test_precision": {
+        "n": 12,
+        "step": 75720,
+        "value": 60.892784118652344,
+        "observed_last3_mean": 54.81692250569662
+      }
+    }
+  },
+  {
+    "run": "output/20260822-2246-24_b0-ct24_b0_restore_seed42",
+    "commit": "2bdacd806b09db2a920873f1a23625c603268548",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 31.414663314819336,
+        "observed_last3_mean": 31.505835851033527
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 31.10284423828125,
+        "observed_last3_mean": 31.604304631551106
+      }
+    }
+  },
+  {
+    "run": "output/20260822-2252-24_b1-ct24_b1_dual_stream_fix_seed42",
+    "commit": "02084ddfab40c945d1404c7d095b86f35b84bb54",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 47.65755081176758,
+        "observed_last3_mean": 47.14478556315104
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 52.42232131958008,
+        "observed_last3_mean": 51.553610483805336
+      }
+    }
+  },
+  {
+    "run": "output/20260822-2252-24_full-ct24_full_dual_stream_fix_seed42",
+    "commit": "02084ddfab40c945d1404c7d095b86f35b84bb54",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 49.416847229003906,
+        "observed_last3_mean": 49.53573989868164
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 55.904815673828125,
+        "observed_last3_mean": 55.87819163004557
+      }
+    }
+  },
+  {
+    "run": "output/20260822-2252-24_full_minus_b3-ct24_b1_b2_dual_stream_fix_seed42",
+    "commit": "02084ddfab40c945d1404c7d095b86f35b84bb54",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 49.845733642578125,
+        "observed_last3_mean": 49.49124654134115
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 57.617069244384766,
+        "observed_last3_mean": 57.278629302978516
+      }
+    }
+  },
+  {
+    "run": "output/20260824-0219-25_b0-ct25_b0_mini_car_60ep_bs16_seed42_retryfix",
+    "commit": "049de82b304bba3993bc3ba41d2cae4eab0052d7",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 50.690372467041016,
+        "observed_last3_mean": 50.18490219116211
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 59.28009033203125,
+        "observed_last3_mean": 57.03756586710612
+      }
+    }
+  },
+  {
+    "run": "output/20260824-0220-25_b1-ct25_b1_only_mini_car_60ep_bs16_seed42_retryfix",
+    "commit": "049de82b304bba3993bc3ba41d2cae4eab0052d7",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 33.44310760498047,
+        "observed_last3_mean": 33.34901809692383
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 35.137855529785156,
+        "observed_last3_mean": 34.966084798177086
+      }
+    }
+  },
+  {
+    "run": "output/20260824-0220-25_full-ct25_full_mini_car_60ep_bs16_seed42_retryfix",
+    "commit": "049de82b304bba3993bc3ba41d2cae4eab0052d7",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 52.55251693725586,
+        "observed_last3_mean": 50.281182607014976
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 61.19365692138672,
+        "observed_last3_mean": 58.94967269897461
+      }
+    }
+  },
+  {
+    "run": "output/20260824-0220-25_full_minus_b3-ct25_b1_b2_mini_car_60ep_bs16_seed42_retryfix",
+    "commit": "049de82b304bba3993bc3ba41d2cae4eab0052d7",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 47.852298736572266,
+        "observed_last3_mean": 47.6706797281901
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 54.57002639770508,
+        "observed_last3_mean": 52.13968022664388
+      }
+    }
+  },
+  {
+    "run": "output/20260825-1931-25_b0-ct25_b0_mini_car_seed42_60ep_bs16_val5",
+    "commit": "b8222bb25e747e2efd6dbf57975ab3a495d52bb5",
+    "cadence": 5,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 12,
+        "step": 75720,
+        "value": 29.86980438232422,
+        "observed_last3_mean": 30.536474227905273
+      },
+      "metrics_mini_val_precision": {
+        "n": 12,
+        "step": 75720,
+        "value": 30.398250579833984,
+        "observed_last3_mean": 31.430344263712566
+      }
+    }
+  },
+  {
+    "run": "output/20260825-1932-25_b1-ct25_b1only_cfc_mini_car_seed42_60ep_bs16_val5",
+    "commit": "b8222bb25e747e2efd6dbf57975ab3a495d52bb5",
+    "cadence": 5,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 12,
+        "step": 75720,
+        "value": 26.9135684967041,
+        "observed_last3_mean": 26.669949213663738
+      },
+      "metrics_mini_val_precision": {
+        "n": 12,
+        "step": 75720,
+        "value": 25.650983810424805,
+        "observed_last3_mean": 25.03136444091797
+      }
+    }
+  },
+  {
+    "run": "output/20260825-1932-25_b1-ct25_b1only_gru_mini_car_seed42_60ep_bs16_val5",
+    "commit": "b8222bb25e747e2efd6dbf57975ab3a495d52bb5",
+    "cadence": 5,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 12,
+        "step": 75720,
+        "value": 31.226476669311523,
+        "observed_last3_mean": 31.097375233968098
+      },
+      "metrics_mini_val_precision": {
+        "n": 12,
+        "step": 75720,
+        "value": 32.286651611328125,
+        "observed_last3_mean": 31.998542149861652
+      }
+    }
+  },
+  {
+    "run": "output/20260826-1534-25_b0-b0_seed42_diag_v2",
+    "commit": "e9a2d6d1300d1674b3e64f32953c8df0673f6900",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 54.8260383605957,
+        "observed_last3_mean": 54.109049479166664
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 66.34026336669922,
+        "observed_last3_mean": 64.0237045288086
+      }
+    }
+  },
+  {
+    "run": "output/20260826-1534-25_b1-b1_gru_seed42_diag_v2",
+    "commit": "e9a2d6d1300d1674b3e64f32953c8df0673f6900",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 30.7341365814209,
+        "observed_last3_mean": 31.73559633890788
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 29.62582015991211,
+        "observed_last3_mean": 30.924872080485027
+      }
+    }
+  },
+  {
+    "run": "output/20260826-1535-25_b1-b1_cfc_seed42_diag_v2",
+    "commit": "e9a2d6d1300d1674b3e64f32953c8df0673f6900",
+    "cadence": 1,
+    "scores": {
+      "metrics_mini_val_success": {
+        "n": 60,
+        "step": 75720,
+        "value": 35.318382263183594,
+        "observed_last3_mean": 35.31546529134115
+      },
+      "metrics_mini_val_precision": {
+        "n": 60,
+        "step": 75720,
+        "value": 37.696937561035156,
+        "observed_last3_mean": 37.41064961751302
+      }
+    }
+  }
+]

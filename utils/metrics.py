@@ -4,6 +4,14 @@ import torchmetrics.utilities.data
 from shapely.geometry import Polygon
 from torchmetrics import Metric
 
+# v27 explicitly names the benchmark-compatible and geometry-review modes.
+# Legacy estimateAccuracy/estimateOverlap remain unchanged for reproducibility.
+from utils.tracking_metrics_v27 import (
+    metric_contributions, box_metrics, box_metric_contributions,
+    action_metric_gains, batch_action_metric_gains, local_boxes_metric_gains,
+    LocalYawBox,
+)
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

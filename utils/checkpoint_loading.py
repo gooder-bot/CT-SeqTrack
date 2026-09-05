@@ -17,6 +17,14 @@ from utils.action_calibration import (
 )
 
 
+def _compatible_state_value(target, source):
+    """State dicts also contain nn.Module extra state (private RNG mappings)."""
+    if torch.is_tensor(target) or torch.is_tensor(source):
+        return (torch.is_tensor(target) and torch.is_tensor(source)
+                and target.shape == source.shape)
+    return type(target) is type(source)
+
+
 def apply_b1_calibration_contract(model, payload, state_dict):
     """Validate and attach B1 calibration metadata for manual loaders.
 
@@ -94,10 +102,11 @@ def load_initial_weights(
         if not isinstance(saved_config, dict) or not saved_config:
             raise RuntimeError(
                 "strict checkpoint restore requires saved resolved config")
-        observed_config = sha256_json(
-            action_calibration_config_identity(saved_config))
-        expected_config = sha256_json(
-            action_calibration_config_identity(model.config))
+        identity = action_calibration_config_identity
+        if bool(model.config.get('ct_enable_v27', False)):
+            from utils.action_calibration_v27 import action_calibration_config_identity as identity
+        observed_config = sha256_json(identity(saved_config))
+        expected_config = sha256_json(identity(model.config))
         if observed_config != expected_config:
             raise RuntimeError(
                 "strict checkpoint resolved-config identity mismatch")
@@ -111,18 +120,18 @@ def load_initial_weights(
     selected_prefix, normalized = max(
         candidates,
         key=lambda item: sum(
-            key in target and target[key].shape == value.shape
+            key in target and _compatible_state_value(target[key], value)
             for key, value in item[1].items()),
     )
     matched = {
         key: value for key, value in normalized.items()
-        if key in target and target[key].shape == value.shape
+        if key in target and _compatible_state_value(target[key], value)
     }
     if bool(require_complete):
         missing_keys = sorted(set(target).difference(matched))
         mismatched_shapes = sorted(
             key for key, value in normalized.items()
-            if key in target and target[key].shape != value.shape)
+            if key in target and not _compatible_state_value(target[key], value))
         if missing_keys or mismatched_shapes:
             details = []
             if missing_keys:

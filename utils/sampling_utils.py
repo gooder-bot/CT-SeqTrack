@@ -10,6 +10,9 @@ SEQTRACK_OBSERVATION_CORE_FIELDS = frozenset({
     "motion_label", "motion_state_label", "bbox_size", "seg_label",
     "valid_mask", "delta_T", "num_points_in_search", "candidate_id",
     "prev_bc", "this_bc", "candidate_bc",
+    "b0_point_ids", "b0_point_valid_mask", "b0_point_unique_mask",
+    "b0_valid_mask", "b0_unique_mask",
+    "b0_raw_point_count", "b0_frame_uid", "ct_current_observation_valid",
 })
 
 

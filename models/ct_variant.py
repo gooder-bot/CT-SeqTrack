@@ -57,7 +57,8 @@ def configure_ct_variant(config):
             raise ValueError(
                 "safe_seqtrack_auto_v1 requires stateless_seqtrack RNG")
         expected_batch_schema = (
-            "ct_seqtrack.train.v3" if bool(get_config(
+            "ct_seqtrack.train.v4" if bool(get_config(config, "ct_enable_v27", False))
+            else "ct_seqtrack.train.v3" if bool(get_config(
                 config, "ct_enable_v26_recovery", False))
             else "ct_seqtrack.train.v2")
         if str(get_config(config, "ct_batch_schema", "")) != (
@@ -156,9 +157,12 @@ def configure_ct_variant(config):
         raise ValueError(
             "ct_memory_mode must be none, empty, real or time_misaligned")
     set_config(config, "ct_memory_mode", memory_mode)
-    time_mode = str(get_config(
-        config, "ct_time_mode",
-        get_config(config, "dynamics_time_mode", "true"))).strip().lower()
+    if bool(get_config(config, "ct_enable_v27", False)):
+        time_mode = str(get_config(config, "dynamics_time_mode",
+                                  get_config(config, "ct_time_mode", "true"))).strip().lower()
+    else:
+        time_mode = str(get_config(config, "ct_time_mode",
+                                  get_config(config, "dynamics_time_mode", "true"))).strip().lower()
     if time_mode not in ("true", "fixed", "shuffled"):
         raise ValueError("ct_time_mode must be true, fixed or shuffled")
     set_config(config, "ct_time_mode", time_mode)

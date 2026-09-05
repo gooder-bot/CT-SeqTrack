@@ -1,0 +1,14 @@
+{
+  "source": "output/20260903-2301-26_full-ct26_full_mini_car_seed42_60ep_bs16_20260903_225946/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv",
+  "recorded_rows": 1928,
+  "raw_target_positive": 1553,
+  "raw_target_positive_sampled_zero": 2,
+  "raw_target_positive_raw_count_gt2": 1526,
+  "sampled_zero_among_raw_count_gt2": 0,
+  "raw_count_le2": 118,
+  "limits": [
+    "Recorded rows only; earlier inventory found 251 of 2179 non-first endpoints absent.",
+    "This measures complete loss of target-bearing status, not partial target-point retention.",
+    "Target counts use existing label-box membership; sampled slots need not be unique raw points."
+  ]
+}

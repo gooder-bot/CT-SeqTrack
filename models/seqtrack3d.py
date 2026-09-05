@@ -162,6 +162,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         super().__init__(config, **kwargs)
         self.hist_num = getattr(config, 'hist_num', 1)
         self.seg_acc = _build_binary_segmentation_accuracy()
+        self.ct_enable_v27 = bool(getattr(config, 'ct_enable_v27', False))
 
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
@@ -438,7 +439,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'obs_motion_search', 'full_selective',
                 'obs_only', 'obs_vs_motion', 'obs_vs_refined',
                 'obs_vs_all', 'observation', 'motion', 'raw_search',
-                'legacy_clipped', 'selective'):
+                'legacy_clipped', 'selective', 'bounded_always'):
             raise ValueError(
                 "proposal_inference_mode must be obs, obs_motion, "
                 "obs_search, full, obs_motion_search, full_selective, or "
@@ -626,7 +627,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 and self.proposal_inference_mode not in (
                     'obs_only', 'obs_vs_motion', 'obs_vs_refined',
                     'obs_vs_all', 'observation', 'motion', 'raw_search',
-                    'legacy_clipped', 'selective')):
+                    'legacy_clipped', 'selective', 'bounded_always')):
             raise ValueError(
                 "B2-v3 mode must be a legacy obs_vs_* mode or one of "
                 "observation/motion/raw_search/legacy_clipped/selective")
@@ -704,6 +705,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.motion_v3_aux_nll_weight = float(getattr(
             config, 'motion_v3_aux_nll_weight',
             self.motion_v3_nll_weight))
+        if self.ct_enable_v27 and self.ct_enable_b2:
+            for suffix in ('positive_points', 'negative_points', 'positive_weight', 'negative_weight'):
+                self.register_buffer('ct_relation_running_' + suffix,
+                    getattr(self, 'ct_targetness_running_' + suffix).clone())
         self.ct_acquisition_margin_weight = float(getattr(
             config, 'ct_acquisition_margin_weight', 0.0))
         self.ct_acquisition_margin_quantile = float(getattr(
@@ -1144,6 +1149,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             with isolated_constructor_rng(
                     int(getattr(config, 'seed', 42) or 42), 'b1.motion'):
                 self.physical_motion_encoder = B1PhysicalTimePrior(
+                enable_v27=self.ct_enable_v27,
+                initialization_seed=int(getattr(config, 'seed', 42) or 42),
                 hidden_dim=int(getattr(
                     config, 'motion_v3_hidden_dim', 128)),
                 step_dim=int(getattr(
@@ -1226,6 +1233,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     plugin_seed, 'b2.evidence_acquirer'):
                                 self.ct_joint_search_refiner = (
                                     B2EvidenceAcquirer(
+                                    v27_enabled=self.ct_enable_v27,
+                                    exploration_seed=plugin_seed,
                                     feature_dim=64,
                                     num_heads=4,
                                     max_vote_offset=float(getattr(
@@ -1258,7 +1267,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                         if self.ct_enable_b3:
                             with isolated_constructor_rng(
                                     plugin_seed, 'b3.selective_updater'):
-                                self.ct_joint_router = B3SelectiveUpdater(
+                                from models.ct_v2.action_v27 import B3UtilityUpdater
+                                router_class = B3UtilityUpdater if self.ct_enable_v27 else B3SelectiveUpdater
+                                self.ct_joint_router = router_class(
                                 observation_stats_dim=5,
                                 hidden_dim=int(getattr(
                                     config, 'ct_router_hidden_dim', 64)),
@@ -1759,7 +1770,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'epoch_loop', None), 'batch_progress', None)
             checkpoint['ct_epoch_boundary_complete'] = bool(
                 self._ct_epoch_boundary_complete
-                or getattr(batch_progress, 'is_last_batch', False))
+                or (not self.ct_enable_v27
+                    and getattr(batch_progress, 'is_last_batch', False)))
         if hasattr(self, '_ct_b2_method_promotion'):
             checkpoint['ct_b2_method_promotion'] = copy.deepcopy(
                 self._ct_b2_method_promotion)
@@ -2157,7 +2169,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if not (self.ct_joint_contract_version >= 2 and rows):
             return
         epoch_metrics = {}
-        for name in ('presence', 'alpha'):
+        binary_names = ('presence', 'help', 'harm') if self.ct_enable_v27 else ('presence', 'alpha')
+        for name in binary_names:
             entries = rows.get(name, [])
             if not entries:
                 continue
@@ -2187,6 +2200,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if alpha_uplift:
             epoch_metrics['alpha_counterfactual_uplift'] = float(np.mean(
                 np.concatenate(alpha_uplift)))
+        utility_rows = rows.get('bounded_utility', [])
+        if utility_rows:
+            utility = np.concatenate(utility_rows, axis=0)
+            epoch_metrics['bounded_success_gain_mean'] = float(utility[:, 0].mean())
+            epoch_metrics['bounded_precision_gain_mean'] = float(utility[:, 1].mean())
+            epoch_metrics['bounded_utility_gain_mean'] = float(utility[:, :2].mean())
+            if self.ct_enable_b3:
+                epoch_metrics['utility_score_mse'] = float(np.mean(
+                    (utility[:, 2] - utility[:, :2].mean(axis=1)) ** 2))
         if epoch_metrics:
             self.logger.experiment.add_scalars(
                 'ct_epoch_calibration', epoch_metrics,
@@ -2273,6 +2295,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if not hasattr(self, '_ct_epoch_binary_rows'):
             self._ct_epoch_binary_rows = {
                 'presence': [], 'alpha': [], 'alpha_uplift': []}
+        if self.ct_enable_v27:
+            from utils.v27_training import accumulate_v27_binary_rows
+            accumulate_v27_binary_rows(
+                self._ct_epoch_binary_rows, data, output, self.ct_enable_b3)
+            return
         if self.ct_joint_contract_version >= 3:
             action_probability = contract_v3_action_probability(
                 output, self.ct_enable_b3)
@@ -2507,7 +2534,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
     @torch.no_grad()
     def predict_motion_from_history(
-            self, ref_boxs, delta_t, valid_mask, current_delta_t):
+            self, ref_boxs, delta_t, valid_mask, current_delta_t,
+            acquisition_features=None):
         """Public box-only B1 pre-pass with the paper-facing contract."""
         if not self.use_b1motion_v3:
             raise RuntimeError(
@@ -2536,8 +2564,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             torch.flip(ref_boxs, dims=(1,))
             if bool(getattr(self.config, 'shuffle_b1_signal', False))
             else ref_boxs)
+        motion_kwargs = {}
+        if getattr(self, 'ct_enable_v27', False):
+            if acquisition_features is None:
+                raise ValueError('v27 prepass requires causal acquisition features')
+            features = as_tensor(acquisition_features).reshape(ref_boxs.shape[0], 17)
+            motion_kwargs['acquisition_features'] = features
         prediction = self.physical_motion_encoder(
-            motion_ref_boxs, delta_t, valid_mask, current_delta_t)
+            motion_ref_boxs, delta_t, valid_mask, current_delta_t, **motion_kwargs)
         if bool(getattr(self.config, 'force_b1_invalid', False)):
             prediction = dict(prediction)
             prediction['valid'] = torch.zeros_like(prediction['valid'])
@@ -2549,14 +2583,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "mu_xy", "kinematic_prior_xy",
                 "log_sigma_parallel_perp", "covariance_xy",
                 "basis_velocity_xy", "direction_xy", "velocity_xy",
-                "feature", "valid", "gap_ratio", "source_id")
+                "feature", "valid", "gap_ratio", "source_id",
+                "acquisition_margin_parallel_perp")
         }
 
     def _build_motion_prepass_inputs_contract(
             self, history_boxes, history_ids, valid_mask,
             history_timestamps, current_timestamp,
             effective_history_timestamps, effective_current_timestamp,
-            dynamics_time_mode_value, current_frame_id):
+            dynamics_time_mode_value, current_frame_id,
+            history_quality=None, recursive_age=None, first_frame_wlh=None):
         """Build the shared causal box/time-only B1 tensor primitives."""
         if int(current_frame_id) <= 0:
             raise ValueError("motion pre-pass is only defined after frame 0")
@@ -2590,6 +2626,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             pseudo_step=pseudo_step,
         )
         effective_delta_t = effective_fields[1]
+        if getattr(self, 'ct_enable_v27', False):
+            from utils.b1_acquisition import build_b1_input_arrays
+            return build_b1_input_arrays(
+                history_boxes, effective_delta_t, valid_mask,
+                history_quality=history_quality,
+                recursive_age=max(0, int(current_frame_id) - 1) if recursive_age is None else recursive_age,
+                first_frame_wlh=first_frame_wlh, degrees=self.config.degrees,
+                time_scale=float(getattr(self.config, 'time_scale', .5)))
         anchor = history_boxes[0]
         local_rows = []
         for box in history_boxes:
@@ -2668,23 +2712,34 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self, history_boxes, history_ids, valid_mask,
             history_timestamps, current_timestamp,
             effective_history_timestamps, effective_current_timestamp,
-            dynamics_time_mode_value, current_frame_id):
+            dynamics_time_mode_value, current_frame_id,
+            history_quality=None, recursive_age=None, first_frame_wlh=None):
         """Execute one row through the shared box/time-only B1 contract."""
         inputs = self._build_motion_prepass_inputs_contract(
             history_boxes, history_ids, valid_mask,
             history_timestamps, current_timestamp,
             effective_history_timestamps, effective_current_timestamp,
-            dynamics_time_mode_value, current_frame_id)
+            dynamics_time_mode_value, current_frame_id,
+            **(dict(history_quality=history_quality, recursive_age=recursive_age,
+                    first_frame_wlh=first_frame_wlh)
+               if getattr(self, 'ct_enable_v27', False) else {}))
         if inputs is None:
             return self._empty_motion_prepass_prediction()
         prediction = self.predict_motion_from_history(
             inputs["ref_boxs"], inputs["delta_t"], inputs["valid_mask"],
-            inputs["current_delta_t"])
-        return self._unbatch_motion_prepass_predictions(
+            inputs["current_delta_t"],
+            **({'acquisition_features': inputs['acquisition_features']}
+               if getattr(self, 'ct_enable_v27', False) else {}))
+        result = self._unbatch_motion_prepass_predictions(
             prediction, [inputs["current_delta_t"]])[0]
+        if getattr(self, 'ct_enable_v27', False):
+            from utils.b1_acquisition import b1_input_digest
+            result['input_digest'] = b1_input_digest(inputs)
+            result['parameter_revision'] = int(getattr(self, 'global_step', 0))
+        return result
 
     @torch.no_grad()
-    def predict_motion_prepass(self, sequence, frame_id, results_bbs):
+    def predict_motion_prepass(self, sequence, frame_id, results_bbs, recursive_state=None):
         """Build and execute B1 before the current point cloud is cropped.
 
         Only recursive boxes and physical timestamps are read.  In
@@ -2711,6 +2766,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "_ct_dynamics_time_mode",
                 getattr(self.config, "dynamics_time_mode", "true")),
             frame_id,
+            **(dict(history_quality=np.stack([
+                recursive_state.quality.get(index, np.zeros(4)) for index in history_ids])
+                if recursive_state is not None else None,
+                recursive_age=recursive_state.rollout_age(frame_id)
+                if recursive_state is not None else frame_id - 1,
+                first_frame_wlh=results_bbs[0].wlh)
+               if getattr(self, 'ct_enable_v27', False) else {}),
         )
 
 
@@ -2748,7 +2810,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         observation_stats = observation_contract.statistics
         history_features = observation_contract.history_features
         current_base_features = observation_contract.current_features
-        timestamps_real = input_dict.get('timestamps_real')
+        timestamps_real = input_dict.get(
+            'timestamps_effective' if self.ct_enable_v27 else 'timestamps_real')
         history_timestamps = None
         current_timestamp = None
         if timestamps_real is not None:
@@ -2757,7 +2820,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 dtype=current_base_features.dtype)
             history_timestamps = timestamps_real[:, :-1]
             current_timestamp = timestamps_real[:, -1]
-        memory_tokens, memory_valid, memory_metadata = build_box_memory_tokens(
+        memory_result = build_box_memory_tokens(
             history_features,
             raw_frames[:, :-1],
             input_dict['ref_boxs'],
@@ -2769,7 +2832,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             current_timestamp=current_timestamp,
             current_box=observation_box.detach(),
             return_metadata=True,
+            **({
+                'v27_enabled': True,
+                'history_point_ids': input_dict['b0_point_ids'][:, :-1],
+                'history_point_valid_mask': input_dict['b0_valid_mask'][:, :-1],
+                'history_unique_mask': input_dict['b0_unique_mask'][:, :-1],
+                'return_point_ids': True,
+            } if self.ct_enable_v27 else {}),
         )
+        memory_tokens, memory_valid, memory_metadata = memory_result[:3]
+        if self.ct_enable_v27:
+            output_dict['ct_memory_point_ids'] = memory_result[3]
+            output_dict['ct_memory_frame_uid'] = input_dict['b0_frame_uid'][:, :-1].repeat_interleave(12, dim=1)
+            output_dict['ct_memory_valid_mask'] = memory_valid
         if memory_tokens.shape[1] != 36:
             raise RuntimeError("contract-v3 requires exactly 36 memory slots")
         memory_mode = str(getattr(
@@ -2820,12 +2895,49 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             acquisition_margin_parallel_perp=main_motion[
                 'acquisition_margin_parallel_perp'].detach(),
         )
-        prior_contract = reexpress_motion_prior(
-            canonical_prior_contract,
-            input_dict['motion_source_anchor'],
-            input_dict['coordinate_anchor'],
-            degrees=bool(getattr(self.config, 'degrees', False)),
-        )
+        if not self.ct_enable_v27:
+            prior_contract = reexpress_motion_prior(
+                canonical_prior_contract,
+                input_dict['motion_source_anchor'],
+                input_dict['coordinate_anchor'],
+                degrees=bool(getattr(self.config, 'degrees', False)),
+            )
+        if self.ct_enable_v27:
+            # B2 consumes the resolved acquisition, including CV fallback.
+            # The differentiable learned prior above remains B1's loss input.
+            actual = lambda name: input_dict[name].to(
+                device=current_base_features.device,
+                dtype=current_base_features.dtype).detach()
+            from models.ct_v2.pipeline_contracts import AcquisitionRecord
+            acquisition = AcquisitionRecord(
+                endpoint_xy=actual('search_v3_support_anchor_xy'),
+                direction_xy=actual('ct_acquisition_direction_xy'),
+                acquisition_margin_parallel_perp=actual('ct_acquisition_margin'),
+                valid=actual('ct_acquisition_resolved_valid'),
+                source=actual('search_v3_prior_source_id'),
+                source_anchor=actual('motion_source_anchor'),
+                coordinate_anchor=actual('coordinate_anchor'),
+                query_delta_t=actual('search_v3_query_delta_t'),
+                statistical_direction_xy=actual('ct_acquisition_statistical_direction_xy'),
+                statistical_log_sigma=actual('ct_acquisition_log_sigma'),
+                learned_valid=actual('ct_acquisition_learned_valid'),
+                gap_ratio=actual('search_v3_gap_ratio'),
+                real_timestamp=input_dict.get('timestamps_real'),
+                input_digest=input_dict.get('motion_input_digest', ''),
+                parameter_revision=input_dict.get('ct_acquisition_parameter_revision', 0),
+                fallback_reason=input_dict.get('ct_acquisition_fallback_reason', ''))
+            # Project the statistical covariance onto the acquisition axes.
+            cosine = (acquisition.direction_xy * acquisition.statistical_direction_xy).sum(-1).clamp(-1, 1)
+            variance = (2 * acquisition.statistical_log_sigma).exp()
+            sigma = torch.stack((
+                cosine.square() * variance[:, 0] + (1-cosine.square()) * variance[:, 1],
+                (1-cosine.square()) * variance[:, 0] + cosine.square() * variance[:, 1]), -1).clamp_min(1e-8)
+            prior_contract = MotionPriorOutput(
+                center_xy=acquisition.endpoint_xy,
+                direction_xy=acquisition.direction_xy,
+                log_sigma=.5 * sigma.log(), valid=acquisition.valid,
+                source=acquisition.source,
+                acquisition_margin_parallel_perp=acquisition.acquisition_margin_parallel_perp)
         support_alignment_error = validate_motion_prior_support_alignment(
             prior_contract,
             input_dict['search_v3_support_anchor_xy'],
@@ -2853,6 +2965,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 gap_ratio=input_dict['search_v3_gap_ratio'].to(
                     current_base_features.device),
                 recursive_age=recursive_age,
+                **({
+                    'first_box_size_wlh': input_dict['bbox_size'].detach(),
+                    'extension_point_ids': input_dict['ct_extension_point_ids'],
+                    'current_base_point_ids': input_dict['ct_base_point_ids'],
+                    'current_base_unique_mask': input_dict['ct_base_unique_mask'],
+                } if self.ct_enable_v27 else {}),
             )
         evidence_contract = EvidenceOutput(
             raw_box=joint_output['ct_b2_raw_box'],
@@ -2977,6 +3095,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 compatible_hypothesis_count=(
                     evidence_contract.point_diagnostics[
                         'compatible_hypothesis_count']),
+                **({'mode_summary': torch.stack((
+                    torch.log1p(joint_output['ct_vote_effective_mass']),
+                    torch.log1p(joint_output['ct_vote_mode_unique_count']),
+                    joint_output['ct_vote_mode_mean_targetness'],
+                    .5 * joint_output['ct_vote_mode_mean_identity_margin']), dim=-1).detach()
+                } if self.ct_enable_v27 else {}),
             )
         else:
             dt = input_dict['search_v3_query_delta_t'].to(
@@ -2993,6 +3117,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             scale = torch.clamp(
                 radius / residual_norm.clamp_min(1e-6), max=1.0)
             bounded_residual = residual * scale.unsqueeze(1)
+            if self.ct_enable_v27:
+                from models.ct_v2.action_v27 import bounded_residual_xy
+                bounded_residual, geometry = bounded_residual_xy(
+                    observation_box, raw_box, input_dict['search_v3_query_delta_t'],
+                    radius_base=float(getattr(self.config, 'ct_router_radius_base', .5)),
+                    radius_per_second=float(getattr(self.config, 'ct_router_radius_per_second', .5)),
+                    radius_max=float(getattr(self.config, 'ct_router_radius_max', 2.)))
+                residual, radius, residual_norm = geometry['residual'], geometry['radius'], geometry['norm']
             zeros = observation_box.new_zeros((batch_size,))
             final_box = observation_box
             router_output = {
@@ -3022,6 +3154,22 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             mode = self.proposal_inference_mode
             if mode in ('obs', 'obs_only', 'observation'):
                 final_box = observation_box
+                if self.ct_enable_v27:
+                    for gate_key in ('ct_b3_final_gate', 'ct_router_gate', 'ct_router_applied_gate'):
+                        router_output[gate_key] = torch.zeros_like(candidate_available)
+            elif mode == 'bounded_always':
+                from models.ct_v2.action_v27 import bounded_residual_xy
+                bounded, geometry = bounded_residual_xy(
+                    observation_box, raw_box,
+                    input_dict['search_v3_query_delta_t'],
+                    radius_base=float(getattr(self.config, 'ct_router_radius_base', .5)),
+                    radius_per_second=float(getattr(self.config, 'ct_router_radius_per_second', .5)),
+                    radius_max=float(getattr(self.config, 'ct_router_radius_max', 2.)))
+                applies = (candidate_available.reshape(-1) > 0) & geometry['finite']
+                executed_box = torch.cat((observation_box[:, :2] + bounded, observation_box[:, 2:]), dim=1)
+                final_box = torch.where(applies[:, None], executed_box, observation_box)
+                for gate_key in ('ct_b3_final_gate', 'ct_router_gate', 'ct_router_applied_gate'):
+                    router_output[gate_key] = applies.to(observation_box.dtype)
             elif mode == 'raw_search':
                 final_box = torch.where(
                     candidate_available.reshape(
@@ -3034,6 +3182,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 # an expensive full-dataset evaluation has started.
                 if not bool(self.ct_joint_router.calibrated):
                     final_box = observation_box
+        if self.ct_enable_v27 and self.training:
+            final_box = observation_box
         decision_contract = DecisionOutput(
             final_box=final_box,
             help_logit=router_output['ct_b3_help_logit'],
@@ -3254,6 +3404,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'updated_ref_boxs': updated_ref_boxs,
         })
         output_dict.update(obs_aux)
+        if 'b0_unique_mask' in input_dict:
+            from utils.v27_quality import observation_quality
+            output_dict['ct_observation_quality'] = observation_quality(
+                seg_logits, input_dict['b0_unique_mask'], input_dict['b0_raw_point_count'])
         for key in (
                 "ct_search_used",
                 "ct_search_expansion_ratio",
@@ -3674,6 +3828,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         updated_aux_box =  delta_motion[:,-1,:]
 
         observation_aux_box = updated_aux_box
+        if self.ct_enable_v27 and not self.training:
+            current_valid = input_dict['ct_current_observation_valid'].reshape(-1, 1) > 0
+            observation_aux_box = torch.where(
+                current_valid, observation_aux_box, torch.zeros_like(observation_aux_box))
+            updated_aux_box = observation_aux_box
         if b0_auxiliary_only or observation_only_forward:
             return self._finalize_observation_output(
                 input_dict, output_dict, aux_box, observation_aux_box,
@@ -3708,6 +3867,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     input_dict['motion_main_delta_t'],
                     input_dict['motion_main_valid_mask'],
                     input_dict['motion_main_current_delta_t'],
+                    **({'acquisition_features': input_dict['motion_acquisition_features']}
+                       if self.ct_enable_v27 else {}),
                 )
             if 'replay_b1_contract_present' in input_dict:
                 present = input_dict['replay_b1_contract_present'].to(
@@ -3934,6 +4095,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     input_dict['motion_aux_delta_t'],
                     input_dict['motion_aux_valid_mask'],
                     input_dict['motion_aux_current_delta_t'],
+                    **({'acquisition_features': input_dict['motion_aux_acquisition_features']}
+                       if self.ct_enable_v27 else {}),
                 )
                 output_dict.update({
                     'motion_aux_prior_xy': aux_motion['prior_xy'],
@@ -5003,7 +5166,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             "legacy symmetric consistency objective was removed")
 
     def _ct_online_targetness_class_weights(
-            self, extension_labels, extension_valid):
+            self, extension_labels, extension_valid, population='targetness'):
         """Update the cumulative canonical preflight and return its weights.
 
         This is the same inverse-frequency calculation used by the standalone
@@ -5019,15 +5182,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 (1.0 - extension_labels.detach().to(torch.float64))
                 * extension_valid.detach().to(torch.float64)).sum()
             update_cumulative_binary_class_balance(
-                self.ct_targetness_running_positive_points,
-                self.ct_targetness_running_negative_points,
-                self.ct_targetness_running_positive_weight,
-                self.ct_targetness_running_negative_weight,
+                getattr(self, f'ct_{population}_running_positive_points'),
+                getattr(self, f'ct_{population}_running_negative_points'),
+                getattr(self, f'ct_{population}_running_positive_weight'),
+                getattr(self, f'ct_{population}_running_negative_weight'),
                 positive_points, negative_points)
         return (
-            self.ct_targetness_running_positive_weight.to(
+            getattr(self, f'ct_{population}_running_positive_weight').to(
                 device=extension_labels.device, dtype=extension_labels.dtype),
-            self.ct_targetness_running_negative_weight.to(
+            getattr(self, f'ct_{population}_running_negative_weight').to(
                 device=extension_labels.device, dtype=extension_labels.dtype),
         )
 
@@ -5093,9 +5256,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         relation_error = F.binary_cross_entropy_with_logits(
             output['ct_relation_logits_prepool'],
             prepool_labels, reduction='none')
+        if self.ct_enable_v27:
+            relation_positive_weight, relation_negative_weight = self._ct_online_targetness_class_weights(
+                prepool_labels, prepool_valid, population='relation')
+        else:
+            relation_positive_weight, relation_negative_weight = positive_weight, negative_weight
         relation_error = relation_error * (
-            prepool_labels * positive_weight
-            + (1.0 - prepool_labels) * negative_weight)
+            prepool_labels * relation_positive_weight
+            + (1.0 - prepool_labels) * relation_negative_weight)
         loss_relation = weighted_mean(relation_error, prepool_valid)
         relation_probability = torch.sigmoid(
             output['ct_relation_logits_prepool'])
@@ -5164,6 +5332,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             (base_labels * base_valid).sum(dim=1) > 0).to(dtype)
         extension_presence_target = (
             (prepool_labels * prepool_valid).sum(dim=1) > 0).to(dtype)
+        if self.ct_enable_v27:
+            extension_presence_target = (
+                (extension_labels * extension_valid).sum(dim=1) > 0).to(dtype)
         target_bearing = extension_target_bearing_mask(
             availability, extension_labels, extension_valid)
         # A raw candidate is identifiable as extension evidence only on rows
@@ -5182,91 +5353,109 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             base_presence_error, canonical_row)
         loss_extension_presence = weighted_mean(
             extension_presence_error, availability * canonical_row)
-        loss_presence = 0.5 * (
+        loss_presence = (.5 if not self.ct_enable_v27 else 1.) * (
             loss_base_presence + loss_extension_presence)
 
-        observation_error = torch.linalg.norm(
-            observation_xy - target_xy, dim=1)
-        bounded_xy = (
-            observation_xy
-            + output['ct_router_bounded_residual_xy'].detach())
-        bounded_distance_error = torch.linalg.norm(
-            bounded_xy - target_xy, dim=1)
-        center_gain_h1 = observation_error - bounded_distance_error
+        observation_error = torch.linalg.norm(observation_xy - target_xy, dim=1)
+        bounded_xy = observation_xy + output['ct_router_bounded_residual_xy'].detach()
+        bounded_distance_error = torch.linalg.norm(bounded_xy - target_xy, dim=1)
+        if self.ct_enable_v27:
+            from utils.v27_training import compute_b3_utility_loss
+            utility = compute_b3_utility_loss(data, output, self.config)
+            loss_b3 = utility['loss'] if self.ct_enable_b3 else target_xy.new_zeros(())
+            loss_helpful, loss_harmful = utility['loss_help'], utility['loss_harm']
+            loss_center_gain, loss_iou_gain = utility['loss_precision'], utility['loss_success']
+            helpful, harmful, b3_valid = utility['help_label'].bool(), utility['harm_label'].bool(), utility['valid']
+            center_gain_h1, iou_gain_h1 = utility['h1_precision_gain'], utility['h1_success_gain']
+            output['ct_b3_h1_success_gain_label'] = iou_gain_h1.detach()
+            output['ct_b3_h1_precision_gain_label'] = center_gain_h1.detach()
+            output['ct_b3_h1_valid'] = b3_valid.detach()
+            h3_center_gain = data.get('ct_h3_precision_gain', torch.zeros_like(center_gain_h1)).detach()
+            h3_iou_gain = data.get('ct_h3_success_gain', torch.zeros_like(iou_gain_h1)).detach()
+            h3_valid = data.get('ct_h3_valid', torch.zeros_like(b3_valid)).detach()
+        else:
+            observation_error = torch.linalg.norm(
+                observation_xy - target_xy, dim=1)
+            bounded_xy = (
+                observation_xy
+                + output['ct_router_bounded_residual_xy'].detach())
+            bounded_distance_error = torch.linalg.norm(
+                bounded_xy - target_xy, dim=1)
+            center_gain_h1 = observation_error - bounded_distance_error
 
-        # Same-size axis-aligned BEV IoU is a stable differentiable proxy for
-        # the expected-IoU head.  Exact oriented IoU remains an evaluation and
-        # calibration metric.
-        size_xy = data['bbox_size'][:, :2].to(
-            device=device, dtype=dtype).clamp_min(1e-3)
+            # Same-size axis-aligned BEV IoU is a stable differentiable proxy for
+            # the expected-IoU head.  Exact oriented IoU remains an evaluation and
+            # calibration metric.
+            size_xy = data['bbox_size'][:, :2].to(
+                device=device, dtype=dtype).clamp_min(1e-3)
 
-        def same_size_iou(center):
-            overlap = torch.clamp(
-                size_xy - torch.abs(center - target_xy), min=0.0)
-            intersection = overlap[:, 0] * overlap[:, 1]
-            area = size_xy[:, 0] * size_xy[:, 1]
-            return intersection / torch.clamp(
-                2.0 * area - intersection, min=1e-6)
+            def same_size_iou(center):
+                overlap = torch.clamp(
+                    size_xy - torch.abs(center - target_xy), min=0.0)
+                intersection = overlap[:, 0] * overlap[:, 1]
+                area = size_xy[:, 0] * size_xy[:, 1]
+                return intersection / torch.clamp(
+                    2.0 * area - intersection, min=1e-6)
 
-        iou_gain_h1 = (
-            same_size_iou(bounded_xy) - same_size_iou(observation_xy))
-        h3_center_gain = center_gain_h1.new_zeros(center_gain_h1.shape)
-        h3_iou_gain = iou_gain_h1.new_zeros(iou_gain_h1.shape)
-        h3_valid = availability.new_zeros(availability.shape)
-        if 'ct_h3_center_gain' in data:
-            h3_center_gain = data['ct_h3_center_gain'].to(
-                device=device, dtype=dtype).reshape(-1).detach()
-        elif 'ct_h3_gain' in data:
-            h3_center_gain = data['ct_h3_gain'].to(
-                device=device, dtype=dtype).reshape(-1).detach()
-        if 'ct_h3_iou_gain' in data:
-            h3_iou_gain = data['ct_h3_iou_gain'].to(
-                device=device, dtype=dtype).reshape(-1).detach()
-        if 'ct_h3_valid' in data:
-            h3_valid = data['ct_h3_valid'].to(
-                device=device, dtype=dtype).reshape(-1).detach()
+            iou_gain_h1 = (
+                same_size_iou(bounded_xy) - same_size_iou(observation_xy))
+            h3_center_gain = center_gain_h1.new_zeros(center_gain_h1.shape)
+            h3_iou_gain = iou_gain_h1.new_zeros(iou_gain_h1.shape)
+            h3_valid = availability.new_zeros(availability.shape)
+            if 'ct_h3_center_gain' in data:
+                h3_center_gain = data['ct_h3_center_gain'].to(
+                    device=device, dtype=dtype).reshape(-1).detach()
+            elif 'ct_h3_gain' in data:
+                h3_center_gain = data['ct_h3_gain'].to(
+                    device=device, dtype=dtype).reshape(-1).detach()
+            if 'ct_h3_iou_gain' in data:
+                h3_iou_gain = data['ct_h3_iou_gain'].to(
+                    device=device, dtype=dtype).reshape(-1).detach()
+            if 'ct_h3_valid' in data:
+                h3_valid = data['ct_h3_valid'].to(
+                    device=device, dtype=dtype).reshape(-1).detach()
 
-        combined_center_gain = torch.where(
-            h3_valid > 0,
-            0.5 * (center_gain_h1 + h3_center_gain),
-            center_gain_h1)
-        combined_iou_gain = torch.where(
-            h3_valid > 0,
-            0.5 * (iou_gain_h1 + h3_iou_gain),
-            iou_gain_h1)
-        helpful = (
-            (center_gain_h1 > self.ct_router_help_margin)
-            & (iou_gain_h1 >= 0.0)
-            & ((h3_valid <= 0) | (
-                (h3_center_gain > self.ct_router_h3_margin)
-                & (h3_iou_gain >= 0.0))))
-        harmful = (
-            (center_gain_h1 < -self.ct_router_help_margin)
-            | (iou_gain_h1 < 0.0)
-            | ((h3_valid > 0) & (
-                (h3_center_gain < -self.ct_router_h3_margin)
-                | (h3_iou_gain < 0.0)))
-            | ~extension_presence_target.to(torch.bool))
-        # B3 risk labels are action labels on the canonical state
-        # distribution.  Auxiliary acquisition views cannot train B3.
-        b3_valid = availability * canonical_row
-        helpful_error = F.binary_cross_entropy_with_logits(
-            output['ct_b3_help_logit'], helpful.to(dtype), reduction='none')
-        harmful_error = F.binary_cross_entropy_with_logits(
-            output['ct_b3_harm_logit'], harmful.to(dtype), reduction='none')
-        loss_helpful = weighted_mean(helpful_error, b3_valid)
-        loss_harmful = weighted_mean(harmful_error, b3_valid)
-        loss_center_gain = weighted_mean(F.smooth_l1_loss(
-            output['ct_b3_expected_center_gain'],
-            combined_center_gain.detach(), reduction='none'), b3_valid)
-        loss_iou_gain = weighted_mean(F.smooth_l1_loss(
-            output['ct_b3_expected_iou_gain'],
-            combined_iou_gain.detach(), reduction='none'), b3_valid)
-        loss_b3 = target_xy.new_zeros(())
-        if self.ct_enable_b3:
-            loss_b3 = (
-                loss_helpful + loss_harmful
-                + loss_center_gain + loss_iou_gain)
+            combined_center_gain = torch.where(
+                h3_valid > 0,
+                0.5 * (center_gain_h1 + h3_center_gain),
+                center_gain_h1)
+            combined_iou_gain = torch.where(
+                h3_valid > 0,
+                0.5 * (iou_gain_h1 + h3_iou_gain),
+                iou_gain_h1)
+            helpful = (
+                (center_gain_h1 > self.ct_router_help_margin)
+                & (iou_gain_h1 >= 0.0)
+                & ((h3_valid <= 0) | (
+                    (h3_center_gain > self.ct_router_h3_margin)
+                    & (h3_iou_gain >= 0.0))))
+            harmful = (
+                (center_gain_h1 < -self.ct_router_help_margin)
+                | (iou_gain_h1 < 0.0)
+                | ((h3_valid > 0) & (
+                    (h3_center_gain < -self.ct_router_h3_margin)
+                    | (h3_iou_gain < 0.0)))
+                | ~extension_presence_target.to(torch.bool))
+            # B3 risk labels are action labels on the canonical state
+            # distribution.  Auxiliary acquisition views cannot train B3.
+            b3_valid = availability * canonical_row
+            helpful_error = F.binary_cross_entropy_with_logits(
+                output['ct_b3_help_logit'], helpful.to(dtype), reduction='none')
+            harmful_error = F.binary_cross_entropy_with_logits(
+                output['ct_b3_harm_logit'], harmful.to(dtype), reduction='none')
+            loss_helpful = weighted_mean(helpful_error, b3_valid)
+            loss_harmful = weighted_mean(harmful_error, b3_valid)
+            loss_center_gain = weighted_mean(F.smooth_l1_loss(
+                output['ct_b3_expected_center_gain'],
+                combined_center_gain.detach(), reduction='none'), b3_valid)
+            loss_iou_gain = weighted_mean(F.smooth_l1_loss(
+                output['ct_b3_expected_iou_gain'],
+                combined_iou_gain.detach(), reduction='none'), b3_valid)
+            loss_b3 = target_xy.new_zeros(())
+            if self.ct_enable_b3:
+                loss_b3 = (
+                    loss_helpful + loss_harmful
+                    + loss_center_gain + loss_iou_gain)
 
         def acquisition_metric(key):
             value = data.get(key)
@@ -5342,6 +5531,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 loss_helpful + loss_harmful),
             'loss_ct_expected_gain': (
                 loss_center_gain + loss_iou_gain),
+            **({
+                'loss_ct_expected_success_gain': loss_iou_gain,
+                'loss_ct_expected_precision_gain': loss_center_gain,
+                'ct_h1_success_gain': weighted_mean(iou_gain_h1, b3_valid),
+                'ct_h1_precision_gain': weighted_mean(center_gain_h1, b3_valid),
+                'ct_h3_exposure_rate': (h3_valid > 0).to(dtype).mean(),
+                'ct_relation_positive_points_cumulative': self.ct_relation_running_positive_points.to(dtype),
+                'ct_relation_negative_points_cumulative': self.ct_relation_running_negative_points.to(dtype),
+            } if self.ct_enable_v27 else {}),
             'loss_ct_helpful': loss_helpful,
             'loss_ct_harmful': loss_harmful,
             'loss_ct_expected_center_gain': loss_center_gain,
@@ -5424,6 +5622,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             # retained eligible rows, never a macro point ratio.
             'ct_acquisition_target_recall': acquisition_row_recall,
         }
+
+    def _b0_point_regression_loss(self, prediction, target, data):
+        if not self.ct_enable_v27:
+            return F.smooth_l1_loss(prediction, target)
+        valid = data['b0_valid_mask'].reshape(prediction.shape[:2]).to(prediction.dtype)
+        error = F.smooth_l1_loss(prediction, target, reduction='none').mean(-1)
+        return (error * valid).sum() / valid.sum().clamp_min(1)
 
     def compute_loss(self, data, output):
         if self.is_paired_batch(data):
@@ -5541,6 +5746,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             seg_label,
             weight=seg_logits.new_tensor([0.5, 2.0]),
         )
+        if self.ct_enable_v27:
+            point_valid = data['b0_valid_mask'].reshape_as(seg_label).to(seg_logits.dtype)
+            weights = seg_logits.new_tensor([.5, 2.])
+            errors = F.cross_entropy(seg_logits, seg_label, weight=weights, reduction='none')
+            loss_seg = (errors * point_valid).sum() / (
+                weights[seg_label] * point_valid).sum().clamp_min(1e-6)
         if self.use_motion_cls:
             motion_cls = output['motion_cls']  # B,2
             loss_motion_cls = F.cross_entropy(motion_cls, motion_state_label)
@@ -5610,7 +5821,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 prev_bc = torch.flatten(
                     data['prev_bc'], start_dim=1, end_dim=2)
                 bc_label = torch.cat([prev_bc, data['this_bc']], dim=1)
-                loss_bc = F.smooth_l1_loss(output['pred_bc'], bc_label)
+                loss_bc = self._b0_point_regression_loss(output['pred_bc'], bc_label, data)
                 weighted_bc = loss_bc * self.config.bc_weight
                 loss_total = loss_total + weighted_bc
                 b0_transaction_loss = b0_transaction_loss + weighted_bc
@@ -5775,6 +5986,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 main_valid,
                 quantile=self.ct_acquisition_margin_quantile,
             )
+            if self.ct_enable_v27:
+                from models.ct_v2.motion import acquisition_margin_target_loss
+                margin_terms = acquisition_margin_target_loss(
+                    output['motion_prior_acquisition_margin_parallel_perp'],
+                    data['motion_acquisition_target'],
+                    main_valid * data['motion_acquisition_target_valid'].reshape_as(main_valid),
+                    quantile=self.ct_acquisition_margin_quantile)
             loss_acquisition_margin = recursive_balanced_mean(
                 margin_terms['loss_per_sample'], margin_terms['valid'],
                 recursive_age=recursive_age,
@@ -7276,7 +7494,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             this_bc = data['this_bc'] #torch.Size([B, 1024, 9])
             bc_label = torch.cat([prev_bc, this_bc], dim=1) #torch.Size([B, 4096, 9])
             pred_bc = output['pred_bc'] #torch.Size([B, 4096, 9])
-            loss_bc = F.smooth_l1_loss(pred_bc, bc_label)
+            loss_bc = self._b0_point_regression_loss(pred_bc, bc_label, data)
             loss_total += loss_bc * self.config.bc_weight
             b0_transaction_loss = (
                 b0_transaction_loss + loss_bc * self.config.bc_weight)
@@ -7527,7 +7745,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
                     'ct_seqtrack.train.v2',
-                    'ct_seqtrack.train.v3')):
+                    'ct_seqtrack.train.v3', 'ct_seqtrack.train.v4')):
             transferred = {
                 'ct_stream_schema': batch['ct_stream_schema'],
                 'observation': self._move_batch_to_device(
@@ -7722,6 +7940,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     '_ct_dynamics_time_mode',
                     getattr(self.config, 'dynamics_time_mode', 'true')),
                 int(raw['this_frame_id']),
+                **(dict(history_quality=contract['history_quality'],
+                        recursive_age=state.rollout_age(raw['this_frame_id']),
+                        first_frame_wlh=state.target_size)
+                   if self.ct_enable_v27 else {}),
             )
             if inputs is None:
                 raise RuntimeError(
@@ -7734,10 +7956,19 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             np.asarray([
                 item['current_delta_t'] for item in prepass_inputs],
                 dtype=np.float32),
+            **({'acquisition_features': np.stack([
+                item['acquisition_features'] for item in prepass_inputs])}
+               if self.ct_enable_v27 else {}),
         )
-        return self._unbatch_motion_prepass_predictions(
+        results = self._unbatch_motion_prepass_predictions(
             prediction,
             [item['current_delta_t'] for item in prepass_inputs])
+        if self.ct_enable_v27:
+            from utils.b1_acquisition import b1_input_digest
+            for result, inputs in zip(results, prepass_inputs):
+                result['input_digest'] = b1_input_digest(inputs)
+                result['parameter_revision'] = int(self.global_step)
+        return results
 
     def _process_online_raw(
             self, raw, state, motion_prediction=None, state_diagnostics=None):
@@ -7889,8 +8120,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.config, 'ct_training_topology', 'legacy')).strip().lower()
             if dual_stream == 'dual_stream':
                 auxiliary_processed = []
-                if (len(processed) != int(getattr(
-                        self.config, 'batch_size', 16))
+                expected_slots = int(getattr(self.config, 'batch_size', 16))
+                size_valid = (0 < len(processed) <= expected_slots) if self.ct_enable_v27 else len(processed) == expected_slots
+                if (not size_valid
                         or any(int(np.asarray(
                             item['b0_view_id']).reshape(-1)[0]) != 0
                                for item in processed)):
@@ -7983,6 +8215,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 module.training = was_training
 
     def _attach_h3_shadow_labels(self, batch, output):
+        if self.ct_enable_v27:
+            from utils.v27_training import attach_h3_shadow_labels_v27
+            return attach_h3_shadow_labels_v27(self, batch, output)
         if (not bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
                 or not self.ct_enable_b3):
@@ -8124,6 +8359,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             commit_canonical_prediction(
                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
                 raw['this_frame'].get('timestamp'))
+            if self.ct_enable_v27:
+                state.quality[int(raw['this_frame_id'])] = output[
+                    'ct_observation_quality'][index].detach().cpu().numpy().copy()
 
     def _ensure_ct_scalers(self):
         if self._ct_scalers:
@@ -8422,9 +8660,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self, '_ct_observation_only_forward', False))
         self._ct_observation_only_forward = True
         try:
+            original_modes = [(module, module.training) for module in self.modules()]
+            if getattr(self, 'ct_enable_v27', False):
+                self.eval()
             with torch.no_grad():
                 observation_output = self(batch)
         finally:
+            if 'original_modes' in locals():
+                for module, training in original_modes:
+                    module.training = training
             self._ct_observation_only_forward = previous
 
         required_motion = (
@@ -8446,7 +8690,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             main_motion = self.physical_motion_encoder(
                 motion_ref, batch['motion_main_delta_t'],
                 batch['motion_main_valid_mask'],
-                batch['motion_main_current_delta_t'])
+                batch['motion_main_current_delta_t'],
+                **({'acquisition_features': batch['motion_acquisition_features']}
+                   if getattr(self, 'ct_enable_v27', False) else {}))
         if 'replay_b1_contract_present' in batch:
             present = batch['replay_b1_contract_present'].to(
                 device=main_motion['mu_xy'].device).reshape(-1) > 0.5
@@ -8508,7 +8754,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             aux_motion = self.physical_motion_encoder(
                 batch['motion_aux_ref_boxs'], batch['motion_aux_delta_t'],
                 batch['motion_aux_valid_mask'],
-                batch['motion_aux_current_delta_t'])
+                batch['motion_aux_current_delta_t'],
+                **({'acquisition_features': batch['motion_aux_acquisition_features']}
+                   if getattr(self, 'ct_enable_v27', False) else {}))
             observation_output.update({
                 'motion_aux_prior_xy': aux_motion['prior_xy'],
                 'motion_aux_prior_velocity_xy': aux_motion['velocity_xy'],
@@ -8565,7 +8813,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
                     'ct_seqtrack.train.v2',
-                    'ct_seqtrack.train.v3')):
+                    'ct_seqtrack.train.v3', 'ct_seqtrack.train.v4')):
             if getattr(self, '_ct_inside_dual_stream', False):
                 raise RuntimeError('nested dual-stream transaction')
             self._ct_inside_dual_stream = True
@@ -8613,8 +8861,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                 'physical_motion_encoder',
                                 'ct_joint_search_refiner',
                                 'ct_joint_router')):
-                        mechanism_loss = self.training_step(
-                            mechanism_batch, batch_idx)
+                        if (self.ct_enable_v27 and isinstance(mechanism_batch, dict)
+                                and 'ct_mechanism_sequence' in mechanism_batch):
+                            ticks = mechanism_batch['ct_mechanism_sequence']
+                            row_counts = [len(tick) for tick in ticks]
+                            total_rows = sum(row_counts)
+                            mechanism_loss = sum(
+                                self.training_step(tick, batch_idx) * (count / total_rows)
+                                for tick, count in zip(ticks, row_counts))
+                        else:
+                            mechanism_loss = self.training_step(
+                                mechanism_batch, batch_idx)
                 finally:
                     restore_global_rng_state(rng_state)
                     self._ct_mechanism_transaction = False

@@ -1,0 +1,41 @@
+{
+  "compileall": {
+    "command": [
+      "python",
+      "-m",
+      "compileall",
+      "-q",
+      "models/",
+      "datasets/",
+      "utils/",
+      "tools/",
+      "main.py"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff_check": {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'datasets/protocol_utils.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/EXPERIMENT_PROTOCOL.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/FORMAL_TOOLING.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/evidence_memory.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/motion.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/pipeline.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_v2/pipeline_contracts.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ct_variant.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'models/ctseqtrack.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'need_to_do.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tools/calibrate_ct_actions.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tools/export_ct_action_rows.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/checkpoint_loading.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/ct_search.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/dual_stream.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/lightning_runtime.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/online_contract.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/recursive_state.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/run_provenance.py', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'utils/sampling_utils.py', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "protected_tracked_diff": {
+    "command": [
+      "git",
+      "diff",
+      "--name-only",
+      "--",
+      "output/",
+      "cfgs/"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

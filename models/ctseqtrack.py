@@ -29,6 +29,10 @@ class CTSEQTRACK(SEQTRACK3D):
         config = configure_ct_variant(config)
         super().__init__(config, **kwargs)
         artifact_path = get_config(config, "ct_action_calibration_path")
+        if self.ct_enable_b3 and bool(get_config(config, "ct_enable_v27", False)):
+            from utils.action_calibration_v27 import install_v27_action_calibration
+            install_v27_action_calibration(self, config)
+            return
         if self.ct_enable_b3 and artifact_path:
             checkpoint_path = get_config(config, "checkpoint")
             manifest_sha = get_config(

@@ -1,0 +1,79 @@
+_base_: 26_formal_base.yaml
+
+# v27：公共正确性修复 + 获取/身份条件证据/整体跟踪效用。
+experiment_family: ct_seqtrack_v27
+ct_enable_v27: true
+ct_enable_v26_recovery: true
+ct_v26_full_formal_arm: false
+ct_v27_reference: false
+ct_runtime_protocol: safe_seqtrack_auto_v1
+ct_b0_training_protocol: safe_seqtrack_auto_v1
+ct_batch_schema: ct_seqtrack.train.v4
+ct_optimizer_topology: unified_auto
+ct_separate_optimizers: false
+ct_initialization_policy: scratch_only
+ct_b0_initialization_policy: scratch_only
+ct_formal_resume_contract: true
+ct_b0_steps_per_epoch: 0
+ct_recursive_reseed_enabled: false
+ct_training_state_policy: observation
+ct_partition_seed: 42
+ct_metric_mode: benchmark_compat
+ct_exact_metric_audit: true
+
+# 两后端共同协议；主集成臂暂用 GRU，独立 CfC 臂保留。
+motion_v3_temporal_backend: gru
+ct_adaptive_acquisition_margin: true
+ct_acquisition_margin_min: [2.0, 1.0]
+ct_acquisition_margin_max: [6.0, 3.0]
+ct_acquisition_margin_bias: -4.6
+ct_acquisition_margin_quantile: 0.90
+ct_acquisition_margin_weight: 0.05
+
+# 原始 ID 定义 extension；公共 B0 segmentation 的 bb_scale 不改。
+ct_evidence_label_box_scale: 1.0
+ct_relation_weight: 0.25
+ct_targetness_weight: 0.2
+ct_vote_weight: 1.0
+ct_raw_search_weight: 1.0
+# v27 分别乘 base-presence 与 selected-presence，无额外 1/2。
+ct_presence_weight: 0.1
+ct_presence_balanced_loss: false
+ct_targetness_class_weight_source: online_canonical_preflight
+ct_targetness_positive_weight: 1.0
+ct_targetness_negative_weight: 1.0
+ct_memory_mode: real
+
+# B2 bounded-always 与 B3 使用同一实际动作；B3 不再设 presence 硬门。
+ct_router_weight: 0.2
+ct_router_radius_base: 0.5
+ct_router_radius_per_second: 0.5
+ct_router_radius_max: 2.0
+ct_router_shadow_interval: 2
+ct_router_shadow_slots_per_event: 1
+ct_require_action_calibration: true
+ct_action_calibration_path: null
+ct_calibration_tracklet_manifest_sha256: null
+ct_dev_tracklet_manifest_sha256: null
+
+version: v1.0-mini
+path: /home/lishengjie/data/nuscenes-mini
+train_split: mini_train
+val_split: mini_val
+test_split: mini_val
+category_name: Car
+seed: 42
+epoch: 60
+from_epoch: 0
+lr: 0.0001
+ct_b0_lr: 0.0001
+ct_b1_lr: 0.0001
+ct_b2_lr: 0.0001
+ct_b3_lr: 0.0001
+ct_plugin_lr: 0.0001
+save_top_k: 0
+ct_keep_final_window_checkpoints: 3
+# mini 启动参数固化在配置中，确保训练、校准与续训读取相同 identity。
+workers: 4
+check_val_every_n_epoch: 5
+trainer_devices: 1

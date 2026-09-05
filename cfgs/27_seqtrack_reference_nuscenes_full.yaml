@@ -1,0 +1,8 @@
+_base_: 27_seqtrack_reference.yaml
+experiment_name: ct27_seqtrack_reference_nuscenes_full_scratch_seed42
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+

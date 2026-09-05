@@ -1,0 +1,8 @@
+_base_: 27_full_minus_b3.yaml
+experiment_name: ct27_full_mini_car_scratch_seed42
+ct_variant: full
+ct_enable_b3: true
+ct_require_action_calibration: true
+# 训练由 runtime 固定 observation；评测加载匹配 v27 policy 后 selective。
+proposal_inference_mode: selective
+

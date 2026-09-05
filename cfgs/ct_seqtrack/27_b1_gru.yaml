@@ -1,0 +1,10 @@
+_base_: 27_formal_base.yaml
+experiment_name: ct27_b1_gru_mini_car_scratch_seed42
+ct_variant: b1
+ct_enable_b1: true
+ct_enable_b2: false
+ct_enable_b3: false
+motion_v3_temporal_backend: gru
+ct_memory_mode: none
+proposal_inference_mode: observation
+

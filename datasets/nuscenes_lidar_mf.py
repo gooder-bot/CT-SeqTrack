@@ -98,6 +98,9 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         self.virtual_rate_manifest_require_commit_match = self._parse_bool(
             kwargs.get('virtual_rate_manifest_require_commit_match', False))
         self.protocol_role = str(kwargs.get('protocol_role', 'eval'))
+        self.ct_scene_manifest = kwargs.get('ct_scene_manifest')
+        self.ct_scene_names = kwargs.get('ct_scene_names')
+        self.ct_scene_role = kwargs.get('ct_scene_role', self.protocol_role)
         self.virtual_rate_manifest_content_sha256 = ''
         self.virtual_rate_manifest_file_sha256 = ''
         if self.virtual_rate_mode == 'none' and self.virtual_rate_manifest:
@@ -147,12 +150,14 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
             general_classes = tracking_to_general_class[category_name]
         instances = []
         scene_splits = nuscenes.utils.splits.create_splits_scenes()
+        allowed_scenes = set(scene_splits[split] if self.ct_scene_names is None
+                             else self.ct_scene_names)
         for instance in self.nusc.instance:
             anno = self.nusc.get('sample_annotation', instance['first_annotation_token'])
             sample = self.nusc.get('sample', anno['sample_token'])
             scene = self.nusc.get('scene', sample['scene_token'])
             instance_category = self.nusc.get('category', instance['category_token'])['name']
-            if scene['name'] in scene_splits[split] and anno['num_lidar_pts'] >= min_points and \
+            if scene['name'] in allowed_scenes and anno['num_lidar_pts'] >= min_points and \
                     (category_name is None or category_name is not None and instance_category in general_classes):
                 instances.append(instance)
         return instances
@@ -928,6 +933,9 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
     def _load_data(self):
         print('preloading data into memory')
         cache_suffix = self._virtual_rate_cache_tag()
+        if self.ct_scene_manifest is not None:
+            cache_suffix += ('_v27_ids_' + self.ct_scene_role + '_' +
+                             self.ct_scene_manifest['content_sha256'][:16])
         if cache_suffix:
             cache_suffix = f"_{cache_suffix}"
         preload_data_path = os.path.join(

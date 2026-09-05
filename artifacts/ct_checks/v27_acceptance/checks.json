@@ -1,0 +1,29 @@
+[
+  {
+    "command": [
+      "python",
+      "-m",
+      "compileall",
+      "-q",
+      "models/",
+      "datasets/",
+      "utils/",
+      "tools/",
+      "main.py"
+    ],
+    "returncode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--exit-code",
+      "--",
+      "output/",
+      "cfgs/"
+    ],
+    "returncode": 0,
+    "output": ""
+  }
+]

@@ -1,5 +1,45 @@
 # CT-SeqTrack 正式工具面
 
+## v27 当前工具协议（2026-09-05）
+
+训练/评估仍只有`main.py`。五臂配置为`cfgs/ct_seqtrack/27_*.yaml`，外部架构
+参考为`cfgs/27_seqtrack_reference{_nuscenes_full}.yaml`。方法、场景用途、指标和
+校准定义见[CTSEQTRACK_V27_METHOD.md](CTSEQTRACK_V27_METHOD.md)。
+
+在训练服务器导出运行矩阵，默认只写可审阅配置和命令；mini是五个CT臂加外部参考共6次，full是5类共30次：
+
+```bash
+python tools/run_ct_v27_matrix.py --stage mini --path MINI_DATA_ROOT --output artifacts/ct_checks/v27_mini_matrix
+python tools/run_ct_v27_matrix.py --stage full --path FULL_DATA_ROOT --output artifacts/ct_checks/v27_full_matrix
+```
+
+确认命令后，在相同命令末尾加`--execute`才顺序启动训练。工具为每类保存resolved config，训练固定
+scratch/seed42/60epoch/batch16。`manifest.json`与`next_commands.txt`列出各运行epoch58/59/60的待执行命令；
+Full每个checkpoint先独立校准，再评估官方split。该工具不自动执行这些后续步骤，不以静态命令清单充当完成结果。
+运行日志也进入指定新目录，禁止使用历史`output/`。有执行记录的矩阵目录不能被重新覆盖。
+
+`python tools/preflight_ct_v27.py --cfg cfgs/ct_seqtrack/27_full.yaml --path DATA_ROOT --output artifacts/ct_checks/v27_preflight.json`
+实际遍历机制索引，报告endpoint完整性、逐轨迹顺序、partial slot batch及每个观测事务最大tick数量；
+`--manifest-only`只核对场景划分，不可解释为真实数据遍历通过。
+
+现有action工具通过显式`--v27`路由到`tools/ct_action_v27_runtime.py`：
+
+```bash
+python tools/export_ct_action_rows.py --v27 --config cfgs/ct_seqtrack/27_full.yaml --checkpoint FINAL_CKPT --path MINI_DATA_ROOT --partition calibration --output artifacts/ct_checks/v27/full_calibration.csv
+python tools/calibrate_ct_actions.py --v27 --config cfgs/ct_seqtrack/27_full.yaml --checkpoint FINAL_CKPT --path MINI_DATA_ROOT --output artifacts/ct_checks/v27/full_policy.json
+```
+
+第二条会重放真实calibration闭环候选策略，再记录锁定dev策略结果，不复用旧v26
+promotion门或静态rows替代闭环。每个checkpoint、类别和resolved config分别生成artifact。
+工具产物写入新`artifacts/ct_checks/`路径；历史`output/`不变。
+
+本地必检：`python -m pytest -q`、`python -m compileall -q models/ datasets/ utils/ tools/`。
+瘦身verify仍绑定旧HEAD，后续commit失败必须与代码失败区分。服务器真实batch、B0更新
+一致性、resume和阶段耗时须另外验收；一次CPU测试不能代替真实数据通路检查。
+
+旧报告工具仅在确认支持当前schema后用于v27，不能将v26 presence/风险阈值或不完整分母
+强套到v27。下面旧命令和“当前工具”描述保留历史用途，不覆盖本节。
+
 > v26 新增两个正式只读入口：`export_ct_action_rows.py` 按稳定且互斥的
 > calibration/dev tracklet 分区导出 action rows；`report_ct_b2_v26.py`
 > 验证 schema-v3 漏斗与反事实指标。`calibrate_ct_actions.py` 现在要求两份

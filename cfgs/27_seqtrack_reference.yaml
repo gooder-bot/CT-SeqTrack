@@ -1,0 +1,41 @@
+_base_: seqtrack3d_nuscenes_w0_shared_se2_scratch.yaml
+
+# 外部架构参考：使用同一公共修复与场景用途，普通 SeqTrack 原目标。
+# 不是 CT B0 四视图加权目标；main 不调用 configure_ct_variant。
+experiment_name: ct27_seqtrack_reference_mini_car_scratch_seed42
+ct_enable_v27: true
+ct_v27_reference: true
+ct_enable_v26_recovery: false
+ct_v26_full_formal_arm: false
+candidate_trajectory_mode: independent
+net_model: seqtrack3d
+use_ct_v2: false
+use_ct_joint_full: false
+use_b1motion_v3: false
+use_time_guided_search: false
+use_endpoint_search_evidence: false
+use_trajectory_search_encoder: false
+ct_enable_b1: false
+ct_enable_b2: false
+ct_enable_b3: false
+ct_memory_mode: none
+ct_online_recursive_training: false
+ct_recursive_reseed_enabled: false
+ct_b0_steps_per_epoch: 0
+ct_initialization_policy: scratch_only
+ct_b0_initialization_policy: scratch_only
+ct_formal_resume_contract: true
+ct_partition_seed: 42
+ct_metric_mode: benchmark_compat
+ct_exact_metric_audit: true
+observation_safe_bbox_size: true
+proposal_inference_mode: observation
+seed: 42
+epoch: 60
+from_epoch: 0
+lr: 0.0001
+save_top_k: 0
+ct_keep_final_window_checkpoints: 3
+check_val_every_n_epoch: 1
+trainer_devices: 1
+

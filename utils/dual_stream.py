@@ -23,7 +23,7 @@ class DualStreamLoader:
             raise ValueError("observation loader must be non-empty")
         if mechanism_loader is not None and self.mechanism_steps <= 0:
             raise ValueError("mechanism loader must be non-empty")
-        if self.mechanism_steps > self.observation_steps:
+        if self.mechanism_steps > self.observation_steps and self.schema != 'ct_seqtrack.train.v4':
             raise ValueError(
                 "mechanism stream may not exceed the observation stream")
 
@@ -51,13 +51,24 @@ class DualStreamLoader:
                     and hasattr(sampler, "set_epoch")):
                 sampler.set_epoch(int(epoch))
 
+    def _next_mechanism(self, iterator):
+        # num_workers=0 fetches and iterator-finalization code may use global
+        # RNGs too.  Independent DataLoader generators still advance normally.
+        rng_state = capture_global_rng_state() if self.isolate_mechanism_rng else None
+        try:
+            return next(iterator)
+        finally:
+            if rng_state is not None:
+                restore_global_rng_state(rng_state)
+
     def __iter__(self):
         mechanism_iterator = None
         emitted = 0
         for step, observation_batch in enumerate(self.observation_loader):
             mechanism_batch = None
-            if self._scheduled(
-                    step, self.observation_steps, self.mechanism_steps):
+            ticks = ((step + 1) * self.mechanism_steps // self.observation_steps
+                     - step * self.mechanism_steps // self.observation_steps)
+            if ticks:
                 if mechanism_iterator is None:
                     rng_state = (
                         capture_global_rng_state()
@@ -67,12 +78,16 @@ class DualStreamLoader:
                     finally:
                         if rng_state is not None:
                             restore_global_rng_state(rng_state)
-                try:
-                    mechanism_batch = next(mechanism_iterator)
-                except StopIteration as exc:
-                    raise RuntimeError(
-                        "mechanism loader ended before its registered pass") from exc
-                emitted += 1
+                sequence = []
+                for _ in range(ticks):
+                    try:
+                        sequence.append(self._next_mechanism(mechanism_iterator))
+                    except StopIteration as exc:
+                        raise RuntimeError(
+                            "mechanism loader ended before its registered pass") from exc
+                mechanism_batch = (sequence[0] if ticks == 1 else
+                                   {'ct_mechanism_sequence': sequence})
+                emitted += ticks
             yield {
                 "ct_stream_schema": self.schema,
                 "observation": observation_batch,
@@ -83,7 +98,7 @@ class DualStreamLoader:
                 "dual-stream schedule did not consume exactly one mechanism pass")
         if mechanism_iterator is not None:
             try:
-                next(mechanism_iterator)
+                self._next_mechanism(mechanism_iterator)
             except StopIteration:
                 return
             raise RuntimeError(

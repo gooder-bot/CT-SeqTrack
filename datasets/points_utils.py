@@ -6,6 +6,7 @@ from pyquaternion import Quaternion
 from datasets.data_classes import PointCloud
 from scipy.spatial.distance import cdist
 from utils.box_membership import axis_aligned_box_membership_mask
+from utils.point_identity import raw_point_ids
 
 
 def random_choice(num_samples, size, replacement=False, seed=None):
@@ -27,7 +28,7 @@ def regularize_pc(points, sample_size, seed=None):
     num_feature = points.shape[1]
     new_pts_idx = None
     rng = np.random if seed is None else np.random.default_rng(seed)
-    if num_points > 2:
+    if num_points > 0:
         if num_points != sample_size:
             new_pts_idx = rng.choice(num_points, size=sample_size, replace=sample_size > num_points)
             # new_pts_idx = random_choice(num_samples=sample_size, size=num_points,
@@ -155,6 +156,7 @@ def crop_pc_axis_aligned(PC, box, offset=0, scale=1.0, return_mask=False):
 
     new_PC = copy.deepcopy(PC)
     new_PC.points = PC.points[:, close]
+    new_PC.point_ids = raw_point_ids(PC)[close].copy()
     if return_mask:
         return new_PC, close
     return new_PC
@@ -193,6 +195,7 @@ def crop_pc_axis_aligned_with_aroundboxs(PC, box, around_boxs, offset=0, scale=1
 
     new_PC = copy.deepcopy(PC)
     new_PC.points = PC.points[:, close]
+    new_PC.point_ids = raw_point_ids(PC)[close].copy()
     if return_mask:
         return new_PC, close
     return new_PC
@@ -205,7 +208,7 @@ def crop_pc_oriented(PC, box, offset=0, scale=1.0, return_mask=False):
     """
 
     box_tmp = copy.deepcopy(box)
-    new_PC = PointCloud(PC.points.copy())
+    new_PC = PointCloud(PC.points.copy(), point_ids=raw_point_ids(PC).copy())
     rot_mat = np.transpose(box_tmp.rotation_matrix)
     trans = -box_tmp.center
 
@@ -232,7 +235,7 @@ def crop_pc_oriented(PC, box, offset=0, scale=1.0, return_mask=False):
     close = np.logical_and(close, z_filt_min)
     close = np.logical_and(close, z_filt_max)
 
-    new_PC = PointCloud(new_PC.points[:, close])
+    new_PC = PointCloud(new_PC.points[:, close], point_ids=raw_point_ids(PC)[close])
 
     # transform back to the original coordinate system
     new_PC.rotate(np.transpose(rot_mat))
@@ -277,7 +280,8 @@ def generate_subwindow(pc, sample_bb, scale, offset=2, oriented=True):
 
     return new_pc
 
-def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, oriented=True):
+def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, oriented=True,
+                                     canonicalize=False):
     """
     generating the search area using the sample_bb
 
@@ -309,6 +313,19 @@ def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, or
         box_tmp.rotate(Quaternion(matrix=rot_mat))
        
         new_pc = crop_pc_axis_aligned(new_pc, box_tmp, scale=scale, offset=offset)
+
+        if canonicalize:
+            # Membership may use a support frame, but every retained ID is
+            # transformed directly from the same source table to the B0 anchor.
+            source_ids = raw_point_ids(pc)
+            if np.array_equal(source_ids, np.arange(len(source_ids))):
+                indices = raw_point_ids(new_pc)
+            else:
+                lookup = {int(pid): index for index, pid in enumerate(source_ids)}
+                indices = np.asarray([lookup[int(pid)] for pid in raw_point_ids(new_pc)],
+                                     dtype=np.int64)
+            coordinates = rot_mat_o @ (pc.points[:, indices] + trans_o[:, None])
+            return PointCloud(coordinates, point_ids=raw_point_ids(new_pc).copy())
 
         new_pc.rotate(np.transpose(rot_mat)) 
         new_pc.translate(-trans) 

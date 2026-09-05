@@ -10,14 +10,11 @@ import sys
 from pathlib import Path
 
 import torch
-from easydict import EasyDict
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from datasets import get_dataset  # noqa: E402
-from models import get_model  # noqa: E402
 from models.ct_variant import configure_ct_variant  # noqa: E402
 from utils.action_calibration import (  # noqa: E402
     CONSENSUS_FEATURE_SCHEMA,
@@ -56,6 +53,9 @@ def resolve_device(name):
 
 
 def main():
+    from easydict import EasyDict
+    from datasets import get_dataset
+    from models import get_model
     args = parse_args()
     raw_config = load_yaml_config(args.config)
     seed = int(args.seed if args.seed is not None
@@ -152,4 +152,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--v27" in sys.argv[1:]:
+        from tools.ct_action_v27_runtime import export_main
+        export_main()
+    else:
+        main()

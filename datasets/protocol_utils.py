@@ -39,7 +39,7 @@ def normalize_protocol_role(role):
         return "val"
     if role in ("evaluation", "evaluate"):
         return "eval"
-    if role not in ("train", "val", "test", "eval"):
+    if role not in ("train", "val", "test", "eval", "calibration", "dev"):
         raise ValueError(f"Unsupported protocol role: {role}")
     return role
 
@@ -57,7 +57,7 @@ def _role_value(config, base_key, role, default=None):
         candidates.insert(0, f"virtual_rate_manifest_{role}")
     if base_key == "dynamics_time_manifest":
         candidates.insert(0, f"dynamics_time_manifest_{role}")
-    if role in ("val", "test", "eval"):
+    if role in ("val", "test", "eval", "calibration", "dev"):
         candidates.append(f"eval_{base_key}")
     elif role == "train":
         candidates.append(f"train_{base_key}")

@@ -1,0 +1,6 @@
+﻿arm,initial_equal,input100_equal,step1,step100,b0_updates,plugin_updates,frozen
+B0,True,True,126580d7,4231eff7,75720,0,False
+B1-GRU,True,True,6b901e2f,ab98b21c,75720,12780,False
+B1-CfC,True,True,726e7516,dc9467bf,75720,12780,False
+Full-minus-B3,True,True,b875c2ab,8e6910b0,10096,1704,False
+Full,True,True,2d036f20,d94bb0c3,75720,12780,False

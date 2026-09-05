@@ -259,6 +259,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     bb_scale
     bb_offset
     """
+    v27 = bool(getattr(config, 'ct_enable_v27', False))
+    from utils.point_identity import raw_point_ids, sampled_identity
+    from functools import partial
+    crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
+                             canonicalize=v27)
     prev_frames = data['prev_frames']
     this_frame = data['this_frame']
     candidate_id = data['candidate_id']
@@ -406,7 +411,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
         if num_points_in_prev_box < config.limit_num_points_in_prev_box:
             empty_counter += 1
-    if online_recursive_state is None:
+    if online_recursive_state is None and not v27:
         assert empty_counter < config.empty_box_limit, 'not enough valid box'
 
     if candidate_trajectory_mode == 'shared_se2':
@@ -612,8 +617,19 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         effective_relative_timestamps = (-cumulative).tolist()
         effective_local_timestamps = np.asarray(
             effective_relative_timestamps + [0.0], dtype=np.float32)
+    v27_b1_input = None
+    if v27 and use_motion_v3:
+        from utils.b1_acquisition import build_b1_input_arrays
+        v27_b1_input = build_b1_input_arrays(
+            recursive_history, effective_delta_t_list, valid_mask,
+            history_quality=(online_recursive_state or {}).get('history_quality'),
+            recursive_age=(online_recursive_state or {}).get('recursive_age', 0.),
+            first_frame_wlh=data['first_frame']['3d_bbox'].wlh,
+            degrees=config.degrees,
+            time_scale=float(getattr(config, 'time_scale', .5)))
+        motion_main_ref_boxs = v27_b1_input['ref_boxs']
     motion_aux_contract = None
-    if use_motion_v3 and not observation_only:
+    if use_motion_v3 and not observation_only and not data.get('_ct_inference', False):
         motion_aux_prev_frames = data.get('motion_aux_prev_frames')
         if motion_aux_prev_frames is None:
             raise KeyError(
@@ -744,6 +760,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             motion_aux_delta_t_effective[0]
             if motion_aux_delta_t_effective else float(getattr(
                 config, 'dynamics_fixed_delta_t', default_time_step)))
+        v27_aux_input = None
+        if v27:
+            from utils.b1_acquisition import build_b1_input_arrays
+            v27_aux_input = build_b1_input_arrays(
+                motion_aux_canonical_boxs, motion_aux_delta_t_effective,
+                motion_aux_valid_mask,
+                history_quality=(online_motion_aux_state or {}).get('history_quality'),
+                recursive_age=(online_motion_aux_state or {}).get('recursive_age', 0.),
+                first_frame_wlh=data['first_frame']['3d_bbox'].wlh,
+                degrees=config.degrees,
+                time_scale=float(getattr(config, 'time_scale', .5)))
+            motion_aux_ref_boxs = v27_aux_input['ref_boxs']
         if joint_contract_v2:
             motion_aux_physical = build_b1_physical_contract(
                 canonical_this_box,
@@ -753,9 +781,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 degrees=config.degrees,
                 eps=1e-3,
             )
-            if not np.array_equal(
-                    motion_aux_ref_boxs,
-                    motion_aux_physical['ref_boxs']):
+            same_aux_axes = (np.allclose(
+                motion_aux_ref_boxs, motion_aux_physical['ref_boxs'],
+                rtol=1e-6, atol=1e-6) if v27 else np.array_equal(
+                    motion_aux_ref_boxs, motion_aux_physical['ref_boxs']))
+            if not same_aux_axes:
                 raise RuntimeError(
                     "B1 auxiliary input and physical-label axes diverged")
             motion_aux_target_xy = motion_aux_physical['target_xy']
@@ -780,6 +810,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'motion_aux_query_gap_frames': np.int64(
                 data['motion_aux_offsets'][0]),
         }
+        if v27_aux_input is not None:
+            motion_aux_contract['motion_aux_acquisition_features'] = (
+                v27_aux_input['acquisition_features'])
     main_current_value = float(getattr(config, 'main_time_current', 0.0))
     point_timestamps, corner_timestamps, main_timestamps = build_main_time_fields(
         valid_mask,
@@ -792,12 +825,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
 
     prev_frame_pcs = []
     for i, prev_pc in enumerate(prev_pcs):
-        prev_frame_pc = points_utils.generate_subwindow_with_aroundboxs(prev_pc, ref_boxs[i], ref_boxs[0],
+        prev_frame_pc = crop_subwindow(prev_pc, ref_boxs[i], ref_boxs[0],
                                                     scale=config.bb_scale,
                                                     offset=config.bb_offset)
         prev_frame_pcs.append(prev_frame_pc)
 
-    this_frame_pc = points_utils.generate_subwindow_with_aroundboxs(
+    this_frame_pc = crop_subwindow(
         this_pc, ref_boxs[0], ref_boxs[0],
         scale=config.bb_scale,
         offset=config.bb_offset)
@@ -921,7 +954,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     config, 'ct_search_min_displacement', 0.2)),
             )
         if ct_search_box is not None:
-            expanded_search_pc = points_utils.generate_subwindow_with_aroundboxs(
+            expanded_search_pc = crop_subwindow(
                 this_pc,
                 ct_search_box,
                 ref_boxs[0],
@@ -1067,6 +1100,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             if not (use_ct_joint_full and joint_contract_v2) else 0.0,
             fallback_require_recent_transition=use_ct_joint_full,
         )
+        if v27:
+            support_kwargs.update(enable_v27=True,
+                                  first_frame_size=data['first_frame']['3d_bbox'].wlh)
         if use_ct_joint_full and joint_contract_v2:
             (search_v2_box,
              ct_search_box,
@@ -1079,7 +1115,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             if ct_search_box is not None:
                 ct_search_diagnostics = dict(search_v2_diagnostics)
                 expanded_search_pc = (
-                    points_utils.generate_subwindow_with_aroundboxs(
+                    crop_subwindow(
                         this_pc, ct_search_box, ref_boxs[0],
                         scale=1.0, offset=0.0))
                 expanded_search_points = expanded_search_pc.points.T
@@ -1096,7 +1132,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             bounded_support = bool(
                 learned_prior_support or v26_recovery_enabled)
             search_v2_expanded_pc = (
-                points_utils.generate_subwindow_with_aroundboxs(
+                crop_subwindow(
                     this_pc,
                     search_v2_box,
                     ref_boxs[0],
@@ -1122,7 +1158,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     search_v2_local_box.center[:2], dtype=np.float32)
 
         if v26_recovery_enabled:
-            inner_core_pc = points_utils.generate_subwindow_with_aroundboxs(
+            inner_core_pc = crop_subwindow(
                 this_pc, ref_boxs[0], ref_boxs[0], scale=1.0, offset=0.0)
             b1_prior_valid = bool(
                 isinstance(support_prediction, dict)
@@ -1170,9 +1206,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     config, 'ct_corridor_width_padding', 2.0)),
                 max_width=float(getattr(
                     config, 'ct_corridor_max_width', 6.0)),
+                **({'enable_v27': True} if v27 else {}),
             )
             if corridor_box is not None:
-                corridor_pc = points_utils.generate_subwindow_with_aroundboxs(
+                corridor_pc = crop_subwindow(
                     this_pc, corridor_box, ref_boxs[0],
                     scale=1.0, offset=0.0)
                 corridor_points = corridor_pc.points.T
@@ -1202,11 +1239,13 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     motion_boxs = [points_utils.transform_box(this_box, prev_box) for prev_box in prev_boxs]  
 
     # Resample each frame of the point cloud to a specific number
-    prev_points_list = [
+    prev_regularized = [
         points_utils.regularize_pc(
-            prev_frame_pc.points.T, config.point_sample_size, seed=seed)[0]
+            prev_frame_pc.points.T, config.point_sample_size, seed=seed)
         for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
     ]
+    prev_points_list = [item[0] for item in prev_regularized]
+    this_sample_indices = None
     trajectory_search_points = np.zeros(
         (int(getattr(config, 'ct_tube_quota', 128)
              if use_ct_joint_full else getattr(
@@ -1226,11 +1265,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if use_trajectory_search:
         # Keep every baseline token exactly as in B0.  The extension is encoded
         # by a separate lightweight branch instead of stealing a fixed quota.
-        this_points = points_utils.regularize_pc(
+        this_points, this_sample_indices = points_utils.regularize_pc(
             baseline_search_points,
             config.point_sample_size,
             seed=current_sampling_seed,
-        )[0]
+        )
         if use_ct_joint_full:
             (trajectory_search_points,
              trajectory_search_point_valid_mask,
@@ -1277,11 +1316,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             seed=current_sampling_seed,
         )
     else:
-        this_points = points_utils.regularize_pc(
+        this_points, this_sample_indices = points_utils.regularize_pc(
             baseline_search_points,
             config.point_sample_size,
             seed=current_sampling_seed,
-        )[0]
+        )
         ct_search_sampling = {
             'baseline_sample_count': int(config.point_sample_size),
             'expansion_sample_count': 0,
@@ -1338,6 +1377,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             )
     joint_extension_sampling = None
     joint_extension_source = None
+    identity_kwargs = {}
+    if v27:
+        empty_ids = np.empty(0, dtype=np.int64)
+        identity_kwargs = dict(
+            baseline_ids=raw_point_ids(this_frame_pc),
+            endpoint_ids=(raw_point_ids(search_v2_expanded_pc)
+                          if search_v2_box is not None else empty_ids),
+            tube_ids=(raw_point_ids(expanded_search_pc)
+                      if ct_search_box is not None else empty_ids),
+            corridor_ids=(raw_point_ids(corridor_pc)
+                          if corridor_box is not None else empty_ids),
+            enable_v27=True)
     if use_search_evidence_v3 and joint_contract_v3:
         independent_seed_base = (
             current_sampling_seed
@@ -1360,6 +1411,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     config, 'ct_corridor_quota', 256)),
                 voxel_size=float(getattr(
                     config, 'ct_search_extension_voxel_size', 0.2)),
+                **identity_kwargs,
             )
         else:
             (joint_extension_points,
@@ -1413,6 +1465,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         (search_v2_point_source, trajectory_search_point_source),
         voxel_size=float(getattr(
             config, 'ct_search_extension_voxel_size', 0.2)),
+        **({'point_ids': (
+            joint_extension_sampling['_selected_point_ids'][:len(search_v2_points)],
+            joint_extension_sampling['_selected_point_ids'][len(search_v2_points):])}
+           if v27 and use_search_evidence_v3 and joint_contract_v3 else {}),
     )
     coverage_need, endpoint_ratio = useful_search_coverage_need(
         search_v2_diagnostics.get(
@@ -1494,16 +1550,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     search_has_usable_points = num_points_in_search > 2
 
     seg_label_this = geometry_utils.points_in_box(this_box, this_points.T[:3,:], config.bb_scale).astype(int)
+    evidence_label_scale = 1.0 if v27 else config.bb_scale
     search_v2_point_labels = geometry_utils.points_in_box(
         this_box,
         search_v2_points.T[:3, :],
-        config.bb_scale,
+        evidence_label_scale,
     ).astype(np.float32)
     search_v2_point_labels *= search_v2_point_valid_mask
     trajectory_search_point_labels = geometry_utils.points_in_box(
         this_box,
         trajectory_search_points.T[:3, :],
-        config.bb_scale,
+        evidence_label_scale,
     ).astype(np.float32)
     trajectory_search_point_labels *= trajectory_search_point_valid_mask
     if joint_extension_sampling is not None:
@@ -1517,18 +1574,24 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     expansion_regions = np.concatenate((
         search_v2_expanded_points, expanded_search_points,
         corridor_points), axis=0)
-    if len(expansion_regions):
+    if len(expansion_regions) and not v27:
         _, unique_expansion_indices = np.unique(
             np.rint(expansion_regions[:, :3] / 1e-6).astype(np.int64),
             axis=0, return_index=True)
         expansion_regions = expansion_regions[
             np.sort(unique_expansion_indices)]
+    elif len(expansion_regions) and v27:
+        raw_expansion_ids = np.concatenate((identity_kwargs['endpoint_ids'],
+                                            identity_kwargs['tube_ids'],
+                                            identity_kwargs['corridor_ids']))
+        _, first = np.unique(raw_expansion_ids, return_index=True)
+        expansion_regions = expansion_regions[np.sort(first)]
     expansion_target_count = int(np.sum(geometry_utils.points_in_box(
         this_box, expansion_regions.T[:3, :],
-        config.bb_scale))) if len(expansion_regions) else 0
+        evidence_label_scale))) if len(expansion_regions) else 0
     extension_pool_target_count = int(np.sum(geometry_utils.points_in_box(
         this_box, extension_pool_points.T[:3, :],
-        config.bb_scale))) if len(extension_pool_points) else 0
+        evidence_label_scale))) if len(extension_pool_points) else 0
     extension_sampled_target_count = int(
         np.sum(search_v2_point_labels > 0)
         + np.sum(trajectory_search_point_labels > 0))
@@ -1680,9 +1743,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 degrees=config.degrees,
                 eps=1e-3,
             )
-            if not np.array_equal(
-                    motion_main_ref_boxs,
-                    motion_main_physical['ref_boxs']):
+            same_main_axes = (np.allclose(
+                motion_main_ref_boxs, motion_main_physical['ref_boxs'],
+                rtol=1e-6, atol=1e-6) if v27 else np.array_equal(
+                    motion_main_ref_boxs, motion_main_physical['ref_boxs']))
+            if not same_main_axes:
                 raise RuntimeError(
                     "B1 main input and physical-label axes diverged")
             motion_main_target_xy = motion_main_physical['target_xy']
@@ -1702,13 +1767,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'ref_boxs':np.stack(ref_box_list, axis=0),
         'box_label_prev': np.stack(box_label_prev_list, axis=0),
         'motion_label': np.stack(motion_label_list, axis=0),
-        'motion_state_label': np.stack(motion_state_label_list, axis=0).astype('int'),
+        'motion_state_label': np.stack(motion_state_label_list, axis=0).astype(
+            np.int64 if v27 else 'int'),
         'bbox_size': (
             np.asarray(data['first_frame']['3d_bbox'].wlh, dtype=np.float32)
             if use_ct_joint_full or bool(getattr(
                 config, 'observation_safe_bbox_size', False))
             else this_box.wlh),
-        'seg_label': stack_seg_label.astype('int'), 
+        'seg_label': stack_seg_label.astype(np.int64 if v27 else 'int'),
         'valid_mask': np.array(valid_mask).astype('int'), 
         'timestamps': main_timestamps,
         'delta_t': np.array(delta_t_list, dtype=np.float32),
@@ -2073,6 +2139,156 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         data_dict.update({'prev_bc': np.stack(prev_bc_list, axis=0).astype('float32'),
                           'this_bc': this_bc.astype('float32'),
                           'candidate_bc': candidate_bc.astype('float32')})
+
+    if v27:
+        import hashlib
+        margin_target = None
+        identities = [sampled_identity(pc, result[1], config.point_sample_size)
+                      for pc, result in zip(prev_frame_pcs, prev_regularized)]
+        identities.append(sampled_identity(this_frame_pc, this_sample_indices,
+                                           config.point_sample_size))
+        data_dict.update({
+            'b0_point_ids': np.stack([item[0] for item in identities]),
+            'b0_point_valid_mask': np.stack([item[1] for item in identities]),
+            'b0_point_unique_mask': np.stack([item[2] for item in identities]),
+            'b0_valid_mask': np.stack([item[1] for item in identities]),
+            'b0_unique_mask': np.stack([item[2] for item in identities]),
+            'b0_raw_point_count': np.asarray(
+                [len(pc.points.T) for pc in prev_frame_pcs] +
+                [len(baseline_search_points)], dtype=np.int64),
+            'b0_frame_uid': np.asarray([int.from_bytes(hashlib.sha256(str(
+                frame.get('frame_id', frame.get('timestamp', ''))).encode()).digest()[:8],
+                'big') & ((1 << 63) - 1) for frame in
+                [prev_frames[key] for key in sorted_prev_keys] + [this_frame]], dtype=np.int64),
+            'ct_current_observation_valid': np.float32(len(baseline_search_points) > 0),
+            'ct_recursive_state_age': np.float32(
+                (online_recursive_state or {}).get('recursive_age', 0.)),
+            'target_bbox_size': np.asarray(canonical_this_box.wlh, dtype=np.float32),
+            'timestamps_effective': np.asarray(effective_local_timestamps, dtype=np.float32),
+        })
+        if v27_b1_input is not None:
+            from utils.b1_acquisition import b1_input_digest, acquisition_margin_grid_target
+            data_dict['motion_acquisition_features'] = v27_b1_input['acquisition_features']
+            data_dict['motion_input_digest'] = b1_input_digest(v27_b1_input)
+            data_dict['motion_main_ref_boxs'] = v27_b1_input['ref_boxs']
+            data_dict['motion_acquisition_target'] = np.asarray((2., 1.), dtype=np.float32)
+            data_dict['motion_acquisition_target_valid'] = np.float32(0.)
+            if not data.get('_ct_inference', False) and search_v2_box is not None:
+                margin_target = acquisition_margin_grid_target(
+                    this_pc.points.T, raw_point_ids(this_pc),
+                    geometry_utils.points_in_box(canonical_this_box, this_pc.points, 1.0),
+                    raw_point_ids(this_frame_pc),
+                    anchor_center=coordinate_anchor_box.center,
+                    endpoint_center=search_v2_diagnostics['endpoint_center'],
+                    object_wlh=data['first_frame']['3d_bbox'].wlh,
+                    object_yaw=float(coordinate_anchor_box.orientation.radians *
+                                     coordinate_anchor_box.orientation.axis[-1]),
+                    corridor_box=corridor_box)
+                data_dict['motion_acquisition_target'] = margin_target['target_margin']
+                data_dict['motion_acquisition_target_valid'] = np.float32(margin_target['valid'])
+                for key in ('global_novel_target_count', 'max_reachable_target_count',
+                            'selected_target_count', 'selected_background_count'):
+                    data_dict['motion_margin_' + key] = np.float32(margin_target[key])
+        if use_search_evidence_v3 and joint_contract_v3:
+            data_dict['ct_extension_point_ids'] = np.asarray(
+                joint_extension_sampling['_selected_point_ids'], dtype=np.int64)
+            data_dict['ct_base_evidence_valid_mask'] = identities[-1][1]
+            data_dict['ct_base_evidence_unique_mask'] = identities[-1][2]
+            data_dict['ct_base_evidence_point_ids'] = identities[-1][0]
+            data_dict['ct_base_point_ids'] = identities[-1][0]
+            data_dict['ct_base_unique_mask'] = identities[-1][2]
+            evidence_labels = geometry_utils.points_in_box(
+                this_box, extension_points[:, :3].T, 1.0).astype(np.float32)
+            evidence_labels *= extension_valid_mask
+            data_dict['ct_extension_labels'] = evidence_labels
+            data_dict['ct_extension_prepool_labels'] = evidence_labels.copy()
+            data_dict['ct_base_evidence_labels'] = geometry_utils.points_in_box(
+                this_box, this_points[:, :3].T, 1.0).astype(np.float32) * identities[-1][1]
+            data_dict.update({
+                'ct_acquisition_base_target_count': np.float32(np.sum(
+                    geometry_utils.points_in_box(this_box, this_frame_pc.points[:3], 1.0))),
+                'ct_acquisition_expansion_target_count': np.float32(expansion_target_count),
+                'ct_acquisition_extension_pool_target_count': np.float32(extension_pool_target_count),
+                'ct_acquisition_sampled_target_count': np.float32(np.sum(evidence_labels)),
+            })
+            source_prediction = support_prediction or {}
+            learned_acquisition = search_v2_diagnostics.get('prior_source') == 'b1'
+            actual_margin = (source_prediction.get('acquisition_margin_parallel_perp', (2., 1.))
+                             if learned_acquisition else (2., 1.))
+            acquisition_yaw = (float(search_v2_box.orientation.radians *
+                                     search_v2_box.orientation.axis[-1])
+                               if search_v2_box is not None else float(coordinate_anchor_theta))
+            anchor_yaw = float(coordinate_anchor_theta)
+            if config.degrees:
+                anchor_yaw = np.deg2rad(anchor_yaw)
+            angle = acquisition_yaw - anchor_yaw
+            acquisition_direction = np.asarray((np.cos(angle), np.sin(angle)), dtype=np.float32)
+            if learned_acquisition:
+                statistical_direction = np.asarray(source_prediction['direction_xy'], dtype=np.float32)
+                statistical_log_sigma = np.asarray(source_prediction['log_sigma_parallel_perp'], dtype=np.float32)
+            else:
+                # The resolved CV prior owns these statistics.  An invalid
+                # learned prior may contain NaNs and cannot enter B2 features.
+                statistical_direction = acquisition_direction.copy()
+                coverage_scale = max(float(getattr(config, 'search_v3_coverage_scale', 2.448)), 1e-6)
+                fallback_sigma = np.asarray((
+                    search_v2_diagnostics.get('sigma_parallel', 2. / coverage_scale),
+                    search_v2_diagnostics.get('sigma_perpendicular', 1. / coverage_scale)), dtype=np.float32)
+                fallback_sigma = np.where(np.isfinite(fallback_sigma) & (fallback_sigma > 0),
+                                          fallback_sigma, np.asarray((2., 1.)) / coverage_scale)
+                statistical_log_sigma = np.log(fallback_sigma).astype(np.float32)
+            data_dict.update({
+                'ct_acquisition_direction_xy': acquisition_direction,
+                'ct_acquisition_margin': np.asarray(actual_margin, dtype=np.float32),
+                'ct_acquisition_statistical_direction_xy': statistical_direction,
+                'ct_acquisition_log_sigma': statistical_log_sigma,
+                'ct_acquisition_learned_valid': np.float32(source_prediction.get('valid', False)),
+                'ct_acquisition_resolved_valid': np.float32(search_v2_diagnostics.get('valid', False)),
+                'ct_acquisition_fallback_reason': str(search_v2_diagnostics.get('fallback_reason',
+                    search_v2_diagnostics.get('reason', ''))),
+                'ct_acquisition_parameter_revision': np.int64(source_prediction.get('parameter_revision', 0)),
+            })
+            sidecar = data.get('_ct_diagnostic_sidecar')
+            if sidecar is not None:
+                sidecar['_construction'] = dict(
+                    global_pc=this_pc, gt_box=canonical_this_box, anchor_box=coordinate_anchor_box,
+                    baseline_pc=this_frame_pc, sampled_base_xyz=this_points[:, :3],
+                    sampled_base_ids=identities[-1][0],
+                    endpoint_pc=search_v2_expanded_pc if search_v2_box is not None else None,
+                    tube_pc=expanded_search_pc if ct_search_box is not None else None,
+                    corridor_pc=corridor_pc if corridor_box is not None else None,
+                    pool_xyz=extension_pool_points,
+                    pool_ids=joint_extension_sampling['_pool_point_ids'],
+                    prepool_xyz=extension_points[:, :3],
+                    prepool_ids=data_dict['ct_extension_point_ids'],
+                    prepool_valid=extension_valid_mask, source=joint_extension_source,
+                    support_boxes=(search_v2_box, ct_search_box, corridor_box))
+                from utils.v27_diagnostics import build_acquisition_diagnostics
+                sidecar['acquisition'] = build_acquisition_diagnostics(
+                    **sidecar.pop('_construction'), margin_target=margin_target)
+                data_dict.update({
+                    'ct_acquisition_base_target_count': np.float32(sidecar['acquisition']['base_raw_target_count']),
+                    'ct_acquisition_expansion_target_count': np.float32(sidecar['acquisition']['expansion_target_count']),
+                    'ct_acquisition_extension_pool_target_count': np.float32(sidecar['acquisition']['pool_target_count']),
+                    'ct_acquisition_sampled_target_count': np.float32(sidecar['acquisition']['sampled_target_count']),
+                })
+        sidecar = data.get('_ct_diagnostic_sidecar')
+        if isinstance(sidecar, dict) and 'acquisition' not in sidecar:
+            # Observation-only arms still report the complete raw/base funnel.
+            # GT is read exclusively in this sidecar and does not alter B0 labels.
+            from utils.v27_diagnostics import build_acquisition_diagnostics
+            empty_xyz = np.empty((0, 3), dtype=np.float32)
+            empty_ids = np.empty(0, dtype=np.int64)
+            sidecar['acquisition'] = build_acquisition_diagnostics(
+                this_pc, canonical_this_box, coordinate_anchor_box, this_frame_pc,
+                this_points[:, :3], identities[-1][0], None, None, None,
+                empty_xyz, empty_ids, empty_xyz, empty_ids,
+                np.empty(0, dtype=np.float32), empty_ids)
+            sidecar['acquisition'].update(
+                acquisition_enabled=False,
+                acquisition_disabled_reason=('observation_only' if observation_only else 'modules_disabled'),
+                selected_point_count=0, selected_target_count=0,
+                selected_background_count=0, selected_target_bearing=0)
 
     if str(getattr(
             config, 'ct_observation_payload_mode', 'legacy'
@@ -2503,6 +2719,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             'current_sampling_seed': deterministic_point_seed(
                 self.config, *seed_parts, 'current'),
             'shadow_future': [],
+            'shadow_scheduled': bool(build_shadow),
+            'shadow_future_exists': [
+                this_frame_id + horizon < self.dataset.get_num_frames_tracklet(tracklet_id)
+                for horizon in (1, 2)],
         }
         if self.use_b1motion_v3:
             motion_aux_offsets = self._motion_v3_aux_offsets(this_frame_id)
@@ -2521,6 +2741,8 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             })
         if build_shadow:
             for future_id in (this_frame_id + 1, this_frame_id + 2):
+                if future_id >= self.dataset.get_num_frames_tracklet(tracklet_id):
+                    continue
                 future_raw = self._online_raw_view(
                     epoch, batch_index, slot, tracklet_id, future_id,
                     candidate_id=0, build_shadow=False)

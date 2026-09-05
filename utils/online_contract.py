@@ -235,6 +235,10 @@ def build_online_resume_contract(config):
             config, "ct_targetness_negative_weight", 1.0)),
         "enable_v26_recovery": bool(_get(
             config, "ct_enable_v26_recovery", False)),
+        "enable_v27": bool(_get(config, "ct_enable_v27", False)),
+        "v27_reference": bool(_get(config, "ct_v27_reference", False)),
+        "scene_manifest_sha256": _get(config, "ct_scene_manifest_sha256"),
+        "metric_mode": str(_get(config, "ct_metric_mode", "legacy")),
         "v26_full_formal_arm": bool(_get(
             config, "ct_v26_full_formal_arm", False)),
         "adaptive_acquisition_margin": bool(_get(
@@ -323,6 +327,21 @@ def validate_online_resume_contract(checkpoint, config):
         raise ValueError(
             "online resume contract mismatch: "
             + ", ".join(sorted(mismatches)))
+    if bool(_get(config, 'ct_enable_v27', False)):
+        # The named legacy contract does not enumerate all v27 B2/B3 loss and
+        # action settings. Use the same identity as strict calibration restore;
+        # runtime dataset counts and checkpoint/log paths are excluded there.
+        from utils.action_calibration_v27 import action_calibration_config_identity
+        hyper_parameters = checkpoint.get('hyper_parameters', {})
+        saved_config = hyper_parameters.get('config', hyper_parameters)
+        if not isinstance(saved_config, dict) or not saved_config:
+            raise ValueError('v27 resume requires the saved resolved config')
+        expected_config = action_calibration_config_identity(config)
+        observed_config = action_calibration_config_identity(saved_config)
+        changed = sorted(key for key in set(expected_config) | set(observed_config)
+                         if _normal(expected_config.get(key)) != _normal(observed_config.get(key)))
+        if changed:
+            raise ValueError('v27 resolved-config identity mismatch: ' + ', '.join(changed))
     if checkpoint.get("ct_epoch_boundary_complete") is not True:
         raise ValueError(
             "online resume is supported only from an explicitly completed "
@@ -455,7 +474,8 @@ def validate_scratch_training_contract(config):
     require_equal("ct_b0_candidate_mode", "independent", "legacy")
     require_equal("candidate_trajectory_mode", "independent", "legacy")
     expected_b0_steps = (
-        1262 if str(_get(config, "version", "v1.0-mini")) == "v1.0-mini"
+        1262 if not bool(_get(config, "ct_enable_v27", False))
+        and str(_get(config, "version", "v1.0-mini")) == "v1.0-mini"
         else 0)
     require_equal("ct_b0_steps_per_epoch", expected_b0_steps, 0)
     require_equal("ct_mechanism_stream", "online_recursive", "legacy")
@@ -473,7 +493,8 @@ def validate_scratch_training_contract(config):
             "ct_validation_rng_mode", "stateless_tracklet_frame", "legacy")
         require_equal(
             "ct_batch_schema",
-            ("ct_seqtrack.train.v3" if bool(_get(
+            ("ct_seqtrack.train.v4" if bool(_get(config, "ct_enable_v27", False))
+             else "ct_seqtrack.train.v3" if bool(_get(
                 config, "ct_enable_v26_recovery", False))
              else "ct_seqtrack.train.v2"),
             "legacy")

@@ -1,0 +1,7 @@
+_base_: 27_full_minus_b3_nuscenes_full.yaml
+experiment_name: ct27_full_nuscenes_full_scratch_seed42
+ct_variant: full
+ct_enable_b3: true
+ct_require_action_calibration: true
+proposal_inference_mode: selective
+

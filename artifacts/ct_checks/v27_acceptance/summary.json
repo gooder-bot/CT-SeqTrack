@@ -1,0 +1,32 @@
+{
+  "schema": "ct_seqtrack.implementation_acceptance.v27",
+  "git_head": "b445ecd04fcdc41474c29d829b2626f3780f759d",
+  "committed": false,
+  "pytest": {
+    "passed": 290,
+    "skipped": 1,
+    "seconds": 26.1,
+    "log": "pytest.txt"
+  },
+  "compileall": "passed",
+  "diff_check": "passed",
+  "historical_config_and_output_tracked_diff": "empty",
+  "source_content_sha256": "a6c220553e509eb16825d4f2a95c25aa1d12b5c649928001af1f00c26046d68f",
+  "slimming_gate": {
+    "status": "rejected_by_historical_head_pin",
+    "expected_head": "001951a3aee15fdad6e5d5e32ca02d87bf083f3a"
+  },
+  "server_real_batch": "pending",
+  "server_100_step_and_resume": "pending",
+  "formal_training": "not_started",
+  "score_claim": "none",
+  "full_protocol": {
+    "train_split": "train_track",
+    "train_scenes": 350,
+    "test_split": "val",
+    "test_scenes": 150,
+    "internal_calibration_scenes": 17,
+    "internal_dev_scenes": 18,
+    "parameter_training_overlap": true
+  }
+}
