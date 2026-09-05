@@ -13,6 +13,7 @@
 - [x] 完成v27数据/模型/损失/校准入口集成和本地检查：290 passed、1 skipped；compileall与diff检查通过。范围与服务器待验收项见[实施记录](docs/CTSEQTRACK_V27_IMPLEMENTATION.md)。
 - [x] 二次审计修复稀疏GT重采样、分类标签dtype、epoch文件保存顺序、续训generator恢复、Full RNG extra_state加载及旧诊断标签；实际六臂网络、Full完整训练事务、五臂B0两步对齐和真实Lightning连续/恢复对照通过。详见[训练就绪记录](docs/CTSEQTRACK_V27_TRAINING_READINESS.md)与其中最新测试结果。
 - [x] 按本次mini启动要求同步workers4/每5轮dev诊断，新增运行resolved_config.yaml；修复验证间隔5的last保存与延迟val-loader恢复，附GPU2/GPU3五臂[后台命令](docs/CTSEQTRACK_V27_MINI_LAUNCH.md)。
+- [x] 修复服务器epoch0的异质轨迹合批KeyError：B1 margin四计数固定schema，补九类状态与真实batch16混合轨迹反传测试；见[报错验证](artifacts/ct_checks/v27_mixed_batch_fix/summary.json)。真实100-step与60轮继续待服务器验证。
 - [ ] 服务器验证原始point ID、0/1/2点、所有endpoint、B1实际获取、B0更新一致性、
   所有启用参数组梯度、resume与耗时；工程checkpoint不进入正式实验。
 - [ ] 从epoch0运行mini Car五臂，seed42、60epoch；报告final与58/59/60。

@@ -2173,6 +2173,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             data_dict['motion_main_ref_boxs'] = v27_b1_input['ref_boxs']
             data_dict['motion_acquisition_target'] = np.asarray((2., 1.), dtype=np.float32)
             data_dict['motion_acquisition_target_valid'] = np.float32(0.)
+            # 不同slot会同时包含首个query和成熟历史。没有合法获取几何时
+            # 仍返回固定字段，target_valid=0屏蔽监督，不能让合批取决于首行。
+            margin_count_keys = ('global_novel_target_count', 'max_reachable_target_count',
+                                 'selected_target_count', 'selected_background_count')
+            for key in margin_count_keys:
+                data_dict['motion_margin_' + key] = np.float32(0.)
             if not data.get('_ct_inference', False) and search_v2_box is not None:
                 margin_target = acquisition_margin_grid_target(
                     this_pc.points.T, raw_point_ids(this_pc),
@@ -2186,8 +2192,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     corridor_box=corridor_box)
                 data_dict['motion_acquisition_target'] = margin_target['target_margin']
                 data_dict['motion_acquisition_target_valid'] = np.float32(margin_target['valid'])
-                for key in ('global_novel_target_count', 'max_reachable_target_count',
-                            'selected_target_count', 'selected_background_count'):
+                for key in margin_count_keys:
                     data_dict['motion_margin_' + key] = np.float32(margin_target[key])
         if use_search_evidence_v3 and joint_contract_v3:
             data_dict['ct_extension_point_ids'] = np.asarray(

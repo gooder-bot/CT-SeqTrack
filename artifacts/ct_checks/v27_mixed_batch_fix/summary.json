@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-05",
+  "error": "KeyError: motion_margin_global_novel_target_count",
+  "source_file": "datasets/sampler.py",
+  "cause": "conditional per-sample diagnostic keys with mixed cold-start and mature tracking slots",
+  "command": [
+    "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v27_runtime_env\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "-q",
+    "-rs",
+    "--disable-warnings",
+    "tests/test_ct_v27_heterogeneous_batch.py",
+    "tests/test_ct_v27_mixed_slots_training.py",
+    "tests/test_ct_v27_input_flow.py",
+    "tests/test_ct_v27_b1_acquisition.py",
+    "tests/test_ct_v27_data_reaudit.py",
+    "tests/test_ct_v27_training.py",
+    "tests/test_ct_v27_full_model.py::test_actual_lightning_full_dual_stream_training_and_epoch_checkpoint"
+  ],
+  "pytest_exit_code": 0,
+  "elapsed_seconds": 29.24,
+  "tail": [
+    "...........................................                              [100%]",
+    "43 passed, 16 warnings in 27.87s"
+  ],
+  "server_run_replayed": false,
+  "actual_mixed_model_batch_size": 16,
+  "server_reported_epoch": 0,
+  "server_reported_progress": "21/1057",
+  "restart": "failed epoch-zero plugin runs need a fresh scratch launch; no completed epoch checkpoint from reported Full run"
+}

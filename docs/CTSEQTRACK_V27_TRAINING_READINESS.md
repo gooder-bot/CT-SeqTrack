@@ -57,3 +57,11 @@ python main.py --cfg cfgs/ct_seqtrack/27_full.yaml \
 针对验证间隔5，main显式在train epoch-end保存last，避免默认validation-end保存未收尾状态。DataLoader callback同时处理恢复后延迟发生的验证loader初始化，记录是否曾初始化，只隔离重复setup的种子消耗；每次真正验证照常推进随机状态。真实Lightning测试覆盖首次验证前第1/4轮恢复，以及已验证后的第58轮恢复到60轮。
 
 每次v27运行新增顶层`resolved_config.yaml`，可直接用于后续校准/同run恢复，保留CLI覆盖后的配置身份。后台命令见[mini启动说明](CTSEQTRACK_V27_MINI_LAUNCH.md)，本次针对性结果见[启动验证摘要](../artifacts/ct_checks/v27_mini_launch_validation/summary.json)。
+
+## 服务器混合轨迹 batch 报错修复
+
+服务器Full在epoch0约21/1057步报`KeyError: motion_margin_global_novel_target_count`。根因是sampler仅在有效搜索区域存在时生成四个margin统计字段：同batch的成熟轨迹和首个query字段不一致，成熟样本为首行时default_collate报错，首个query为首行时则可能静默遗漏成熟样本的统计字段。该错误发生在组批阶段，与checkpoint保存和GPU显存无关；后续tqdm析构异常是退出时的连带现象。
+
+`datasets/sampler.py`现为所有B1样本初始化四个float32标量计数，再在完成获取标签计算后覆盖。无合法支持时仍使用最小margin占位、target_valid=0；实际点云、获取范围、标签算法及参数训练策略不变。预加载缓存保存原始帧，可继续复用。
+
+此前单槽/同阶段模型测试遗漏了异质轨迹合批。新增九类历史/可见性状态、GRU/CfC、两种首行顺序的完整schema检查，以及Full与B1+B2各16条独立轨迹混合frame1/3/8的实际合批/前向/反传测试。结果见[修复验证摘要](../artifacts/ct_checks/v27_mixed_batch_fix/summary.json)。所报告Full运行未完成一个epoch，修复同步后应以新目录重新scratch启动；其他启用B1的臂同样需要此修复，B0不经过该分支。

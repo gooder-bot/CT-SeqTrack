@@ -1,0 +1,13 @@
+{
+  "compileall": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff_check": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: in the working copy of 'docs/CTSEQTRACK_V27_TRAINING_READINESS.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'need_to_do.md', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "sampler_sha256": "1d2ff6fc2cb3844eb9ed2ca0e080bd1aadfd2d3b68b9ee3a0d41a3c76d840620"
+}
