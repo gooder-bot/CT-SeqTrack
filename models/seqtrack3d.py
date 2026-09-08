@@ -163,6 +163,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.hist_num = getattr(config, 'hist_num', 1)
         self.seg_acc = _build_binary_segmentation_accuracy()
         self.ct_enable_v27 = bool(getattr(config, 'ct_enable_v27', False))
+        self.ct_enable_v28 = bool(getattr(config, 'ct_enable_v28', False))
 
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
@@ -982,11 +983,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.seg_pointnet = SegPointNet(input_channel=3 + 1 + 1 + (9 if self.box_aware else 0),
                                         per_point_mlp1=[64, 64, 64, 128, 1024],
                                         per_point_mlp2=[512, 256, 128, 128],
-                                        output_size=2 + (9 if self.box_aware else 0))
+                                        output_size=2 + (9 if self.box_aware else 0),
+                                        deterministic_pooling=self.ct_enable_v28)
         self.mini_pointnet = MiniPointNet(input_channel=3 + 1 + (9 if self.box_aware else 0),
                                           per_point_mlp=[64, 128, 256, 512],
                                           hidden_mlp=[512, 256],
-                                          output_size=-1)
+                                          output_size=-1,
+                                          deterministic_pooling=self.ct_enable_v28)
 
         if self.use_motion_cls:
             self.motion_state_mlp = nn.Sequential(nn.Linear(256, 128),
@@ -1070,7 +1073,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             input_channel=3 + 1 + 1 + (9 if self.box_aware else 0),
             per_point_mlp1=[64, 64, 64, 128, 1024],
             per_point_mlp2=[512, 256, 128, 128],
-            output_size=128)
+            output_size=128, deterministic_pooling=self.ct_enable_v28)
         if self.use_point_feature_tc:
             self.point_feature_tc = PointFeatureTemporalConsistencyLoss(
                 distance_threshold=float(getattr(
@@ -1234,6 +1237,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                 self.ct_joint_search_refiner = (
                                     B2EvidenceAcquirer(
                                     v27_enabled=self.ct_enable_v27,
+                                    v28_enabled=self.ct_enable_v28,
                                     exploration_seed=plugin_seed,
                                     feature_dim=64,
                                     num_heads=4,
@@ -1755,6 +1759,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     f"{prefix}")
 
     def on_save_checkpoint(self, checkpoint):
+        if getattr(self, 'ct_enable_v28', False):
+            checkpoint['ct_v28_runtime_environment'] = copy.deepcopy(
+                getattr(self.config, 'ct_runtime_environment', {}))
         formal_resume = (
             bool(getattr(
                 self.config, 'ct_online_recursive_training', False))
@@ -1886,6 +1893,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             }
 
     def on_load_checkpoint(self, checkpoint):
+        if getattr(self, 'ct_enable_v28', False) and bool(getattr(self.config, 'test', False)):
+            from utils.online_contract import validate_v28_evaluation_checkpoint
+            validate_v28_evaluation_checkpoint(checkpoint, self.config)
+        if getattr(self, 'ct_enable_v28', False) and not bool(getattr(self.config, 'test', False)):
+            saved_environment = checkpoint.get('ct_v28_runtime_environment')
+            current_environment = getattr(self.config, 'ct_runtime_environment', None)
+            if current_environment and saved_environment != current_environment:
+                raise ValueError('v28 exact training resume requires the recorded numerical environment')
         self._ct_b0_prefix_hashes = copy.deepcopy(
             checkpoint.get('ct_b0_prefix_hashes', {}))
         self._ct_b0_optimizer_state_hashes = copy.deepcopy(
@@ -2032,6 +2047,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if stored_hashes is not None:
                 self._b2_v3_frozen_reference_hashes = dict(stored_hashes)
     def on_before_optimizer_step(self, optimizer):
+        audit = getattr(self, '_ct_numerical_audit', None)
+        if audit is not None:
+            audit.before_optimizer(optimizer)
         if self.ct_unified_auto:
             active = set()
             norms = {}
@@ -2056,6 +2074,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self._ct_max_gradient_norm = maximum
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
+        audit = getattr(self, '_ct_numerical_audit', None)
+        if audit is not None:
+            audit.after_optimizer(self.trainer.optimizers[0])
         if self.ct_unified_auto:
             active = set(getattr(
                 self, '_ct_pending_auto_updates', set()))
@@ -3327,7 +3348,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 parameter_groups,
                 lr=float(self.config.lr),
                 weight_decay=float(self.config.wd),
-                betas=(0.5, 0.999), eps=1e-6)
+                betas=(0.5, 0.999), eps=1e-6,
+                **({'foreach': False, 'fused': False} if getattr(self, 'ct_enable_v28', False) else {}))
             scheduler = torch.optim.lr_scheduler.StepLR(
                 optimizer, step_size=self.config.lr_decay_step,
                 gamma=self.config.lr_decay_rate)
@@ -3473,7 +3495,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         L = HL + 1 # Total length of the point cloud sequence, 1 represents the current frame
         chunk_size = N // L
 
-        seg_out = self.seg_pointnet(x) 
+        collect_b2_point_features = bool(
+            self.use_ct_joint_full and self.ct_joint_contract_version >= 3
+            and self.ct_enable_b2 and not b0_auxiliary_only)
+        if getattr(self, 'ct_enable_v28', False) and collect_b2_point_features:
+            seg_out, seg_second64 = self.seg_pointnet(x, return_point_features=True)
+            output_dict['b0_point_aligned_features'] = seg_second64.transpose(1, 2).reshape(
+                B, L, chunk_size, 64)
+        else:
+            seg_out = self.seg_pointnet(x)
         seg_logits = seg_out[:, :2, :]  # B,2,N
         obs_stats, obs_aux = self.build_observability_stats(input_dict, seg_logits, chunk_size)
         pred_cls = torch.argmax(seg_logits, dim=1, keepdim=True)  # B,1,N
@@ -3751,13 +3781,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds
         collect_pftc_features = self.use_point_feature_tc and self.training
-        collect_b2_point_features = bool(
-            self.use_ct_joint_full
-            and self.ct_joint_contract_version >= 3
-            and self.ct_enable_b2
-            and not b0_auxiliary_only)
+        # v28 B2 读取 SegPointNet 真实逐点特征，保留 FeaturePointNet 原布局。
         collect_point_aligned_features = bool(
-            collect_pftc_features or collect_b2_point_features)
+            collect_pftc_features or (collect_b2_point_features and not getattr(self, 'ct_enable_v28', False)))
         feature_result = self.feature_pointnet(
             solo_x, return_point_features=collect_point_aligned_features)
         if collect_point_aligned_features:
@@ -3770,7 +3796,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     "FeaturePointNet second-layer features must be 64d")
             if collect_pftc_features:
                 output_dict["pftc_point_features"] = point_aligned_feature
-            if collect_b2_point_features:
+            if collect_b2_point_features and not getattr(self, 'ct_enable_v28', False):
                 output_dict["b0_point_aligned_features"] = (
                     point_aligned_feature)
                 raw_frame_points = input_dict['points'].reshape(
@@ -3791,6 +3817,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 output_dict['ct_base_evidence_points'] = explicit_base
         else:
             feature = feature_result
+
+        if getattr(self, 'ct_enable_v28', False) and collect_b2_point_features:
+            raw_frames = input_dict['points'].reshape(B, L, chunk_size, -1)
+            explicit_base = input_dict.get('ct_base_evidence_points')
+            if explicit_base is None:
+                raise KeyError('v28 B2 requires ct_base_evidence_points')
+            if not torch.equal(explicit_base.to(raw_frames), raw_frames[:, -1]):
+                raise RuntimeError('base evidence diverged from B0 current 1024 points')
+            output_dict['ct_base_evidence_points'] = explicit_base
 
         # (B*num) * C * N; N is the fixed Transformer token count per frame.
         feature = feature.transpose(1,2)
@@ -3829,7 +3864,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
         observation_aux_box = updated_aux_box
         if self.ct_enable_v27 and not self.training:
-            current_valid = input_dict['ct_current_observation_valid'].reshape(-1, 1) > 0
+            if getattr(self, 'ct_enable_v28', False):
+                # 任意历史或当前槽仍有真实测量时，保留原网络预测。
+                current_valid = input_dict['b0_point_valid_mask'].reshape(B, -1).any(1, keepdim=True)
+            else:
+                current_valid = input_dict['ct_current_observation_valid'].reshape(-1, 1) > 0
             observation_aux_box = torch.where(
                 current_valid, observation_aux_box, torch.zeros_like(observation_aux_box))
             updated_aux_box = observation_aux_box
@@ -5741,72 +5780,81 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             ref_center_label = ref_label[:, :, :3] #B*hist_num*3
             ref_angle_label = torch.sin(ref_label[:,:,3]) 
 
-        loss_seg = F.cross_entropy(
-            seg_logits,
-            seg_label,
-            weight=seg_logits.new_tensor([0.5, 2.0]),
-        )
-        if self.ct_enable_v27:
-            point_valid = data['b0_valid_mask'].reshape_as(seg_label).to(seg_logits.dtype)
-            weights = seg_logits.new_tensor([.5, 2.])
-            errors = F.cross_entropy(seg_logits, seg_label, weight=weights, reduction='none')
-            loss_seg = (errors * point_valid).sum() / (
-                weights[seg_label] * point_valid).sum().clamp_min(1e-6)
-        if self.use_motion_cls:
-            motion_cls = output['motion_cls']  # B,2
-            loss_motion_cls = F.cross_entropy(motion_cls, motion_state_label)
-            loss_total += loss_motion_cls * self.config.motion_cls_seg_weight
-            loss_dict['loss_motion_cls'] = loss_motion_cls
-
-            loss_center_motion = F.smooth_l1_loss(motion_pred[:, :3], center_label_motion, reduction='none')
-            loss_center_motion = (motion_state_label * loss_center_motion.mean(dim=1)).sum() / (
-                    motion_state_label.sum() + 1e-6) # Balance within a batch
-            loss_angle_motion = F.smooth_l1_loss(torch.sin(motion_pred[:, 3]), angle_label_motion, reduction='none')
-            loss_angle_motion = (motion_state_label * loss_angle_motion).sum() / (motion_state_label.sum() + 1e-6)
+        if getattr(self, 'ct_enable_v28', False):
+            from models.ct_v2.observation_reference import seqtrack_reference_loss
+            loss_dict.update(seqtrack_reference_loss(
+                data, output, self.config, use_motion_cls=self.use_motion_cls,
+                box_aware=self.box_aware))
+            b0_transaction_loss = loss_dict['loss_total']
+            # 新建 Tensor，避免后续原地累加修改 B0 事务的别名。
+            loss_total = b0_transaction_loss + 0.0
         else:
-            loss_center_motion = F.smooth_l1_loss(motion_pred[:, :3], center_label_motion)
-            loss_angle_motion = F.smooth_l1_loss(torch.sin(motion_pred[:, 3]), angle_label_motion)
+            loss_seg = F.cross_entropy(
+                seg_logits,
+                seg_label,
+                weight=seg_logits.new_tensor([0.5, 2.0]),
+            )
+            if self.ct_enable_v27:
+                point_valid = data['b0_valid_mask'].reshape_as(seg_label).to(seg_logits.dtype)
+                weights = seg_logits.new_tensor([.5, 2.])
+                errors = F.cross_entropy(seg_logits, seg_label, weight=weights, reduction='none')
+                loss_seg = (errors * point_valid).sum() / (
+                    weights[seg_label] * point_valid).sum().clamp_min(1e-6)
+            if self.use_motion_cls:
+                motion_cls = output['motion_cls']  # B,2
+                loss_motion_cls = F.cross_entropy(motion_cls, motion_state_label)
+                loss_total += loss_motion_cls * self.config.motion_cls_seg_weight
+                loss_dict['loss_motion_cls'] = loss_motion_cls
+
+                loss_center_motion = F.smooth_l1_loss(motion_pred[:, :3], center_label_motion, reduction='none')
+                loss_center_motion = (motion_state_label * loss_center_motion.mean(dim=1)).sum() / (
+                        motion_state_label.sum() + 1e-6) # Balance within a batch
+                loss_angle_motion = F.smooth_l1_loss(torch.sin(motion_pred[:, 3]), angle_label_motion, reduction='none')
+                loss_angle_motion = (motion_state_label * loss_angle_motion).sum() / (motion_state_label.sum() + 1e-6)
+            else:
+                loss_center_motion = F.smooth_l1_loss(motion_pred[:, :3], center_label_motion)
+                loss_angle_motion = F.smooth_l1_loss(torch.sin(motion_pred[:, 3]), angle_label_motion)
 
 
 
-        # ----- Stage 1 loss ---------------------
-        estimation_boxes = output['estimation_boxes']  
-        loss_center = F.smooth_l1_loss(estimation_boxes[:, :3], center_label)
-        loss_angle = F.smooth_l1_loss(torch.sin(estimation_boxes[:, 3]), angle_label)
-        loss_total += 1 * (loss_center * self.config.center_weight + loss_angle * self.config.angle_weight)
-        loss_dict["loss_center"] = loss_center
-        loss_dict["loss_angle"] = loss_angle
-        #-----------------------------------------
+            # ----- Stage 1 loss ---------------------
+            estimation_boxes = output['estimation_boxes']
+            loss_center = F.smooth_l1_loss(estimation_boxes[:, :3], center_label)
+            loss_angle = F.smooth_l1_loss(torch.sin(estimation_boxes[:, 3]), angle_label)
+            loss_total += 1 * (loss_center * self.config.center_weight + loss_angle * self.config.angle_weight)
+            loss_dict["loss_center"] = loss_center
+            loss_dict["loss_angle"] = loss_angle
+            #-----------------------------------------
 
-        loss_center_aux = F.smooth_l1_loss(aux_estimation_boxes[:, :3], center_label)
+            loss_center_aux = F.smooth_l1_loss(aux_estimation_boxes[:, :3], center_label)
 
-        loss_angle_aux = F.smooth_l1_loss(torch.sin(aux_estimation_boxes[:, 3]), angle_label)
-
-
-        #---------------------refbox loss---------
-        loss_center_ref = F.smooth_l1_loss(updated_ref_boxs[:,:,:3],ref_center_label)
-        loss_angle_ref = F.smooth_l1_loss(torch.sin(updated_ref_boxs[:, :, 3]), ref_angle_label)
-        #---------------------refbox loss---------
+            loss_angle_aux = F.smooth_l1_loss(torch.sin(aux_estimation_boxes[:, 3]), angle_label)
 
 
-        loss_total += loss_seg * self.config.seg_weight \
-                      + 1 * (loss_center_aux * self.config.center_weight + loss_angle_aux * self.config.angle_weight) \
-                      + 1 * (loss_center_motion * self.config.center_weight + loss_angle_motion * self.config.angle_weight) \
-                      + 1 * (loss_center_ref * self.config.ref_center_weight + loss_angle_ref * self.config.ref_angle_weight) 
+            #---------------------refbox loss---------
+            loss_center_ref = F.smooth_l1_loss(updated_ref_boxs[:,:,:3],ref_center_label)
+            loss_angle_ref = F.smooth_l1_loss(torch.sin(updated_ref_boxs[:, :, 3]), ref_angle_label)
+            #---------------------refbox loss---------
 
-        loss_dict.update({
-            "loss_total": loss_total,
-            "loss_seg": loss_seg,
-            "loss_center_aux": loss_center_aux,
-            "loss_center_motion": loss_center_motion,
-            "loss_angle_aux": loss_angle_aux,
-            "loss_angle_motion": loss_angle_motion,
-            "loss_center_ref": loss_center_ref,
-            "loss_angle_ref": loss_angle_ref,
-        })
-        # Snapshot the observation objective before any B1/B2/B3 term.  The
-        # remaining B0-only heads below extend this value explicitly.
-        b0_transaction_loss = loss_total
+
+            loss_total += loss_seg * self.config.seg_weight \
+                          + 1 * (loss_center_aux * self.config.center_weight + loss_angle_aux * self.config.angle_weight) \
+                          + 1 * (loss_center_motion * self.config.center_weight + loss_angle_motion * self.config.angle_weight) \
+                          + 1 * (loss_center_ref * self.config.ref_center_weight + loss_angle_ref * self.config.ref_angle_weight)
+
+            loss_dict.update({
+                "loss_total": loss_total,
+                "loss_seg": loss_seg,
+                "loss_center_aux": loss_center_aux,
+                "loss_center_motion": loss_center_motion,
+                "loss_angle_aux": loss_angle_aux,
+                "loss_angle_motion": loss_angle_motion,
+                "loss_center_ref": loss_center_ref,
+                "loss_angle_ref": loss_angle_ref,
+            })
+            # Snapshot the observation objective before any B1/B2/B3 term.  The
+            # remaining B0-only heads below extend this value explicitly.
+            b0_transaction_loss = loss_total
         b1_transaction_loss = loss_total.new_zeros(())
         b2_transaction_loss = loss_total.new_zeros(())
         b3_transaction_loss = loss_total.new_zeros(())
@@ -5817,7 +5865,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if self.use_dynamics_encoder or self.use_point_feature_tc:
                 raise RuntimeError(
                     "B0 candidate decoupling requires formal CT B0 heads")
-            if self.box_aware:
+            if self.box_aware and not getattr(self, 'ct_enable_v28', False):
                 prev_bc = torch.flatten(
                     data['prev_bc'], start_dim=1, end_dim=2)
                 bc_label = torch.cat([prev_bc, data['this_bc']], dim=1)
@@ -7489,7 +7537,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 raise RuntimeError(
                     "B2-v3 refiner training must write exact observation")
 
-        if self.box_aware:
+        if self.box_aware and not getattr(self, 'ct_enable_v28', False):
             prev_bc = torch.flatten(data['prev_bc'], start_dim=1, end_dim=2)
             this_bc = data['this_bc'] #torch.Size([B, 1024, 9])
             bc_label = torch.cat([prev_bc, this_bc], dim=1) #torch.Size([B, 4096, 9])
@@ -7692,6 +7740,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             raise RuntimeError(
                 "B1 transaction diverged from its recorded weighted losses")
         loss_dict['motion_v3_weighted_loss'] = recorded_b1_weighted_loss
+        if getattr(self, 'ct_enable_v28', False):
+            loss_dict['loss_total'] = (b0_transaction_loss + b1_transaction_loss
+                                       + b2_transaction_loss + b3_transaction_loss)
         loss_dict['loss_b0_transaction'] = b0_transaction_loss
         loss_dict['loss_b1_transaction'] = b1_transaction_loss
         loss_dict['loss_b2_transaction'] = b2_transaction_loss
@@ -8617,7 +8668,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
     def _ct_candidate_weighted_observation_loss(
             self, batch, output, loss_dict):
-        """Apply the registered 1/2 + 3x1/6 B0 branch objective."""
+        """旧版按 view 归约；v28 返回已构造的整批原始目标。"""
+        if getattr(self, 'ct_enable_v28', False):
+            loss_dict['loss_b0_observation'] = loss_dict['loss_b0_transaction'].detach()
+            return loss_dict['loss_b0_transaction']
         candidate_id = batch.get('candidate_id')
         if candidate_id is None:
             raise RuntimeError(
@@ -8846,6 +8900,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             mechanism_batch = batch.get('mechanism')
             if mechanism_batch is not None:
                 rng_state = capture_global_rng_state()
+                audit = getattr(self, '_ct_numerical_audit', None)
+                audit_before_mechanism = audit.b0_state() if audit is not None else None
                 try:
                     self._ct_transaction_modules = {
                         name for name in ('b1', 'b2', 'b3')
@@ -8876,6 +8932,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     restore_global_rng_state(rng_state)
                     self._ct_mechanism_transaction = False
                     self._ct_safe_mechanism_forward = False
+                    if audit is not None:
+                        audit.verify_mechanism(audit_before_mechanism)
             else:
                 mechanism_loss = None
             self._ct_transaction_modules = None
@@ -8909,6 +8967,16 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         autocast_context = (
             torch.autocast(device_type='cuda', dtype=torch.float16)
             if amp_enabled else contextlib.nullcontext())
+        observation_audit = None
+        if (getattr(self, 'ct_enable_v28', False) and not online_batch
+                and not getattr(self, '_ct_safe_mechanism_forward', False)):
+            if not hasattr(self, '_ct_numerical_audit'):
+                from utils.v28_numerical_audit import B0NumericalAudit
+                self._ct_numerical_audit = B0NumericalAudit.from_environment(self)
+            observation_audit = self._ct_numerical_audit
+            if observation_audit is not None:
+                observation_audit.begin_observation(
+                    batch, int(self.ct_b0_update_step.item()) + 1)
         with autocast_context:
             output = (
                 self._forward_safe_mechanism(batch)
@@ -8949,6 +9017,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 loss_dict['ct_canonical_b0_weight'] = canonical_b0.new_tensor(
                     canonical_weight)
             self._ct_record_cuda_stage('loss')
+        if observation_audit is not None:
+            observation_audit.end_observation(output, loss_dict)
         self._accumulate_joint_binary_rows(batch, output)
         loss = loss_dict['loss_total']
         if self.ct_unified_auto:

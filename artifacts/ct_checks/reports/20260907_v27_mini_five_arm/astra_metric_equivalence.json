@@ -1,0 +1,17 @@
+{
+  "samples": 2000,
+  "up_axis": [
+    0,
+    0,
+    1
+  ],
+  "dim": 3,
+  "source": "a43a8ee^:utils/metrics.py extracted original functions",
+  "max_iou_difference": 2.1316282072803006e-14,
+  "max_distance_difference": 0.0,
+  "max_per_frame_success_precision_difference": [
+    0.0,
+    0.0
+  ],
+  "scope": "same synthetic boxes; does not assess model outputs or changed evaluation populations"
+}

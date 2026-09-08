@@ -13,6 +13,8 @@ SEQTRACK_OBSERVATION_CORE_FIELDS = frozenset({
     "b0_point_ids", "b0_point_valid_mask", "b0_point_unique_mask",
     "b0_valid_mask", "b0_unique_mask",
     "b0_raw_point_count", "b0_frame_uid", "ct_current_observation_valid",
+    "ct_observation_original_index", "ct_observation_actual_index",
+    "ct_observation_retry_count", "ct_observation_retry_reason",
 })
 
 
@@ -27,6 +29,41 @@ def stable_uint32_seed(base_seed, *parts):
     payload = "::".join((str(int(base_seed)), *(str(part) for part in parts)))
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "big", signed=False)
+
+
+class StatelessObservationBatchSampler:
+    """v28 完整候选总体随机排列；不限制一个 batch 内的候选比例。"""
+
+    def __init__(self, dataset, batch_size, seed, drop_last=True):
+        self.dataset = dataset
+        self.batch_size = int(batch_size)
+        self.seed = int(seed)
+        self.drop_last = bool(drop_last)
+        self.epoch = 0
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+    def __len__(self):
+        count = len(self.dataset)
+        return (count // self.batch_size if self.drop_last else
+                (count + self.batch_size - 1) // self.batch_size)
+
+    def set_epoch(self, epoch):
+        self.epoch = int(epoch)
+        if hasattr(self.dataset, "set_epoch"):
+            self.dataset.set_epoch(self.epoch)
+
+    def __iter__(self):
+        import torch
+        generator = torch.Generator()
+        generator.manual_seed(stable_uint32_seed(
+            self.seed, "seqtrack-whole-population-shuffle", self.epoch))
+        indices = torch.randperm(len(self.dataset), generator=generator).tolist()
+        for start in range(0, len(indices), self.batch_size):
+            batch = indices[start:start + self.batch_size]
+            if len(batch) < self.batch_size and self.drop_last:
+                return
+            yield batch
 
 
 class StatelessCandidateBatchSampler:
@@ -207,4 +244,3 @@ def point_sampling_seeds_for_frame_ids(frame_ids, seed_map):
     return np.asarray([
         int(seed_map[int(frame_id)]) for frame_id in frame_ids],
         dtype=np.int64)
-

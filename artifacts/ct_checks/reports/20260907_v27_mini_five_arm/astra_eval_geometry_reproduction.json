@@ -1,0 +1,370 @@
+{
+  "historical_commit": "a43a8ee^",
+  "new_builder": "working tree v27",
+  "real_builders": true,
+  "synthetic_data": true,
+  "dense_inputs": [
+    {
+      "frame_id": 1,
+      "compared_fields": {
+        "ref_boxs": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3,
+            4
+          ]
+        },
+        "bbox_size": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "candidate_bc": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4096,
+            9
+          ]
+        },
+        "valid_mask": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "timestamps": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4
+          ]
+        },
+        "delta_t_real": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_t_effective": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_T": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        }
+      },
+      "points_channel_max_abs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "history_prior_old": [
+        0.0,
+        1.0
+      ],
+      "history_prior_new": [
+        0.0,
+        1.0
+      ],
+      "raw_point_counts": [
+        3000,
+        3000,
+        3000,
+        2873
+      ]
+    },
+    {
+      "frame_id": 2,
+      "compared_fields": {
+        "ref_boxs": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3,
+            4
+          ]
+        },
+        "bbox_size": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "candidate_bc": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4096,
+            9
+          ]
+        },
+        "valid_mask": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "timestamps": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4
+          ]
+        },
+        "delta_t_real": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_t_effective": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_T": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        }
+      },
+      "points_channel_max_abs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.20000000298023224
+      ],
+      "history_prior_old": [
+        0.20000000298023224,
+        0.800000011920929
+      ],
+      "history_prior_new": [
+        0.0,
+        1.0
+      ],
+      "raw_point_counts": [
+        3000,
+        3000,
+        3000,
+        2875
+      ]
+    },
+    {
+      "frame_id": 3,
+      "compared_fields": {
+        "ref_boxs": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3,
+            4
+          ]
+        },
+        "bbox_size": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "candidate_bc": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4096,
+            9
+          ]
+        },
+        "valid_mask": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "timestamps": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4
+          ]
+        },
+        "delta_t_real": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_t_effective": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_T": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        }
+      },
+      "points_channel_max_abs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.20000000298023224
+      ],
+      "history_prior_old": [
+        0.20000000298023224,
+        0.800000011920929
+      ],
+      "history_prior_new": [
+        0.0,
+        1.0
+      ],
+      "raw_point_counts": [
+        3000,
+        3000,
+        3000,
+        2997
+      ]
+    },
+    {
+      "frame_id": 8,
+      "compared_fields": {
+        "ref_boxs": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3,
+            4
+          ]
+        },
+        "bbox_size": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "candidate_bc": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4096,
+            9
+          ]
+        },
+        "valid_mask": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "timestamps": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            4
+          ]
+        },
+        "delta_t_real": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_t_effective": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        },
+        "delta_T": {
+          "max_abs": 0.0,
+          "shape": [
+            1,
+            3
+          ]
+        }
+      },
+      "points_channel_max_abs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.20000000298023224
+      ],
+      "history_prior_old": [
+        0.20000000298023224,
+        0.800000011920929
+      ],
+      "history_prior_new": [
+        0.0,
+        1.0
+      ],
+      "raw_point_counts": [
+        3000,
+        3000,
+        3000,
+        3000
+      ]
+    }
+  ],
+  "canonicalization": [
+    {
+      "frame_id": 0,
+      "count": 3000,
+      "point_ids_equal": true,
+      "xyz_max_abs": 0.0
+    },
+    {
+      "frame_id": 5,
+      "count": 3000,
+      "point_ids_equal": true,
+      "xyz_max_abs": 0.0
+    },
+    {
+      "frame_id": 6,
+      "count": 3000,
+      "point_ids_equal": true,
+      "xyz_max_abs": 0.0
+    },
+    {
+      "frame_id": 7,
+      "count": 3000,
+      "point_ids_equal": true,
+      "xyz_max_abs": 2.220446049250313e-16
+    }
+  ]
+}

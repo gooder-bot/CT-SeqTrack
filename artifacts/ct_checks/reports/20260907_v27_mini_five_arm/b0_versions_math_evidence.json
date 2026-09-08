@@ -1,0 +1,731 @@
+{
+  "revisions": [
+    "049de82",
+    "b8222bb",
+    "b445ecd",
+    "8b8b8d9"
+  ],
+  "function_changes": {
+    "models/seqtrack3d.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {
+          "SEQTRACK3D.__init__": {
+            "old_line": 159,
+            "new_line": 160
+          },
+          "SEQTRACK3D._forward_safe_mechanism": {
+            "old_line": 7972,
+            "new_line": 8154
+          },
+          "SEQTRACK3D._process_online_raw": {
+            "old_line": 7297,
+            "new_line": 7477
+          },
+          "SEQTRACK3D.compute_loss": {
+            "old_line": 5118,
+            "new_line": 5194
+          },
+          "SEQTRACK3D.configure_optimizers": {
+            "old_line": 2951,
+            "new_line": 3021
+          },
+          "SEQTRACK3D.forward": {
+            "old_line": 3104,
+            "new_line": 3176
+          },
+          "SEQTRACK3D.on_before_optimizer_step": {
+            "old_line": 1911,
+            "new_line": 1971
+          },
+          "SEQTRACK3D.on_load_checkpoint": {
+            "old_line": 1768,
+            "new_line": 1827
+          },
+          "SEQTRACK3D.on_save_checkpoint": {
+            "old_line": 1655,
+            "new_line": 1701
+          },
+          "SEQTRACK3D.on_train_batch_end": {
+            "old_line": 1929,
+            "new_line": 1995
+          }
+        },
+        "added": [
+          "SEQTRACK3D._ct_optimizer_state_hash"
+        ],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {
+          "SEQTRACK3D.__init__": {
+            "old_line": 160,
+            "new_line": 161
+          },
+          "SEQTRACK3D._compute_ct_contract_v3_loss": {
+            "old_line": 4933,
+            "new_line": 5034
+          },
+          "SEQTRACK3D._empty_motion_prepass_prediction": {
+            "old_line": 2561,
+            "new_line": 2612
+          },
+          "SEQTRACK3D._forward_ct_contract_v3": {
+            "old_line": 2664,
+            "new_line": 2717
+          },
+          "SEQTRACK3D._forward_safe_mechanism": {
+            "old_line": 8154,
+            "new_line": 8419
+          },
+          "SEQTRACK3D._unbatch_motion_prepass_predictions": {
+            "old_line": 2581,
+            "new_line": 2634
+          },
+          "SEQTRACK3D.compute_loss": {
+            "old_line": 5194,
+            "new_line": 5428
+          },
+          "SEQTRACK3D.forward": {
+            "old_line": 3176,
+            "new_line": 3273
+          },
+          "SEQTRACK3D.on_load_checkpoint": {
+            "old_line": 1827,
+            "new_line": 1876
+          },
+          "SEQTRACK3D.on_save_checkpoint": {
+            "old_line": 1701,
+            "new_line": 1746
+          },
+          "SEQTRACK3D.training_step": {
+            "old_line": 8283,
+            "new_line": 8552
+          },
+          "SEQTRACK3D.transfer_batch_to_device": {
+            "old_line": 7255,
+            "new_line": 7519
+          }
+        },
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {
+          "SEQTRACK3D.__init__": {
+            "old_line": 161,
+            "new_line": 161
+          },
+          "SEQTRACK3D._accumulate_joint_binary_rows": {
+            "old_line": 2269,
+            "new_line": 2291
+          },
+          "SEQTRACK3D._attach_h3_shadow_labels": {
+            "old_line": 7985,
+            "new_line": 8217
+          },
+          "SEQTRACK3D._build_motion_prepass_inputs_contract": {
+            "old_line": 2555,
+            "new_line": 2590
+          },
+          "SEQTRACK3D._commit_online_recursive_predictions": {
+            "old_line": 8099,
+            "new_line": 8334
+          },
+          "SEQTRACK3D._compute_ct_contract_v3_loss": {
+            "old_line": 5034,
+            "new_line": 5197
+          },
+          "SEQTRACK3D._ct_online_targetness_class_weights": {
+            "old_line": 5005,
+            "new_line": 5168
+          },
+          "SEQTRACK3D._finalize_observation_output": {
+            "old_line": 3241,
+            "new_line": 3391
+          },
+          "SEQTRACK3D._forward_ct_contract_v3": {
+            "old_line": 2717,
+            "new_line": 2779
+          },
+          "SEQTRACK3D._forward_safe_mechanism": {
+            "old_line": 8419,
+            "new_line": 8657
+          },
+          "SEQTRACK3D._online_motion_prepass_batch": {
+            "old_line": 7696,
+            "new_line": 7914
+          },
+          "SEQTRACK3D._predict_motion_prepass_contract": {
+            "old_line": 2667,
+            "new_line": 2711
+          },
+          "SEQTRACK3D._prepare_online_recursive_batch": {
+            "old_line": 7846,
+            "new_line": 8077
+          },
+          "SEQTRACK3D.compute_loss": {
+            "old_line": 5428,
+            "new_line": 5633
+          },
+          "SEQTRACK3D.forward": {
+            "old_line": 3273,
+            "new_line": 3427
+          },
+          "SEQTRACK3D.on_save_checkpoint": {
+            "old_line": 1746,
+            "new_line": 1757
+          },
+          "SEQTRACK3D.on_train_epoch_end": {
+            "old_line": 2082,
+            "new_line": 2094
+          },
+          "SEQTRACK3D.predict_motion_from_history": {
+            "old_line": 2509,
+            "new_line": 2536
+          },
+          "SEQTRACK3D.predict_motion_prepass": {
+            "old_line": 2687,
+            "new_line": 2742
+          },
+          "SEQTRACK3D.training_step": {
+            "old_line": 8552,
+            "new_line": 8800
+          },
+          "SEQTRACK3D.transfer_batch_to_device": {
+            "old_line": 7519,
+            "new_line": 7737
+          }
+        },
+        "added": [
+          "SEQTRACK3D._b0_point_regression_loss"
+        ],
+        "removed": []
+      }
+    ],
+    "models/base_model.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {
+          "BaseModelMF._build_ct_joint_diagnostic_row": {
+            "old_line": 589,
+            "new_line": 589
+          }
+        },
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {
+          "BaseModelMF._build_ct_joint_diagnostic_row": {
+            "old_line": 589,
+            "new_line": 1118
+          },
+          "BaseModelMF.evaluate_one_sequence": {
+            "old_line": 1106,
+            "new_line": 1831
+          },
+          "BaseModelMF.test_step": {
+            "old_line": 1350,
+            "new_line": 2086
+          },
+          "MotionBaseModelMF.build_input_dict": {
+            "old_line": 1465,
+            "new_line": 2201
+          }
+        },
+        "added": [
+          "BaseModelMF._build_ct_acquisition_diagnostics_v2"
+        ],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {
+          "BaseModelMF._build_ct_joint_diagnostic_row": {
+            "old_line": 1118,
+            "new_line": 1118
+          },
+          "BaseModelMF._write_csv_rows": {
+            "old_line": 1660,
+            "new_line": 1677
+          },
+          "BaseModelMF._write_proposal_test_diagnostics": {
+            "old_line": 1670,
+            "new_line": 1688
+          },
+          "BaseModelMF._write_tracking_test_endpoints": {
+            "old_line": 1777,
+            "new_line": 1806
+          },
+          "BaseModelMF.evaluate_one_sequence": {
+            "old_line": 1831,
+            "new_line": 1863
+          },
+          "BaseModelMF.on_test_epoch_end": {
+            "old_line": 2174,
+            "new_line": 2236
+          },
+          "BaseModelMF.on_validation_epoch_end": {
+            "old_line": 2061,
+            "new_line": 2105
+          },
+          "BaseModelMF.on_validation_epoch_start": {
+            "old_line": 2193,
+            "new_line": 2257
+          },
+          "BaseModelMF.test_step": {
+            "old_line": 2086,
+            "new_line": 2141
+          },
+          "BaseModelMF.validation_step": {
+            "old_line": 1969,
+            "new_line": 2004
+          },
+          "MotionBaseModelMF.build_input_dict": {
+            "old_line": 2201,
+            "new_line": 2266
+          }
+        },
+        "added": [],
+        "removed": []
+      }
+    ],
+    "models/backbone/pointnet.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {},
+        "added": [],
+        "removed": []
+      }
+    ],
+    "models/attn/Models.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {},
+        "added": [],
+        "removed": []
+      }
+    ],
+    "datasets/sampler.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {
+          "motion_processing_mf": {
+            "old_line": 250,
+            "new_line": 252
+          }
+        },
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {
+          "MotionTrackingSamplerMF._online_raw_view": {
+            "old_line": 2460,
+            "new_line": 2681
+          },
+          "motion_processing_mf": {
+            "old_line": 252,
+            "new_line": 252
+          }
+        },
+        "added": [],
+        "removed": []
+      }
+    ],
+    "datasets/points_utils.py": [
+      {
+        "from": "049de82",
+        "to": "b8222bb",
+        "changed": {},
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b8222bb",
+        "to": "b445ecd",
+        "changed": {
+          "crop_pc_axis_aligned": {
+            "old_line": 148,
+            "new_line": 149
+          }
+        },
+        "added": [],
+        "removed": []
+      },
+      {
+        "from": "b445ecd",
+        "to": "8b8b8d9",
+        "changed": {
+          "crop_pc_axis_aligned": {
+            "old_line": 149,
+            "new_line": 150
+          },
+          "crop_pc_axis_aligned_with_aroundboxs": {
+            "old_line": 162,
+            "new_line": 164
+          },
+          "crop_pc_oriented": {
+            "old_line": 201,
+            "new_line": 204
+          },
+          "generate_subwindow_with_aroundboxs": {
+            "old_line": 280,
+            "new_line": 283
+          },
+          "regularize_pc": {
+            "old_line": 24,
+            "new_line": 25
+          }
+        },
+        "added": [],
+        "removed": []
+      }
+    ]
+  },
+  "config_changes": [
+    {
+      "from": "20260824-0219-25_b0*",
+      "to": "20260825-1931-25_b0*",
+      "differences": {
+        "check_val_every_n_epoch": {
+          "old": 1,
+          "new": 5
+        },
+        "motion_v3_aux_nll_weight": {
+          "old": 0.0,
+          "new": 0.05
+        },
+        "motion_v3_beta_nll_beta": {
+          "old": null,
+          "new": 0.5
+        },
+        "motion_v3_cfc_backbone_units": {
+          "old": null,
+          "new": 105
+        },
+        "motion_v3_log_sigma_max": {
+          "old": null,
+          "new": 2.5
+        },
+        "motion_v3_log_sigma_min": {
+          "old": null,
+          "new": -2.302585092994046
+        },
+        "motion_v3_tail_direction_margin": {
+          "old": null,
+          "new": 0.9
+        },
+        "motion_v3_tail_direction_weight": {
+          "old": null,
+          "new": 0.25
+        },
+        "motion_v3_temporal_backend": {
+          "old": null,
+          "new": "gru"
+        },
+        "tag": {
+          "old": "ct25_b0_mini_car_60ep_bs16_seed42_retryfix",
+          "new": "ct25_b0_mini_car_seed42_60ep_bs16_val5"
+        }
+      }
+    },
+    {
+      "from": "20260825-1931-25_b0*",
+      "to": "20260903-2301-26_b0*",
+      "differences": {
+        "cfg": {
+          "old": "cfgs/ct_seqtrack/25_b0.yaml",
+          "new": "cfgs/ct_seqtrack/26_b0.yaml"
+        },
+        "check_val_every_n_epoch": {
+          "old": 5,
+          "new": 2
+        },
+        "ct_acquisition_margin_bias": {
+          "old": null,
+          "new": -8.0
+        },
+        "ct_acquisition_margin_max": {
+          "old": null,
+          "new": [
+            6.0,
+            3.0
+          ]
+        },
+        "ct_acquisition_margin_min": {
+          "old": null,
+          "new": [
+            2.0,
+            1.0
+          ]
+        },
+        "ct_acquisition_margin_quantile": {
+          "old": null,
+          "new": 0.9
+        },
+        "ct_acquisition_margin_weight": {
+          "old": null,
+          "new": 0.05
+        },
+        "ct_adaptive_acquisition_margin": {
+          "old": null,
+          "new": true
+        },
+        "ct_b3_consensus_features": {
+          "old": null,
+          "new": true
+        },
+        "ct_batch_schema": {
+          "old": "ct_seqtrack.train.v2",
+          "new": "ct_seqtrack.train.v3"
+        },
+        "ct_corridor_max_length": {
+          "old": null,
+          "new": 16.0
+        },
+        "ct_corridor_max_width": {
+          "old": null,
+          "new": 6.0
+        },
+        "ct_corridor_min_inner_core_points": {
+          "old": null,
+          "new": 3
+        },
+        "ct_corridor_quota": {
+          "old": null,
+          "new": 256
+        },
+        "ct_corridor_width_padding": {
+          "old": null,
+          "new": 2.0
+        },
+        "ct_enable_v26_recovery": {
+          "old": null,
+          "new": true
+        },
+        "ct_endpoint_quota": {
+          "old": 128,
+          "new": 256
+        },
+        "ct_expansion_point_count": {
+          "old": 256,
+          "new": 768
+        },
+        "ct_keep_final_window_checkpoints": {
+          "old": null,
+          "new": 3
+        },
+        "ct_memory_mode": {
+          "old": "none",
+          "new": "real"
+        },
+        "ct_relation_aware_sampling": {
+          "old": null,
+          "new": true
+        },
+        "ct_relation_coverage_count": {
+          "old": null,
+          "new": 96
+        },
+        "ct_relation_exploration_count": {
+          "old": null,
+          "new": 32
+        },
+        "ct_relation_topk": {
+          "old": null,
+          "new": 128
+        },
+        "ct_relation_weight": {
+          "old": null,
+          "new": 0.25
+        },
+        "ct_robust_consensus_voting": {
+          "old": null,
+          "new": true
+        },
+        "ct_tube_quota": {
+          "old": 128,
+          "new": 256
+        },
+        "experiment_name": {
+          "old": "ct25_safe_b0_scratch_seed42",
+          "new": "ct26_b0_mini_scratch_seed42"
+        },
+        "tag": {
+          "old": "ct25_b0_mini_car_seed42_60ep_bs16_val5",
+          "new": "ct26_b0_mini_car_seed42_60ep_bs16_20260903_225946"
+        },
+        "trainer_devices": {
+          "old": null,
+          "new": 1
+        }
+      }
+    },
+    {
+      "from": "20260903-2301-26_b0*",
+      "to": "20260905-173106-27_b0*",
+      "differences": {
+        "cfg": {
+          "old": "cfgs/ct_seqtrack/26_b0.yaml",
+          "new": "cfgs/ct_seqtrack/27_b0.yaml"
+        },
+        "check_val_every_n_epoch": {
+          "old": 2,
+          "new": 5
+        },
+        "ct_acquisition_margin_bias": {
+          "old": -8.0,
+          "new": -4.6
+        },
+        "ct_b0_steps_per_epoch": {
+          "old": 1262,
+          "new": 0
+        },
+        "ct_batch_schema": {
+          "old": "ct_seqtrack.train.v3",
+          "new": "ct_seqtrack.train.v4"
+        },
+        "ct_enable_v27": {
+          "old": null,
+          "new": true
+        },
+        "ct_evidence_label_box_scale": {
+          "old": null,
+          "new": 1.0
+        },
+        "ct_exact_metric_audit": {
+          "old": null,
+          "new": true
+        },
+        "ct_formal_resume_contract": {
+          "old": null,
+          "new": true
+        },
+        "ct_memory_mode": {
+          "old": "real",
+          "new": "none"
+        },
+        "ct_metric_mode": {
+          "old": null,
+          "new": "benchmark_compat"
+        },
+        "ct_observation_steps_per_epoch_observed": {
+          "old": 1262,
+          "new": 1057
+        },
+        "ct_presence_balanced_loss": {
+          "old": true,
+          "new": false
+        },
+        "ct_presence_weight": {
+          "old": 0.2,
+          "new": 0.1
+        },
+        "ct_require_action_calibration": {
+          "old": null,
+          "new": true
+        },
+        "ct_scene_manifest_sha256": {
+          "old": null,
+          "new": "a9c1775833cd14ede37a13f203b440e0526f5055105ea80c158f3078b06bd4ed"
+        },
+        "ct_targetness_class_weight_source": {
+          "old": null,
+          "new": "online_canonical_preflight"
+        },
+        "ct_targetness_negative_weight": {
+          "old": null,
+          "new": 1.0
+        },
+        "ct_targetness_positive_weight": {
+          "old": null,
+          "new": 1.0
+        },
+        "ct_v26_full_formal_arm": {
+          "old": null,
+          "new": false
+        },
+        "ct_v27_reference": {
+          "old": null,
+          "new": false
+        },
+        "experiment_family": {
+          "old": "ct_seqtrack_v2",
+          "new": "ct_seqtrack_v27"
+        },
+        "experiment_name": {
+          "old": "ct26_b0_mini_scratch_seed42",
+          "new": "ct27_b0_mini_car_scratch_seed42"
+        },
+        "log_dir": {
+          "old": null,
+          "new": "output/20260905-173106-27_b0-mini_car_seed42_60ep_bs16"
+        },
+        "tag": {
+          "old": "ct26_b0_mini_car_seed42_60ep_bs16_20260903_225946",
+          "new": "ct27_b0_mini_car_seed42_60ep_bs16"
+        }
+      }
+    }
+  ],
+  "v25_low_to_v26_method_diffs": {
+    "forward": "--- b8222bb\n\n+++ b445ecd\n\n@@ -493,6 +493,8 @@\n\n                     'residual_unit_parallel_perp'],\n                 'motion_prior_envelope_parallel_perp': main_motion[\n                     'envelope_parallel_perp'],\n+                'motion_prior_acquisition_margin_parallel_perp': main_motion[\n+                    'acquisition_margin_parallel_perp'],\n                 'motion_prior_valid': main_motion['valid'],\n                 'motion_prior_log_sigma_xy': main_motion['log_sigma_xy'],\n                 'motion_prior_log_sigma_parallel_perp': main_motion[\n@@ -671,6 +673,8 @@\n\n                         aux_motion['residual_unit_parallel_perp'],\n                     'motion_aux_prior_envelope_parallel_perp':\n                         aux_motion['envelope_parallel_perp'],\n+                    'motion_aux_prior_acquisition_margin_parallel_perp':\n+                        aux_motion['acquisition_margin_parallel_perp'],\n                     'motion_aux_prior_valid': aux_motion['valid'],\n                     'motion_aux_prior_gap_ratio': aux_motion['gap_ratio'],\n                     'motion_aux_prior_log_sigma_xy':",
+    "compute_loss": "--- b8222bb\n\n+++ b445ecd\n\n@@ -340,6 +340,25 @@\n\n             b1_transaction_loss = (\n                 b1_transaction_loss\n                 + self.motion_v3_prior_weight * loss_motion_v3_prior)\n+            margin_terms = acquisition_margin_pinball_loss(\n+                output['motion_prior_xy'],\n+                main_target,\n+                output['motion_prior_direction_xy'],\n+                output['motion_prior_acquisition_margin_parallel_perp'],\n+                main_valid,\n+                quantile=self.ct_acquisition_margin_quantile,\n+            )\n+            loss_acquisition_margin = recursive_balanced_mean(\n+                margin_terms['loss_per_sample'], margin_terms['valid'],\n+                recursive_age=recursive_age,\n+                recursive_age_valid=recursive_age_valid)\n+            loss_total += (\n+                self.ct_acquisition_margin_weight\n+                * loss_acquisition_margin)\n+            b1_transaction_loss = (\n+                b1_transaction_loss\n+                + self.ct_acquisition_margin_weight\n+                * loss_acquisition_margin)\n             if uncertainty_terms is not None:\n                 loss_motion_v3_nll = recursive_balanced_mean(\n                     uncertainty_terms['nll_per_sample'], main_valid,\n@@ -365,6 +384,15 @@\n\n             loss_dict.update({\n                 'loss_total': loss_total,\n                 'loss_motion_v3_prior': loss_motion_v3_prior,\n+                'loss_ct_acquisition_margin': loss_acquisition_margin,\n+                'ct_acquisition_margin_parallel_mean': masked_mean(\n+                    output[\n+                        'motion_prior_acquisition_margin_parallel_perp'][:, 0],\n+                    main_valid),\n+                'ct_acquisition_margin_perpendicular_mean': masked_mean(\n+                    output[\n+                        'motion_prior_acquisition_margin_parallel_perp'][:, 1],\n+                    main_valid),\n                 'motion_v3_prior_rmse': torch.sqrt(masked_mean(\n                     main_prior_error.pow(2), main_valid)),\n                 'motion_v3_kinematic_rmse': torch.sqrt(masked_mean(\n@@ -2005,6 +2033,8 @@\n\n         recorded_b1_weighted_loss = loss_total.new_zeros(())\n         for key, weight in (\n                 ('loss_motion_v3_prior', self.motion_v3_prior_weight),\n+                ('loss_ct_acquisition_margin',\n+                 self.ct_acquisition_margin_weight),\n                 ('loss_motion_v3_nll', self.motion_v3_nll_weight),\n                 ('loss_motion_v3_aux_prior',\n                  self.motion_v3_aux_prior_weight),",
+    "training_step": "--- b8222bb\n\n+++ b445ecd\n\n@@ -13,7 +13,8 @@\n\n         if (isinstance(batch, dict)\n                 and batch.get('ct_stream_schema') in (\n                     'ct_seqtrack.dual_stream.v1',\n-                    'ct_seqtrack.train.v2')):\n+                    'ct_seqtrack.train.v2',\n+                    'ct_seqtrack.train.v3')):\n             if getattr(self, '_ct_inside_dual_stream', False):\n                 raise RuntimeError('nested dual-stream transaction')\n             self._ct_inside_dual_stream = True",
+    "configure_optimizers": "",
+    "_finalize_observation_output": "",
+    "_ct_candidate_weighted_observation_loss": ""
+  },
+  "scope": "Static code and actual run configuration comparison; this does not replay old CUDA training or quantify score causality."
+}

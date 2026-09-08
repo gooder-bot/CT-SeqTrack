@@ -1,5 +1,24 @@
 # CT-SeqTrack
 
+## 当前轮次：v28（2026-09-08）
+
+当前采用 [v28 共享观测实施合同](docs/CTSEQTRACK_V28_IMPLEMENTATION.md)，
+首轮正式实验只运行 B0：mini 全8场景训练、官方2场景验证，seed42/60epoch/
+batch16/workers12/每5轮验证。B0恢复完整候选总体shuffle和整batch原SeqTrack损失，
+BC只计一次；各臂共享观测、ID与严格确定性合同，B2读取真实seg第二层逐点特征。
+所有启用模块从epoch0的合法tick学习，不冻结、不从旧模型初始化。
+
+先做真实preflight、同卡B0/B0/GRU的100-step逐位验收与Full epoch-boundary恢复，
+再启动28 B0。见 [服务器命令](docs/CTSEQTRACK_V28_SERVER_RUNS.md)。后续五臂及五类
+矩阵已注册，尚未启动；v28 reference与28 B0是同一共享实现，不构成不同架构消融。
+v28尚无正式结果，不承诺恢复历史高分。具体改动及必要性见
+[v28修改审计](docs/CTSEQTRACK_V28_CHANGE_AUDIT.md)。
+本地最终验证：453 passed、12 skipped，详见 [验收记录](docs/CTSEQTRACK_V28_LOCAL_VALIDATION.md)。
+
+进度更正：v27五臂已经跑完60轮，但记录仅为内部dev，Full没有校准策略，
+58/59及官方mini_val仍未补齐。以 [9月7–8日审计](artifacts/ct_checks/reports/20260907_v27_mini_five_arm/REPORT.md)
+为实际证据。下面v27及更早章节保留历史说明；与本节冲突时采用v28协议。
+
 ## 当前轮次：v27（2026-09-05）
 
 当前实现与实验入口以 [v27 方法](docs/CTSEQTRACK_V27_METHOD.md) 和

@@ -17,6 +17,18 @@ from utils.action_calibration_v27 import (
 from utils.config import load_yaml_config
 
 
+def use_v27_runtime(argv):
+    """兼容旧 --v27；v28 按配置自动选择真实闭环 runner。"""
+    if "--v27" in argv or "--v28" in argv:
+        return True
+    for index, argument in enumerate(argv):
+        if argument == "--config" and index + 1 < len(argv):
+            return bool(load_yaml_config(argv[index + 1]).get("ct_enable_v28", False))
+        if argument.startswith("--config="):
+            return bool(load_yaml_config(argument.split("=", 1)[1]).get("ct_enable_v28", False))
+    return False
+
+
 def write_rows(path, rows):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,6 +64,9 @@ class TrackerClosedLoopRunner:
         from utils.checkpoint_loading import load_initial_weights
         raw = load_yaml_config(config_path)
         configure_ct_variant(raw)
+        if raw.get("ct_enable_v28", False):
+            from utils.online_contract import configure_v28_numerics
+            configure_v28_numerics(raw)
         if not raw.get("ct_enable_v27") or raw.get("ct_variant") != "full":
             raise ValueError("v27 action calibration requires a v27 Full config")
         self.config_sha256 = sha256_json(action_calibration_config_identity(raw))
@@ -144,6 +159,7 @@ class TrackerClosedLoopRunner:
 def _parser(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--v27", action="store_true")
+    parser.add_argument("--v28", action="store_true")
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
@@ -164,7 +180,7 @@ def export_main(argv=None):
     write_rows(args.output, rows)
     from utils.v27_eval_reporting import write_endpoint_diagnostics
     write_endpoint_diagnostics(str(args.output) + '.summary.json', rows)
-    manifest = {"schema": ROWS_SCHEMA, "partition": args.partition,
+    manifest = {"schema": ("ct_seqtrack.action_rows.v28" if runner.config.get("ct_enable_v28") else ROWS_SCHEMA), "partition": args.partition,
         "checkpoint_sha256": runner.checkpoint_sha256, "config_sha256": runner.config_sha256,
         "score_definition": SCORE_DEFINITION, "metric_mode": "benchmark_compat",
         "scene_manifest": runner.scene_manifest,

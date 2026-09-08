@@ -8,7 +8,10 @@ import json
 SCHEMA = "ct_seqtrack.scene_protocol.v27"
 
 
-def build_scene_manifest(scene_splits, version, seed=42):
+def build_scene_manifest(scene_splits, version, seed=42, *, enable_v28=False):
+    if enable_v28:
+        from utils.v28_protocol import build_scene_manifest as build_v28_scene_manifest
+        return build_v28_scene_manifest(scene_splits, version, seed)
     if str(version) not in ('v1.0-mini', 'v1.0-trainval'):
         raise ValueError('v27 supports only v1.0-mini or v1.0-trainval')
     mini = str(version) == "v1.0-mini"

@@ -1,0 +1,22 @@
+{
+  "purpose": "engineering audit; no journal-specific formatting claim",
+  "source_tables": [
+    "dev_validation_curves.csv",
+    "b0_view0_training_loss.csv",
+    "metrics_summary.json"
+  ],
+  "source_endpoints": "output/20260905-173*/lightning_logs/version_0/dev_diagnostics/epoch_60_endpoints.csv",
+  "transformations": {
+    "A": "unsmoothed observed every-five-epoch U; connecting segments are visual guides",
+    "B": "per-epoch arithmetic batch mean; logarithmic y axis",
+    "C": "sum of unique target point IDs at each endpoint, then sum over all 309 prediction endpoints",
+    "D": "nonempty selected count versus recorded structural flag versus recorded applied flag"
+  },
+  "uncertainty": "none shown; one seed and one dev scene; curves are not independent replicates",
+  "known_limits": [
+    "B0 trajectories differ across arms",
+    "Full is uncalibrated observation output",
+    "historical SeqTrack uses a different evaluation split and is excluded from this chart"
+  ],
+  "alt_text": "All dev curves remain low while training loss falls. Most visible novel target points never reach the support. Selection retains most prepool target points. The old presence gate leaves only 2 and 12 candidates marked valid, compared with 177 and 140 frames with selected evidence."
+}

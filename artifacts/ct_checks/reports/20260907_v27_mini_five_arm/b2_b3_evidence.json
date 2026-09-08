@@ -1,0 +1,4906 @@
+{
+  "b1_b2": {
+    "run": "20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16",
+    "dev_epochs": {
+      "5": {
+        "epoch": 5,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 39,
+        "selected_target_bearing_frames": 6,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 39,
+        "presence_blocked_target_bearing_frames": 6,
+        "actions": 0,
+        "clipped_evidence_frames": 39,
+        "presence_quantiles": [
+          0.05462874844670296,
+          0.05818958580493927,
+          0.07324106097221379,
+          0.11798673868179321
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 39,
+            "raw_utility_net_all_frames_pp": -0.19859812306559346,
+            "raw_helpful_frames": 14,
+            "raw_harmful_frames": 9,
+            "mean_observation_distance_m": 10.428454176068318,
+            "mean_raw_distance_m": 10.541074022146995
+          },
+          "selected_target": {
+            "frames": 6,
+            "raw_utility_net_all_frames_pp": 0.31931464331125914,
+            "raw_helpful_frames": 6,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 3.919471784183465,
+            "mean_raw_distance_m": 1.5058594472146236
+          },
+          "target_absent": {
+            "frames": 33,
+            "raw_utility_net_all_frames_pp": -0.5179127663768526,
+            "raw_helpful_frames": 8,
+            "raw_harmful_frames": 9,
+            "mean_observation_distance_m": 11.611905520047383,
+            "mean_raw_distance_m": 12.183840308498334
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 39,
+            "raw_utility_net_all_frames_pp": -0.19859812306559346,
+            "raw_helpful_frames": 14,
+            "raw_harmful_frames": 9,
+            "mean_observation_distance_m": 10.428454176068318,
+            "mean_raw_distance_m": 10.541074022146995
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 39,
+              "success_net_all_frames_pp": -0.14018690637153258,
+              "precision_net_all_frames_pp": -0.2725856813871972,
+              "utility_net_all_frames_pp": -0.20638629387936488,
+              "helpful_frames": 10,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.0934579464783921
+            },
+            "selected_target": {
+              "frames": 6,
+              "success_net_all_frames_pp": 0.10903427127829965,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.054517135639149825,
+              "helpful_frames": 5,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.054517135639149825
+            },
+            "target_absent": {
+              "frames": 33,
+              "success_net_all_frames_pp": -0.2492211776498322,
+              "precision_net_all_frames_pp": -0.2725856813871972,
+              "utility_net_all_frames_pp": -0.2609034295185147,
+              "helpful_frames": 5,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.03894081083924228
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_05.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "10": {
+        "epoch": 10,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 149,
+        "selected_target_bearing_frames": 20,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 149,
+        "presence_blocked_target_bearing_frames": 20,
+        "actions": 0,
+        "clipped_evidence_frames": 149,
+        "presence_quantiles": [
+          0.06771150231361389,
+          0.16965802013874054,
+          0.3007519185543061,
+          0.3803703188896179
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 149,
+            "raw_utility_net_all_frames_pp": -2.5506230419344993,
+            "raw_helpful_frames": 23,
+            "raw_harmful_frames": 60,
+            "mean_observation_distance_m": 11.430485817931645,
+            "mean_raw_distance_m": 12.407964883591738
+          },
+          "selected_target": {
+            "frames": 20,
+            "raw_utility_net_all_frames_pp": 0.7359813100939785,
+            "raw_helpful_frames": 13,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 4.500991212385952,
+            "mean_raw_distance_m": 3.64466378362251
+          },
+          "target_absent": {
+            "frames": 129,
+            "raw_utility_net_all_frames_pp": -3.2866043520284776,
+            "raw_helpful_frames": 10,
+            "raw_harmful_frames": 58,
+            "mean_observation_distance_m": 12.50482606685346,
+            "mean_raw_distance_m": 13.766616216920301
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 149,
+            "raw_utility_net_all_frames_pp": -2.5506230419344993,
+            "raw_helpful_frames": 23,
+            "raw_harmful_frames": 60,
+            "mean_observation_distance_m": 11.430485817931645,
+            "mean_raw_distance_m": 12.407964883591738
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 149,
+              "success_net_all_frames_pp": -0.5295950141836921,
+              "precision_net_all_frames_pp": -1.1682242665706766,
+              "utility_net_all_frames_pp": -0.8489096403771843,
+              "helpful_frames": 23,
+              "harmful_frames": 43,
+              "oracle_positive_utility_net_all_frames_pp": 0.22196261751874585
+            },
+            "selected_target": {
+              "frames": 20,
+              "success_net_all_frames_pp": 0.10903426895724651,
+              "precision_net_all_frames_pp": 0.06230529223647073,
+              "utility_net_all_frames_pp": 0.08566978059685862,
+              "helpful_frames": 8,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.08566978059685862
+            },
+            "target_absent": {
+              "frames": 129,
+              "success_net_all_frames_pp": -0.6386292831409386,
+              "precision_net_all_frames_pp": -1.2305295588071472,
+              "utility_net_all_frames_pp": -0.9345794209740429,
+              "helpful_frames": 15,
+              "harmful_frames": 43,
+              "oracle_positive_utility_net_all_frames_pp": 0.13629283692188723
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_10.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "15": {
+        "epoch": 15,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 127,
+        "selected_target_bearing_frames": 26,
+        "reported_structural_frames": 16,
+        "presence_blocked_evidence_frames": 111,
+        "presence_blocked_target_bearing_frames": 19,
+        "actions": 16,
+        "clipped_evidence_frames": 127,
+        "presence_quantiles": [
+          0.08333279937505722,
+          0.321530818939209,
+          0.5090985059738159,
+          0.6043187975883484
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 127,
+            "raw_utility_net_all_frames_pp": -1.1020249309964083,
+            "raw_helpful_frames": 16,
+            "raw_harmful_frames": 33,
+            "mean_observation_distance_m": 11.528485305189761,
+            "mean_raw_distance_m": 12.678131958852457
+          },
+          "selected_target": {
+            "frames": 26,
+            "raw_utility_net_all_frames_pp": 1.0669781977304975,
+            "raw_helpful_frames": 14,
+            "raw_harmful_frames": 4,
+            "mean_observation_distance_m": 6.241848136928998,
+            "mean_raw_distance_m": 5.544164553154541
+          },
+          "target_absent": {
+            "frames": 101,
+            "raw_utility_net_all_frames_pp": -2.1690031287269056,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 29,
+            "mean_observation_distance_m": 12.889401803949957,
+            "mean_raw_distance_m": 14.51459881576479
+          },
+          "presence_passed": {
+            "frames": 16,
+            "raw_utility_net_all_frames_pp": 0.15965732209082706,
+            "raw_helpful_frames": 3,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 12.448711076888204,
+            "mean_raw_distance_m": 12.930248645395025
+          },
+          "presence_blocked": {
+            "frames": 111,
+            "raw_utility_net_all_frames_pp": -1.2616822530872354,
+            "raw_helpful_frames": 13,
+            "raw_harmful_frames": 33,
+            "mean_observation_distance_m": 11.395840148908906,
+            "mean_raw_distance_m": 12.64179081484632
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 127,
+              "success_net_all_frames_pp": -0.6853582528985549,
+              "precision_net_all_frames_pp": -0.46728974341696294,
+              "utility_net_all_frames_pp": -0.5763239981577589,
+              "helpful_frames": 7,
+              "harmful_frames": 28,
+              "oracle_positive_utility_net_all_frames_pp": 0.2920560672229324
+            },
+            "selected_target": {
+              "frames": 26,
+              "success_net_all_frames_pp": -1.7407898590943524e-09,
+              "precision_net_all_frames_pp": 0.02336449155183596,
+              "utility_net_all_frames_pp": 0.01168224490552305,
+              "helpful_frames": 3,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.04283489334481156
+            },
+            "target_absent": {
+              "frames": 101,
+              "success_net_all_frames_pp": -0.685358251157765,
+              "precision_net_all_frames_pp": -0.49065423496879895,
+              "utility_net_all_frames_pp": -0.588006243063282,
+              "helpful_frames": 4,
+              "harmful_frames": 25,
+              "oracle_positive_utility_net_all_frames_pp": 0.24922117387812084
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_15.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "20": {
+        "epoch": 20,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 170,
+        "selected_target_bearing_frames": 21,
+        "reported_structural_frames": 19,
+        "presence_blocked_evidence_frames": 151,
+        "presence_blocked_target_bearing_frames": 18,
+        "actions": 19,
+        "clipped_evidence_frames": 169,
+        "presence_quantiles": [
+          0.041399214416742325,
+          0.2848627418279648,
+          0.5111035525798797,
+          0.6551416516304016
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 170,
+            "raw_utility_net_all_frames_pp": -2.5194704863373363,
+            "raw_helpful_frames": 7,
+            "raw_harmful_frames": 43,
+            "mean_observation_distance_m": 15.686632044222618,
+            "mean_raw_distance_m": 15.916339552487608
+          },
+          "selected_target": {
+            "frames": 21,
+            "raw_utility_net_all_frames_pp": 0.3699376918027334,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 7.390420939773398,
+            "mean_raw_distance_m": 6.540571720151612
+          },
+          "target_absent": {
+            "frames": 149,
+            "raw_utility_net_all_frames_pp": -2.88940817814007,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 40,
+            "mean_observation_distance_m": 16.855896696527545,
+            "mean_raw_distance_m": 17.237756495300065
+          },
+          "presence_passed": {
+            "frames": 19,
+            "raw_utility_net_all_frames_pp": -0.0311526490195518,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 20.560920529927113,
+            "mean_raw_distance_m": 20.118787788254643
+          },
+          "presence_blocked": {
+            "frames": 151,
+            "raw_utility_net_all_frames_pp": -2.4883178373177848,
+            "raw_helpful_frames": 7,
+            "raw_harmful_frames": 41,
+            "mean_observation_distance_m": 15.073310976484967,
+            "mean_raw_distance_m": 15.387554675139443
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 170,
+              "success_net_all_frames_pp": -0.42056075625144806,
+              "precision_net_all_frames_pp": -0.848909805752221,
+              "utility_net_all_frames_pp": -0.6347352810018345,
+              "helpful_frames": 14,
+              "harmful_frames": 29,
+              "oracle_positive_utility_net_all_frames_pp": 0.22975075177593024
+            },
+            "selected_target": {
+              "frames": 21,
+              "success_net_all_frames_pp": -0.015576324799907542,
+              "precision_net_all_frames_pp": 0.015576318417011391,
+              "utility_net_all_frames_pp": -3.1914480750063126e-09,
+              "helpful_frames": 2,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.015576321608459467
+            },
+            "target_absent": {
+              "frames": 149,
+              "success_net_all_frames_pp": -0.4049844314515405,
+              "precision_net_all_frames_pp": -0.8644861241692323,
+              "utility_net_all_frames_pp": -0.6347352778103864,
+              "helpful_frames": 12,
+              "harmful_frames": 27,
+              "oracle_positive_utility_net_all_frames_pp": 0.21417443016747076
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_20.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "25": {
+        "epoch": 25,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 167,
+        "selected_target_bearing_frames": 32,
+        "reported_structural_frames": 9,
+        "presence_blocked_evidence_frames": 158,
+        "presence_blocked_target_bearing_frames": 29,
+        "actions": 9,
+        "clipped_evidence_frames": 165,
+        "presence_quantiles": [
+          0.012435431592166424,
+          0.288822203874588,
+          0.4533198893070221,
+          0.5865433216094971
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 167,
+            "raw_utility_net_all_frames_pp": -1.1876947159452416,
+            "raw_helpful_frames": 26,
+            "raw_harmful_frames": 37,
+            "mean_observation_distance_m": 14.390341778099941,
+            "mean_raw_distance_m": 14.19697513991965
+          },
+          "selected_target": {
+            "frames": 32,
+            "raw_utility_net_all_frames_pp": 1.927570106513868,
+            "raw_helpful_frames": 24,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 5.96926399883686,
+            "mean_raw_distance_m": 3.8605180565635506
+          },
+          "target_absent": {
+            "frames": 135,
+            "raw_utility_net_all_frames_pp": -3.1152648224591095,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 36,
+            "mean_observation_distance_m": 16.38644910355489,
+            "mean_raw_distance_m": 16.64709830041887
+          },
+          "presence_passed": {
+            "frames": 9,
+            "raw_utility_net_all_frames_pp": 0.07788162022782635,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 13.476292537413816,
+            "mean_raw_distance_m": 11.139036920142452
+          },
+          "presence_blocked": {
+            "frames": 158,
+            "raw_utility_net_all_frames_pp": -1.2655763361730679,
+            "raw_helpful_frames": 24,
+            "raw_harmful_frames": 36,
+            "mean_observation_distance_m": 14.44240787408839,
+            "mean_raw_distance_m": 14.371161494210755
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 167,
+              "success_net_all_frames_pp": 0.18691587496862233,
+              "precision_net_all_frames_pp": 0.5607476510177148,
+              "utility_net_all_frames_pp": 0.3738317629931686,
+              "helpful_frames": 30,
+              "harmful_frames": 18,
+              "oracle_positive_utility_net_all_frames_pp": 0.9929906562365289
+            },
+            "selected_target": {
+              "frames": 32,
+              "success_net_all_frames_pp": 0.2336448690972967,
+              "precision_net_all_frames_pp": 0.09345794763891868,
+              "utility_net_all_frames_pp": 0.1635514083681077,
+              "helpful_frames": 11,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.1713395704779298
+            },
+            "target_absent": {
+              "frames": 135,
+              "success_net_all_frames_pp": -0.04672899412867436,
+              "precision_net_all_frames_pp": 0.4672897033787962,
+              "utility_net_all_frames_pp": 0.21028035462506092,
+              "helpful_frames": 19,
+              "harmful_frames": 17,
+              "oracle_positive_utility_net_all_frames_pp": 0.8216510857585991
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_25.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "30": {
+        "epoch": 30,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 129,
+        "selected_target_bearing_frames": 41,
+        "reported_structural_frames": 7,
+        "presence_blocked_evidence_frames": 122,
+        "presence_blocked_target_bearing_frames": 39,
+        "actions": 7,
+        "clipped_evidence_frames": 127,
+        "presence_quantiles": [
+          0.01755574159324169,
+          0.3091263473033905,
+          0.45353724360466,
+          0.5572854280471802
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 129,
+            "raw_utility_net_all_frames_pp": 2.9322429803835455,
+            "raw_helpful_frames": 36,
+            "raw_harmful_frames": 23,
+            "mean_observation_distance_m": 15.739735598120232,
+            "mean_raw_distance_m": 15.396693815520214
+          },
+          "selected_target": {
+            "frames": 41,
+            "raw_utility_net_all_frames_pp": 4.240654201777739,
+            "raw_helpful_frames": 33,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 6.056493777972072,
+            "mean_raw_distance_m": 2.8110653845891242
+          },
+          "target_absent": {
+            "frames": 88,
+            "raw_utility_net_all_frames_pp": -1.3084112213941934,
+            "raw_helpful_frames": 3,
+            "raw_harmful_frames": 22,
+            "mean_observation_distance_m": 20.251245991598353,
+            "mean_raw_distance_m": 21.260452516294922
+          },
+          "presence_passed": {
+            "frames": 7,
+            "raw_utility_net_all_frames_pp": 0.19859813351033262,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 19.652835730255465,
+            "mean_raw_distance_m": 14.888848148925039
+          },
+          "presence_blocked": {
+            "frames": 122,
+            "raw_utility_net_all_frames_pp": 2.733644846873213,
+            "raw_helpful_frames": 34,
+            "raw_harmful_frames": 23,
+            "mean_observation_distance_m": 15.515213459391164,
+            "mean_raw_distance_m": 15.42583250130846
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 129,
+              "success_net_all_frames_pp": -0.14018692029785143,
+              "precision_net_all_frames_pp": -0.19470407305476822,
+              "utility_net_all_frames_pp": -0.16744549667630984,
+              "helpful_frames": 19,
+              "harmful_frames": 18,
+              "oracle_positive_utility_net_all_frames_pp": 0.4049844160745634
+            },
+            "selected_target": {
+              "frames": 41,
+              "success_net_all_frames_pp": 0.20249221369484874,
+              "precision_net_all_frames_pp": 0.16355139444178882,
+              "utility_net_all_frames_pp": 0.18302180406831878,
+              "helpful_frames": 14,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.19080996646827256
+            },
+            "target_absent": {
+              "frames": 88,
+              "success_net_all_frames_pp": -0.34267913399270017,
+              "precision_net_all_frames_pp": -0.358255467496557,
+              "utility_net_all_frames_pp": -0.3504673007446286,
+              "helpful_frames": 5,
+              "harmful_frames": 17,
+              "oracle_positive_utility_net_all_frames_pp": 0.21417444960629087
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_30.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "35": {
+        "epoch": 35,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 134,
+        "selected_target_bearing_frames": 28,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 134,
+        "presence_blocked_target_bearing_frames": 28,
+        "actions": 0,
+        "clipped_evidence_frames": 132,
+        "presence_quantiles": [
+          0.02270047552883625,
+          0.28522108495235443,
+          0.43241546154022215,
+          0.49556446075439453
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 134,
+            "raw_utility_net_all_frames_pp": -0.2881620140206591,
+            "raw_helpful_frames": 22,
+            "raw_harmful_frames": 37,
+            "mean_observation_distance_m": 10.894942330346982,
+            "mean_raw_distance_m": 12.586179912717236
+          },
+          "selected_target": {
+            "frames": 28,
+            "raw_utility_net_all_frames_pp": 2.24688473096657,
+            "raw_helpful_frames": 17,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 5.431330852093552,
+            "mean_raw_distance_m": 5.450732718021726
+          },
+          "target_absent": {
+            "frames": 106,
+            "raw_utility_net_all_frames_pp": -2.535046744987229,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 34,
+            "mean_observation_distance_m": 12.338160456678077,
+            "mean_raw_distance_m": 14.471015020750015
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 134,
+            "raw_utility_net_all_frames_pp": -0.2881620140206591,
+            "raw_helpful_frames": 22,
+            "raw_harmful_frames": 37,
+            "mean_observation_distance_m": 10.894942330346982,
+            "mean_raw_distance_m": 12.586179912717236
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 134,
+              "success_net_all_frames_pp": -0.2803738394351763,
+              "precision_net_all_frames_pp": -0.18691585407914402,
+              "utility_net_all_frames_pp": -0.23364484675716016,
+              "helpful_frames": 30,
+              "harmful_frames": 25,
+              "oracle_positive_utility_net_all_frames_pp": 0.8450155877551743
+            },
+            "selected_target": {
+              "frames": 28,
+              "success_net_all_frames_pp": 0.18691589063573105,
+              "precision_net_all_frames_pp": 0.0856697837883067,
+              "utility_net_all_frames_pp": 0.13629283721201887,
+              "helpful_frames": 12,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.16744548623157068
+            },
+            "target_absent": {
+              "frames": 106,
+              "success_net_all_frames_pp": -0.4672897300709074,
+              "precision_net_all_frames_pp": -0.2725856378674507,
+              "utility_net_all_frames_pp": -0.36993768396917903,
+              "helpful_frames": 18,
+              "harmful_frames": 22,
+              "oracle_positive_utility_net_all_frames_pp": 0.6775701015236036
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_35.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "40": {
+        "epoch": 40,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 139,
+        "selected_target_bearing_frames": 36,
+        "reported_structural_frames": 2,
+        "presence_blocked_evidence_frames": 137,
+        "presence_blocked_target_bearing_frames": 35,
+        "actions": 2,
+        "clipped_evidence_frames": 135,
+        "presence_quantiles": [
+          0.01654987782239914,
+          0.2965991795063019,
+          0.45239660143852234,
+          0.5263939499855042
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 139,
+            "raw_utility_net_all_frames_pp": 2.1962616845060174,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 17,
+            "mean_observation_distance_m": 14.124802722191447,
+            "mean_raw_distance_m": 12.661033809933537
+          },
+          "selected_target": {
+            "frames": 36,
+            "raw_utility_net_all_frames_pp": 2.729750783516332,
+            "raw_helpful_frames": 25,
+            "raw_harmful_frames": 4,
+            "mean_observation_distance_m": 6.007694691669015,
+            "mean_raw_distance_m": 4.018591782160966
+          },
+          "target_absent": {
+            "frames": 103,
+            "raw_utility_net_all_frames_pp": -0.5334890990103145,
+            "raw_helpful_frames": 6,
+            "raw_harmful_frames": 13,
+            "mean_observation_distance_m": 16.96185018917016,
+            "mean_raw_distance_m": 15.68169315944628
+          },
+          "presence_passed": {
+            "frames": 2,
+            "raw_utility_net_all_frames_pp": -0.11292834914176264,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 4.2667701605906245,
+            "mean_raw_distance_m": 3.6222513733685604
+          },
+          "presence_blocked": {
+            "frames": 137,
+            "raw_utility_net_all_frames_pp": 2.30919003364778,
+            "raw_helpful_frames": 30,
+            "raw_harmful_frames": 16,
+            "mean_observation_distance_m": 14.268715606302408,
+            "mean_raw_distance_m": 12.792986838204557
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 139,
+              "success_net_all_frames_pp": -0.15576323465301983,
+              "precision_net_all_frames_pp": -0.4984423703865099,
+              "utility_net_all_frames_pp": -0.32710280251976487,
+              "helpful_frames": 11,
+              "harmful_frames": 14,
+              "oracle_positive_utility_net_all_frames_pp": 0.22975077788777812
+            },
+            "selected_target": {
+              "frames": 36,
+              "success_net_all_frames_pp": 0.015576323059117683,
+              "precision_net_all_frames_pp": -0.3271027981677902,
+              "utility_net_all_frames_pp": -0.15576323755433627,
+              "helpful_frames": 8,
+              "harmful_frames": 4,
+              "oracle_positive_utility_net_all_frames_pp": 0.077881620517958
+            },
+            "target_absent": {
+              "frames": 103,
+              "success_net_all_frames_pp": -0.17133955771213752,
+              "precision_net_all_frames_pp": -0.17133957221871968,
+              "utility_net_all_frames_pp": -0.1713395649654286,
+              "helpful_frames": 3,
+              "harmful_frames": 10,
+              "oracle_positive_utility_net_all_frames_pp": 0.15186915736982012
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_40.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "45": {
+        "epoch": 45,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 133,
+        "selected_target_bearing_frames": 49,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 133,
+        "presence_blocked_target_bearing_frames": 49,
+        "actions": 0,
+        "clipped_evidence_frames": 131,
+        "presence_quantiles": [
+          0.01361923385411501,
+          0.2543828785419464,
+          0.3882216334342956,
+          0.47776710987091064
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 133,
+            "raw_utility_net_all_frames_pp": 3.2398754049011296,
+            "raw_helpful_frames": 44,
+            "raw_harmful_frames": 14,
+            "mean_observation_distance_m": 11.918347268288697,
+            "mean_raw_distance_m": 11.475140133186606
+          },
+          "selected_target": {
+            "frames": 49,
+            "raw_utility_net_all_frames_pp": 3.746105934786277,
+            "raw_helpful_frames": 37,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 5.999588919587196,
+            "mean_raw_distance_m": 4.05364280120807
+          },
+          "target_absent": {
+            "frames": 84,
+            "raw_utility_net_all_frames_pp": -0.5062305298851473,
+            "raw_helpful_frames": 7,
+            "raw_harmful_frames": 11,
+            "mean_observation_distance_m": 15.37095630503124,
+            "mean_raw_distance_m": 15.804346910174084
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 133,
+            "raw_utility_net_all_frames_pp": 3.2398754049011296,
+            "raw_helpful_frames": 44,
+            "raw_harmful_frames": 14,
+            "mean_observation_distance_m": 11.918347268288697,
+            "mean_raw_distance_m": 11.475140133186606
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 133,
+              "success_net_all_frames_pp": -0.1557632155043314,
+              "precision_net_all_frames_pp": -0.3738317650240901,
+              "utility_net_all_frames_pp": -0.26479749026421073,
+              "helpful_frames": 15,
+              "harmful_frames": 12,
+              "oracle_positive_utility_net_all_frames_pp": 0.16744548536117573
+            },
+            "selected_target": {
+              "frames": 49,
+              "success_net_all_frames_pp": 0.10903427185856293,
+              "precision_net_all_frames_pp": -0.054517128385858746,
+              "utility_net_all_frames_pp": 0.027258571736352096,
+              "helpful_frames": 11,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.10124610858821423
+            },
+            "target_absent": {
+              "frames": 84,
+              "success_net_all_frames_pp": -0.2647974873628943,
+              "precision_net_all_frames_pp": -0.31931463663823134,
+              "utility_net_all_frames_pp": -0.29205606200056283,
+              "helpful_frames": 4,
+              "harmful_frames": 9,
+              "oracle_positive_utility_net_all_frames_pp": 0.06619937677296152
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_45.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "50": {
+        "epoch": 50,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 129,
+        "selected_target_bearing_frames": 34,
+        "reported_structural_frames": 1,
+        "presence_blocked_evidence_frames": 128,
+        "presence_blocked_target_bearing_frames": 33,
+        "actions": 1,
+        "clipped_evidence_frames": 127,
+        "presence_quantiles": [
+          0.013429353013634682,
+          0.2869690954685211,
+          0.43945921063423155,
+          0.5031315684318542
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 129,
+            "raw_utility_net_all_frames_pp": 1.8886292858101497,
+            "raw_helpful_frames": 25,
+            "raw_harmful_frames": 15,
+            "mean_observation_distance_m": 16.892293383961437,
+            "mean_raw_distance_m": 17.2381133572669
+          },
+          "selected_target": {
+            "frames": 34,
+            "raw_utility_net_all_frames_pp": 2.5467289762565652,
+            "raw_helpful_frames": 22,
+            "raw_harmful_frames": 5,
+            "mean_observation_distance_m": 5.481651585546739,
+            "mean_raw_distance_m": 5.330598050372613
+          },
+          "target_absent": {
+            "frames": 95,
+            "raw_utility_net_all_frames_pp": -0.6580996904464155,
+            "raw_helpful_frames": 3,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 20.976102027604583,
+            "mean_raw_distance_m": 21.499750414471173
+          },
+          "presence_passed": {
+            "frames": 1,
+            "raw_utility_net_all_frames_pp": 0.023364486619598026,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 7.168568616788748,
+            "mean_raw_distance_m": 2.711400560404082
+          },
+          "presence_blocked": {
+            "frames": 128,
+            "raw_utility_net_all_frames_pp": 1.8652647991905518,
+            "raw_helpful_frames": 24,
+            "raw_harmful_frames": 15,
+            "mean_observation_distance_m": 16.968259983704968,
+            "mean_raw_distance_m": 17.35160330099239
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 129,
+              "success_net_all_frames_pp": 0.015576326540697401,
+              "precision_net_all_frames_pp": -0.358255467496557,
+              "utility_net_all_frames_pp": -0.1713395704779298,
+              "helpful_frames": 16,
+              "harmful_frames": 12,
+              "oracle_positive_utility_net_all_frames_pp": 0.3271028057112129
+            },
+            "selected_target": {
+              "frames": 34,
+              "success_net_all_frames_pp": 0.1713395675766134,
+              "precision_net_all_frames_pp": -0.12461059839926034,
+              "utility_net_all_frames_pp": 0.023364484588676526,
+              "helpful_frames": 12,
+              "harmful_frames": 4,
+              "oracle_positive_utility_net_all_frames_pp": 0.21806853675396642
+            },
+            "target_absent": {
+              "frames": 95,
+              "success_net_all_frames_pp": -0.155763241035916,
+              "precision_net_all_frames_pp": -0.2336448690972967,
+              "utility_net_all_frames_pp": -0.19470405506660635,
+              "helpful_frames": 4,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.10903426895724651
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_50.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "55": {
+        "epoch": 55,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 133,
+        "selected_target_bearing_frames": 43,
+        "reported_structural_frames": 1,
+        "presence_blocked_evidence_frames": 132,
+        "presence_blocked_target_bearing_frames": 42,
+        "actions": 1,
+        "clipped_evidence_frames": 132,
+        "presence_quantiles": [
+          0.014217452146112919,
+          0.2758677899837494,
+          0.4006153762340546,
+          0.5102345943450928
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 133,
+            "raw_utility_net_all_frames_pp": 3.6487539084135,
+            "raw_helpful_frames": 41,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 12.272862215900696,
+            "mean_raw_distance_m": 12.315397763157444
+          },
+          "selected_target": {
+            "frames": 43,
+            "raw_utility_net_all_frames_pp": 3.6721183988048094,
+            "raw_helpful_frames": 36,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 5.303673444245154,
+            "mean_raw_distance_m": 3.1053760723533705
+          },
+          "target_absent": {
+            "frames": 90,
+            "raw_utility_net_all_frames_pp": -0.02336449039130939,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 7,
+            "mean_observation_distance_m": 15.602585740136119,
+            "mean_raw_distance_m": 16.715741459874945
+          },
+          "presence_passed": {
+            "frames": 1,
+            "raw_utility_net_all_frames_pp": 0.023364486619598026,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 7.432193221376211,
+            "mean_raw_distance_m": 2.768228547941306
+          },
+          "presence_blocked": {
+            "frames": 132,
+            "raw_utility_net_all_frames_pp": 3.6253894217939022,
+            "raw_helpful_frames": 40,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 12.309533950707701,
+            "mean_raw_distance_m": 12.387724802666657
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 133,
+              "success_net_all_frames_pp": 0.04672898020235549,
+              "precision_net_all_frames_pp": -0.11682241598022318,
+              "utility_net_all_frames_pp": -0.03504671788893385,
+              "helpful_frames": 16,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.2180685425565993
+            },
+            "selected_target": {
+              "frames": 43,
+              "success_net_all_frames_pp": 0.10903426895724651,
+              "precision_net_all_frames_pp": -0.23364484124465895,
+              "utility_net_all_frames_pp": -0.06230528614370622,
+              "helpful_frames": 13,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.11682243280785849
+            },
+            "target_absent": {
+              "frames": 90,
+              "success_net_all_frames_pp": -0.06230528875489101,
+              "precision_net_all_frames_pp": 0.11682242526443576,
+              "utility_net_all_frames_pp": 0.027258568254772377,
+              "helpful_frames": 3,
+              "harmful_frames": 5,
+              "oracle_positive_utility_net_all_frames_pp": 0.1012461097487408
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_55.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      },
+      "60": {
+        "epoch": 60,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 177,
+        "selected_target_bearing_frames": 60,
+        "reported_structural_frames": 2,
+        "presence_blocked_evidence_frames": 175,
+        "presence_blocked_target_bearing_frames": 59,
+        "actions": 2,
+        "clipped_evidence_frames": 173,
+        "presence_quantiles": [
+          0.03233448415994644,
+          0.29017964005470276,
+          0.42682971954345705,
+          0.5358675718307495
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 177,
+            "raw_utility_net_all_frames_pp": 3.714953284606198,
+            "raw_helpful_frames": 52,
+            "raw_harmful_frames": 24,
+            "mean_observation_distance_m": 13.511460315894528,
+            "mean_raw_distance_m": 13.938475227245368
+          },
+          "selected_target": {
+            "frames": 60,
+            "raw_utility_net_all_frames_pp": 5.1947040709658205,
+            "raw_helpful_frames": 47,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 6.468343763251367,
+            "mean_raw_distance_m": 3.6996872759683295
+          },
+          "target_absent": {
+            "frames": 117,
+            "raw_utility_net_all_frames_pp": -1.4797507863596222,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 22,
+            "mean_observation_distance_m": 17.123314958275635,
+            "mean_raw_distance_m": 19.189135715079747
+          },
+          "presence_passed": {
+            "frames": 2,
+            "raw_utility_net_all_frames_pp": 0.03115264814915687,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 19.566193363731934,
+            "mean_raw_distance_m": 16.03214720867235
+          },
+          "presence_blocked": {
+            "frames": 175,
+            "raw_utility_net_all_frames_pp": 3.6838006364570415,
+            "raw_helpful_frames": 51,
+            "raw_harmful_frames": 24,
+            "mean_observation_distance_m": 13.442263366776388,
+            "mean_raw_distance_m": 13.914547547457628
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 177,
+              "success_net_all_frames_pp": 0.10903427069803635,
+              "precision_net_all_frames_pp": -0.26479752101816495,
+              "utility_net_all_frames_pp": -0.07788162516006428,
+              "helpful_frames": 26,
+              "harmful_frames": 12,
+              "oracle_positive_utility_net_all_frames_pp": 0.3348909704322198
+            },
+            "selected_target": {
+              "frames": 60,
+              "success_net_all_frames_pp": 0.2647975146352688,
+              "precision_net_all_frames_pp": 0.015576325380170827,
+              "utility_net_all_frames_pp": 0.1401869200077198,
+              "helpful_frames": 14,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.14797508211754193
+            },
+            "target_absent": {
+              "frames": 117,
+              "success_net_all_frames_pp": -0.15576324393723243,
+              "precision_net_all_frames_pp": -0.28037384639833574,
+              "utility_net_all_frames_pp": -0.2180685451677841,
+              "helpful_frames": 12,
+              "harmful_frames": 11,
+              "oracle_positive_utility_net_all_frames_pp": 0.18691588831467792
+            },
+            "q_positive": {
+              "frames": 0,
+              "success_net_all_frames_pp": 0.0,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0,
+              "helpful_frames": 0,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            }
+          },
+          "source": "output\\20260905-173118-27_full_minus_b3-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_60.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        }
+      }
+    },
+    "training_scalars": {
+      "ct_epoch_calibration_presence_auroc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.5329193472862244
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.7028632760047913
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.7719852924346924
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.743314802646637
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.7472946643829346
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.7476428151130676
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.7071531414985657
+          }
+        },
+        "late3_mean": 0.7340302069981893,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_auprc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.09638013690710068
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.3919234275817871
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.534868597984314
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.4890853762626648
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.5238842964172363
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.5076342821121216
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.47658249735832214
+          }
+        },
+        "late3_mean": 0.5027003586292267,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_ece": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.010918453335762024
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.03097623772919178
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.01883102022111416
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.02456938661634922
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.022198693826794624
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.026831243187189102
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.008828499354422092
+          }
+        },
+        "late3_mean": 0.019286145456135273,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_positive_count": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 60.0
+          },
+          "10": {
+            "n": 1,
+            "mean": 335.0
+          },
+          "20": {
+            "n": 1,
+            "mean": 472.0
+          },
+          "40": {
+            "n": 1,
+            "mean": 415.0
+          },
+          "58": {
+            "n": 1,
+            "mean": 438.0
+          },
+          "59": {
+            "n": 1,
+            "mean": 422.0
+          },
+          "60": {
+            "n": 1,
+            "mean": 444.0
+          }
+        },
+        "late3_mean": 434.6666666666667,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_negative_count": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 624.0
+          },
+          "10": {
+            "n": 1,
+            "mean": 1115.0
+          },
+          "20": {
+            "n": 1,
+            "mean": 1151.0
+          },
+          "40": {
+            "n": 1,
+            "mean": 1232.0
+          },
+          "58": {
+            "n": 1,
+            "mean": 1149.0
+          },
+          "59": {
+            "n": 1,
+            "mean": 1138.0
+          },
+          "60": {
+            "n": 1,
+            "mean": 1167.0
+          }
+        },
+        "late3_mean": 1151.3333333333333,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_positive_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.09882228821516037
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.271544873714447
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.4132593274116516
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.3465518653392792
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.35048267245292664
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.3553386926651001
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.3392202854156494
+          }
+        },
+        "late3_mean": 0.3483472168445587,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_negative_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.09862000495195389
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.20478658378124237
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.25364384055137634
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.2326858639717102
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.23253700137138367
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.23631668090820312
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.23921462893486023
+          }
+        },
+        "late3_mean": 0.23602277040481567,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_utility_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.03845028951764107
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.00465517258271575
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.0058841644786298275
+          },
+          "40": {
+            "n": 1,
+            "mean": -0.008781117387115955
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.0008821679512038827
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.0013621801044791937
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.0031424574553966522
+          }
+        },
+        "late3_mean": -0.0002993697999045253,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_success_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.03881579264998436
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.0017586208414286375
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.005637707654386759
+          },
+          "40": {
+            "n": 1,
+            "mean": -0.007710989098995924
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.0006616258178837597
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.0008653846452943981
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.0015207940014079213
+          }
+        },
+        "late3_mean": 2.072153923412164e-06,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_precision_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.03808479383587837
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.007551724091172218
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.006130622234195471
+          },
+          "40": {
+            "n": 1,
+            "mean": -0.00985124334692955
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.0011027095606550574
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.0018589745741337538
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.004764121025800705
+          }
+        },
+        "late3_mean": -0.0006008122970039645,
+        "scope": "full_epoch_aggregate"
+      },
+      "loss_ct_h3_exposure_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.0
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.0
+          }
+        },
+        "late3_mean": 0.0,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_b2_availability_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.17038986912049145
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.3629837793657979
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.40424018219647656
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.41021627781400644
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.3971684691440537
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.3903742176128099
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.40259675592540267
+          }
+        },
+        "late3_mean": 0.39671314756075543,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_b2_target_bearing_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.014940239043824702
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.08348747868224445
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.11756545248853258
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.10333665338645419
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.1091704610809387
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.10511525328534532
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.11059334093474772
+          }
+        },
+        "late3_mean": 0.10829301843367724,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_auprc": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.10445705404972651
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.39535889054919443
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.5096203206567116
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.48518801709373605
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.4643366283438432
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5071399575693021
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.46757074299201634
+          }
+        },
+        "late3_mean": 0.47968244296838725,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_auroc": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.5262840567342195
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.6753767359541707
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.749565462233495
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.7900940721847146
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.7687866617906913
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.7792642237507252
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.7498224563600979
+          }
+        },
+        "late3_mean": 0.7659577806338381,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_ece": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.37774600382463863
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4320706680595162
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.36501343780943
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.3382013782829165
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.3236045109560765
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.34375197962816967
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.32880691952439417
+          }
+        },
+        "late3_mean": 0.3320544700362134,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.051185287160435286
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.18092019659322334
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.24154009647570937
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.17942468148370486
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.17037273927562058
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.18051237518439048
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.19738758290631778
+          }
+        },
+        "late3_mean": 0.18275756578877625,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_spatial_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.009187974866880364
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.06291552647888898
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.10702351726725164
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.0762023677552245
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.06858036518690595
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.06707915847015333
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.07980948396071613
+          }
+        },
+        "late3_mean": 0.07182300253925848,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_exploration_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.0026145418326693226
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.04884643722102937
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.10687031291900166
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.05633454667441398
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.043874118254479184
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.03506806103208388
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.048335766442031025
+          }
+        },
+        "late3_mean": 0.04242598190953136,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_selected_target_enrichment": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.22537835708177423
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.8009803679834799
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.9901127489914457
+          },
+          "40": {
+            "n": 251,
+            "mean": 1.028338808699908
+          },
+          "58": {
+            "n": 251,
+            "mean": 1.0396484898855962
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.9980308373135874
+          },
+          "60": {
+            "n": 251,
+            "mean": 1.0812331958121038
+          }
+        },
+        "late3_mean": 1.0396375076704292,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_vote_consistency_mean": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.12636575351755444
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.2582205556689268
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.24485915440665298
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.23355244518632434
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.21869769949183995
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.22370391886354798
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.2284803444081806
+          }
+        },
+        "late3_mean": 0.2236273209211895,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_vote_effective_mass_mean": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 1.5361206437130848
+          },
+          "10": {
+            "n": 251,
+            "mean": 6.027337885769715
+          },
+          "20": {
+            "n": 251,
+            "mean": 7.153062940949938
+          },
+          "40": {
+            "n": 251,
+            "mean": 7.304824613598713
+          },
+          "58": {
+            "n": 251,
+            "mean": 6.5265243448821675
+          },
+          "59": {
+            "n": 251,
+            "mean": 5.86610923110845
+          },
+          "60": {
+            "n": 251,
+            "mean": 6.6281304079222965
+          }
+        },
+        "late3_mean": 6.3402546613043045,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_vote": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.10220995109270427
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.33681519318416536
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.37452869026725033
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.32531367820053103
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.3206409894781506
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.32839206430645457
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.31645104074219904
+          }
+        },
+        "late3_mean": 0.32182803150893474,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_raw_search": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.22930126815646576
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.6565579008886153
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.9102335475710781
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.9237244685618318
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.9895227812230587
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.9900977060271138
+          },
+          "60": {
+            "n": 251,
+            "mean": 1.0891472705077765
+          }
+        },
+        "late3_mean": 1.0229225859193163,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_relation": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.6827721467531059
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.7012929348831632
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.6122912186312961
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.5454094518881395
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5085832288125122
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5443409935411704
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5914897691918559
+          }
+        },
+        "late3_mean": 0.5481379971818462,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_targetness": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.6450441357386539
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.7424306957370257
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.635029557929096
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.604753339225315
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5702048314816923
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5953943408521049
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.6362494408371914
+          }
+        },
+        "late3_mean": 0.6006162043903296,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_base_presence": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.7226051287465837
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4921020758579452
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.4656005974903525
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.4607127451920414
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.4488637618334645
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.4437149067323996
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.4611095441765044
+          }
+        },
+        "late3_mean": 0.4512294042474562,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_extension_presence": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.25775410427871454
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4975827508476151
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.5058270783657097
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.482275622002632
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5029332231121709
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.4977080781324451
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5280275449334862
+          }
+        },
+        "late3_mean": 0.5095562820593674,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_expected_success_gain": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.010083048797140188
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.008742878746322033
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.00905412928395129
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.007988471865275525
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.007006302454942036
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.006557515440986443
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.00752495733876824
+          }
+        },
+        "late3_mean": 0.0070295917448989055,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_expected_precision_gain": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.022924219326946823
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.022497364248202898
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.01835724374550011
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.016268128749093065
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.012792815705165323
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.01155427152081532
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.016402498554361593
+          }
+        },
+        "late3_mean": 0.013583195260114077,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      }
+    }
+  },
+  "full": {
+    "run": "20260905-173121-27_full-mini_car_seed42_60ep_bs16",
+    "dev_epochs": {
+      "5": {
+        "epoch": 5,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 45,
+        "selected_target_bearing_frames": 5,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 45,
+        "presence_blocked_target_bearing_frames": 5,
+        "actions": 0,
+        "clipped_evidence_frames": 45,
+        "presence_quantiles": [
+          0.05940401926636696,
+          0.0663788765668869,
+          0.1736914336681366,
+          0.18512015044689178
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 45,
+            "raw_utility_net_all_frames_pp": -0.07398754091370514,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 13.838068484730766,
+            "mean_raw_distance_m": 13.612587345043698
+          },
+          "selected_target": {
+            "frames": 5,
+            "raw_utility_net_all_frames_pp": 0.37383177604909257,
+            "raw_helpful_frames": 4,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 6.344180283933305,
+            "mean_raw_distance_m": 2.047861816477859
+          },
+          "target_absent": {
+            "frames": 40,
+            "raw_utility_net_all_frames_pp": -0.4478193169627977,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 14.77480450983045,
+            "mean_raw_distance_m": 15.05817803611443
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 45,
+            "raw_utility_net_all_frames_pp": -0.07398754091370514,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 13.838068484730766,
+            "mean_raw_distance_m": 13.612587345043698
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 45,
+              "success_net_all_frames_pp": -0.0934579464783921,
+              "precision_net_all_frames_pp": -0.1947040527455532,
+              "utility_net_all_frames_pp": -0.14408099961197265,
+              "helpful_frames": 2,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.027258568544904018
+            },
+            "selected_target": {
+              "frames": 5,
+              "success_net_all_frames_pp": 0.015576324219644255,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.0077881621098221275,
+              "helpful_frames": 1,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.0077881621098221275
+            },
+            "target_absent": {
+              "frames": 40,
+              "success_net_all_frames_pp": -0.10903427069803635,
+              "precision_net_all_frames_pp": -0.1947040527455532,
+              "utility_net_all_frames_pp": -0.15186916172179477,
+              "helpful_frames": 1,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.019470406435081893
+            },
+            "q_positive": {
+              "frames": 15,
+              "success_net_all_frames_pp": 0.04672897323919605,
+              "precision_net_all_frames_pp": 0.007788163850611987,
+              "utility_net_all_frames_pp": 0.027258568544904018,
+              "helpful_frames": 2,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.027258568544904018
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_05.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.06045042723417282,
+          -0.04096084013581276,
+          -0.01794552057981491,
+          0.0252148948609829,
+          0.03391410410404205
+        ],
+        "q_positive_evidence_frames": 15,
+        "q_positive_but_presence_blocked_frames": 15
+      },
+      "10": {
+        "epoch": 10,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 152,
+        "selected_target_bearing_frames": 10,
+        "reported_structural_frames": 0,
+        "presence_blocked_evidence_frames": 152,
+        "presence_blocked_target_bearing_frames": 10,
+        "actions": 0,
+        "clipped_evidence_frames": 152,
+        "presence_quantiles": [
+          0.12986934185028076,
+          0.2572476714849472,
+          0.36561819911003113,
+          0.43722161650657654
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 152,
+            "raw_utility_net_all_frames_pp": -7.235202473817492,
+            "raw_helpful_frames": 8,
+            "raw_harmful_frames": 73,
+            "mean_observation_distance_m": 10.238286899728852,
+            "mean_raw_distance_m": 11.940032132437073
+          },
+          "selected_target": {
+            "frames": 10,
+            "raw_utility_net_all_frames_pp": 0.7087227392280213,
+            "raw_helpful_frames": 7,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 4.705473017083525,
+            "mean_raw_distance_m": 3.213239069394781
+          },
+          "target_absent": {
+            "frames": 142,
+            "raw_utility_net_all_frames_pp": -7.943925213045513,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 73,
+            "mean_observation_distance_m": 10.627921680196833,
+            "mean_raw_distance_m": 12.554595024200617
+          },
+          "presence_passed": {
+            "frames": 0,
+            "raw_utility_net_all_frames_pp": 0.0,
+            "raw_helpful_frames": 0,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": null,
+            "mean_raw_distance_m": null
+          },
+          "presence_blocked": {
+            "frames": 152,
+            "raw_utility_net_all_frames_pp": -7.235202473817492,
+            "raw_helpful_frames": 8,
+            "raw_harmful_frames": 73,
+            "mean_observation_distance_m": 10.238286899728852,
+            "mean_raw_distance_m": 11.940032132437073
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 152,
+              "success_net_all_frames_pp": -1.152647980068146,
+              "precision_net_all_frames_pp": -3.8084112154174816,
+              "utility_net_all_frames_pp": -2.4805295977428137,
+              "helpful_frames": 15,
+              "harmful_frames": 70,
+              "oracle_positive_utility_net_all_frames_pp": 0.12461059520781226
+            },
+            "selected_target": {
+              "frames": 10,
+              "success_net_all_frames_pp": 0.09345794763891868,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.04672897381945934,
+              "helpful_frames": 6,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.04672897381945934
+            },
+            "target_absent": {
+              "frames": 142,
+              "success_net_all_frames_pp": -1.2461059277070645,
+              "precision_net_all_frames_pp": -3.8084112154174816,
+              "utility_net_all_frames_pp": -2.5272585715622733,
+              "helpful_frames": 9,
+              "harmful_frames": 70,
+              "oracle_positive_utility_net_all_frames_pp": 0.07788162138835292
+            },
+            "q_positive": {
+              "frames": 57,
+              "success_net_all_frames_pp": -0.1869158894752045,
+              "precision_net_all_frames_pp": -1.0046728837341534,
+              "utility_net_all_frames_pp": -0.595794386604679,
+              "helpful_frames": 11,
+              "harmful_frames": 19,
+              "oracle_positive_utility_net_all_frames_pp": 0.08566978407843834
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_10.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.04358183592557907,
+          -0.01922842841595411,
+          -0.004843415692448616,
+          0.015781940147280692,
+          0.0541696771979332
+        ],
+        "q_positive_evidence_frames": 57,
+        "q_positive_but_presence_blocked_frames": 57
+      },
+      "15": {
+        "epoch": 15,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 132,
+        "selected_target_bearing_frames": 34,
+        "reported_structural_frames": 11,
+        "presence_blocked_evidence_frames": 121,
+        "presence_blocked_target_bearing_frames": 30,
+        "actions": 0,
+        "clipped_evidence_frames": 132,
+        "presence_quantiles": [
+          0.09157396852970123,
+          0.3210765868425369,
+          0.4778890281915665,
+          0.642466127872467
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 132,
+            "raw_utility_net_all_frames_pp": 1.0436137148826108,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 30,
+            "mean_observation_distance_m": 13.92541804725787,
+            "mean_raw_distance_m": 13.139261081696144
+          },
+          "selected_target": {
+            "frames": 34,
+            "raw_utility_net_all_frames_pp": 2.53504673976486,
+            "raw_helpful_frames": 27,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 5.809316570228505,
+            "mean_raw_distance_m": 2.7866431335300277
+          },
+          "target_absent": {
+            "frames": 98,
+            "raw_utility_net_all_frames_pp": -1.491433024882249,
+            "raw_helpful_frames": 4,
+            "raw_harmful_frames": 30,
+            "mean_observation_distance_m": 16.741208355614997,
+            "mean_raw_distance_m": 16.73098567595786
+          },
+          "presence_passed": {
+            "frames": 11,
+            "raw_utility_net_all_frames_pp": 0.18302180958082,
+            "raw_helpful_frames": 1,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 16.351487714882836,
+            "mean_raw_distance_m": 16.57957429069663
+          },
+          "presence_blocked": {
+            "frames": 121,
+            "raw_utility_net_all_frames_pp": 0.8605919053017907,
+            "raw_helpful_frames": 30,
+            "raw_harmful_frames": 30,
+            "mean_observation_distance_m": 13.704866259291965,
+            "mean_raw_distance_m": 12.826505335423374
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 132,
+              "success_net_all_frames_pp": -0.4517134012091568,
+              "precision_net_all_frames_pp": -1.121495335110437,
+              "utility_net_all_frames_pp": -0.786604368159797,
+              "helpful_frames": 10,
+              "harmful_frames": 30,
+              "oracle_positive_utility_net_all_frames_pp": 0.14408100048236758
+            },
+            "selected_target": {
+              "frames": 34,
+              "success_net_all_frames_pp": 0.18691589179625764,
+              "precision_net_all_frames_pp": 0.007788163850611987,
+              "utility_net_all_frames_pp": 0.09735202782343481,
+              "helpful_frames": 7,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.09735202782343481
+            },
+            "target_absent": {
+              "frames": 98,
+              "success_net_all_frames_pp": -0.6386292930054145,
+              "precision_net_all_frames_pp": -1.1292834989610492,
+              "utility_net_all_frames_pp": -0.8839563959832317,
+              "helpful_frames": 3,
+              "harmful_frames": 30,
+              "oracle_positive_utility_net_all_frames_pp": 0.04672897265893276
+            },
+            "q_positive": {
+              "frames": 27,
+              "success_net_all_frames_pp": 0.14018691855706159,
+              "precision_net_all_frames_pp": 0.007788163850611987,
+              "utility_net_all_frames_pp": 0.07398754120383678,
+              "helpful_frames": 4,
+              "harmful_frames": 0,
+              "oracle_positive_utility_net_all_frames_pp": 0.07398754120383678
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_15.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.12476439774036407,
+          -0.06371670961380005,
+          -0.0197431817650795,
+          0.005808603484183551,
+          0.05828583985567093
+        ],
+        "q_positive_evidence_frames": 27,
+        "q_positive_but_presence_blocked_frames": 22
+      },
+      "20": {
+        "epoch": 20,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 140,
+        "selected_target_bearing_frames": 44,
+        "reported_structural_frames": 38,
+        "presence_blocked_evidence_frames": 102,
+        "presence_blocked_target_bearing_frames": 29,
+        "actions": 0,
+        "clipped_evidence_frames": 138,
+        "presence_quantiles": [
+          0.029474496841430664,
+          0.35260188579559326,
+          0.5523788869380951,
+          0.6464945077896118
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 140,
+            "raw_utility_net_all_frames_pp": 0.7398753572034873,
+            "raw_helpful_frames": 36,
+            "raw_harmful_frames": 43,
+            "mean_observation_distance_m": 10.833588281116127,
+            "mean_raw_distance_m": 11.020227603448445
+          },
+          "selected_target": {
+            "frames": 44,
+            "raw_utility_net_all_frames_pp": 2.8777258488062385,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 7,
+            "mean_observation_distance_m": 5.586232222048698,
+            "mean_raw_distance_m": 3.865586901285045
+          },
+          "target_absent": {
+            "frames": 96,
+            "raw_utility_net_all_frames_pp": -2.137850491602751,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 36,
+            "mean_observation_distance_m": 13.23862647485536,
+            "mean_raw_distance_m": 14.299437925273336
+          },
+          "presence_passed": {
+            "frames": 38,
+            "raw_utility_net_all_frames_pp": 0.41277258021530705,
+            "raw_helpful_frames": 9,
+            "raw_harmful_frames": 7,
+            "mean_observation_distance_m": 11.815358594377388,
+            "mean_raw_distance_m": 12.773409999895383
+          },
+          "presence_blocked": {
+            "frames": 102,
+            "raw_utility_net_all_frames_pp": 0.32710277698818024,
+            "raw_helpful_frames": 27,
+            "raw_harmful_frames": 36,
+            "mean_observation_distance_m": 10.467830713430558,
+            "mean_raw_distance_m": 10.367081220458408
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 140,
+              "success_net_all_frames_pp": -0.12461061406636907,
+              "precision_net_all_frames_pp": 0.23364485691176767,
+              "utility_net_all_frames_pp": 0.05451712142269931,
+              "helpful_frames": 27,
+              "harmful_frames": 27,
+              "oracle_positive_utility_net_all_frames_pp": 0.7320872200449865
+            },
+            "selected_target": {
+              "frames": 44,
+              "success_net_all_frames_pp": 0.046728970918142904,
+              "precision_net_all_frames_pp": 0.007788154566399405,
+              "utility_net_all_frames_pp": 0.027258562742271154,
+              "helpful_frames": 9,
+              "harmful_frames": 6,
+              "oracle_positive_utility_net_all_frames_pp": 0.13239875325579137
+            },
+            "target_absent": {
+              "frames": 96,
+              "success_net_all_frames_pp": -0.17133958498451196,
+              "precision_net_all_frames_pp": 0.22585670234536828,
+              "utility_net_all_frames_pp": 0.02725855868042815,
+              "helpful_frames": 18,
+              "harmful_frames": 21,
+              "oracle_positive_utility_net_all_frames_pp": 0.5996884667891951
+            },
+            "q_positive": {
+              "frames": 85,
+              "success_net_all_frames_pp": 0.07788161413506184,
+              "precision_net_all_frames_pp": 0.23364486561571698,
+              "utility_net_all_frames_pp": 0.1557632398753894,
+              "helpful_frames": 15,
+              "harmful_frames": 9,
+              "oracle_positive_utility_net_all_frames_pp": 0.4789719566981369
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_20.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.08873552083969116,
+          -0.038566162809729576,
+          0.010180540382862091,
+          0.05448119044303895,
+          0.07938497513532639
+        ],
+        "q_positive_evidence_frames": 85,
+        "q_positive_but_presence_blocked_frames": 53
+      },
+      "25": {
+        "epoch": 25,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 125,
+        "selected_target_bearing_frames": 37,
+        "reported_structural_frames": 11,
+        "presence_blocked_evidence_frames": 114,
+        "presence_blocked_target_bearing_frames": 32,
+        "actions": 0,
+        "clipped_evidence_frames": 125,
+        "presence_quantiles": [
+          0.018265414983034134,
+          0.31969931721687317,
+          0.4865581095218659,
+          0.5680257081985474
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 125,
+            "raw_utility_net_all_frames_pp": 2.6207165226827716,
+            "raw_helpful_frames": 39,
+            "raw_harmful_frames": 18,
+            "mean_observation_distance_m": 12.603529566641297,
+            "mean_raw_distance_m": 12.062668423171747
+          },
+          "selected_target": {
+            "frames": 37,
+            "raw_utility_net_all_frames_pp": 3.002336466064056,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 5.597880230506459,
+            "mean_raw_distance_m": 3.1537853832180143
+          },
+          "target_absent": {
+            "frames": 88,
+            "raw_utility_net_all_frames_pp": -0.38161994338128424,
+            "raw_helpful_frames": 8,
+            "raw_harmful_frames": 17,
+            "mean_observation_distance_m": 15.549086673879806,
+            "mean_raw_distance_m": 15.8084487922432
+          },
+          "presence_passed": {
+            "frames": 11,
+            "raw_utility_net_all_frames_pp": 0.12850467626272333,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 15.775781100416909,
+            "mean_raw_distance_m": 15.10497036071416
+          },
+          "presence_blocked": {
+            "frames": 114,
+            "raw_utility_net_all_frames_pp": 2.492211846420048,
+            "raw_helpful_frames": 37,
+            "raw_harmful_frames": 18,
+            "mean_observation_distance_m": 12.29743512039979,
+            "mean_raw_distance_m": 11.769112973058004
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 125,
+              "success_net_all_frames_pp": -0.1246105740282023,
+              "precision_net_all_frames_pp": -0.10903430667436012,
+              "utility_net_all_frames_pp": -0.11682244035128121,
+              "helpful_frames": 16,
+              "harmful_frames": 14,
+              "oracle_positive_utility_net_all_frames_pp": 0.3504672824663351
+            },
+            "selected_target": {
+              "frames": 37,
+              "success_net_all_frames_pp": 0.15576324335696912,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.07788162167848456,
+              "helpful_frames": 10,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.0856697837883067
+            },
+            "target_absent": {
+              "frames": 88,
+              "success_net_all_frames_pp": -0.2803738173851714,
+              "precision_net_all_frames_pp": -0.10903430667436012,
+              "utility_net_all_frames_pp": -0.19470406202976578,
+              "helpful_frames": 6,
+              "harmful_frames": 13,
+              "oracle_positive_utility_net_all_frames_pp": 0.2647974986780284
+            },
+            "q_positive": {
+              "frames": 75,
+              "success_net_all_frames_pp": 0.2180685413960727,
+              "precision_net_all_frames_pp": 0.14797505745635225,
+              "utility_net_all_frames_pp": 0.1830217994262125,
+              "helpful_frames": 14,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.2647975027398714
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_25.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.06621477007865906,
+          -0.03867569789290428,
+          0.002737728413194418,
+          0.03685286194086075,
+          0.06553453952074051
+        ],
+        "q_positive_evidence_frames": 75,
+        "q_positive_but_presence_blocked_frames": 70
+      },
+      "30": {
+        "epoch": 30,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 154,
+        "selected_target_bearing_frames": 62,
+        "reported_structural_frames": 11,
+        "presence_blocked_evidence_frames": 143,
+        "presence_blocked_target_bearing_frames": 54,
+        "actions": 0,
+        "clipped_evidence_frames": 154,
+        "presence_quantiles": [
+          0.034829072654247284,
+          0.327135369181633,
+          0.44986540973186495,
+          0.6007092595100403
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 154,
+            "raw_utility_net_all_frames_pp": 6.1682242920442345,
+            "raw_helpful_frames": 63,
+            "raw_harmful_frames": 13,
+            "mean_observation_distance_m": 11.182153178316767,
+            "mean_raw_distance_m": 10.083280940313568
+          },
+          "selected_target": {
+            "frames": 62,
+            "raw_utility_net_all_frames_pp": 6.725077879414937,
+            "raw_helpful_frames": 55,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 5.777545345880675,
+            "mean_raw_distance_m": 2.1284953195303875
+          },
+          "target_absent": {
+            "frames": 92,
+            "raw_utility_net_all_frames_pp": -0.5568535873707025,
+            "raw_helpful_frames": 8,
+            "raw_harmful_frames": 12,
+            "mean_observation_distance_m": 14.82438889148022,
+            "mean_raw_distance_m": 15.444114728232663
+          },
+          "presence_passed": {
+            "frames": 11,
+            "raw_utility_net_all_frames_pp": 0.5023364473795779,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 10.781129522532648,
+            "mean_raw_distance_m": 8.822154606135369
+          },
+          "presence_blocked": {
+            "frames": 143,
+            "raw_utility_net_all_frames_pp": 5.665887844664657,
+            "raw_helpful_frames": 58,
+            "raw_harmful_frames": 13,
+            "mean_observation_distance_m": 11.213001151838624,
+            "mean_raw_distance_m": 10.180290658327273
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 154,
+              "success_net_all_frames_pp": 0.12461058331241488,
+              "precision_net_all_frames_pp": -0.23364486155387398,
+              "utility_net_all_frames_pp": -0.054517139120729544,
+              "helpful_frames": 20,
+              "harmful_frames": 10,
+              "oracle_positive_utility_net_all_frames_pp": 0.24922118751430808
+            },
+            "selected_target": {
+              "frames": 62,
+              "success_net_all_frames_pp": 0.29595015959297755,
+              "precision_net_all_frames_pp": 0.02336449155183596,
+              "utility_net_all_frames_pp": 0.15965732557240675,
+              "helpful_frames": 16,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.1674454876822289
+            },
+            "target_absent": {
+              "frames": 92,
+              "success_net_all_frames_pp": -0.17133957628056268,
+              "precision_net_all_frames_pp": -0.25700935310570994,
+              "utility_net_all_frames_pp": -0.2141744646931363,
+              "helpful_frames": 4,
+              "harmful_frames": 9,
+              "oracle_positive_utility_net_all_frames_pp": 0.08177569983207919
+            },
+            "q_positive": {
+              "frames": 49,
+              "success_net_all_frames_pp": 0.09345793893496938,
+              "precision_net_all_frames_pp": -0.1401869086925857,
+              "utility_net_all_frames_pp": -0.023364484878808166,
+              "helpful_frames": 8,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.09735202753330317
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_30.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.12996098399162292,
+          -0.044263110309839246,
+          -0.009886029176414013,
+          0.018725153431296365,
+          0.047115251421928406
+        ],
+        "q_positive_evidence_frames": 49,
+        "q_positive_but_presence_blocked_frames": 46
+      },
+      "35": {
+        "epoch": 35,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 145,
+        "selected_target_bearing_frames": 51,
+        "reported_structural_frames": 13,
+        "presence_blocked_evidence_frames": 132,
+        "presence_blocked_target_bearing_frames": 41,
+        "actions": 0,
+        "clipped_evidence_frames": 144,
+        "presence_quantiles": [
+          0.027548326179385185,
+          0.34320229291915894,
+          0.4985501170158386,
+          0.6460953950881958
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 145,
+            "raw_utility_net_all_frames_pp": 3.321651100381234,
+            "raw_helpful_frames": 48,
+            "raw_harmful_frames": 11,
+            "mean_observation_distance_m": 13.16193058650289,
+            "mean_raw_distance_m": 12.184119957163823
+          },
+          "selected_target": {
+            "frames": 51,
+            "raw_utility_net_all_frames_pp": 4.2445482929872576,
+            "raw_helpful_frames": 44,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 6.597413185155951,
+            "mean_raw_distance_m": 2.658482054477631
+          },
+          "target_absent": {
+            "frames": 94,
+            "raw_utility_net_all_frames_pp": -0.9228971926060235,
+            "raw_helpful_frames": 4,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 16.723530453191124,
+            "mean_raw_distance_m": 17.352285202238246
+          },
+          "presence_passed": {
+            "frames": 13,
+            "raw_utility_net_all_frames_pp": 0.8839563849582294,
+            "raw_helpful_frames": 7,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 8.179815603591155,
+            "mean_raw_distance_m": 6.621560631872395
+          },
+          "presence_blocked": {
+            "frames": 132,
+            "raw_utility_net_all_frames_pp": 2.437694715423005,
+            "raw_helpful_frames": 41,
+            "raw_harmful_frames": 11,
+            "mean_observation_distance_m": 13.65259342572905,
+            "mean_raw_distance_m": 12.73194776950313
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 145,
+              "success_net_all_frames_pp": -0.4672897080209025,
+              "precision_net_all_frames_pp": -0.29595015611139786,
+              "utility_net_all_frames_pp": -0.3816199320661502,
+              "helpful_frames": 2,
+              "harmful_frames": 11,
+              "oracle_positive_utility_net_all_frames_pp": 0.031152648729420154
+            },
+            "selected_target": {
+              "frames": 51,
+              "success_net_all_frames_pp": 0.015576324799907542,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 0.007788162399953771,
+              "helpful_frames": 2,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.031152648729420154
+            },
+            "target_absent": {
+              "frames": 94,
+              "success_net_all_frames_pp": -0.48286603282081003,
+              "precision_net_all_frames_pp": -0.29595015611139786,
+              "utility_net_all_frames_pp": -0.3894080944661039,
+              "helpful_frames": 0,
+              "harmful_frames": 10,
+              "oracle_positive_utility_net_all_frames_pp": 0.0
+            },
+            "q_positive": {
+              "frames": 90,
+              "success_net_all_frames_pp": -0.01557632363938097,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": -0.007788161819690485,
+              "helpful_frames": 1,
+              "harmful_frames": 1,
+              "oracle_positive_utility_net_all_frames_pp": 0.0155763245097759
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_35.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.08796907961368561,
+          -0.04557575210928917,
+          0.009623397141695023,
+          0.045919685065746306,
+          0.08608180284500122
+        ],
+        "q_positive_evidence_frames": 90,
+        "q_positive_but_presence_blocked_frames": 78
+      },
+      "40": {
+        "epoch": 40,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 117,
+        "selected_target_bearing_frames": 40,
+        "reported_structural_frames": 10,
+        "presence_blocked_evidence_frames": 107,
+        "presence_blocked_target_bearing_frames": 33,
+        "actions": 0,
+        "clipped_evidence_frames": 116,
+        "presence_quantiles": [
+          0.024947600439190865,
+          0.333340048789978,
+          0.4941068828105927,
+          0.5970432162284851
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 117,
+            "raw_utility_net_all_frames_pp": 3.1892523291372807,
+            "raw_helpful_frames": 37,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 12.09833485101192,
+            "mean_raw_distance_m": 10.830344561103054
+          },
+          "selected_target": {
+            "frames": 40,
+            "raw_utility_net_all_frames_pp": 3.4618379954376324,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 6.214202921027288,
+            "mean_raw_distance_m": 3.6578837249035487
+          },
+          "target_absent": {
+            "frames": 77,
+            "raw_utility_net_all_frames_pp": -0.27258566630035175,
+            "raw_helpful_frames": 6,
+            "raw_harmful_frames": 8,
+            "mean_observation_distance_m": 15.155026762692248,
+            "mean_raw_distance_m": 14.556298242245653
+          },
+          "presence_passed": {
+            "frames": 10,
+            "raw_utility_net_all_frames_pp": 0.06230529629831374,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 11.881939217351743,
+            "mean_raw_distance_m": 12.942105898157426
+          },
+          "presence_blocked": {
+            "frames": 107,
+            "raw_utility_net_all_frames_pp": 3.126947032838967,
+            "raw_helpful_frames": 35,
+            "raw_harmful_frames": 10,
+            "mean_observation_distance_m": 12.118558742008199,
+            "mean_raw_distance_m": 10.632983688481149
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 117,
+              "success_net_all_frames_pp": -0.23364483834334251,
+              "precision_net_all_frames_pp": -0.2647974925852639,
+              "utility_net_all_frames_pp": -0.2492211654643032,
+              "helpful_frames": 8,
+              "harmful_frames": 9,
+              "oracle_positive_utility_net_all_frames_pp": 0.12850467858377645
+            },
+            "selected_target": {
+              "frames": 40,
+              "success_net_all_frames_pp": 0.0311526490195518,
+              "precision_net_all_frames_pp": -0.03894080996884735,
+              "utility_net_all_frames_pp": -0.0038940804746477775,
+              "helpful_frames": 5,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.03894081083924228
+            },
+            "target_absent": {
+              "frames": 77,
+              "success_net_all_frames_pp": -0.2647974873628943,
+              "precision_net_all_frames_pp": -0.22585668261641653,
+              "utility_net_all_frames_pp": -0.24532708498965541,
+              "helpful_frames": 3,
+              "harmful_frames": 7,
+              "oracle_positive_utility_net_all_frames_pp": 0.08956386774453419
+            },
+            "q_positive": {
+              "frames": 63,
+              "success_net_all_frames_pp": 0.0467289755602492,
+              "precision_net_all_frames_pp": 0.06230530152068331,
+              "utility_net_all_frames_pp": 0.054517138540466255,
+              "helpful_frames": 5,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.09735202985435631
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_40.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.08960209786891937,
+          -0.04656185805797577,
+          0.003669479163363576,
+          0.04312525540590287,
+          0.06933632493019104
+        ],
+        "q_positive_evidence_frames": 63,
+        "q_positive_but_presence_blocked_frames": 58
+      },
+      "45": {
+        "epoch": 45,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 116,
+        "selected_target_bearing_frames": 37,
+        "reported_structural_frames": 14,
+        "presence_blocked_evidence_frames": 102,
+        "presence_blocked_target_bearing_frames": 31,
+        "actions": 0,
+        "clipped_evidence_frames": 116,
+        "presence_quantiles": [
+          0.03014504536986351,
+          0.3266907334327698,
+          0.5043968260288239,
+          0.6013103127479553
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 116,
+            "raw_utility_net_all_frames_pp": 2.858255467902741,
+            "raw_helpful_frames": 37,
+            "raw_harmful_frames": 8,
+            "mean_observation_distance_m": 12.424573703315783,
+            "mean_raw_distance_m": 11.37967181399963
+          },
+          "selected_target": {
+            "frames": 37,
+            "raw_utility_net_all_frames_pp": 2.93613707623517,
+            "raw_helpful_frames": 27,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 6.148270353602544,
+            "mean_raw_distance_m": 3.9050063835546114
+          },
+          "target_absent": {
+            "frames": 79,
+            "raw_utility_net_all_frames_pp": -0.07788160833242898,
+            "raw_helpful_frames": 10,
+            "raw_harmful_frames": 6,
+            "mean_observation_distance_m": 15.36410818356122,
+            "mean_raw_distance_m": 14.880464483954896
+          },
+          "presence_passed": {
+            "frames": 14,
+            "raw_utility_net_all_frames_pp": 0.6503115251451452,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 17.571614931055862,
+            "mean_raw_distance_m": 14.486386161206129
+          },
+          "presence_blocked": {
+            "frames": 102,
+            "raw_utility_net_all_frames_pp": 2.207943942757596,
+            "raw_helpful_frames": 32,
+            "raw_harmful_frames": 8,
+            "mean_observation_distance_m": 11.718117064214203,
+            "mean_raw_distance_m": 10.953260040853644
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 116,
+              "success_net_all_frames_pp": -0.12461057925057188,
+              "precision_net_all_frames_pp": -0.19470404172055075,
+              "utility_net_all_frames_pp": -0.1596573104855613,
+              "helpful_frames": 5,
+              "harmful_frames": 7,
+              "oracle_positive_utility_net_all_frames_pp": 0.08956386774453419
+            },
+            "selected_target": {
+              "frames": 37,
+              "success_net_all_frames_pp": -0.03115264669849865,
+              "precision_net_all_frames_pp": -0.07009345608708271,
+              "utility_net_all_frames_pp": -0.050623051392790684,
+              "helpful_frames": 2,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.02336448690972967
+            },
+            "target_absent": {
+              "frames": 79,
+              "success_net_all_frames_pp": -0.09345793255207323,
+              "precision_net_all_frames_pp": -0.12461058563346804,
+              "utility_net_all_frames_pp": -0.10903425909277063,
+              "helpful_frames": 3,
+              "harmful_frames": 5,
+              "oracle_positive_utility_net_all_frames_pp": 0.06619938083480452
+            },
+            "q_positive": {
+              "frames": 62,
+              "success_net_all_frames_pp": -0.04672897149840619,
+              "precision_net_all_frames_pp": -0.14018691217416543,
+              "utility_net_all_frames_pp": -0.09345794183628581,
+              "helpful_frames": 1,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.0155763245097759
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_45.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.0907563716173172,
+          -0.044339997693896294,
+          0.0013158527435734868,
+          0.030916931107640266,
+          0.06005382537841797
+        ],
+        "q_positive_evidence_frames": 62,
+        "q_positive_but_presence_blocked_frames": 54
+      },
+      "50": {
+        "epoch": 50,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 116,
+        "selected_target_bearing_frames": 43,
+        "reported_structural_frames": 9,
+        "presence_blocked_evidence_frames": 107,
+        "presence_blocked_target_bearing_frames": 39,
+        "actions": 0,
+        "clipped_evidence_frames": 116,
+        "presence_quantiles": [
+          0.014503279700875282,
+          0.34686270356178284,
+          0.48711811006069183,
+          0.6398744583129883
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 116,
+            "raw_utility_net_all_frames_pp": 5.689252329543465,
+            "raw_helpful_frames": 40,
+            "raw_harmful_frames": 13,
+            "mean_observation_distance_m": 12.915592471713,
+            "mean_raw_distance_m": 12.735018375884973
+          },
+          "selected_target": {
+            "frames": 43,
+            "raw_utility_net_all_frames_pp": 6.113707153503769,
+            "raw_helpful_frames": 36,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 4.97825968901999,
+            "mean_raw_distance_m": 2.647899806679233
+          },
+          "target_absent": {
+            "frames": 73,
+            "raw_utility_net_all_frames_pp": -0.42445482396030354,
+            "raw_helpful_frames": 4,
+            "raw_harmful_frames": 11,
+            "mean_observation_distance_m": 17.591007672477375,
+            "mean_raw_distance_m": 18.676745752266434
+          },
+          "presence_passed": {
+            "frames": 9,
+            "raw_utility_net_all_frames_pp": 0.39719626179829565,
+            "raw_helpful_frames": 2,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 18.68023529779826,
+            "mean_raw_distance_m": 17.637004008981332
+          },
+          "presence_blocked": {
+            "frames": 107,
+            "raw_utility_net_all_frames_pp": 5.292056067745169,
+            "raw_helpful_frames": 38,
+            "raw_harmful_frames": 13,
+            "mean_observation_distance_m": 12.43071597232265,
+            "mean_raw_distance_m": 12.322701827306773
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 116,
+              "success_net_all_frames_pp": 0.10903427301908951,
+              "precision_net_all_frames_pp": -0.031152636834022782,
+              "utility_net_all_frames_pp": 0.03894081809253336,
+              "helpful_frames": 19,
+              "harmful_frames": 10,
+              "oracle_positive_utility_net_all_frames_pp": 0.32320872987867144
+            },
+            "selected_target": {
+              "frames": 43,
+              "success_net_all_frames_pp": 0.2647975140550055,
+              "precision_net_all_frames_pp": -0.07009345608708271,
+              "utility_net_all_frames_pp": 0.09735202898396138,
+              "helpful_frames": 15,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.17133956670621844
+            },
+            "target_absent": {
+              "frames": 73,
+              "success_net_all_frames_pp": -0.155763241035916,
+              "precision_net_all_frames_pp": 0.038940819253059936,
+              "utility_net_all_frames_pp": -0.05841121089142803,
+              "helpful_frames": 4,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.151869163172453
+            },
+            "q_positive": {
+              "frames": 51,
+              "success_net_all_frames_pp": 0.17133956873713996,
+              "precision_net_all_frames_pp": -0.07009345608708271,
+              "utility_net_all_frames_pp": 0.05062305632502862,
+              "helpful_frames": 9,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.12461059404728568
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_50.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.1058155745267868,
+          -0.04589742794632912,
+          -0.0029356807935982943,
+          0.02629905566573143,
+          0.06325828284025192
+        ],
+        "q_positive_evidence_frames": 51,
+        "q_positive_but_presence_blocked_frames": 46
+      },
+      "55": {
+        "epoch": 55,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 126,
+        "selected_target_bearing_frames": 36,
+        "reported_structural_frames": 7,
+        "presence_blocked_evidence_frames": 119,
+        "presence_blocked_target_bearing_frames": 31,
+        "actions": 0,
+        "clipped_evidence_frames": 124,
+        "presence_quantiles": [
+          0.020091727375984192,
+          0.3173056095838547,
+          0.48148488998413086,
+          0.577261209487915
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 126,
+            "raw_utility_net_all_frames_pp": 1.5654205591229264,
+            "raw_helpful_frames": 31,
+            "raw_harmful_frames": 14,
+            "mean_observation_distance_m": 13.664639607647418,
+            "mean_raw_distance_m": 13.348520907396512
+          },
+          "selected_target": {
+            "frames": 36,
+            "raw_utility_net_all_frames_pp": 2.780373832878201,
+            "raw_helpful_frames": 27,
+            "raw_harmful_frames": 3,
+            "mean_observation_distance_m": 6.593878374722039,
+            "mean_raw_distance_m": 4.149918477881869
+          },
+          "target_absent": {
+            "frames": 90,
+            "raw_utility_net_all_frames_pp": -1.2149532737552748,
+            "raw_helpful_frames": 4,
+            "raw_harmful_frames": 11,
+            "mean_observation_distance_m": 16.492944100817567,
+            "mean_raw_distance_m": 17.027961879202373
+          },
+          "presence_passed": {
+            "frames": 7,
+            "raw_utility_net_all_frames_pp": 0.3699376984757612,
+            "raw_helpful_frames": 3,
+            "raw_harmful_frames": 0,
+            "mean_observation_distance_m": 14.295335222850355,
+            "mean_raw_distance_m": 13.607977032957782
+          },
+          "presence_blocked": {
+            "frames": 119,
+            "raw_utility_net_all_frames_pp": 1.1954828606471652,
+            "raw_helpful_frames": 28,
+            "raw_harmful_frames": 14,
+            "mean_observation_distance_m": 13.627539865576656,
+            "mean_raw_distance_m": 13.333258782363496
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 126,
+              "success_net_all_frames_pp": -0.23364486677624355,
+              "precision_net_all_frames_pp": -0.2725856941529895,
+              "utility_net_all_frames_pp": -0.2531152804646165,
+              "helpful_frames": 7,
+              "harmful_frames": 11,
+              "oracle_positive_utility_net_all_frames_pp": 0.22585668290654817
+            },
+            "selected_target": {
+              "frames": 36,
+              "success_net_all_frames_pp": 1.1605265727295682e-09,
+              "precision_net_all_frames_pp": 0.0,
+              "utility_net_all_frames_pp": 5.802632863647841e-10,
+              "helpful_frames": 4,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.03894081083924228
+            },
+            "target_absent": {
+              "frames": 90,
+              "success_net_all_frames_pp": -0.2336448679367701,
+              "precision_net_all_frames_pp": -0.2725856941529895,
+              "utility_net_all_frames_pp": -0.2531152810448798,
+              "helpful_frames": 3,
+              "harmful_frames": 8,
+              "oracle_positive_utility_net_all_frames_pp": 0.1869158720673059
+            },
+            "q_positive": {
+              "frames": 73,
+              "success_net_all_frames_pp": -0.031152649599815084,
+              "precision_net_all_frames_pp": -0.10124611148953067,
+              "utility_net_all_frames_pp": -0.06619938054467288,
+              "helpful_frames": 3,
+              "harmful_frames": 3,
+              "oracle_positive_utility_net_all_frames_pp": 0.031152648729420154
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_55.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.10367446392774582,
+          -0.05228792317211628,
+          0.007703468203544617,
+          0.042502762749791145,
+          0.0701032355427742
+        ],
+        "q_positive_evidence_frames": 73,
+        "q_positive_but_presence_blocked_frames": 66
+      },
+      "60": {
+        "epoch": 60,
+        "all_frames": 321,
+        "prediction_frames": 309,
+        "structural_evidence_frames": 140,
+        "selected_target_bearing_frames": 55,
+        "reported_structural_frames": 12,
+        "presence_blocked_evidence_frames": 128,
+        "presence_blocked_target_bearing_frames": 46,
+        "actions": 0,
+        "clipped_evidence_frames": 140,
+        "presence_quantiles": [
+          0.02563793584704399,
+          0.34383144974708557,
+          0.4926141947507858,
+          0.6087378263473511
+        ],
+        "groups": {
+          "all_evidence": {
+            "frames": 140,
+            "raw_utility_net_all_frames_pp": 5.1479750872818855,
+            "raw_helpful_frames": 49,
+            "raw_harmful_frames": 8,
+            "mean_observation_distance_m": 12.51289726500391,
+            "mean_raw_distance_m": 11.566771862155582
+          },
+          "selected_target": {
+            "frames": 55,
+            "raw_utility_net_all_frames_pp": 5.315420566260165,
+            "raw_helpful_frames": 46,
+            "raw_harmful_frames": 2,
+            "mean_observation_distance_m": 6.043813282861717,
+            "mean_raw_distance_m": 3.130669990696039
+          },
+          "target_absent": {
+            "frames": 85,
+            "raw_utility_net_all_frames_pp": -0.1674454789782796,
+            "raw_helpful_frames": 3,
+            "raw_harmful_frames": 6,
+            "mean_observation_distance_m": 16.698775135801796,
+            "mean_raw_distance_m": 17.025426014276462
+          },
+          "presence_passed": {
+            "frames": 12,
+            "raw_utility_net_all_frames_pp": 0.45171339482626066,
+            "raw_helpful_frames": 5,
+            "raw_harmful_frames": 1,
+            "mean_observation_distance_m": 9.302864027172996,
+            "mean_raw_distance_m": 9.318800131216534
+          },
+          "presence_blocked": {
+            "frames": 128,
+            "raw_utility_net_all_frames_pp": 4.696261692455624,
+            "raw_helpful_frames": 44,
+            "raw_harmful_frames": 7,
+            "mean_observation_distance_m": 12.813837881050558,
+            "mean_raw_distance_m": 11.777519211931118
+          }
+        },
+        "recovered_bounded_h1": {
+          "groups": {
+            "all_evidence": {
+              "frames": 140,
+              "success_net_all_frames_pp": -0.01557632015780125,
+              "precision_net_all_frames_pp": -4.642106290918273e-09,
+              "utility_net_all_frames_pp": -0.007788162399953771,
+              "helpful_frames": 8,
+              "harmful_frames": 6,
+              "oracle_positive_utility_net_all_frames_pp": 0.12071651009105819
+            },
+            "selected_target": {
+              "frames": 55,
+              "success_net_all_frames_pp": 0.04672897439972262,
+              "precision_net_all_frames_pp": -0.07009345608708271,
+              "utility_net_all_frames_pp": -0.011682240843680046,
+              "helpful_frames": 6,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.06230529745884031
+            },
+            "target_absent": {
+              "frames": 85,
+              "success_net_all_frames_pp": -0.06230529455752388,
+              "precision_net_all_frames_pp": 0.07009345144497643,
+              "utility_net_all_frames_pp": 0.0038940784437262754,
+              "helpful_frames": 2,
+              "harmful_frames": 4,
+              "oracle_positive_utility_net_all_frames_pp": 0.05841121263221788
+            },
+            "q_positive": {
+              "frames": 98,
+              "success_net_all_frames_pp": 0.09345794821918196,
+              "precision_net_all_frames_pp": -0.015576327701223974,
+              "utility_net_all_frames_pp": 0.038940810258979,
+              "helpful_frames": 7,
+              "harmful_frames": 2,
+              "oracle_positive_utility_net_all_frames_pp": 0.11292834856149934
+            }
+          },
+          "source": "output\\20260905-173121-27_full-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0\\candidate_diagnostics\\epoch_60.csv",
+          "scope": "native action_metric_gains of unconditional bounded box at recorded rollout states; not a new closed-loop rollout",
+          "checks": "309 keyed rows; exact observation-distance agreement; evidence availability agrees; gated endpoint gains match within 1e-7"
+        },
+        "gain_score_quantiles": [
+          -0.11071521788835526,
+          -0.03554154448211193,
+          0.010715417098253965,
+          0.05027494318783284,
+          0.07291584461927414
+        ],
+        "q_positive_evidence_frames": 98,
+        "q_positive_but_presence_blocked_frames": 88
+      }
+    },
+    "training_scalars": {
+      "ct_epoch_calibration_presence_auroc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.45108357071876526
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.7090543508529663
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.7430555820465088
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.7634554505348206
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.7304760813713074
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.7149186134338379
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.7158088684082031
+          }
+        },
+        "late3_mean": 0.7204011877377828,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_auprc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.09308943152427673
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.3947046399116516
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.49739956855773926
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.5629583597183228
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.545191764831543
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.5278304815292358
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.516779363155365
+          }
+        },
+        "late3_mean": 0.5299338698387146,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_ece": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.010982288978993893
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.03962771221995354
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.01979673281311989
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.019002411514520645
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.01425574254244566
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.025232763960957527
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.025086430832743645
+          }
+        },
+        "late3_mean": 0.021524979112048943,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_positive_count": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 74.0
+          },
+          "10": {
+            "n": 1,
+            "mean": 328.0
+          },
+          "20": {
+            "n": 1,
+            "mean": 410.0
+          },
+          "40": {
+            "n": 1,
+            "mean": 434.0
+          },
+          "58": {
+            "n": 1,
+            "mean": 480.0
+          },
+          "59": {
+            "n": 1,
+            "mean": 498.0
+          },
+          "60": {
+            "n": 1,
+            "mean": 467.0
+          }
+        },
+        "late3_mean": 481.6666666666667,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_negative_count": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 651.0
+          },
+          "10": {
+            "n": 1,
+            "mean": 1153.0
+          },
+          "20": {
+            "n": 1,
+            "mean": 1129.0
+          },
+          "40": {
+            "n": 1,
+            "mean": 1107.0
+          },
+          "58": {
+            "n": 1,
+            "mean": 1066.0
+          },
+          "59": {
+            "n": 1,
+            "mean": 1052.0
+          },
+          "60": {
+            "n": 1,
+            "mean": 1054.0
+          }
+        },
+        "late3_mean": 1057.3333333333333,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_positive_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.0901922881603241
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.2548620104789734
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.3462434411048889
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.3955824077129364
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.38899511098861694
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.38317349553108215
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.3863653540611267
+          }
+        },
+        "late3_mean": 0.38617798686027527,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_presence_negative_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.09118834137916565
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.20018526911735535
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.21325479447841644
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.24239179491996765
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.2586801052093506
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.25837329030036926
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.25925177335739136
+          }
+        },
+        "late3_mean": 0.2587683896223704,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_help_auroc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.5294342041015625
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.5239047408103943
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.6566662788391113
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.6869648098945618
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.666905403137207
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.6709513068199158
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.7006617188453674
+          }
+        },
+        "late3_mean": 0.6795061429341634,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_help_auprc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.2673404812812805
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.29215431213378906
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.3818809986114502
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.47254493832588196
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.4499712288379669
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.4626069664955139
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.47920820116996765
+          }
+        },
+        "late3_mean": 0.46392879883448285,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_help_ece": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.1773839145898819
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.054983071982860565
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.03286366164684296
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.02421816810965538
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.01403995044529438
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.029097869992256165
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.025153907015919685
+          }
+        },
+        "late3_mean": 0.022763909151156742,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_harm_auroc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.46507591009140015
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.6948884725570679
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.8203001618385315
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.7958629131317139
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.8087416887283325
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.806330680847168
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.814181387424469
+          }
+        },
+        "late3_mean": 0.8097512523333231,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_harm_auprc": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.32612621784210205
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.37093836069107056
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.5897150635719299
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.36927497386932373
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.48039400577545166
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.4779708683490753
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.4553396701812744
+          }
+        },
+        "late3_mean": 0.4712348481019338,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_harm_ece": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.10444434732198715
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.05067743360996246
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.046971771866083145
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.030673803761601448
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.029809601604938507
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.03566087409853935
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.037111759185791016
+          }
+        },
+        "late3_mean": 0.03419407829642296,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_utility_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.028672413900494576
+          },
+          "10": {
+            "n": 1,
+            "mean": -0.0031397701241075993
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.02109324373304844
+          },
+          "40": {
+            "n": 1,
+            "mean": -0.00047047395491972566
+          },
+          "58": {
+            "n": 1,
+            "mean": -0.004519728012382984
+          },
+          "59": {
+            "n": 1,
+            "mean": -0.002524192677810788
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.0034270212054252625
+          }
+        },
+        "late3_mean": -0.003490313965206345,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_success_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.03075861930847168
+          },
+          "10": {
+            "n": 1,
+            "mean": -0.0051991892978549
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.017543859779834747
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.002271252451464534
+          },
+          "58": {
+            "n": 1,
+            "mean": -0.0009379041730426252
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.00129032286349684
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.000394477421650663
+          }
+        },
+        "late3_mean": -1.4019577065482736e-05,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_bounded_precision_gain_mean": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": -0.026586202904582024
+          },
+          "10": {
+            "n": 1,
+            "mean": -0.0010803507175296545
+          },
+          "20": {
+            "n": 1,
+            "mean": -0.02464262768626213
+          },
+          "40": {
+            "n": 1,
+            "mean": -0.003212199080735445
+          },
+          "58": {
+            "n": 1,
+            "mean": -0.008101552724838257
+          },
+          "59": {
+            "n": 1,
+            "mean": -0.006338710896670818
+          },
+          "60": {
+            "n": 1,
+            "mean": -0.006459565833210945
+          }
+        },
+        "late3_mean": -0.0069666098182400065,
+        "scope": "full_epoch_aggregate"
+      },
+      "ct_epoch_calibration_utility_score_mse": {
+        "epochs": {
+          "1": {
+            "n": 1,
+            "mean": 0.012659191153943539
+          },
+          "10": {
+            "n": 1,
+            "mean": 0.013417704030871391
+          },
+          "20": {
+            "n": 1,
+            "mean": 0.011302219703793526
+          },
+          "40": {
+            "n": 1,
+            "mean": 0.01011594757437706
+          },
+          "58": {
+            "n": 1,
+            "mean": 0.010351256467401981
+          },
+          "59": {
+            "n": 1,
+            "mean": 0.00952955149114132
+          },
+          "60": {
+            "n": 1,
+            "mean": 0.008920833468437195
+          }
+        },
+        "late3_mean": 0.009600547142326832,
+        "scope": "full_epoch_aggregate"
+      },
+      "loss_ct_h3_exposure_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.00597609561752988
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.01195219123505976
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.011205179282868526
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.013197211155378486
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.013446215139442231
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.009711155378486056
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.011454183266932271
+          }
+        },
+        "late3_mean": 0.011537184594953518,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_b2_availability_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.1806346045072335
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.3701195219360975
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.38452618114976767
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.38382185550324943
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.38695930579744015
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.3871585089134505
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.3801508254976387
+          }
+        },
+        "late3_mean": 0.3847562134028431,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_b2_target_bearing_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.01846186683116206
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.08174445079379823
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.10325839504065266
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.10810330109411027
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.11962862841161599
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.12403955607418995
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.11632043256821385
+          }
+        },
+        "late3_mean": 0.11999620568467327,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_auprc": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.12010647226644465
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4201759599841226
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.4919527172801118
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.5210554324242609
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.559969820982899
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5703738481919485
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5341124714610067
+          }
+        },
+        "late3_mean": 0.5548187135452847,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_auroc": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.5076174634839018
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.6694172334178273
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.7778843608926017
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.7920433247677121
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.809751945766676
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.8341142669231055
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.8084216876719815
+          }
+        },
+        "late3_mean": 0.8174293001205877,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_ece": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.3800413864423554
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4775390757091967
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.2816601332380952
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.3181262002938772
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.29524464980955145
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.30115291820579315
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.320789004998853
+          }
+        },
+        "late3_mean": 0.3057288576713992,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.08436014948308883
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.19766003060047013
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.16784648531843793
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.1691799652011345
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.17627168938691962
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.18216949026285859
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.17664171282788257
+          }
+        },
+        "late3_mean": 0.17836096415922023,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_spatial_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.02003012731137029
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.11173399065832693
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.0468453691374377
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.039601515922918024
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.0552566820863204
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.04676450884147766
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.03883905148512101
+          }
+        },
+        "late3_mean": 0.04695341413763968,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_exploration_group_target_rate": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.009213147410358566
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.08030378486055777
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.0354799301886701
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.03312238647168376
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.03778285435233933
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.04502980163194744
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.03266398691798586
+          }
+        },
+        "late3_mean": 0.03849221430075755,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_relation_selected_target_enrichment": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.22543372006055368
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.8041213869573586
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.9931967801069358
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.9996443457337489
+          },
+          "58": {
+            "n": 251,
+            "mean": 1.0748674729430818
+          },
+          "59": {
+            "n": 251,
+            "mean": 1.084519044099101
+          },
+          "60": {
+            "n": 251,
+            "mean": 1.0689358647126126
+          }
+        },
+        "late3_mean": 1.0761074605849317,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_vote_consistency_mean": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.13352411758688934
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.26465925623280595
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.23965538392563265
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.23607143171992434
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.23307335401970553
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.23474698096691848
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.2285136012620185
+          }
+        },
+        "late3_mean": 0.23211131208288083,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_ct_vote_effective_mass_mean": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 1.5363536402434705
+          },
+          "10": {
+            "n": 251,
+            "mean": 6.285358022215713
+          },
+          "20": {
+            "n": 251,
+            "mean": 6.081086232916886
+          },
+          "40": {
+            "n": 251,
+            "mean": 5.993642901400646
+          },
+          "58": {
+            "n": 251,
+            "mean": 6.0777687207161195
+          },
+          "59": {
+            "n": 251,
+            "mean": 5.714471084781852
+          },
+          "60": {
+            "n": 251,
+            "mean": 5.855760901335226
+          }
+        },
+        "late3_mean": 5.882666902277733,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_vote": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.131341553007464
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.30200734513392485
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.3441933565717413
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.31911583984849523
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.31179701122993314
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.33517079574632946
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.3476792525873887
+          }
+        },
+        "late3_mean": 0.3315490198545504,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_raw_search": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.26174868232490817
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.6877188535789361
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.8363091402698264
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.9064751533170851
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.9474461519324492
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.8985611849890713
+          },
+          "60": {
+            "n": 251,
+            "mean": 1.0534304737013003
+          }
+        },
+        "late3_mean": 0.966479270207607,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_relation": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.9699807454984026
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.8204112705362745
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.4745333403556708
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.5287764199760806
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5030560176448519
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.504289680416603
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5468673828202653
+          }
+        },
+        "late3_mean": 0.5180710269605734,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_targetness": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.82294721539277
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.8192022721843416
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.5552793642083013
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.5720788464840665
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5601087744492459
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5787054948004119
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5738373319525643
+          }
+        },
+        "late3_mean": 0.5708838670674073,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_base_presence": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.7160254443784159
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.502175817807832
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.4574335929882004
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.4533797202713461
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.44895167138234554
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.45425250307022336
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.4520827388146009
+          }
+        },
+        "late3_mean": 0.45176230442238996,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_extension_presence": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.28996251805488804
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.4874201612287309
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.4861313887534151
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.5011845038409727
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.5349331184093695
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.5557785363073843
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.5443594928875387
+          }
+        },
+        "late3_mean": 0.5450237158680976,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_expected_success_gain": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.007875814325950976
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.008885818564268552
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.007982722636819766
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.006916783984917015
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.007454877378907429
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.007192078232428938
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.007201530708060823
+          }
+        },
+        "late3_mean": 0.0072828287731323965,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      },
+      "loss_loss_ct_expected_precision_gain": {
+        "epochs": {
+          "1": {
+            "n": 251,
+            "mean": 0.019085076538423694
+          },
+          "10": {
+            "n": 251,
+            "mean": 0.022768033378998367
+          },
+          "20": {
+            "n": 251,
+            "mean": 0.0194902243741115
+          },
+          "40": {
+            "n": 251,
+            "mean": 0.015780781903852827
+          },
+          "58": {
+            "n": 251,
+            "mean": 0.016687288377408505
+          },
+          "59": {
+            "n": 251,
+            "mean": 0.015188327688911412
+          },
+          "60": {
+            "n": 251,
+            "mean": 0.0137244505209578
+          }
+        },
+        "late3_mean": 0.015200022195759241,
+        "scope": "mean_of_logged_batches_not_population_weighted"
+      }
+    },
+    "h3_exposure": {
+      "epochs": {
+        "58": {
+          "valid_shadow_rows": 54,
+          "mechanism_rows": 4003,
+          "row_exposure": 0.013489882588058956,
+          "mechanism_batches": 251,
+          "batches_with_valid_shadow": 54,
+          "batch_exposure": 0.2151394422310757
+        },
+        "59": {
+          "valid_shadow_rows": 39,
+          "mechanism_rows": 4003,
+          "row_exposure": 0.0097426929802648,
+          "mechanism_batches": 251,
+          "batches_with_valid_shadow": 39,
+          "batch_exposure": 0.1553784860557769
+        },
+        "60": {
+          "valid_shadow_rows": 46,
+          "mechanism_rows": 4003,
+          "row_exposure": 0.011491381463902073,
+          "mechanism_batches": 251,
+          "batches_with_valid_shadow": 46,
+          "batch_exposure": 0.18326693227091634
+        }
+      },
+      "late3_valid_shadow_rows": 139,
+      "late3_mechanism_rows": 12009,
+      "late3_row_exposure": 0.011574652344075276,
+      "evidence": "resolved_config observed mechanism rows + every mechanism loss TensorBoard record; max one scheduled shadow slot"
+    }
+  }
+}

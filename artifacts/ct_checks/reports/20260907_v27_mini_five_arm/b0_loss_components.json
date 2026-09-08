@@ -1,0 +1,318 @@
+{
+  "run": "D:\\desktop\\research\\CT-SeqTrack\\output\\20260905-173106-27_b0-mini_car_seed42_60ep_bs16\\lightning_logs\\version_0",
+  "stream": "B0-only observation; no mechanism in this arm",
+  "inventory": {
+    "loss_bc": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_seg": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_center": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_angle": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_center_aux": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_angle_aux": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_center_motion": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_angle_motion": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_center_ref": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_angle_ref": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_motion_cls": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_b0_transaction": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_b0_view0": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_b0_view1": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_b0_view2": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    },
+    "loss_b0_view3": {
+      "events": 63420,
+      "distinct_steps": 63420,
+      "duplicate_steps": 0
+    }
+  },
+  "steps_per_epoch": 1057,
+  "epochs": {
+    "1": {
+      "raw_logged_component_means": {
+        "loss_bc": 2.487364401429356,
+        "loss_seg": 0.5876654327592425,
+        "loss_center": 0.21031000999894167,
+        "loss_angle": 0.0020944389597420928,
+        "loss_center_aux": 0.2569637263410477,
+        "loss_angle_aux": 0.04681465255079814,
+        "loss_center_motion": 0.40530668961742405,
+        "loss_angle_motion": 0.006756910175451096,
+        "loss_center_ref": 0.4513468235139026,
+        "loss_angle_ref": 0.05029711877009078,
+        "loss_motion_cls": 0.392966599837157
+      },
+      "logged_batch_component_means_times_config_weight": {
+        "loss_bc": 2.487364401429356,
+        "loss_seg": 0.05876654327592426,
+        "loss_center": 0.42062001999788334,
+        "loss_angle": 0.020944389597420926,
+        "loss_center_aux": 0.5139274526820954,
+        "loss_angle_aux": 0.4681465255079814,
+        "loss_center_motion": 0.8106133792348481,
+        "loss_angle_motion": 0.06756910175451096,
+        "loss_center_ref": 0.09026936470278052,
+        "loss_angle_ref": 0.05029711877009078,
+        "loss_motion_cls": 0.039296659983715704
+      },
+      "actual_candidate_weighted_total": 7.361574867928828,
+      "actual_view_losses": {
+        "0": 7.304833839609585,
+        "1": 7.382616259855489,
+        "2": 7.433043340522383,
+        "3": 7.439287281307051
+      },
+      "logged_bc_once": 2.487364401429356,
+      "logged_bc_twice": 4.974728802858712,
+      "logged_training_accuracy": {
+        "seg_acc_background/train_epoch": {
+          "step": 1056,
+          "value": 0.15735527873039246
+        },
+        "seg_acc_foreground/train_epoch": {
+          "step": 1056,
+          "value": 0.9399360418319702
+        },
+        "motion_acc_static/train_epoch": {
+          "step": 1056,
+          "value": 0.9346389174461365
+        },
+        "motion_acc_dynamic/train_epoch": {
+          "step": 1056,
+          "value": 0.6926080584526062
+        }
+      }
+    },
+    "5": {
+      "raw_logged_component_means": {
+        "loss_bc": 0.16039822178002,
+        "loss_seg": 0.17189245496928524,
+        "loss_center": 0.10394290768054147,
+        "loss_angle": 0.0005163658499962658,
+        "loss_center_aux": 0.08896999113180638,
+        "loss_angle_aux": 0.001473379455543808,
+        "loss_center_motion": 0.162609969315844,
+        "loss_angle_motion": 0.001255585740420916,
+        "loss_center_ref": 0.07867670596586919,
+        "loss_angle_ref": 0.00227924160235394,
+        "loss_motion_cls": 0.2640299648363689
+      },
+      "logged_batch_component_means_times_config_weight": {
+        "loss_bc": 0.16039822178002,
+        "loss_seg": 0.017189245496928525,
+        "loss_center": 0.20788581536108294,
+        "loss_angle": 0.005163658499962658,
+        "loss_center_aux": 0.17793998226361277,
+        "loss_angle_aux": 0.014733794555438079,
+        "loss_center_motion": 0.325219938631688,
+        "loss_angle_motion": 0.01255585740420916,
+        "loss_center_ref": 0.015735341193173838,
+        "loss_angle_ref": 0.00227924160235394,
+        "loss_motion_cls": 0.026402996483636892
+      },
+      "actual_candidate_weighted_total": 1.0627455846419736,
+      "actual_view_losses": {
+        "0": 1.0442839518626457,
+        "1": 1.0779477991410438,
+        "2": 1.1035586163584872,
+        "3": 1.0621151572398229
+      },
+      "logged_bc_once": 0.16039822178002,
+      "logged_bc_twice": 0.32079644356004,
+      "logged_training_accuracy": {
+        "seg_acc_background/train_epoch": {
+          "step": 5284,
+          "value": 0.8436278104782104
+        },
+        "seg_acc_foreground/train_epoch": {
+          "step": 5284,
+          "value": 0.9704921245574951
+        },
+        "motion_acc_static/train_epoch": {
+          "step": 5284,
+          "value": 0.9792198538780212
+        },
+        "motion_acc_dynamic/train_epoch": {
+          "step": 5284,
+          "value": 0.7973081469535828
+        }
+      }
+    },
+    "20": {
+      "raw_logged_component_means": {
+        "loss_bc": 0.07130659459195784,
+        "loss_seg": 0.06651945436124883,
+        "loss_center": 0.07064977700292514,
+        "loss_angle": 0.00033622899048520546,
+        "loss_center_aux": 0.06285263681801895,
+        "loss_angle_aux": 0.0007407216825918427,
+        "loss_center_motion": 0.0828488570086873,
+        "loss_angle_motion": 0.0006859926101648441,
+        "loss_center_ref": 0.0213573128685475,
+        "loss_angle_ref": 0.0008861810948442322,
+        "loss_motion_cls": 0.20408643183695785
+      },
+      "logged_batch_component_means_times_config_weight": {
+        "loss_bc": 0.07130659459195784,
+        "loss_seg": 0.006651945436124883,
+        "loss_center": 0.1412995540058503,
+        "loss_angle": 0.0033622899048520545,
+        "loss_center_aux": 0.1257052736360379,
+        "loss_angle_aux": 0.007407216825918427,
+        "loss_center_motion": 0.1656977140173746,
+        "loss_angle_motion": 0.00685992610164844,
+        "loss_center_ref": 0.0042714625737095,
+        "loss_angle_ref": 0.0008861810948442322,
+        "loss_motion_cls": 0.020408643183695785
+      },
+      "actual_candidate_weighted_total": 0.5797694643065968,
+      "actual_view_losses": {
+        "0": 0.5384497172785121,
+        "1": 0.6218170475641173,
+        "2": 0.6238009508279775,
+        "3": 0.6176495861716731
+      },
+      "logged_bc_once": 0.07130659459195784,
+      "logged_bc_twice": 0.1426131891839157,
+      "logged_training_accuracy": {
+        "seg_acc_background/train_epoch": {
+          "step": 21139,
+          "value": 0.9399585723876953
+        },
+        "seg_acc_foreground/train_epoch": {
+          "step": 21139,
+          "value": 0.9684106707572937
+        },
+        "motion_acc_static/train_epoch": {
+          "step": 21139,
+          "value": 0.989615797996521
+        },
+        "motion_acc_dynamic/train_epoch": {
+          "step": 21139,
+          "value": 0.8285488486289978
+        }
+      }
+    },
+    "60": {
+      "raw_logged_component_means": {
+        "loss_bc": 0.04731213596588672,
+        "loss_seg": 0.05076244386492778,
+        "loss_center": 0.04592777059793247,
+        "loss_angle": 0.00027063239318512067,
+        "loss_center_aux": 0.03627468872676157,
+        "loss_angle_aux": 0.0003141384165686253,
+        "loss_center_motion": 0.046157825242352644,
+        "loss_angle_motion": 0.0005090125344329952,
+        "loss_center_ref": 0.011373814429767084,
+        "loss_angle_ref": 0.00026327273431061144,
+        "loss_motion_cls": 0.13615129983657046
+      },
+      "logged_batch_component_means_times_config_weight": {
+        "loss_bc": 0.04731213596588672,
+        "loss_seg": 0.0050762443864927785,
+        "loss_center": 0.09185554119586493,
+        "loss_angle": 0.0027063239318512065,
+        "loss_center_aux": 0.07254937745352313,
+        "loss_angle_aux": 0.003141384165686253,
+        "loss_center_motion": 0.09231565048470529,
+        "loss_angle_motion": 0.005090125344329953,
+        "loss_center_ref": 0.002274762885953417,
+        "loss_angle_ref": 0.00026327273431061144,
+        "loss_motion_cls": 0.013615129983657047
+      },
+      "actual_candidate_weighted_total": 0.3510257060108257,
+      "actual_view_losses": {
+        "0": 0.30987919595659963,
+        "1": 0.3846438450698257,
+        "2": 0.3990599406123612,
+        "3": 0.3928128250486014
+      },
+      "logged_bc_once": 0.04731213596588672,
+      "logged_bc_twice": 0.09462427193177345,
+      "logged_training_accuracy": {
+        "seg_acc_background/train_epoch": {
+          "step": 63419,
+          "value": 0.9542334675788879
+        },
+        "seg_acc_foreground/train_epoch": {
+          "step": 63419,
+          "value": 0.9787861108779907
+        },
+        "motion_acc_static/train_epoch": {
+          "step": 63419,
+          "value": 0.9877796769142151
+        },
+        "motion_acc_dynamic/train_epoch": {
+          "step": 63419,
+          "value": 0.883577287197113
+        }
+      }
+    }
+  },
+  "component_population": "initial compute_loss over all four equal-count candidates, before candidate-weighted branch recomputation",
+  "total_population": "weighted branch recomputation: 0.5*view0+(view1+view2+view3)/6",
+  "exact_weighted_component_reconstruction_possible": false,
+  "reasons": [
+    "per-view component logs absent",
+    "BC and segmentation normalize by valid slots/classes, whose per-view denominators are not logged",
+    "do not sum all-candidate component means and call it actual weighted total",
+    "logged_bc_twice describes local doubled coefficient magnitude; not exact candidate-weighted BC contribution"
+  ]
+}

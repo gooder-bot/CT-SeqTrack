@@ -1,0 +1,142 @@
+{
+  "schema": "ct_seqtrack.run_matrix.v28",
+  "stage": "initial",
+  "initial_formal_arm": "b0",
+  "working_directory": "D:\\desktop\\research\\CT-SeqTrack",
+  "data_path": "/home/lishengjie/data/nuscenes-mini",
+  "run_count": 1,
+  "categories": [
+    "Car"
+  ],
+  "execution_requested": false,
+  "evaluation_executed": false,
+  "reporting": {
+    "final_epoch": 60,
+    "late3_epochs": [
+      58,
+      59,
+      60
+    ],
+    "late3_aggregation": "arithmetic mean of the three independent epoch metrics",
+    "best_epoch_selection": false,
+    "full_policy_per_checkpoint": true
+  },
+  "runs": [
+    {
+      "run_id": "ct28_initial_car_b0_seed42_60ep_bs16",
+      "arm": "b0",
+      "category": "Car",
+      "source_config": "cfgs/ct_seqtrack/28_b0.yaml",
+      "resolved_config": "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\configs\\ct28_initial_car_b0_seed42_60ep_bs16.yaml",
+      "resolved_config_sha256": "34c99201be378bb4e53a5f829ce78e20f66c8e3486d5375754ff7106db32d9c2",
+      "run_directory": "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16",
+      "training_status": "not_started",
+      "train_argv": [
+        "python",
+        "main.py",
+        "--cfg",
+        "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\configs\\ct28_initial_car_b0_seed42_60ep_bs16.yaml",
+        "--path",
+        "/home/lishengjie/data/nuscenes-mini",
+        "--category_name",
+        "Car",
+        "--seed",
+        "42",
+        "--epoch",
+        "60",
+        "--batch_size",
+        "16",
+        "--tag",
+        "ct28_initial_car_b0_seed42_60ep_bs16",
+        "--log_dir",
+        "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16"
+      ],
+      "next_commands": [
+        {
+          "epoch": 58,
+          "checkpoint": "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=058.ckpt",
+          "status": "pending_training_checkpoint",
+          "evaluation_argv": [
+            "python",
+            "main.py",
+            "--cfg",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\configs\\ct28_initial_car_b0_seed42_60ep_bs16.yaml",
+            "--path",
+            "/home/lishengjie/data/nuscenes-mini",
+            "--category_name",
+            "Car",
+            "--checkpoint",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=058.ckpt",
+            "--test",
+            "--seed",
+            "42",
+            "--batch_size",
+            "16",
+            "--log_dir",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\evaluations\\ct28_initial_car_b0_seed42_60ep_bs16\\epoch_058"
+          ],
+          "order": [
+            "wait_for_checkpoint",
+            "evaluate_official_split"
+          ]
+        },
+        {
+          "epoch": 59,
+          "checkpoint": "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=059.ckpt",
+          "status": "pending_training_checkpoint",
+          "evaluation_argv": [
+            "python",
+            "main.py",
+            "--cfg",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\configs\\ct28_initial_car_b0_seed42_60ep_bs16.yaml",
+            "--path",
+            "/home/lishengjie/data/nuscenes-mini",
+            "--category_name",
+            "Car",
+            "--checkpoint",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=059.ckpt",
+            "--test",
+            "--seed",
+            "42",
+            "--batch_size",
+            "16",
+            "--log_dir",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\evaluations\\ct28_initial_car_b0_seed42_60ep_bs16\\epoch_059"
+          ],
+          "order": [
+            "wait_for_checkpoint",
+            "evaluate_official_split"
+          ]
+        },
+        {
+          "epoch": 60,
+          "checkpoint": "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=060.ckpt",
+          "status": "pending_training_checkpoint",
+          "evaluation_argv": [
+            "python",
+            "main.py",
+            "--cfg",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\configs\\ct28_initial_car_b0_seed42_60ep_bs16.yaml",
+            "--path",
+            "/home/lishengjie/data/nuscenes-mini",
+            "--category_name",
+            "Car",
+            "--checkpoint",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\runs\\ct28_initial_car_b0_seed42_60ep_bs16\\formal_checkpoints\\epoch=060.ckpt",
+            "--test",
+            "--seed",
+            "42",
+            "--batch_size",
+            "16",
+            "--log_dir",
+            "D:\\desktop\\research\\CT-SeqTrack\\artifacts\\ct_checks\\v28_local_validation\\initial_command_plan\\evaluations\\ct28_initial_car_b0_seed42_60ep_bs16\\epoch_060"
+          ],
+          "order": [
+            "wait_for_checkpoint",
+            "evaluate_official_split"
+          ]
+        }
+      ]
+    }
+  ]
+}

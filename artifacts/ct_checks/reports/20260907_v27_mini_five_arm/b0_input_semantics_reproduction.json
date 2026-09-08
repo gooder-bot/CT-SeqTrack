@@ -1,0 +1,18 @@
+{
+  "real_modules": true,
+  "synthetic_pointcloud_fixture": true,
+  "no_unused_cuda_backbone_invoked": true,
+  "actual_feature_input_shape": [
+    8,
+    14,
+    1024
+  ],
+  "feature_input_differs_from_frame_split": true,
+  "feature_input_max_abs_difference": 12.21031665802002,
+  "predicted_history_eval_frame": 8,
+  "history_prior_values": [
+    0.0,
+    1.0
+  ],
+  "transformer_output_identical_after_history_mask_change": true
+}

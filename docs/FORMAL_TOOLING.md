@@ -1,5 +1,27 @@
 # CT-SeqTrack 正式工具面
 
+## v28 当前工具协议（2026-09-08）
+
+以 [v28服务器流程](CTSEQTRACK_V28_SERVER_RUNS.md) 为当前可执行顺序。旧v27工具
+行为保留；新28配置进入reference_batch观测、严格确定性与官方val路由。
+
+- main.py仍为训练/评估唯一入口。正式28配置不允许epoch/workers/数值设置漂移。
+  --ct_engineering_check仅供真实事务短验收，限制1..3epoch、每轮1..100batch，
+  log_dir必须是本仓artifacts/ct_checks子目录，工程checkpoint不可正式初始化。
+- tools/preflight_ct_v28.py检查v28场景、observation总体索引和mechanism完整覆盖；
+  --manifest-only不代表真实数据验收。
+- tools/check_train_steps.py --numerical-audit [--audit-activations]导出实际B0数值快照；
+  tools/compare_ct_v28_audits.py逐位比较同臂与跨臂，不用宽容差替代严格通过。
+- tools/replay_ct_v28_adam.py重放审计中的单步参数/梯度/Adam状态；仅用于首次更新分叉定位。
+- tools/check_ct_v28_resume.py使用真实main/Trainer比较Full连续两工程epoch与同run边界恢复。
+- tools/run_ct_v28_matrix.py默认--stage initial仅生成首轮B0；显式--execute只能执行该B0。
+  --stage mini生成6次计划，--stage full生成30次计划，工具拒绝自动执行后续整矩阵。
+  final/58/59/60评估及Full逐checkpoint校准都是待执行命令，不自动运行。
+- tools/calibrate_ct_actions.py与export_ct_action_rows.py按28配置自动选择真实闭环runner，
+  兼容旧--v27与新--v28；v28策略/rows/scene schema与旧版本区分，源码hash覆盖新输入/主干。
+
+旧output为只读历史证据；新工具输出置于artifacts/ct_checks新目录。
+
 ## v27 当前工具协议（2026-09-05）
 
 训练/评估仍只有`main.py`。五臂配置为`cfgs/ct_seqtrack/27_*.yaml`，外部架构

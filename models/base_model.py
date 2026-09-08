@@ -1115,9 +1115,75 @@ class BaseModelMF(pl.LightningModule):
                 diagnostics_v2[f"cf_{arm}_{key}"] = value
         return diagnostics_v2
 
+    def _build_v28_motion_diagnostics(
+            self, output, data_dict, this_box, reference_box,
+            previous_target_box):
+        """仅评估：区分真实物理位移误差与递归锚点上的 endpoint 误差。"""
+        if previous_target_box is None:
+            raise ValueError("v28 physical-motion diagnostics require previous target box")
+        if 'motion_source_anchor' not in data_dict:
+            raise KeyError("v28 motion diagnostics require motion_source_anchor")
+
+        def array(value):
+            if torch.is_tensor(value):
+                value = value.detach().cpu().numpy()
+            return np.asarray(value, dtype=np.float64)
+
+        def vector(key, default):
+            return array(output.get(key, default)).reshape(-1, 2)[0]
+
+        source = array(data_dict['motion_source_anchor']).reshape(-1, 4)[0]
+        source_yaw = np.deg2rad(source[3]) if self.config.degrees else source[3]
+        cosine, sine = np.cos(source_yaw), np.sin(source_yaw)
+        source_rotation = np.asarray(((cosine, -sine), (sine, cosine)))
+        reference_inverse = np.asarray(reference_box.rotation_matrix, dtype=np.float64).T[:2, :2]
+        to_reference = reference_inverse @ source_rotation
+        source_origin = reference_inverse @ (source[:2] - reference_box.center[:2])
+        current_center = np.asarray(this_box.center[:2], dtype=np.float64)
+        previous_center = np.asarray(previous_target_box.center[:2], dtype=np.float64)
+        physical_target = reference_inverse @ (current_center - previous_center)
+        endpoint_target = reference_inverse @ (current_center - reference_box.center[:2])
+        learned = to_reference @ vector('motion_prior_xy', (0., 0.))
+        kinematic = to_reference @ vector('motion_prior_kinematic_xy', (0., 0.))
+        direction = to_reference @ vector('motion_prior_direction_xy', (1., 0.))
+        log_sigma = vector('motion_prior_log_sigma_parallel_perp', (0., 0.))
+        envelope = vector('motion_prior_envelope_parallel_perp', (1., 1.))
+        if not all(np.isfinite(value).all() for value in (
+                source, physical_target, endpoint_target, learned, kinematic,
+                direction, log_sigma, envelope)):
+            raise ValueError("nonfinite v28 physical-motion diagnostics")
+        direction_norm = float(np.linalg.norm(direction))
+        valid = bool(self._proposal_scalar(output, 'motion_prior_valid') > 0
+                     and direction_norm > 1e-8)
+        direction = direction / direction_norm if direction_norm > 1e-8 else np.asarray((1., 0.))
+        axes = np.stack((direction, (-direction[1], direction[0])))
+        error = axes @ (physical_target - learned)
+        normalized_residual = (axes @ (physical_target - kinematic)) / np.maximum(envelope, 1e-6)
+        safe_log_sigma = np.clip(log_sigma, -4., 2.5)
+        mahalanobis = float(np.sum(error ** 2 * np.exp(-2. * safe_log_sigma))) if valid else 0.
+        nll = .5 * (mahalanobis + 2. * float(safe_log_sigma.sum())) if valid else 0.
+        return dict(
+            b1_target_kind='physical_displacement',
+            motion_target_dx=float(physical_target[0]), motion_target_dy=float(physical_target[1]),
+            kinematic_error=float(np.linalg.norm(kinematic - physical_target)),
+            learned_motion_error=float(np.linalg.norm(learned - physical_target)),
+            kinematic_endpoint_error=float(np.linalg.norm(source_origin + kinematic - endpoint_target)),
+            learned_endpoint_error=float(np.linalg.norm(source_origin + learned - endpoint_target)),
+            recursive_anchor_error=float(np.linalg.norm(source[:2] - previous_center)),
+            learned_error_parallel=float(error[0]), learned_error_perpendicular=float(error[1]),
+            learned_cv_disagreement=float(np.linalg.norm(learned - kinematic)),
+            b1_valid=int(valid), b1_nll=nll, b1_mahalanobis_sq=mahalanobis,
+            b1_coverage_50=int(valid and mahalanobis <= 1.38629436112),
+            b1_coverage_80=int(valid and mahalanobis <= 3.21887582487),
+            b1_coverage_95=int(valid and mahalanobis <= 5.99146454711),
+            target_residual_unit_parallel=float(normalized_residual[0]),
+            target_residual_unit_perpendicular=float(normalized_residual[1]),
+            residual_recoverable_parallel=int(abs(normalized_residual[0]) <= 1.),
+            residual_recoverable_perpendicular=int(abs(normalized_residual[1]) <= 1.))
+
     def _build_ct_joint_diagnostic_row(
             self, output, data_dict, this_box, reference_box, frame_id,
-            acquisition_diagnostics=None):
+            acquisition_diagnostics=None, previous_target_box=None):
         """Export paper-facing joint-Full diagnostics; GT stays outside forward."""
         is_v27 = bool(getattr(self.config, 'ct_enable_v27', False))
         evidence_label_scale = 1.0 if is_v27 else self.config.bb_scale
@@ -1671,6 +1737,10 @@ class BaseModelMF(pl.LightningModule):
                 utility_gain=gain['utility_gain'],
                 action_help_label=int(gain['utility_gain'] > 1e-6),
                 action_harm_label=int(gain['utility_gain'] < -1e-6))
+        if bool(getattr(self.config, 'ct_enable_v28', False)):
+            row.update(self._build_v28_motion_diagnostics(
+                output, data_dict, this_box, reference_box, previous_target_box))
+            row['b2_version'] = 'ct_joint_full.v28'
         return row
 
     @staticmethod
@@ -1976,6 +2046,8 @@ class BaseModelMF(pl.LightningModule):
                                 frame_id,
                                 acquisition_diagnostics=
                                 acquisition_diagnostics,
+                                **({'previous_target_box': sequence[frame_id - 1]['3d_bbox']}
+                                   if bool(getattr(self.config, 'ct_enable_v28', False)) else {}),
                             ))
                     if (bool(getattr(
                             self.config, "export_b3_rollouts", False))

@@ -30,7 +30,9 @@ from datasets.sampler import (
     online_recursive_collate,
 )
 from utils.dual_stream import DualStreamLoader
-from utils.sampling_utils import StatelessCandidateBatchSampler
+from utils.sampling_utils import (
+    StatelessCandidateBatchSampler, StatelessObservationBatchSampler,
+)
 from utils.training_isolation import (
     capture_global_rng_state,
     restore_global_rng_state,
@@ -48,6 +50,9 @@ from utils.online_contract import (
     validate_scratch_training_contract,
     validate_b2_method_promotion,
     validate_online_resume_contract,
+    configure_v28_numerics,
+    capture_v28_runtime_environment,
+    validate_v28_observation_updates,
 )
 from utils.replay_cache import (
     B0_STATE_PREFIXES,
@@ -463,6 +468,8 @@ def validate_candidate0_b0_initialization(checkpoint_path):
 
 def parse_config():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--ct_engineering_check', action='store_true', default=argparse.SUPPRESS,
+                        help='Bounded v28 engineering run under artifacts/ct_checks; never a formal result.')
     parser.add_argument(
         '--batch_size', type=int, default=argparse.SUPPRESS,
         help='input batch size (YAML value is used when omitted)')
@@ -713,11 +720,15 @@ def parse_config():
 
 
 cfg = parse_config()
+if bool(getattr(cfg, 'ct_enable_v28', False)):
+    configure_v28_numerics(cfg)
+    cfg.ct_runtime_environment = capture_v28_runtime_environment()
 if bool(getattr(cfg, 'ct_enable_v27', False)):
     from nuscenes.utils.splits import create_splits_scenes
     from utils.v27_protocol import build_scene_manifest
     scene_manifest = build_scene_manifest(create_splits_scenes(), cfg.version,
-        int(getattr(cfg, 'ct_partition_seed', 42)))
+        int(getattr(cfg, 'ct_partition_seed', 42)),
+        **({'enable_v28': True} if bool(getattr(cfg, 'ct_enable_v28', False)) else {}))
     cfg.ct_scene_manifest_sha256 = scene_manifest['content_sha256']
 if str(getattr(cfg, 'net_model', '')).strip().lower() == 'ctseqtrack':
     configure_ct_variant(cfg)
@@ -825,7 +836,8 @@ if not cfg.test:
     # Atomic mini_train/dev remains a mechanism-analysis partition only.
     val_data = get_dataset(
         cfg, type='test', split=cfg.val_split,
-        protocol_role=('dev' if bool(getattr(cfg, 'ct_enable_v27', False)) else 'val'))
+        protocol_role=('dev' if bool(getattr(cfg, 'ct_enable_v27', False))
+                       and not bool(getattr(cfg, 'ct_enable_v28', False)) else 'val'))
     loader_seed = int(cfg.seed or 42)
     loader_generator = torch.Generator()
     loader_generator.manual_seed(loader_seed + 31001)
@@ -936,7 +948,11 @@ if not cfg.test:
         )
     else:
         observation_batch_sampler = None
-        if safe_auto:
+        if safe_auto and bool(getattr(cfg, 'ct_enable_v28', False)):
+            observation_batch_sampler = StatelessObservationBatchSampler(
+                train_data, batch_size=int(cfg.batch_size),
+                seed=loader_seed, drop_last=True)
+        elif safe_auto:
             observation_batch_sampler = StatelessCandidateBatchSampler(
                 train_data,
                 batch_size=int(cfg.batch_size),
@@ -960,6 +976,12 @@ if not cfg.test:
                 pin_memory=True, worker_init_fn=seed_loader_worker,
                 generator=loader_generator)
     observation_steps_per_epoch = len(train_loader)
+    if bool(getattr(cfg, 'ct_enable_v28', False)):
+        cfg.ct_observation_update_count_check = validate_v28_observation_updates(
+            cfg, sample_count=len(train_data), batch_size=int(cfg.batch_size),
+            drop_last=observation_batch_sampler.drop_last,
+            observed_updates=observation_steps_per_epoch)
+        cfg.ct_observation_steps_per_epoch_observed = observation_steps_per_epoch
     mechanism_steps_per_epoch = (
         len(mechanism_loader) if mechanism_loader is not None else 0)
     if dual_stream:
@@ -1034,8 +1056,11 @@ if not cfg.test:
             and trainer_devices != 1):
         raise ValueError(
             "recursive/dual-stream formal training requires exactly one GPU")
+    actual_epochs = cfg.epoch
     trainer = pl.Trainer(devices=trainer_devices, accelerator='auto',
-                         min_epochs=cfg.epoch, max_epochs=cfg.epoch,
+                         min_epochs=(0 if bool(getattr(cfg, 'ct_engineering_check', False))
+                                     and bool(getattr(cfg, 'ct_enable_v28', False)) else actual_epochs),
+                         max_epochs=actual_epochs,
                          max_steps=-1,
                          callbacks=callbacks,
                          default_root_dir=run_root_dir,

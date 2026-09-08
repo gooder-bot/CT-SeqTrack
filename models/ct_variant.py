@@ -22,6 +22,18 @@ def get_config(config, name, default=None):
 
 
 def configure_ct_variant(config):
+    if bool(get_config(config, "ct_enable_v28", False)):
+        if not bool(get_config(config, "ct_enable_v27", False)):
+            raise ValueError("v28 requires the v27 endpoint/action envelope")
+        expected_v28 = {
+            "ct_observation_contract": "seqtrack_reference_compatible_v1",
+            "ct_b0_sampling_contract": "seqtrack_original_slots_v1",
+            "ct_b0_point_feature_source": "seg_second64_v1",
+            "ct_b0_loss_reduction": "reference_batch",
+        }
+        for key, expected in expected_v28.items():
+            if get_config(config, key) != expected:
+                raise ValueError(f"v28 requires {key}={expected}")
     variant = str(get_config(config, "ct_variant", "full")).strip().lower()
     if variant not in VARIANTS:
         raise ValueError(

@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from pointnet2.utils.pointnet2_modules import PointnetSAModule
+from utils.deterministic_pooling import DeterministicMaxPool1d
 
 
 class Pointnet_Backbone(nn.Module):
@@ -137,7 +138,8 @@ class ReferedPointnet(nn.Module):
 
 class MiniPointNet(nn.Module):
 
-    def __init__(self, input_channel, per_point_mlp, hidden_mlp, output_size=0):
+    def __init__(self, input_channel, per_point_mlp, hidden_mlp, output_size=0,
+                 deterministic_pooling=False):
         """
 
         :param input_channel: int
@@ -164,8 +166,10 @@ class MiniPointNet(nn.Module):
         # self.pooling = nn.AdaptiveMaxPool1d(output_size=1)
         # self.hidden_mlp = nn.Sequential(*seq_hidden)
 
+        pooling = (DeterministicMaxPool1d(1) if deterministic_pooling
+                   else nn.AdaptiveMaxPool1d(output_size=1))
         self.features = nn.Sequential(*seq_per_point,
-                                      nn.AdaptiveMaxPool1d(output_size=1),
+                                      pooling,
                                       nn.Flatten(),
                                       *seq_hidden)
         self.output_size = output_size
@@ -190,7 +194,8 @@ class MiniPointNet(nn.Module):
 
 class SegPointNet(nn.Module):
 
-    def __init__(self, input_channel, per_point_mlp1, per_point_mlp2, output_size=0, return_intermediate=False):
+    def __init__(self, input_channel, per_point_mlp1, per_point_mlp2, output_size=0,
+                 return_intermediate=False, deterministic_pooling=False):
         """
 
         :param input_channel: int
@@ -211,7 +216,8 @@ class SegPointNet(nn.Module):
                 ))
             in_channel = out_channel
 
-        self.pool = nn.AdaptiveMaxPool1d(output_size=1)
+        self.pool = (DeterministicMaxPool1d(1) if deterministic_pooling
+                     else nn.AdaptiveMaxPool1d(output_size=1))
 
         self.seq_per_point2 = nn.ModuleList()
         in_channel = in_channel + per_point_mlp1[1]
@@ -228,7 +234,7 @@ class SegPointNet(nn.Module):
         if output_size >= 0:
             self.fc = nn.Conv1d(in_channel, output_size, 1) #把per_point_mlp2的最后一维直接打成2
 
-    def forward(self, x):
+    def forward(self, x, return_point_features=False):
         """
 
         :param x: B,C,N
@@ -246,13 +252,15 @@ class SegPointNet(nn.Module):
             x = mlp(x)
         if self.output_size > 0:
             x = self.fc(x)
-        if self.return_intermediate:
-            return x, pooled_feature.squeeze(dim=-1)
-        return x
+        result = ((x, pooled_feature.squeeze(dim=-1))
+                  if self.return_intermediate else x)
+        # 原计算图只执行一次；host 按物理点顺序导出给 B2，再在边界 detach。
+        return (result, second_layer_out) if return_point_features else result
     
 class FeaturePointNet(nn.Module):
 
-    def __init__(self, input_channel, per_point_mlp1, per_point_mlp2, output_size=0, return_intermediate=False):
+    def __init__(self, input_channel, per_point_mlp1, per_point_mlp2, output_size=0,
+                 return_intermediate=False, deterministic_pooling=False):
         super(FeaturePointNet, self).__init__()
         self.return_intermediate = return_intermediate
         self.seq_per_point = nn.ModuleList()
@@ -266,8 +274,9 @@ class FeaturePointNet(nn.Module):
                 ))
             in_channel = out_channel
 
-        self.pre_pool = nn.AdaptiveMaxPool1d(output_size=output_size) 
-        self.pool = nn.AdaptiveMaxPool1d(output_size=1) 
+        pool_type = DeterministicMaxPool1d if deterministic_pooling else nn.AdaptiveMaxPool1d
+        self.pre_pool = pool_type(output_size=output_size)
+        self.pool = pool_type(output_size=1)
         
 
         self.seq_per_point2 = nn.ModuleList()

@@ -1,4 +1,25 @@
-# CT-SeqTrack v27 当前状态（2026-09-05）
+# CT-SeqTrack v28 当前状态（2026-09-08）
+
+以[正式协议顶部](docs/EXPERIMENT_PROTOCOL.md)和[v28实施](docs/CTSEQTRACK_V28_IMPLEMENTATION.md)
+为当前定义。先修清共享观测底座，首轮正式仅28 B0；以下历史章节不代表最新实验状态。
+
+- [x] 新增28五臂mini/full与共享实现reference配置，固定seed42/60epoch/bs16/workers12/val5。
+- [x] 注册完整candidate总体shuffle、reference_batch单次BC目标、seg_second64_v1点特征，
+  严格确定性与环境记录；保留train.v4、单Adam、scratch及模块所有权。
+- [x] 新增v28 preflight、首轮B0/后续计划矩阵、版本化校准与工程入口约束。
+- [x] v28最终本地回归453 passed、12 skipped；compileall/diff通过。独立原算式、
+  六配置B0两步更新及真实跨臂审计首步逐位一致，详见[本地验收](docs/CTSEQTRACK_V28_LOCAL_VALIDATION.md)。
+- [x] v27五臂实际60轮训练已完成；9月7–8日报告与原始日志/逐帧CSV已复核。
+  成绩只属于内部dev，Full缺校准且动作0；这不是完成官方mini_val验证。
+- [ ] 服务器真实preflight、同卡B0/B0/GRU 100-step逐位对齐与Full epoch边界连续/恢复验收。
+- [ ] 28 B0从epoch0正式60轮；补官方mini_val的58/59/60，报告final与late-3及失跟诊断。
+- [ ] B0结果可解释后再启动其余mini臂，Full每个checkpoint独立校准；参考实现身份单独披露。
+- [ ] mini验收后再考虑完整nuScenes五类30运行矩阵；所有启用参数从头训练。
+
+尚无v28正式训练结果；不声明恢复历史高分、稳定涨分、SOTA或因果time/memory收益。
+工程短跑和CPU合同检查不能替代真实数据/CUDA验收。具体命令见[v28服务器流程](docs/CTSEQTRACK_V28_SERVER_RUNS.md)。
+
+# 以下为 CT-SeqTrack v27 历史状态（2026-09-05）
 
 当前实验定义以[正式协议](docs/EXPERIMENT_PROTOCOL.md)顶部及
 [v27方法](docs/CTSEQTRACK_V27_METHOD.md)为准。下面v26正文保留历史状态，

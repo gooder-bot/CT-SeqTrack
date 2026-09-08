@@ -424,8 +424,24 @@ def test_v26_zero_step_preflight_accepts_all_registered_arms(tmp_path):
 
 
 def test_v26_trainer_has_no_intermediate_stop_or_batch_truncation_contract():
+    import ast
+    from types import SimpleNamespace
     source = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert "min_epochs=cfg.epoch, max_epochs=cfg.epoch" in source
+    tree = ast.parse(source)
+    epoch_assignment = next(node for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == 'actual_epochs'
+                                    for target in node.targets))
+    assert ast.dump(epoch_assignment.value) == ast.dump(ast.parse('cfg.epoch', mode='eval').body)
+    trainer = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute) and node.func.attr == 'Trainer'
+                   and any(keyword.arg == 'max_epochs' for keyword in node.keywords))
+    kwargs = {keyword.arg: keyword.value for keyword in trainer.keywords}
+    for v28, engineering, expected_min in ((False, False, 60), (False, True, 60),
+                                           (True, False, 60), (True, True, 0)):
+        scope = dict(cfg=SimpleNamespace(epoch=60, ct_enable_v28=v28,
+                                        ct_engineering_check=engineering), actual_epochs=60)
+        assert eval(compile(ast.Expression(kwargs['min_epochs']), '<trainer-min>', 'eval'), scope) == expected_min
+        assert eval(compile(ast.Expression(kwargs['max_epochs']), '<trainer-max>', 'eval'), scope) == 60
     assert "max_steps=-1" in source
     assert "fast_dev_run=False" in source
     assert "EarlyStopping" not in source

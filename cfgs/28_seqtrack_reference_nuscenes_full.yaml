@@ -1,0 +1,3 @@
+_base_: ct_seqtrack/28_b0_nuscenes_full.yaml
+experiment_name: ct28_seqtrack_reference_nuscenes_full_scratch_seed42
+ct_reference_baseline: true

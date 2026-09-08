@@ -143,10 +143,24 @@ def load_initial_weights(
             raise RuntimeError(
                 "strict checkpoint restore is incomplete: "
                 + "; ".join(details))
-    critical = (
+    critical = [
         "seg_pointnet.", "mini_pointnet.", "motion_mlp.",
-        "feature_pointnet.", "Transformer.", "physical_motion_encoder.",
-    )
+        "feature_pointnet.", "Transformer.",
+    ]
+    def enabled(field, default=False):
+        config = model.config
+        configured = config.get(field, default) if isinstance(config, dict) else getattr(config, field, default)
+        return bool(getattr(model, field, configured))
+    for flag, prefix in (
+            ('ct_enable_b1', 'physical_motion_encoder.'),
+            ('ct_enable_b2', 'ct_joint_search_refiner.'),
+            ('ct_enable_b3', 'ct_joint_router.')):
+        # 旧 exporter 未声明 B1 开关时仍要求已构造的 B1；纯 B0/reference
+        # 不存在该模块，不能要求其 checkpoint 含有虚构的 motion 参数。
+        default = (prefix == 'physical_motion_encoder.'
+                   and any(key.startswith(prefix) for key in target))
+        if any(key.startswith(prefix) for key in target) and enabled(flag, default):
+            critical.append(prefix)
     missing = [
         prefix for prefix in critical
         if not any(key.startswith(prefix) for key in matched)]

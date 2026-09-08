@@ -1,5 +1,43 @@
 # CT-SeqTrack 正式实验协议
 
+## v28 当前协议（2026-09-08）
+
+本次服务器启动按用户后续指令更新为三组mini并行：GPU1 B0 seed42、GPU2 B0 seed52
+（`28_b0_seed52.yaml`独立注册）、GPU3 Full seed42。三组均从头训练60轮、batch16、
+workers12、每5轮官方mini_val验证；这次启动安排替代下面“首轮仅B0”的排程。
+数据/数值/模块合同与分数验收要求保持一致；Full训练后的正式评测仍需各checkpoint独立校准。
+
+本节替代下方历史v27/v26/v25/v24中与v28冲突的规定；旧配置和结果不覆盖。
+详细实现与阶段验收见 [v28实施](CTSEQTRACK_V28_IMPLEMENTATION.md) 与
+[服务器流程](CTSEQTRACK_V28_SERVER_RUNS.md)。
+
+- 首轮正式仅28 B0，mini Car、seed42、60epoch、batch16、workers12，每5轮官方val。
+  所有工程checkpoint丢弃；完整结果固定final60与late-3=58/59/60，禁止挑不同best。
+- 每帧1024槽、3帧历史；Adam lr=1e-4、betas=(0.5,0.999)、eps=1e-6、weight_decay=0，
+  StepLR每20轮乘0.1、无梯度裁剪。四候选总体自然drop_last，当前mini Car应为1262步/轮、
+  75,720次更新；按实际长度校验，不能重复或补齐数据凑数。full按其实际长度计算。
+- B0观测合同为seqtrack_reference_compatible_v1，采样为seqtrack_original_slots_v1。
+  完整四candidate数据总体随机排列，batch不强制候选均衡；reference_batch在完整batch
+  一次归约，BC只计一次。v28不消费历史[.5,1/6,1/6,1/6]目标或逐view均值。
+- 保持safe_seqtrack_auto_v1、train.v4、unified Adam和B0唯一递归写入权。
+  B1/B2/B3在第一个合法tick开始训练，所有启用参数从头学习；不冻结、不跨run初始化。
+- mini全部8个mini_train训练，官方2个mini_val只评测；固定内部calibration/dev各1场景
+  与训练重叠，明确标记training_internal，不声称held-out。full全部350 train_track训练，
+  内部17/18拟合/诊断，官方150 val评测。官方val不用于选择后端、阈值或超参。
+- 严格FP32、TF32关闭、cuDNN benchmark关闭/确定性开启、Adam foreach/fused关闭，
+  CUBLAS工作区:4096:8；不允许warn_only降级。观测与数值合同绑定resume身份，
+  同run恢复核对实际环境。合法原始ID及extension-only点证据不随旧槽合同被撤回。
+- B2读取seg_second64_v1真实逐点特征；结构合法性独立于presence，bounded-always/B3/
+  导出/校准共享同一候选。Full每个checkpoint重新真实闭环拟合、锁定内部dev诊断后评官方val。
+  v28 policy绑定checkpoint/config/source/scene/metric，缺失或失配则observation fallback。
+- v28 reference命名为共享实现架构参考：ctseqtrack+b0与28 B0的网络、损失和采样相同，
+  仅参考标签不同，不作“不同原始架构”的算法对照。原冻结SeqTrack结果仅作历史参照。
+- 100-step同卡B0/B0/GRU逐位一致及真实Full连续/恢复是工程门禁，不能替代60轮有效性。
+  后续mini五臂+reference及full五类30次仍待B0验收；不从已注册配置推断收益。
+- 历史健康参照S/P=50.986/59.962，首轮分别要求S≥49.986、P≥58.962。
+  严格“下降≤1个百分点”需随后同协议reference的final及late-3分别比较S/P；
+  两次同样低分不能声明恢复。未通过则继续定位，不换seed、挑epoch或扩训练预算。
+
 ## v27 当前协议（2026-09-05）
 
 本节及 [CTSEQTRACK_V27_METHOD.md](CTSEQTRACK_V27_METHOD.md) 定义当前轮次；

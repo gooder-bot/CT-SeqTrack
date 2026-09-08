@@ -71,6 +71,9 @@ from utils.recursive_state import (
     OnlineRecursiveBatchSampler,
     stable_tracklet_partition,
 )
+from utils.b0_sampling import (
+    B0EmptyHistoryError, isolated_observation_rng, regularize_b0_seqtrack_compat,
+)
 
 
 def no_processing(data, *args):
@@ -260,10 +263,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     bb_offset
     """
     v27 = bool(getattr(config, 'ct_enable_v27', False))
+    v28 = bool(getattr(config, 'ct_enable_v28', False))
     from utils.point_identity import raw_point_ids, sampled_identity
     from functools import partial
     crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
                              canonicalize=v27)
+    b0_crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
+                                canonicalize=v27 and not v28)
+    regularize_b0 = regularize_b0_seqtrack_compat if v28 else points_utils.regularize_pc
     prev_frames = data['prev_frames']
     this_frame = data['this_frame']
     candidate_id = data['candidate_id']
@@ -411,8 +418,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
         if num_points_in_prev_box < config.limit_num_points_in_prev_box:
             empty_counter += 1
-    if online_recursive_state is None and not v27:
-        assert empty_counter < config.empty_box_limit, 'not enough valid box'
+    if online_recursive_state is None and (not v27 or v28):
+        if empty_counter >= config.empty_box_limit:
+            if v28:
+                raise B0EmptyHistoryError('not enough valid box')
+            raise AssertionError('not enough valid box')
 
     if candidate_trajectory_mode == 'shared_se2':
         ref_boxs = apply_shared_se2_to_boxes(
@@ -825,12 +835,12 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
 
     prev_frame_pcs = []
     for i, prev_pc in enumerate(prev_pcs):
-        prev_frame_pc = crop_subwindow(prev_pc, ref_boxs[i], ref_boxs[0],
+        prev_frame_pc = b0_crop_subwindow(prev_pc, ref_boxs[i], ref_boxs[0],
                                                     scale=config.bb_scale,
                                                     offset=config.bb_offset)
         prev_frame_pcs.append(prev_frame_pc)
 
-    this_frame_pc = crop_subwindow(
+    this_frame_pc = b0_crop_subwindow(
         this_pc, ref_boxs[0], ref_boxs[0],
         scale=config.bb_scale,
         offset=config.bb_offset)
@@ -1240,7 +1250,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
 
     # Resample each frame of the point cloud to a specific number
     prev_regularized = [
-        points_utils.regularize_pc(
+        regularize_b0(
             prev_frame_pc.points.T, config.point_sample_size, seed=seed)
         for prev_frame_pc, seed in zip(prev_frame_pcs, prev_sampling_seeds)
     ]
@@ -1265,7 +1275,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if use_trajectory_search:
         # Keep every baseline token exactly as in B0.  The extension is encoded
         # by a separate lightweight branch instead of stealing a fixed quota.
-        this_points, this_sample_indices = points_utils.regularize_pc(
+        this_points, this_sample_indices = regularize_b0(
             baseline_search_points,
             config.point_sample_size,
             seed=current_sampling_seed,
@@ -1316,7 +1326,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             seed=current_sampling_seed,
         )
     else:
-        this_points, this_sample_indices = points_utils.regularize_pc(
+        this_points, this_sample_indices = regularize_b0(
             baseline_search_points,
             config.point_sample_size,
             seed=current_sampling_seed,
@@ -1612,7 +1622,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         recovery_fallback = not recovery_positive
     seg_label_prev_list = [geometry_utils.points_in_box(prev_box, prev_points.T[:3,:], config.bb_scale).astype(int) for prev_box, prev_points in zip(prev_boxs, prev_points_list)] #应当只考虑xyz特征
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
-    if candidate_id != 0:
+    predicted_history = v28 and (online_recursive_state is not None
+                                  or bool(data.get('_ct_inference', False)))
+    soften_history_prior = (int(this_frame_id) != 1 if predicted_history
+                            else candidate_id != 0)
+    if soften_history_prior:
         for seg_mask_prev in seg_mask_prev_list:
             # Here we use 0.2/0.8 instead of 0/1 to indicate that the previous box is not GT.
             # When boxcloud is used, the actual value of prior-targetness mask doesn't really matter.
@@ -2755,12 +2769,60 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 raw['shadow_future'].append(future_raw)
         return raw
 
+    def _getitem_v28_observation(self, index):
+        """原 GT 历史观测总体；拒绝后对全部候选索引均匀重抽。"""
+        if not isinstance(index, (int, np.integer)):
+            raise TypeError('v28 observation requires a flat dataset index')
+        if self.use_paired_history or self.candidate_trajectory_mode != 'independent':
+            raise ValueError('v28 observation requires ordinary independent candidates')
+        original_index = int(index)
+        if not 0 <= original_index < len(self):
+            raise IndexError(original_index)
+        max_retries = int(getattr(self.config, 'ct_observation_retry_max_attempts', 64))
+        if not 0 < max_retries <= 64:
+            raise ValueError('v28 observation retry budget must be in [1, 64]')
+        base_seed = int(getattr(self.config, 'seed', 42) or 42)
+        retry_rng = np.random.default_rng(stable_uint32_seed(
+            base_seed, 'v28-observation-retry', self.epoch, original_index))
+        actual_index = original_index
+        for retry_count in range(max_retries + 1):
+            anno_id = self.get_anno_index(actual_index)
+            candidate_id = self.get_candidate_index(actual_index)
+            sample_seed = stable_uint32_seed(
+                base_seed, 'v28-observation-sample', self.epoch,
+                original_index, actual_index, retry_count)
+            try:
+                with isolated_observation_rng(sample_seed):
+                    tracklet_id, frame_id = self._locate_tracklet(anno_id)
+                    first, current = self.dataset.get_frames(
+                        tracklet_id, frame_ids=(0, frame_id))
+                    # 不用 frame-ID map 合并重复历史槽；原算法对每个槽独立扰动/采样。
+                    result = self._build_view(
+                        tracklet_id, frame_id, first, current, candidate_id,
+                        list(range(1, self.dataset.hist_num + 1)), sample_index=anno_id)
+                result.update({
+                    'ct_observation_original_index': np.int64(original_index),
+                    'ct_observation_actual_index': np.int64(actual_index),
+                    'ct_observation_retry_count': np.int64(retry_count),
+                    # 0=未拒绝；1=原 SeqTrack 三个历史 GT 框全空。
+                    'ct_observation_retry_reason': np.int64(retry_count > 0),
+                })
+                return result
+            except B0EmptyHistoryError as error:
+                if retry_count == max_retries:
+                    raise RuntimeError(
+                        f'v28 observation retry exhausted {max_retries} retries '
+                        f'for original index {original_index}') from error
+                actual_index = int(retry_rng.integers(0, len(self)))
+
     def __getitem__(self, index):
         if self.online_recursive_training:
             if not isinstance(index, tuple) or len(index) != 7:
                 raise TypeError(
                     "online recursive sampler requires structured batch indices")
             return self._online_raw_view(*index)
+        if bool(getattr(self.config, 'ct_enable_v28', False)):
+            return self._getitem_v28_observation(index)
         retry_attempt = 0
         expected_candidate_id = None
         if isinstance(index, tuple):

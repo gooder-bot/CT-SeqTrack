@@ -279,13 +279,17 @@ class B2EvidenceAcquirer(nn.Module):
             robust_consensus_voting=False,
             utility_init_probability=None,
             v27_enabled=False,
-            exploration_seed=42):
+            exploration_seed=42,
+            v28_enabled=False):
         super().__init__()
         self.feature_dim = int(feature_dim)
         self.num_heads = int(num_heads)
         self.max_vote_offset = float(max_vote_offset)
         self.presence_threshold = float(presence_threshold)
         self.v27_enabled = bool(v27_enabled)
+        self.v28_enabled = bool(v28_enabled)
+        if self.v28_enabled and not self.v27_enabled:
+            raise ValueError("v28 evidence requires the v27 point identity contract")
         self.exploration_seed = int(exploration_seed)
         self.relation_aware_sampling = bool(relation_aware_sampling)
         self.relation_topk = int(relation_topk)
@@ -655,6 +659,20 @@ class B2EvidenceAcquirer(nn.Module):
             extension_points.detach() if self.v27_enabled else extension_points)
         if self.v27_enabled:
             safe_points = safe_points.masked_fill(~extension_mask.unsqueeze(2), 0.0)
+        geometry_valid = None
+        if self.v28_enabled:
+            # 有界候选只要求真实新增测量和有限几何，不使用 learned presence。
+            geometry_valid = (
+                torch.isfinite(observation_box).all(dim=1)
+                & torch.isfinite(b1_center_xy).all(dim=1)
+                & torch.isfinite(b1_direction_xy).all(dim=1)
+                & torch.isfinite(b1_sigma_parallel_perp).all(dim=1)
+                & (b1_sigma_parallel_perp > 0).all(dim=1)
+                & torch.isfinite(query_delta_t.reshape(batch_size))
+                & (query_delta_t.reshape(batch_size) >= 0)
+                & torch.isfinite(gap_ratio.reshape(batch_size))
+                & (gap_ratio.reshape(batch_size) >= 0)
+                & torch.isfinite(b1_valid.reshape(batch_size)))
         direction = torch.nan_to_num(b1_direction_xy.detach())
         direction_norm = torch.linalg.norm(direction, dim=1, keepdim=True)
         default_direction = torch.zeros_like(direction)
@@ -664,7 +682,10 @@ class B2EvidenceAcquirer(nn.Module):
             direction / torch.clamp(direction_norm, min=1e-6),
             default_direction)
         perpendicular = torch.stack((-direction[:, 1], direction[:, 0]), 1)
-        delta = safe_points[..., :2] - b1_center_xy.detach().unsqueeze(1)
+        center = b1_center_xy.detach()
+        if self.v28_enabled:
+            center = torch.nan_to_num(center, nan=0., posinf=0., neginf=0.)
+        delta = safe_points[..., :2] - center.unsqueeze(1)
         sigma = torch.clamp(
             torch.nan_to_num(b1_sigma_parallel_perp.detach(), nan=1.0),
             min=0.1)
@@ -675,6 +696,10 @@ class B2EvidenceAcquirer(nn.Module):
         dt = torch.clamp(query_delta_t.detach().reshape(batch_size), min=0.0)
         gap = torch.clamp(gap_ratio.detach().reshape(batch_size), min=0.0)
         b1_valid_f = b1_valid.detach().reshape(batch_size).to(safe_points.dtype)
+        if self.v28_enabled:
+            dt = torch.nan_to_num(dt, nan=0., posinf=0., neginf=0.)
+            gap = torch.nan_to_num(gap, nan=0., posinf=0., neginf=0.)
+            b1_valid_f = torch.nan_to_num(b1_valid_f, nan=0., posinf=0., neginf=0.)
         geometry = torch.stack((
             longitudinal,
             lateral,
@@ -846,6 +871,8 @@ class B2EvidenceAcquirer(nn.Module):
         availability = (
             (extension_point_count > 0)
             & torch.isfinite(raw_xy).all(dim=1))
+        if self.v28_enabled:
+            availability = availability & geometry_valid
         if not self.relation_aware_sampling:
             availability = availability & (b1_valid_f > 0)
         observation_xy = observation_box[:, :2].detach()
@@ -879,7 +906,8 @@ class B2EvidenceAcquirer(nn.Module):
             * availability.to(enriched.dtype))
         evidence_present = (
             extension_presence_probability >= self.presence_threshold)
-        candidate_valid = availability & evidence_present
+        candidate_valid = (availability if self.v28_enabled
+                           else availability & evidence_present)
 
         probability = vote_weights / torch.clamp(weight_sum, min=1e-6)
         entropy = -(probability * torch.log(torch.clamp(

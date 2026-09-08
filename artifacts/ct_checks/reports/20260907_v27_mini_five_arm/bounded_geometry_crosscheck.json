@@ -1,0 +1,222 @@
+{
+  "full_minus_b3": {
+    "rows": 309,
+    "z2_min": 6.10353018259957e-06,
+    "reconstruction_vs_raw_distance_maxabs": 4.704570066849101e-13,
+    "reconstruction_vs_selective_distance_maxabs": 1.4921397450962104e-13,
+    "native_gain_maxabs": {
+      "S": 2.9802322387695312e-08,
+      "P": 2.9802322387695312e-08,
+      "U": 2.9802322387695312e-08
+    },
+    "structurally_available_rows": 177,
+    "native_gain_sign_counts": {
+      "help": 26,
+      "harm": 12,
+      "neutral": 271
+    },
+    "native_gain_sums": {
+      "S": 0.3500000089406967,
+      "P": -0.8500000424683094,
+      "U": -0.25000001676380634
+    },
+    "samples": [
+      {
+        "tracklet_id": "0",
+        "frame_id": "8",
+        "observation_xy": 0.9303992250053198,
+        "observation_distance": 0.9349402008967677,
+        "bounded_xy": 1.6800113409309034,
+        "bounded_distance_reconstructed": 1.6825304059715653,
+        "endpoint_candidate_distance": 0.9349402008967677,
+        "structural_available": true,
+        "native_U_gain": -0.2500000074505806
+      },
+      {
+        "tracklet_id": "0",
+        "frame_id": "9",
+        "observation_xy": 1.5334776749044035,
+        "observation_distance": 1.5375588217016165,
+        "bounded_xy": 2.283417934075787,
+        "bounded_distance_reconstructed": 2.286160714477699,
+        "endpoint_candidate_distance": 1.5375588217016165,
+        "structural_available": true,
+        "native_U_gain": -0.16250000149011612
+      },
+      {
+        "tracklet_id": "0",
+        "frame_id": "11",
+        "observation_xy": 3.470678461581954,
+        "observation_distance": 3.473322267648228,
+        "bounded_xy": 2.7212752745650124,
+        "bounded_distance_reconstructed": 2.724646346080723,
+        "endpoint_candidate_distance": 3.473322267648228,
+        "structural_available": true,
+        "native_U_gain": 0.04999999888241291
+      },
+      {
+        "tracklet_id": "9",
+        "frame_id": "10",
+        "observation_xy": 0.04297811087755515,
+        "observation_distance": 0.27079241582046104,
+        "bounded_xy": 0.7367970658526165,
+        "bounded_distance_reconstructed": 0.7838056715157801,
+        "endpoint_candidate_distance": 0.27079241582046104,
+        "structural_available": true,
+        "native_U_gain": -0.3250000011175871
+      },
+      {
+        "tracklet_id": "0",
+        "frame_id": "8",
+        "observation_xy": 0.9303992250053198,
+        "observation_distance": 0.9349402008967677,
+        "bounded_xy": 1.6800113409309034,
+        "bounded_distance_reconstructed": 1.6825304059715653,
+        "endpoint_candidate_distance": 0.9349402008967677,
+        "structural_available": true,
+        "native_U_gain": -0.2500000074505806
+      },
+      {
+        "tracklet_id": "5",
+        "frame_id": "10",
+        "observation_xy": 0.43226632616480587,
+        "observation_distance": 0.4936902318548317,
+        "bounded_xy": 1.0498196908683894,
+        "bounded_distance_reconstructed": 1.0765673465361374,
+        "endpoint_candidate_distance": 0.4936902318548317,
+        "structural_available": true,
+        "native_U_gain": -0.22500000521540642
+      }
+    ],
+    "endpoint_candidate_changed_rows": 2,
+    "endpoint_changed_distance_maxabs": 1.4921397450962104e-13,
+    "endpoint_observation_distance_maxabs": 0.0,
+    "passed_samples": [
+      {
+        "tracklet_id": "4",
+        "frame_id": "2",
+        "bounded_distance_reconstructed": 7.29778392089706,
+        "endpoint_candidate_distance": 7.297783920896911
+      },
+      {
+        "tracklet_id": "7",
+        "frame_id": "27",
+        "bounded_distance_reconstructed": 30.839956533558833,
+        "endpoint_candidate_distance": 30.83995653355883
+      }
+    ]
+  },
+  "full": {
+    "rows": 309,
+    "z2_min": 5.327749387495917e-10,
+    "reconstruction_vs_raw_distance_maxabs": 4.143352327901084e-13,
+    "reconstruction_vs_selective_distance_maxabs": 0.0,
+    "native_gain_maxabs": {
+      "S": 0.0,
+      "P": 0.0,
+      "U": 0.0
+    },
+    "structurally_available_rows": 140,
+    "native_gain_sign_counts": {
+      "help": 8,
+      "harm": 6,
+      "neutral": 295
+    },
+    "native_gain_sums": {
+      "S": -0.049999987706542015,
+      "P": -1.4901161193847656e-08,
+      "U": -0.025000001303851604
+    },
+    "samples": [
+      {
+        "tracklet_id": "0",
+        "frame_id": "11",
+        "observation_xy": 3.61708627838636,
+        "observation_distance": 3.6187185250687817,
+        "bounded_xy": 2.86918773521387,
+        "bounded_distance_reconstructed": 2.8712451790620013,
+        "endpoint_candidate_distance": 3.6187185250687817,
+        "structural_available": true,
+        "native_U_gain": 0.02500000037252903
+      },
+      {
+        "tracklet_id": "0",
+        "frame_id": "12",
+        "observation_xy": 6.732030832845329,
+        "observation_distance": 6.733149775979668,
+        "bounded_xy": 5.982382515522574,
+        "bounded_distance_reconstructed": 5.983641644803363,
+        "endpoint_candidate_distance": 6.733149775979668,
+        "structural_available": true,
+        "native_U_gain": 0.0
+      },
+      {
+        "tracklet_id": "0",
+        "frame_id": "13",
+        "observation_xy": 6.72126793977898,
+        "observation_distance": 6.723670993016748,
+        "bounded_xy": 5.971378772615161,
+        "bounded_distance_reconstructed": 5.974083473644556,
+        "endpoint_candidate_distance": 5.974083473644549,
+        "structural_available": true,
+        "native_U_gain": 0.0
+      },
+      {
+        "tracklet_id": "2",
+        "frame_id": "5",
+        "observation_xy": 1.5905232421864182,
+        "observation_distance": 1.5935395553826976,
+        "bounded_xy": 2.31784510115029,
+        "bounded_distance_reconstructed": 2.3199159561416205,
+        "endpoint_candidate_distance": 1.5935395553826976,
+        "structural_available": true,
+        "native_U_gain": -0.1874999962747097
+      },
+      {
+        "tracklet_id": "11",
+        "frame_id": "14",
+        "observation_xy": 2.3532041536492305,
+        "observation_distance": 2.3546101963235655,
+        "bounded_xy": 1.6033538680692014,
+        "bounded_distance_reconstructed": 1.6054167727202113,
+        "endpoint_candidate_distance": 2.3546101963235655,
+        "structural_available": true,
+        "native_U_gain": 0.16249999403953552
+      },
+      {
+        "tracklet_id": "10",
+        "frame_id": "23",
+        "observation_xy": 4.127558610923894,
+        "observation_distance": 4.129973162487988,
+        "bounded_xy": 3.3778944797586803,
+        "bounded_distance_reconstructed": 3.380844473300008,
+        "endpoint_candidate_distance": 4.129973162487988,
+        "structural_available": true,
+        "native_U_gain": 0.050000001676380634
+      }
+    ],
+    "endpoint_candidate_changed_rows": 12,
+    "endpoint_changed_distance_maxabs": 9.325873406851315e-14,
+    "endpoint_observation_distance_maxabs": 0.0,
+    "passed_samples": [
+      {
+        "tracklet_id": "0",
+        "frame_id": "13",
+        "bounded_distance_reconstructed": 5.974083473644555,
+        "endpoint_candidate_distance": 5.974083473644549
+      },
+      {
+        "tracklet_id": "2",
+        "frame_id": "6",
+        "bounded_distance_reconstructed": 4.528633862193361,
+        "endpoint_candidate_distance": 4.52863386219341
+      },
+      {
+        "tracklet_id": "2",
+        "frame_id": "8",
+        "bounded_distance_reconstructed": 6.597080798489214,
+        "endpoint_candidate_distance": 6.5970807984892605
+      }
+    ]
+  }
+}

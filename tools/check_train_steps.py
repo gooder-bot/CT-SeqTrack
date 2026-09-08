@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -64,7 +65,7 @@ def validate_config(path: Path, b1_backend=None) -> dict:
     observed_weights = [
         float(value) for value
         in config.get("ct_b0_candidate_weights", [])]
-    if (len(observed_weights) != len(expected_weights)
+    if not config.get('ct_enable_v28', False) and (len(observed_weights) != len(expected_weights)
             or any(abs(observed - expected) > 1e-12
                    for observed, expected in zip(
                        observed_weights, expected_weights))):
@@ -126,6 +127,10 @@ def main() -> None:
     parser.add_argument("--preloading", action="store_true")
     parser.add_argument("--tag", default="ct-bounded-train-check")
     parser.add_argument("--b1-backend", choices=("gru", "cfc"))
+    parser.add_argument('--numerical-audit', action='store_true',
+                        help='v28 only: save B0 input/layer fingerprints/gradient/Adam/update snapshots')
+    parser.add_argument('--audit-activations', action='store_true',
+                        help='also save full layer activations and their gradients; may use many GB')
     parser.add_argument(
         "--artifact-dir",
         type=Path,
@@ -150,6 +155,16 @@ def main() -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     command = build_command(args, artifact_dir)
+    if config.get('ct_enable_v28', False):
+        command.append('--ct_engineering_check')
+    environment = os.environ.copy()
+    if args.numerical_audit:
+        if not config.get('ct_enable_v28', False):
+            raise ValueError('--numerical-audit requires a v28 configuration')
+        environment['CT_V28_AUDIT_DIR'] = str(artifact_dir / 'numerical_audit')
+        environment['CT_V28_AUDIT_ACTIVATIONS'] = '1' if args.audit_activations else '0'
+    elif args.audit_activations:
+        raise ValueError('--audit-activations requires --numerical-audit')
     manifest = {
         "schema": "ct_seqtrack.bounded_train_check.v2",
         "variant": config["ct_variant"],
@@ -170,7 +185,7 @@ def main() -> None:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    completed = subprocess.run(command, cwd=ROOT, check=False)
+    completed = subprocess.run(command, cwd=ROOT, check=False, env=environment)
     manifest["status"] = "passed" if completed.returncode == 0 else "failed"
     manifest["returncode"] = completed.returncode
     if completed.returncode == 0:

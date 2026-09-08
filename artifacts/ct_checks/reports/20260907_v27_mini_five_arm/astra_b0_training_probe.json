@@ -1,0 +1,67 @@
+{
+  "schema": "ct_seqtrack.astra_b0_training_probe.v1",
+  "dense_same_batch_toggle": {
+    "scope": "same current B0 real forward/loss, flag off vs on, identical state and CPU RNG; not full parent-commit training replay",
+    "all_point_slots_valid": true,
+    "common_forward_tensor_count": 21,
+    "common_forward_max_abs_delta": 0.0,
+    "observation_box_max_abs_delta": 0.0,
+    "weighted_loss_off": 12.788481712341309,
+    "weighted_loss_on": 12.788481712341309,
+    "losses_off": {
+      "loss_seg": 0.7032962441444397,
+      "loss_bc": 3.2603111267089844,
+      "loss_b0_transaction": 12.788481712341309
+    },
+    "losses_on": {
+      "loss_seg": 0.7032963037490845,
+      "loss_bc": 3.2603111267089844,
+      "loss_b0_transaction": 12.788481712341309
+    },
+    "gradient_tensor_count": 236,
+    "gradient_tensors_bitwise_changed": 37,
+    "gradient_max_abs_delta": 2.1569430828094482e-06,
+    "gradient_delta_l2_relative": 6.246695249956247e-08
+  },
+  "zero_history_training_sample": {
+    "False": {
+      "accepted": false,
+      "reason": "not enough valid box"
+    },
+    "True": {
+      "accepted": true,
+      "box_label": [
+        0.39800167083740234,
+        -0.03993336483836174,
+        0.0,
+        0.0
+      ],
+      "valid_slots_per_frame": [
+        0.0,
+        0.0,
+        0.0,
+        1024.0
+      ]
+    }
+  },
+  "crop_direct_anchor_vs_roundtrip": [
+    {
+      "frame": 0,
+      "ids_equal": true,
+      "point_count": 685,
+      "coordinate_max_abs_delta": 1.7763568394002505e-15
+    },
+    {
+      "frame": 4,
+      "ids_equal": true,
+      "point_count": 726,
+      "coordinate_max_abs_delta": 1.7763568394002505e-15
+    },
+    {
+      "frame": 7,
+      "ids_equal": true,
+      "point_count": 683,
+      "coordinate_max_abs_delta": 8.881784197001252e-16
+    }
+  ]
+}

@@ -30,6 +30,9 @@ CODE_FILES = (
     "datasets/__init__.py", "datasets/sampler.py", "datasets/nuscenes_lidar_mf.py",
     "datasets/data_classes.py", "datasets/points_utils.py", "datasets/protocol_utils.py",
     "tools/ct_action_v27_runtime.py", "tools/calibrate_ct_actions.py", "tools/export_ct_action_rows.py",
+    "utils/v28_protocol.py", "models/backbone/pointnet.py",
+    "models/ct_v2/observation_reference.py", "utils/b0_sampling.py",
+    "utils/deterministic_pooling.py", "utils/v28_recovery_reporting.py",
 )
 
 
@@ -37,7 +40,8 @@ def action_calibration_config_identity(config):
     """排除仅决定导出/角色的字段，场景身份由独立 manifest 严格绑定。"""
     values = _legacy_config_identity(config)
     excluded = {"ct_protocol_role", "ct_scene_manifest_path", "ct_scene_manifest_sha256",
-                "export_proposal_diagnostics", "export_v3_candidate_diagnostics"}
+                "export_proposal_diagnostics", "export_v3_candidate_diagnostics",
+                "ct_runtime_environment", "ct_observation_update_count_check"}
     return {key: value for key, value in values.items() if key not in excluded}
 
 
@@ -82,7 +86,8 @@ def policy_mask(scores, structural_available, policy, is_initial=None):
 def validate_scene_manifest(manifest):
     if manifest.get('version') not in ('v1.0-mini', 'v1.0-trainval'):
         raise ValueError('v27 supports only v1.0-mini or v1.0-trainval')
-    if manifest.get("schema") != "ct_seqtrack.scene_protocol.v27":
+    v28 = manifest.get("schema") == "ct_seqtrack.scene_protocol.v28"
+    if manifest.get("schema") not in ("ct_seqtrack.scene_protocol.v27", "ct_seqtrack.scene_protocol.v28"):
         raise ValueError("v27 scene manifest schema mismatch")
     body = dict(manifest)
     supplied = body.pop("content_sha256", None)
@@ -93,19 +98,19 @@ def validate_scene_manifest(manifest):
     if any(len(roles[k]) != len(scenes.get(k, [])) for k in roles):
         raise ValueError("duplicate scene IDs")
     mini = manifest.get("version") == "v1.0-mini"
-    expected = (6, 1, 1, 2) if mini else (350, 17, 18, 150)
+    expected = ((8, 1, 1, 2) if v28 else (6, 1, 1, 2)) if mini else (350, 17, 18, 150)
     if tuple(len(roles[k]) for k in roles) != expected:
         raise ValueError("v27 scene role counts do not match mini/full protocol")
     overlap = manifest.get("parameter_training_overlap")
-    if type(overlap) is not bool or overlap != (not mini):
+    if type(overlap) is not bool or overlap != (v28 or not mini):
         raise ValueError("v27 parameter training overlap declaration mismatch")
     if roles["calibration"] & roles["dev"]:
         raise ValueError("threshold fit and diagnostic scenes must be disjoint")
     if roles["test"] & (roles["train"] | roles["calibration"] | roles["dev"]):
         raise ValueError("official evaluation scenes cannot enter training or tuning")
-    if mini and roles["train"] & (roles["calibration"] | roles["dev"]):
+    if mini and not v28 and roles["train"] & (roles["calibration"] | roles["dev"]):
         raise ValueError("mini calibration/dev must be held out from all training streams")
-    if not mini and not (roles["calibration"] | roles["dev"]) <= roles["train"]:
+    if (v28 or not mini) and not (roles["calibration"] | roles["dev"]) <= roles["train"]:
         raise ValueError("full calibration/dev must be declared training subsets")
     return manifest
 
@@ -263,7 +268,9 @@ def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
             (r["tracklet_id"], r["frame_id"]) for r in dev_baseline}:
         raise ValueError("dev policies must evaluate identical endpoints")
     artifact = {
-        "schema": SCHEMA, "action_policy": chosen["policy"],
+        "schema": ("ct_seqtrack.action_calibration.v28"
+                   if scene_manifest["schema"].endswith(".v28") else SCHEMA),
+        "action_policy": chosen["policy"],
         "checkpoint_sha256": str(checkpoint_sha256), "config_sha256": str(config_sha256),
         "code_content_sha256": code_sha256 or code_content_sha256(),
         "source_files": list(CODE_FILES),
@@ -293,7 +300,9 @@ def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
 
 def validate_action_calibration_v27(artifact, checkpoint_sha256, config_sha256,
                                     scene_manifest_sha256=None, code_sha256=None):
-    if artifact.get("schema") != SCHEMA:
+    expected_schema = ("ct_seqtrack.action_calibration.v28"
+                       if artifact.get("scene_manifest", {}).get("schema", "").endswith(".v28") else SCHEMA)
+    if artifact.get("schema") != expected_schema:
         raise ValueError("v27 action calibration schema mismatch")
     body = dict(artifact)
     digest = body.pop("artifact_sha256", None)
@@ -331,7 +340,8 @@ def install_v27_action_calibration(model, config, *, scene_splits=None, code_sha
     router.install_policy({"kind": "never"})
     router.calibrated.fill_(False)
     model._ct_action_calibration = None
-    status = {"schema": SCHEMA, "loaded": False, "fallback": "observation", "reason": "missing_calibration_artifact"}
+    status = {"schema": "ct_seqtrack.action_calibration.v28" if get("ct_enable_v28", False) else SCHEMA,
+              "loaded": False, "fallback": "observation", "reason": "missing_calibration_artifact"}
     model._ct_action_calibration_status = status
     path = get("ct_action_calibration_path")
     if not path:
@@ -344,7 +354,8 @@ def install_v27_action_calibration(model, config, *, scene_splits=None, code_sha
         if scene_splits is None:
             from nuscenes.utils.splits import create_splits_scenes
             scene_splits = create_splits_scenes()
-        scene_manifest = build_scene_manifest(scene_splits, get("version"), get("ct_partition_seed", 42))
+        scene_manifest = build_scene_manifest(scene_splits, get("version"), get("ct_partition_seed", 42),
+            **({"enable_v28": True} if get("ct_enable_v28", False) else {}))
         artifact = json.loads(Path(path).read_text(encoding="utf-8"))
         validate_action_calibration_v27(artifact, sha256_file(checkpoint),
             sha256_json(action_calibration_config_identity(config)),

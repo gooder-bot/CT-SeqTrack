@@ -1,0 +1,248 @@
+{
+  "schema": "ct_seqtrack.b0_distribution_reproduction.v1",
+  "actual_observation_route": {
+    "b0": {
+      "branches": [
+        {
+          "view": 0,
+          "auxiliary_shortcut_taken": false,
+          "total": 8.461254119873047,
+          "transaction": 11.721565246582031,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 1,
+          "auxiliary_shortcut_taken": false,
+          "total": 12.036713600158691,
+          "transaction": 15.297024726867676,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 2,
+          "auxiliary_shortcut_taken": false,
+          "total": 11.85185718536377,
+          "transaction": 15.112168312072754,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 3,
+          "auxiliary_shortcut_taken": false,
+          "total": 9.276504516601562,
+          "transaction": 12.536815643310547,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        }
+      ],
+      "actual_weighted_loss": 13.018451690673828
+    },
+    "b1_cfc": {
+      "branches": [
+        {
+          "view": 0,
+          "auxiliary_shortcut_taken": false,
+          "total": 8.461254119873047,
+          "transaction": 11.721565246582031,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 1,
+          "auxiliary_shortcut_taken": false,
+          "total": 12.036713600158691,
+          "transaction": 15.297024726867676,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 2,
+          "auxiliary_shortcut_taken": false,
+          "total": 11.85185718536377,
+          "transaction": 15.112168312072754,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 3,
+          "auxiliary_shortcut_taken": false,
+          "total": 9.276504516601562,
+          "transaction": 12.536815643310547,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        }
+      ],
+      "actual_weighted_loss": 13.018451690673828
+    },
+    "b1_gru": {
+      "branches": [
+        {
+          "view": 0,
+          "auxiliary_shortcut_taken": false,
+          "total": 8.461254119873047,
+          "transaction": 11.721565246582031,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 1,
+          "auxiliary_shortcut_taken": false,
+          "total": 12.036713600158691,
+          "transaction": 15.297024726867676,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 2,
+          "auxiliary_shortcut_taken": false,
+          "total": 11.85185718536377,
+          "transaction": 15.112168312072754,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 3,
+          "auxiliary_shortcut_taken": false,
+          "total": 9.276504516601562,
+          "transaction": 12.536815643310547,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        }
+      ],
+      "actual_weighted_loss": 13.018451690673828
+    },
+    "full_minus_b3": {
+      "branches": [
+        {
+          "view": 0,
+          "auxiliary_shortcut_taken": false,
+          "total": 8.461254119873047,
+          "transaction": 11.721565246582031,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 1,
+          "auxiliary_shortcut_taken": false,
+          "total": 12.036713600158691,
+          "transaction": 15.297024726867676,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 2,
+          "auxiliary_shortcut_taken": false,
+          "total": 11.85185718536377,
+          "transaction": 15.112168312072754,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 3,
+          "auxiliary_shortcut_taken": false,
+          "total": 9.276504516601562,
+          "transaction": 12.536815643310547,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        }
+      ],
+      "actual_weighted_loss": 13.018451690673828
+    },
+    "full": {
+      "branches": [
+        {
+          "view": 0,
+          "auxiliary_shortcut_taken": false,
+          "total": 8.461254119873047,
+          "transaction": 11.721565246582031,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 1,
+          "auxiliary_shortcut_taken": false,
+          "total": 12.036713600158691,
+          "transaction": 15.297024726867676,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 2,
+          "auxiliary_shortcut_taken": false,
+          "total": 11.85185718536377,
+          "transaction": 15.112168312072754,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        },
+        {
+          "view": 3,
+          "auxiliary_shortcut_taken": false,
+          "total": 9.276504516601562,
+          "transaction": 12.536815643310547,
+          "box_cloud": 3.2603111267089844,
+          "extra_box_cloud_coefficient": 1.0
+        }
+      ],
+      "actual_weighted_loss": 13.018451690673828
+    }
+  },
+  "box_cloud_gradient_check": {
+    "bc_loss": 3.2603111267089844,
+    "total_delta_when_weight_0_to_1": 3.260310649871826,
+    "transaction_delta_when_weight_0_to_1": 6.5206217765808105,
+    "gradient_norm_ratio": 2.0,
+    "max_error_vs_twice_expected_gradient": 0.0
+  },
+  "predicted_history_prior": {
+    "frame": 8,
+    "prediction_history_error_m": 0.2,
+    "actual_unique_values": [
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "original_seqtrack_expected_unique_values": [
+      [
+        0.2,
+        0.8
+      ],
+      [
+        0.2,
+        0.8
+      ],
+      [
+        0.2,
+        0.8
+      ]
+    ]
+  },
+  "empty_current_training_sample": {
+    "valid": 0.0,
+    "point_valid_sum": 0.0,
+    "unique_current_input_features": [
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.10000000149011612,
+        0.5
+      ]
+    ],
+    "gt_box_target": [
+      0.39800167083740234,
+      -0.03993336483836174,
+      0.0,
+      0.0
+    ]
+  }
+}

@@ -10,6 +10,7 @@ from utils.tracking_metrics_v27 import box_metrics, metric_contributions
 
 def evaluate_sequence_v27(host, sequence):
     results, overlaps, distances, rows, diagnostics = [], [], [], [], []
+    v28 = bool(getattr(host.config, 'ct_enable_v28', False))
     state = None
     for frame_id, frame in enumerate(sequence):
         target = frame['3d_bbox']
@@ -55,7 +56,8 @@ def evaluate_sequence_v27(host, sequence):
                 if not np.isfinite(value):
                     raise ValueError(f'nonfinite v27 diagnostic: {key}')
                 return value
-            available = bool(scalar('ct_policy_candidate_valid'))
+            # v28 的 Full−B3 与 selective 共享结构候选，不继承旧 presence 门。
+            available = bool(scalar('ct_b2_available' if v28 else 'ct_policy_candidate_valid'))
             correction = output.get('ct_router_bounded_residual_xy')
             if correction is not None and available and bool(torch.isfinite(correction[0]).all()):
                 local[:2] += correction[0].detach()
@@ -75,7 +77,8 @@ def evaluate_sequence_v27(host, sequence):
                 if 'ct_search_raw_xy' in output or bool(getattr(host.config, 'use_ct_joint_full', False)):
                     diagnostic = host._build_ct_joint_diagnostic_row(
                         output, batch, target, anchor, frame_id,
-                        acquisition_diagnostics=sidecar.get('acquisition'))
+                        acquisition_diagnostics=sidecar.get('acquisition'),
+                        **({'previous_target_box': sequence[frame_id - 1]['3d_bbox']} if v28 else {}))
                     diagnostics.append(diagnostic)
         status = getattr(host, '_ct_action_calibration_status', 'not_installed')
         row = dict(tracklet_id=state.tracklet_key,
@@ -88,6 +91,20 @@ def evaluate_sequence_v27(host, sequence):
                    tracking_elapsed_ms=elapsed_ms, cuda_profile_available=cuda_profile,
                    cuda_peak_allocated_mb=cuda_peak_mb,
                    calibration_status=json.dumps(status, sort_keys=True) if isinstance(status, dict) else str(status))
+        if v28:
+            row['protocol_version'] = 'v28'
+            # 原始 crop 点数与 B0 采样槽可执行性分别导出；缺失不能伪装为空 crop。
+            raw_counts = batch.get('b0_raw_point_count')
+            row['b0_raw_point_count'] = (
+                float(torch.as_tensor(raw_counts).reshape(-1)[-1].cpu())
+                if raw_counts is not None else sidecar.get('acquisition', {}).get('base_raw_point_count'))
+            sampled_valid = batch.get('b0_point_valid_mask')
+            row['current_sampled_valid'] = (
+                bool(torch.as_tensor(sampled_valid)[0, -1].any().cpu())
+                if sampled_valid is not None else None)
+            if frame_id > 0 and 'motion_prior_xy' in output:
+                row.update(host._build_v28_motion_diagnostics(
+                    output, batch, target, anchor, sequence[frame_id - 1]['3d_bbox']))
         for mode, prefix in (('benchmark_compat', ''), ('geometry_exact', 'exact_')):
             for name, box in (('observation', observation), ('raw', raw), ('candidate', bounded), ('final', final)):
                 iou, distance = box_metrics(box, target,

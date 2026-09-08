@@ -1,0 +1,33 @@
+{
+  "scope": "read-only experiment analysis; no training source changes",
+  "five_runs_metrics_tb_vs_endpoint_max_tolerance": 0.0001,
+  "prediction_rows_per_arm": 309,
+  "all_endpoint_rows_per_arm": 321,
+  "unique_endpoint_keys_checked": true,
+  "actual_late3_checkpoints_read": 15,
+  "presence_contract_failure_reproduced": true,
+  "bounded_h1_crosscheck": "see bounded_geometry_crosscheck.json",
+  "compiled_analysis_scripts": [
+    "analyze_20260907_v27_mini.py",
+    "audit_checkpoints.py",
+    "collect_b1_audit.py",
+    "extract_b2_b3.py",
+    "plot_audit.py",
+    "reproduce_presence_contract.py"
+  ],
+  "parsed_json_files": [
+    "b1_audit.json",
+    "b2_b3_evidence.json",
+    "bounded_geometry_crosscheck.json",
+    "checkpoint_fairness.json",
+    "collection_log.json",
+    "figure_provenance.json",
+    "metrics_summary.json",
+    "presence_contract_reproduction.json"
+  ],
+  "markdown_local_links": "all resolve",
+  "figure_visual_inspection": "PNG viewed; overview labels, legends, axes reviewed",
+  "server_training_or_eval_executed": false,
+  "official_v27_mini_val_results_available": false,
+  "production_code_modified": false
+}

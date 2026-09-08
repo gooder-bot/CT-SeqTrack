@@ -1,0 +1,1050 @@
+{
+  "slices": {
+    "all_queries": {
+      "n": 309,
+      "success": 14.765372226153378,
+      "precision": 12.273462762314717,
+      "distance_mean": 13.851637303735094,
+      "distance_median": 8.117565738061844,
+      "distance_over2": 260,
+      "distance_over10": 137,
+      "base_empty": 117,
+      "base_without_target": 231,
+      "globally_visible": 230
+    },
+    "first_queries": {
+      "n": 12,
+      "success": 60.83333343267441,
+      "precision": 59.99999982304871,
+      "distance_mean": 1.296689297899938,
+      "distance_median": 0.23346958876013957,
+      "distance_over2": 4,
+      "distance_over10": 0,
+      "base_empty": 4,
+      "base_without_target": 7,
+      "globally_visible": 5
+    },
+    "first_five_queries": {
+      "n": 56,
+      "success": 41.07142863462546,
+      "precision": 36.91964280192873,
+      "distance_mean": 3.9223168720650463,
+      "distance_median": 2.456500144959527,
+      "distance_over2": 31,
+      "distance_over10": 7,
+      "base_empty": 17,
+      "base_without_target": 28,
+      "globally_visible": 35
+    },
+    "globally_invisible": {
+      "n": 79,
+      "success": 21.487341750460335,
+      "precision": 20.284810075182705,
+      "distance_mean": 7.721157241862562,
+      "distance_median": 6.360467792311423,
+      "distance_over2": 60,
+      "distance_over10": 22,
+      "base_empty": 47,
+      "base_without_target": 79,
+      "globally_visible": 0
+    },
+    "base_empty": {
+      "n": 117,
+      "success": 12.371794815756317,
+      "precision": 10.876068356645922,
+      "distance_mean": 20.493534786048127,
+      "distance_median": 14.12365738861341,
+      "distance_over2": 102,
+      "distance_over10": 73,
+      "base_empty": 117,
+      "base_without_target": 117,
+      "globally_visible": 70
+    },
+    "base_background_only": {
+      "n": 114,
+      "success": 5.526315881625602,
+      "precision": 2.8947368264198303,
+      "distance_mean": 14.42650386673615,
+      "distance_median": 11.342271350812165,
+      "distance_over2": 110,
+      "distance_over10": 64,
+      "base_empty": 0,
+      "base_without_target": 114,
+      "globally_visible": 82
+    },
+    "base_1_to_2_targets": {
+      "n": 22,
+      "success": 34.77272734215314,
+      "precision": 31.136363583870907,
+      "distance_mean": 3.0122176060613666,
+      "distance_median": 2.7237717558539796,
+      "distance_over2": 12,
+      "distance_over10": 0,
+      "base_empty": 0,
+      "base_without_target": 0,
+      "globally_visible": 22
+    },
+    "base_3_to_10_targets": {
+      "n": 32,
+      "success": 42.50000030733645,
+      "precision": 39.53124996623956,
+      "distance_mean": 2.206132677652316,
+      "distance_median": 1.7766525166374894,
+      "distance_over2": 16,
+      "distance_over10": 0,
+      "base_empty": 0,
+      "base_without_target": 0,
+      "globally_visible": 32
+    },
+    "base_over10_targets": {
+      "n": 24,
+      "success": 15.000000107102096,
+      "precision": 9.999999993791182,
+      "distance_mean": 4.205245127515351,
+      "distance_median": 4.556097383378554,
+      "distance_over2": 20,
+      "distance_over10": 0,
+      "base_empty": 0,
+      "base_without_target": 0,
+      "globally_visible": 24
+    }
+  },
+  "tracks": [
+    {
+      "tracklet_id": "0",
+      "n": 36,
+      "success": 20.833333203982978,
+      "precision": 18.81944443513122,
+      "distance_mean": 4.844367782542984,
+      "distance_median": 6.373163948946264,
+      "distance_over2": 29,
+      "distance_over10": 0,
+      "base_empty": 21,
+      "base_without_target": 25,
+      "globally_visible": 20,
+      "first_over2_frame": 8,
+      "first_over2_distance": 2.5971624861325937,
+      "first_over2_global_targets": 8.0,
+      "first_over2_base_targets": 8.0,
+      "first_over2_base_points": 9.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.02807133769522951,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 0.05522680508588157,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 3,
+          "distance": 0.059878083949297,
+          "base_points": 3.0,
+          "base_targets": 3.0,
+          "global_targets": 3.0
+        },
+        {
+          "frame": 4,
+          "distance": 0.09833804522173051,
+          "base_points": 1.0,
+          "base_targets": 1.0,
+          "global_targets": 1.0
+        },
+        {
+          "frame": 5,
+          "distance": 0.05243229301247245,
+          "base_points": 1.0,
+          "base_targets": 1.0,
+          "global_targets": 1.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "1",
+      "n": 2,
+      "success": 37.49999972060323,
+      "precision": 43.749999813735485,
+      "distance_mean": 2.87432182583221,
+      "distance_median": 2.87432182583221,
+      "distance_over2": 1,
+      "distance_over10": 0,
+      "base_empty": 0,
+      "base_without_target": 0,
+      "globally_visible": 2,
+      "first_over2_frame": 2,
+      "first_over2_distance": 5.508492921821705,
+      "first_over2_global_targets": 2.0,
+      "first_over2_base_targets": 2.0,
+      "first_over2_base_points": 7.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.24015072984271543,
+          "base_points": 29.0,
+          "base_targets": 12.0,
+          "global_targets": 15.0
+        },
+        {
+          "frame": 2,
+          "distance": 5.508492921821705,
+          "base_points": 7.0,
+          "base_targets": 2.0,
+          "global_targets": 2.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "2",
+      "n": 23,
+      "success": 11.630435077392537,
+      "precision": 6.739130486612735,
+      "distance_mean": 12.109982181295601,
+      "distance_median": 10.266556044921032,
+      "distance_over2": 19,
+      "distance_over10": 12,
+      "base_empty": 0,
+      "base_without_target": 16,
+      "globally_visible": 21,
+      "first_over2_frame": 3,
+      "first_over2_distance": 2.147743808784787,
+      "first_over2_global_targets": 13.0,
+      "first_over2_base_targets": 13.0,
+      "first_over2_base_points": 114.0,
+      "recovered_within2_after_first_over2": 2,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.8307058697447107,
+          "base_points": 24.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 1.3202099514958143,
+          "base_points": 59.0,
+          "base_targets": 10.0,
+          "global_targets": 10.0
+        },
+        {
+          "frame": 3,
+          "distance": 2.147743808784787,
+          "base_points": 114.0,
+          "base_targets": 13.0,
+          "global_targets": 13.0
+        },
+        {
+          "frame": 4,
+          "distance": 3.4967468261526684,
+          "base_points": 181.0,
+          "base_targets": 18.0,
+          "global_targets": 18.0
+        },
+        {
+          "frame": 5,
+          "distance": 0.8998075742145668,
+          "base_points": 328.0,
+          "base_targets": 16.0,
+          "global_targets": 20.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "3",
+      "n": 38,
+      "success": 4.868421154586892,
+      "precision": 0.0,
+      "distance_mean": 11.192906881909716,
+      "distance_median": 12.092818364843495,
+      "distance_over2": 38,
+      "distance_over10": 25,
+      "base_empty": 15,
+      "base_without_target": 36,
+      "globally_visible": 31,
+      "first_over2_frame": 1,
+      "first_over2_distance": 3.1891641760394918,
+      "first_over2_global_targets": 0.0,
+      "first_over2_base_targets": 0.0,
+      "first_over2_base_points": 1.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 3.1891641760394918,
+          "base_points": 1.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 3.205477541372618,
+          "base_points": 3.0,
+          "base_targets": 3.0,
+          "global_targets": 3.0
+        },
+        {
+          "frame": 3,
+          "distance": 3.2754536394875036,
+          "base_points": 2.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 4,
+          "distance": 3.2991483228852103,
+          "base_points": 4.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 5,
+          "distance": 3.220876471444144,
+          "base_points": 4.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "4",
+      "n": 4,
+      "success": 22.500000474974513,
+      "precision": 24.374999990686774,
+      "distance_mean": 7.142744713131229,
+      "distance_median": 7.311404014961372,
+      "distance_over2": 3,
+      "distance_over10": 1,
+      "base_empty": 0,
+      "base_without_target": 2,
+      "globally_visible": 4,
+      "first_over2_frame": 2,
+      "first_over2_distance": 6.277123553822847,
+      "first_over2_global_targets": 4.0,
+      "first_over2_base_targets": 4.0,
+      "first_over2_base_points": 37.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.09604565741720214,
+          "base_points": 33.0,
+          "base_targets": 6.0,
+          "global_targets": 6.0
+        },
+        {
+          "frame": 2,
+          "distance": 6.277123553822847,
+          "base_points": 37.0,
+          "base_targets": 4.0,
+          "global_targets": 4.0
+        },
+        {
+          "frame": 3,
+          "distance": 8.345684476099898,
+          "base_points": 33.0,
+          "base_targets": 0.0,
+          "global_targets": 2.0
+        },
+        {
+          "frame": 4,
+          "distance": 13.85212516518497,
+          "base_points": 38.0,
+          "base_targets": 0.0,
+          "global_targets": 4.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "5",
+      "n": 38,
+      "success": 7.368421108510933,
+      "precision": 2.5657894727038713,
+      "distance_mean": 11.545744953912802,
+      "distance_median": 14.144747316813255,
+      "distance_over2": 37,
+      "distance_over10": 27,
+      "base_empty": 18,
+      "base_without_target": 33,
+      "globally_visible": 26,
+      "first_over2_frame": 2,
+      "first_over2_distance": 2.2695387099767257,
+      "first_over2_global_targets": 1.0,
+      "first_over2_base_targets": 1.0,
+      "first_over2_base_points": 1.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.02415292866368392,
+          "base_points": 4.0,
+          "base_targets": 4.0,
+          "global_targets": 4.0
+        },
+        {
+          "frame": 2,
+          "distance": 2.2695387099767257,
+          "base_points": 1.0,
+          "base_targets": 1.0,
+          "global_targets": 1.0
+        },
+        {
+          "frame": 3,
+          "distance": 2.2330950817791644,
+          "base_points": 8.0,
+          "base_targets": 7.0,
+          "global_targets": 7.0
+        },
+        {
+          "frame": 4,
+          "distance": 3.2594721971710343,
+          "base_points": 5.0,
+          "base_targets": 5.0,
+          "global_targets": 5.0
+        },
+        {
+          "frame": 5,
+          "distance": 3.1016430841586704,
+          "base_points": 8.0,
+          "base_targets": 8.0,
+          "global_targets": 8.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "6",
+      "n": 31,
+      "success": 10.564516178302226,
+      "precision": 7.741935479064141,
+      "distance_mean": 8.344790094629507,
+      "distance_median": 9.868302673679214,
+      "distance_over2": 27,
+      "distance_over10": 14,
+      "base_empty": 16,
+      "base_without_target": 24,
+      "globally_visible": 22,
+      "first_over2_frame": 5,
+      "first_over2_distance": 3.248729615917409,
+      "first_over2_global_targets": 8.0,
+      "first_over2_base_targets": 8.0,
+      "first_over2_base_points": 8.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.22678844767756368,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 0.29449400359616235,
+          "base_points": 5.0,
+          "base_targets": 5.0,
+          "global_targets": 5.0
+        },
+        {
+          "frame": 3,
+          "distance": 1.4180198369953423,
+          "base_points": 1.0,
+          "base_targets": 1.0,
+          "global_targets": 1.0
+        },
+        {
+          "frame": 4,
+          "distance": 1.2734259132899237,
+          "base_points": 6.0,
+          "base_targets": 6.0,
+          "global_targets": 6.0
+        },
+        {
+          "frame": 5,
+          "distance": 3.248729615917409,
+          "base_points": 8.0,
+          "base_targets": 8.0,
+          "global_targets": 8.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "7",
+      "n": 38,
+      "success": 3.1578947888001014,
+      "precision": 0.0,
+      "distance_mean": 51.09937596383116,
+      "distance_median": 60.451099461947805,
+      "distance_over2": 38,
+      "distance_over10": 36,
+      "base_empty": 22,
+      "base_without_target": 36,
+      "globally_visible": 38,
+      "first_over2_frame": 1,
+      "first_over2_distance": 2.6434615799423287,
+      "first_over2_global_targets": 8.0,
+      "first_over2_base_targets": 8.0,
+      "first_over2_base_points": 53.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 2.6434615799423287,
+          "base_points": 53.0,
+          "base_targets": 8.0,
+          "global_targets": 8.0
+        },
+        {
+          "frame": 2,
+          "distance": 9.244341343735378,
+          "base_points": 81.0,
+          "base_targets": 25.0,
+          "global_targets": 25.0
+        },
+        {
+          "frame": 3,
+          "distance": 11.564339536657435,
+          "base_points": 106.0,
+          "base_targets": 0.0,
+          "global_targets": 12.0
+        },
+        {
+          "frame": 4,
+          "distance": 17.130365098802603,
+          "base_points": 219.0,
+          "base_targets": 0.0,
+          "global_targets": 24.0
+        },
+        {
+          "frame": 5,
+          "distance": 18.853194668581544,
+          "base_points": 1217.0,
+          "base_targets": 0.0,
+          "global_targets": 19.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "8",
+      "n": 12,
+      "success": 2.9166667101283865,
+      "precision": 0.0,
+      "distance_mean": 26.98584537587286,
+      "distance_median": 28.241267908589222,
+      "distance_over2": 12,
+      "distance_over10": 10,
+      "base_empty": 9,
+      "base_without_target": 12,
+      "globally_visible": 5,
+      "first_over2_frame": 1,
+      "first_over2_distance": 3.9788151502677707,
+      "first_over2_global_targets": 0.0,
+      "first_over2_base_targets": 0.0,
+      "first_over2_base_points": 0.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 3.9788151502677707,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 7.957630300535333,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 3,
+          "distance": 11.936445450803104,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 4,
+          "distance": 15.914863775728602,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 3.0
+        },
+        {
+          "frame": 5,
+          "distance": 20.597720286478328,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 1.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "9",
+      "n": 18,
+      "success": 68.33333323399225,
+      "precision": 73.33333319466975,
+      "distance_mean": 0.5271557243173722,
+      "distance_median": 0.26085764912334464,
+      "distance_over2": 0,
+      "distance_over10": 0,
+      "base_empty": 11,
+      "base_without_target": 12,
+      "globally_visible": 6,
+      "first_over2_frame": null,
+      "first_over2_distance": null,
+      "first_over2_global_targets": null,
+      "first_over2_base_targets": null,
+      "first_over2_base_points": null,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.028000000000000025,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 0.05599999999999994,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 3,
+          "distance": 0.08399999999999996,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 4,
+          "distance": 0.09799999999999998,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 5,
+          "distance": 0.1130000000000001,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "10",
+      "n": 34,
+      "success": 2.500000037252903,
+      "precision": 0.0,
+      "distance_mean": 4.809021231357666,
+      "distance_median": 4.48105748819251,
+      "distance_over2": 34,
+      "distance_over10": 0,
+      "base_empty": 4,
+      "base_without_target": 18,
+      "globally_visible": 23,
+      "first_over2_frame": 1,
+      "first_over2_distance": 4.232551749945872,
+      "first_over2_global_targets": 0.0,
+      "first_over2_base_targets": 0.0,
+      "first_over2_base_points": 1.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 4.232551749945872,
+          "base_points": 1.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 2,
+          "distance": 4.232457182175634,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 3,
+          "distance": 4.2325223309429045,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 4,
+          "distance": 4.2327471888728025,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        },
+        {
+          "frame": 5,
+          "distance": 4.233113988189664,
+          "base_points": 0.0,
+          "base_targets": 0.0,
+          "global_targets": 0.0
+        }
+      ]
+    },
+    {
+      "tracklet_id": "11",
+      "n": 35,
+      "success": 31.928571569068094,
+      "precision": 31.92857130829777,
+      "distance_mean": 6.615721579254476,
+      "distance_median": 5.220447435506267,
+      "distance_over2": 22,
+      "distance_over10": 12,
+      "base_empty": 1,
+      "base_without_target": 17,
+      "globally_visible": 32,
+      "first_over2_frame": 14,
+      "first_over2_distance": 2.6227938767831698,
+      "first_over2_global_targets": 13.0,
+      "first_over2_base_targets": 13.0,
+      "first_over2_base_points": 67.0,
+      "recovered_within2_after_first_over2": 0,
+      "first_five": [
+        {
+          "frame": 1,
+          "distance": 0.04236394756268906,
+          "base_points": 7.0,
+          "base_targets": 2.0,
+          "global_targets": 2.0
+        },
+        {
+          "frame": 2,
+          "distance": 0.27768354410237217,
+          "base_points": 13.0,
+          "base_targets": 7.0,
+          "global_targets": 7.0
+        },
+        {
+          "frame": 3,
+          "distance": 0.306590352174209,
+          "base_points": 12.0,
+          "base_targets": 3.0,
+          "global_targets": 3.0
+        },
+        {
+          "frame": 4,
+          "distance": 0.41506040335810496,
+          "base_points": 15.0,
+          "base_targets": 3.0,
+          "global_targets": 3.0
+        },
+        {
+          "frame": 5,
+          "distance": 0.39621388678480507,
+          "base_points": 5.0,
+          "base_targets": 1.0,
+          "global_targets": 1.0
+        }
+      ]
+    }
+  ],
+  "epochs": {
+    "epoch_05_endpoints": {
+      "n": 309,
+      "success": 20.606796211988023,
+      "precision": 18.268608359143766,
+      "distance_mean": 10.209659112744003,
+      "distance_median": 6.157754467509647,
+      "distance_over2": 233,
+      "distance_over10": 64,
+      "base_empty": 73,
+      "base_without_target": 201,
+      "globally_visible": 230
+    },
+    "epoch_10_endpoints": {
+      "n": 309,
+      "success": 17.160194247213575,
+      "precision": 17.233009676186782,
+      "distance_mean": 10.00908330540643,
+      "distance_median": 3.9947133874226077,
+      "distance_over2": 207,
+      "distance_over10": 91,
+      "base_empty": 73,
+      "base_without_target": 193,
+      "globally_visible": 230
+    },
+    "epoch_15_endpoints": {
+      "n": 309,
+      "success": 14.91100326493913,
+      "precision": 11.812297694843178,
+      "distance_mean": 10.986849338294572,
+      "distance_median": 5.646958731784544,
+      "distance_over2": 259,
+      "distance_over10": 123,
+      "base_empty": 85,
+      "base_without_target": 214,
+      "globally_visible": 230
+    },
+    "epoch_20_endpoints": {
+      "n": 309,
+      "success": 20.81715220398598,
+      "precision": 20.258899583423986,
+      "distance_mean": 11.814984905425066,
+      "distance_median": 4.601334395628692,
+      "distance_over2": 205,
+      "distance_over10": 95,
+      "base_empty": 72,
+      "base_without_target": 192,
+      "globally_visible": 230
+    },
+    "epoch_25_endpoints": {
+      "n": 309,
+      "success": 18.082524298367765,
+      "precision": 15.72815529809222,
+      "distance_mean": 12.906047882566693,
+      "distance_median": 6.161456795479038,
+      "distance_over2": 241,
+      "distance_over10": 120,
+      "base_empty": 92,
+      "base_without_target": 221,
+      "globally_visible": 230
+    },
+    "epoch_30_endpoints": {
+      "n": 309,
+      "success": 15.558252462508415,
+      "precision": 12.831715156827544,
+      "distance_mean": 13.384911341246125,
+      "distance_median": 7.957630300535333,
+      "distance_over2": 257,
+      "distance_over10": 131,
+      "base_empty": 97,
+      "base_without_target": 222,
+      "globally_visible": 230
+    },
+    "epoch_35_endpoints": {
+      "n": 309,
+      "success": 13.309061544130534,
+      "precision": 10.525889969566492,
+      "distance_mean": 13.873580893633726,
+      "distance_median": 7.957630300535333,
+      "distance_over2": 266,
+      "distance_over10": 143,
+      "base_empty": 105,
+      "base_without_target": 230,
+      "globally_visible": 230
+    },
+    "epoch_40_endpoints": {
+      "n": 309,
+      "success": 15.865695809276358,
+      "precision": 13.325242679505866,
+      "distance_mean": 12.297566288342729,
+      "distance_median": 5.72459500269835,
+      "distance_over2": 256,
+      "distance_over10": 89,
+      "base_empty": 98,
+      "base_without_target": 200,
+      "globally_visible": 230
+    },
+    "epoch_45_endpoints": {
+      "n": 309,
+      "success": 14.555016240786195,
+      "precision": 11.351132673184269,
+      "distance_mean": 14.094081080145617,
+      "distance_median": 7.649610711447433,
+      "distance_over2": 264,
+      "distance_over10": 145,
+      "base_empty": 123,
+      "base_without_target": 229,
+      "globally_visible": 230
+    },
+    "epoch_50_endpoints": {
+      "n": 309,
+      "success": 14.085760565540935,
+      "precision": 10.93042069039395,
+      "distance_mean": 13.314539574677623,
+      "distance_median": 6.950541348935642,
+      "distance_over2": 260,
+      "distance_over10": 128,
+      "base_empty": 113,
+      "base_without_target": 225,
+      "globally_visible": 230
+    },
+    "epoch_55_endpoints": {
+      "n": 309,
+      "success": 17.192556688556007,
+      "precision": 14.490291236938976,
+      "distance_mean": 12.602511300458746,
+      "distance_median": 5.916719757826143,
+      "distance_over2": 250,
+      "distance_over10": 97,
+      "base_empty": 94,
+      "base_without_target": 209,
+      "globally_visible": 230
+    },
+    "epoch_60_endpoints": {
+      "n": 309,
+      "success": 14.765372226153378,
+      "precision": 12.273462762314717,
+      "distance_mean": 13.851637303735094,
+      "distance_median": 8.117565738061844,
+      "distance_over2": 260,
+      "distance_over10": 137,
+      "base_empty": 117,
+      "base_without_target": 231,
+      "globally_visible": 230
+    }
+  },
+  "layout_reproduction": {
+    "B": 2,
+    "C": 14,
+    "L": 4,
+    "N": 3,
+    "actual_first_frame_first_point": [
+      0,
+      100,
+      200,
+      300,
+      1000,
+      1100,
+      1200,
+      1300,
+      2000,
+      2100,
+      2200,
+      2300,
+      3000,
+      3100
+    ],
+    "intended_first_frame_first_point": [
+      0,
+      1000,
+      2000,
+      3000,
+      4000,
+      5000,
+      6000,
+      7000,
+      8000,
+      9000,
+      10000,
+      11000,
+      12000,
+      13000
+    ],
+    "actual_current_frame_first_point": [
+      10200,
+      10300,
+      11000,
+      11100,
+      11200,
+      11300,
+      12000,
+      12100,
+      12200,
+      12300,
+      13000,
+      13100,
+      13200,
+      13300
+    ],
+    "intended_current_frame_first_point": [
+      300,
+      1300,
+      2300,
+      3300,
+      4300,
+      5300,
+      6300,
+      7300,
+      8300,
+      9300,
+      10300,
+      11300,
+      12300,
+      13300
+    ],
+    "current_output_channel_sources": [
+      {
+        "output_channel": 0,
+        "source_channel": 10,
+        "source_frame": 2
+      },
+      {
+        "output_channel": 1,
+        "source_channel": 10,
+        "source_frame": 3
+      },
+      {
+        "output_channel": 2,
+        "source_channel": 11,
+        "source_frame": 0
+      },
+      {
+        "output_channel": 3,
+        "source_channel": 11,
+        "source_frame": 1
+      },
+      {
+        "output_channel": 4,
+        "source_channel": 11,
+        "source_frame": 2
+      },
+      {
+        "output_channel": 5,
+        "source_channel": 11,
+        "source_frame": 3
+      },
+      {
+        "output_channel": 6,
+        "source_channel": 12,
+        "source_frame": 0
+      },
+      {
+        "output_channel": 7,
+        "source_channel": 12,
+        "source_frame": 1
+      },
+      {
+        "output_channel": 8,
+        "source_channel": 12,
+        "source_frame": 2
+      },
+      {
+        "output_channel": 9,
+        "source_channel": 12,
+        "source_frame": 3
+      },
+      {
+        "output_channel": 10,
+        "source_channel": 13,
+        "source_frame": 0
+      },
+      {
+        "output_channel": 11,
+        "source_channel": 13,
+        "source_frame": 1
+      },
+      {
+        "output_channel": 12,
+        "source_channel": 13,
+        "source_frame": 2
+      },
+      {
+        "output_channel": 13,
+        "source_channel": 13,
+        "source_frame": 3
+      }
+    ],
+    "mismatched_elements": 324,
+    "total_elements": 336,
+    "current_frame_xyz_source_present": false,
+    "current_frame_time_source_present": false
+  }
+}

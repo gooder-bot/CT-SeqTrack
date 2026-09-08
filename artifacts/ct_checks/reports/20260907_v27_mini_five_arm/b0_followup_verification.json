@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-08",
+  "git_head": "8b8b8d9",
+  "mode": "analysis only; production code and output unchanged",
+  "historical_runs_rechecked": 7,
+  "historical_high_low_input_prefix_equal": true,
+  "historical_step1_parameter_divergence": true,
+  "actual_BC_double_count_arms": 5,
+  "actual_BC_double_count_views_per_arm": 4,
+  "BC_gradient_ratio": 2,
+  "real_module_input_probe": "1 passed in 2.95s; verifies defects exist, not fixes",
+  "new_report": "B0_ROOT_CAUSES_AND_FUSION.md",
+  "real_nuscenes_counterfactual_evaluation_performed": false
+}

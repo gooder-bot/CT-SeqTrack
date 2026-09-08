@@ -11,6 +11,104 @@ ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v8"
 LEGACY_ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
 
 
+def configure_v28_numerics(config):
+    """在首个 CUDA context 之前固定 v28 数值路径；禁止静默放宽确定性。"""
+    if not bool(_get(config, "ct_enable_v28", False)):
+        return
+    import os
+    import torch
+    expected = {
+        "precision": 32, "ct_deterministic_algorithms": True,
+        "ct_deterministic_warn_only": False, "ct_allow_tf32": False,
+        "ct_cudnn_benchmark": False, "ct_cudnn_deterministic": True,
+        "ct_adam_foreach": False, "ct_adam_fused": False,
+        "ct_cublas_workspace_config": ":4096:8",
+    }
+    for key, value in expected.items():
+        if _get(config, key) != value:
+            raise ValueError(f"v28 numeric contract requires {key}={value!r}")
+    workspace = os.environ.get("CUBLAS_WORKSPACE_CONFIG")
+    if torch.cuda.is_initialized() and workspace != ":4096:8":
+        raise RuntimeError("v28 CUBLAS_WORKSPACE_CONFIG must be set before CUDA initialization")
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True, warn_only=False)
+
+
+def capture_v28_runtime_environment():
+    """保存实际执行环境；配置中的数值开关另由 resume identity 绑定。"""
+    import os
+    import platform
+    import importlib.metadata
+    import subprocess
+    import torch
+    devices = []
+    if torch.cuda.is_available():
+        for index in range(torch.cuda.device_count()):
+            prop = torch.cuda.get_device_properties(index)
+            devices.append({"index": index, "name": prop.name,
+                            "capability": [prop.major, prop.minor],
+                            "total_memory": prop.total_memory,
+                            "uuid": str(getattr(prop, "uuid", "unavailable"))})
+    try:
+        lightning_version = importlib.metadata.version("pytorch-lightning")
+    except importlib.metadata.PackageNotFoundError:
+        lightning_version = None
+    driver_devices = []
+    if torch.cuda.is_available():
+        try:
+            report = subprocess.run(["nvidia-smi", "--query-gpu=uuid,driver_version",
+                                     "--format=csv,noheader,nounits"],
+                                    capture_output=True, text=True, check=True, timeout=10)
+            driver_devices = sorted(line.strip() for line in report.stdout.splitlines() if line.strip())
+        except (OSError, subprocess.SubprocessError):
+            driver_devices = ["unavailable"]
+    return {"schema": "ct_seqtrack.runtime_environment.v28",
+            "python": platform.python_version(), "platform": platform.platform(),
+            "pytorch_lightning": lightning_version, "nvidia_driver_devices": driver_devices,
+            "torch": torch.__version__, "cuda": torch.version.cuda,
+            "cudnn": torch.backends.cudnn.version(), "devices": devices,
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+            "matmul_precision": torch.get_float32_matmul_precision(),
+            "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "deterministic_warn_only": torch.is_deterministic_algorithms_warn_only_enabled()}
+
+
+def validate_v28_observation_updates(config, *, sample_count, batch_size,
+                                     drop_last, observed_updates):
+    """核对真实数据总体的自然步数；禁止为了凑预算重复或补齐样本。"""
+    if not bool(_get(config, "ct_enable_v28", False)):
+        return None
+    if int(batch_size) != 16 or not drop_last:
+        raise ValueError("v28 observation updates require batch_size=16 and drop_last=True")
+    actual = int(sample_count) // int(batch_size)
+    if int(observed_updates) != actual:
+        raise ValueError("v28 observation loader length differs from the complete dataset/drop_last count")
+    mini_car = (str(_get(config, "version", "")) == "v1.0-mini"
+                and str(_get(config, "category_name", "")).lower() == "car")
+    expected = _get(config, "ct_v28_expected_mini_car_updates_per_epoch")
+    if mini_car:
+        if expected != 1262 or actual != expected:
+            raise ValueError(f"v28 mini Car requires 1262 natural observation updates per epoch; "
+                             f"observed {actual} from {sample_count} rows; do not repeat or pad rows")
+    elif expected is not None:
+        raise ValueError("v28 mini Car update expectation must be null outside mini Car")
+    return {"samples": int(sample_count), "batch_size": int(batch_size), "drop_last": True,
+            "observed_updates_per_epoch": actual, "expected_updates_per_epoch": expected,
+            "registered_formal_epochs": 60,
+            "registered_formal_total_updates": actual * 60,
+            "dropped_final_rows": int(sample_count) - actual * int(batch_size)}
+
+
 def online_candidate_state_consistent(processed, target_size):
     """Validate only the history contracts owned by the active CT arm.
 
@@ -299,7 +397,32 @@ def build_online_resume_contract(config):
         "val_split": str(_get(config, "val_split", "")),
         "save_top_k": int(_get(config, "save_top_k", 0)),
     }
+    if bool(_get(config, "ct_enable_v28", False)):
+        for key in ("ct_enable_v28", "ct_reference_baseline", "ct_observation_contract",
+                    "ct_b0_sampling_contract", "ct_b0_point_feature_source",
+                    "ct_deterministic_algorithms", "ct_deterministic_warn_only",
+                    "ct_allow_tf32", "ct_cudnn_benchmark", "ct_cudnn_deterministic",
+                    "ct_adam_foreach", "ct_adam_fused", "ct_cublas_workspace_config",
+                    "precision", "workers", "ct_engineering_check",
+                    "ct_v28_expected_mini_car_updates_per_epoch", "ct_v28_registered_seed"):
+            fields[key] = _get(config, key)
     return {"schema": schema, "fields": fields}
+
+
+def validate_v28_evaluation_checkpoint(checkpoint, config):
+    """v28 正式评测不能把旧模型或不同训练合同的权重重新标成新结果。"""
+    if not bool(_get(config, 'ct_enable_v28', False)):
+        return
+    saved = checkpoint.get('hyper_parameters', {}).get('config', {})
+    if not isinstance(saved, dict) or not saved.get('ct_enable_v28', False):
+        raise ValueError('v28 evaluation requires a v28 checkpoint; use the original config for historical diagnosis')
+    from utils.action_calibration_v27 import action_calibration_config_identity
+    expected = action_calibration_config_identity(config)
+    observed = action_calibration_config_identity(saved)
+    changed = sorted(key for key in set(expected) | set(observed)
+                     if _normal(expected.get(key)) != _normal(observed.get(key)))
+    if changed:
+        raise ValueError('v28 evaluation checkpoint/config identity mismatch: ' + ', '.join(changed))
 
 
 def validate_online_resume_contract(checkpoint, config):
@@ -500,7 +623,9 @@ def validate_scratch_training_contract(config):
             "legacy")
         require_equal("ct_candidate_policy", "b2_raw", "legacy")
         require_equal(
-            "ct_b0_loss_reduction", "candidate_weighted", "batch_mean")
+            "ct_b0_loss_reduction",
+            "reference_batch" if bool(_get(config, "ct_enable_v28", False)) else "candidate_weighted",
+            "batch_mean")
         require_equal("ct_mechanism_shadow_b0_no_grad", True, False)
         require_equal("ct_cuda_stage_audit", True, False)
         require_equal("ct_observation_fingerprint_steps", 100, 0)
@@ -557,6 +682,50 @@ def validate_scratch_training_contract(config):
                     config, "ct_v26_cfc_ablation", False)) else "gru"),
                 "")
 
+    if bool(_get(config, "ct_enable_v28", False)):
+        registered_seed = _get(config, "ct_v28_registered_seed", 42)
+        if type(registered_seed) is not int or registered_seed <= 0:
+            errors.append("v28 registered training seed must be a positive integer")
+        for key, value in {
+                "ct_enable_v27": True,
+                "ct_observation_contract": "seqtrack_reference_compatible_v1",
+                "ct_b0_sampling_contract": "seqtrack_original_slots_v1",
+                "ct_b0_point_feature_source": "seg_second64_v1",
+                "ct_deterministic_algorithms": True,
+                "ct_deterministic_warn_only": False,
+                "ct_allow_tf32": False, "ct_cudnn_benchmark": False,
+                "ct_cudnn_deterministic": True, "ct_adam_foreach": False,
+                "ct_adam_fused": False, "ct_cublas_workspace_config": ":4096:8",
+                "precision": 32, "seed": registered_seed,
+                "ct_keep_final_window_checkpoints": 3, "save_top_k": 0,
+                "observation_safe_bbox_size": True}.items():
+            require_equal(key, value)
+        mini_car = (str(_get(config, "version", "")) == "v1.0-mini"
+                    and str(_get(config, "category_name", "")).lower() == "car")
+        require_equal("ct_v28_expected_mini_car_updates_per_epoch", 1262 if mini_car else None)
+        if bool(_get(config, "ct_engineering_check", False)):
+            from pathlib import Path
+            log_dir = _get(config, "log_dir")
+            root = (Path(__file__).resolve().parents[1] / "artifacts" / "ct_checks").resolve()
+            target = Path(str(log_dir)).resolve() if log_dir else None
+            if target is None or root not in target.parents:
+                errors.append("v28 engineering log_dir must be below artifacts/ct_checks")
+            limit = _get(config, "limit_train_batches", 1.0)
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+                errors.append("v28 engineering requires integer limit_train_batches in [1,100]")
+            if not 1 <= int(_get(config, "epoch", 0)) <= 3:
+                errors.append("v28 engineering permits only 1..3 actual Trainer epochs")
+            if int(_get(config, "workers", -1)) < 0:
+                errors.append("v28 engineering workers must be nonnegative")
+        else:
+            require_equal("epoch", 60)
+            require_equal("workers", 12)
+            require_equal("check_val_every_n_epoch", 5)
+            for key in ("limit_train_batches", "limit_val_batches"):
+                value = _get(config, key, 1.0)
+                if not isinstance(value, float) or value != 1.0:
+                    errors.append(f"formal v28 {key} must be float 1.0")
+
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))
     b3 = bool(_get(config, "ct_enable_b3", False))
@@ -585,11 +754,12 @@ def validate_scratch_training_contract(config):
         errors.append("ct_b0_candidate_views must be 4")
     require_equal("num_candidates", b0_views, 1)
     require_equal("ct_recursive_candidate_views", b0_views, 1)
-    require_equal(
-        "ct_b0_candidate_weights",
-        ([0.5, 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0]
-         if safe_auto else [0.25, 0.25, 0.25, 0.25]),
-        [1.0])
+    if not bool(_get(config, "ct_enable_v28", False)):
+        require_equal(
+            "ct_b0_candidate_weights",
+            ([0.5, 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0]
+             if safe_auto else [0.25, 0.25, 0.25, 0.25]),
+            [1.0])
     if b0_views > 1:
         require_equal("ct_auxiliary_microbatch_size", 16, 16)
     if b2:

@@ -1,0 +1,11 @@
+# Pending commands: run only after the corresponding training checkpoint exists.
+# Full: calibrate each checkpoint first, then evaluate with its own policy.
+
+# ct28_initial_car_b0_seed42_60ep_bs16: epoch 58
+python main.py --cfg 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\configs\ct28_initial_car_b0_seed42_60ep_bs16.yaml' --path /home/lishengjie/data/nuscenes-mini --category_name Car --checkpoint 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\runs\ct28_initial_car_b0_seed42_60ep_bs16\formal_checkpoints\epoch=058.ckpt' --test --seed 42 --batch_size 16 --log_dir 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\evaluations\ct28_initial_car_b0_seed42_60ep_bs16\epoch_058'
+
+# ct28_initial_car_b0_seed42_60ep_bs16: epoch 59
+python main.py --cfg 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\configs\ct28_initial_car_b0_seed42_60ep_bs16.yaml' --path /home/lishengjie/data/nuscenes-mini --category_name Car --checkpoint 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\runs\ct28_initial_car_b0_seed42_60ep_bs16\formal_checkpoints\epoch=059.ckpt' --test --seed 42 --batch_size 16 --log_dir 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\evaluations\ct28_initial_car_b0_seed42_60ep_bs16\epoch_059'
+
+# ct28_initial_car_b0_seed42_60ep_bs16: epoch 60
+python main.py --cfg 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\configs\ct28_initial_car_b0_seed42_60ep_bs16.yaml' --path /home/lishengjie/data/nuscenes-mini --category_name Car --checkpoint 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\runs\ct28_initial_car_b0_seed42_60ep_bs16\formal_checkpoints\epoch=060.ckpt' --test --seed 42 --batch_size 16 --log_dir 'D:\desktop\research\CT-SeqTrack\artifacts\ct_checks\v28_local_validation\initial_command_plan\evaluations\ct28_initial_car_b0_seed42_60ep_bs16\epoch_060'

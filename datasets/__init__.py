@@ -21,7 +21,10 @@ def get_dataset(config, type='train', **kwargs):
         scene_kwargs = {}
         if bool(getattr(config, 'ct_enable_v27', False)):
             from nuscenes.utils.splits import create_splits_scenes
-            from utils.v27_protocol import select_scene_protocol
+            if bool(getattr(config, 'ct_enable_v28', False)):
+                from utils.v28_protocol import select_scene_protocol
+            else:
+                from utils.v27_protocol import select_scene_protocol
             manifest, role, scene_names = select_scene_protocol(
                 config, role, create_splits_scenes())
             split = (manifest['training_source'] if role != 'test'

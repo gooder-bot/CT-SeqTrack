@@ -1,0 +1,4 @@
+﻿run,partition,S,P,U,final_step,validation_points,paired_with_v27_dev,epoch,workers,seed,batch_size,check_val_every_n_epoch,train_split,val_split,version,num_candidates,lr
+20260528-1633-seqtrack3d_nuscenes_mini-seqtrack_mini_baseline_car_60ep_bs16,official mini_val (historical evaluator),50.98577880859375,59.96171188354492,55.473745346069336,75720,12,False,60,12,42,16,5,mini_train,mini_val,v1.0-mini,4,0.0001
+20260801-2155-seqtrack3d_nuscenes_mini-seqtrack_mini_baseline_car_60ep_bs16_seed42,official mini_val (historical evaluator),31.683805465698242,31.33698081970215,31.510393142700195,75720,12,False,60,4,42,16,5,mini_train,mini_val,v1.0-mini,4,0.0001
+20260825-0057-seqtrack3d_nuscenes_mini-seqtrack_mini_baseline_car_60ep_bs16_seed42_rerun_20260825,official mini_val (historical evaluator),27.996719360351562,26.48358917236328,27.240154266357422,75720,12,False,60,4,42,16,5,mini_train,mini_val,v1.0-mini,4,0.0001

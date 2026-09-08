@@ -51,7 +51,8 @@ def summarize_endpoint_diagnostics(rows):
                    cuda_profile_frames=len(gpu_rows),
                    cuda_peak_allocated_mb=max((r['cuda_peak_allocated_mb'] for r in gpu_rows), default=None),
                    scope='acquisition includes B1 prepass and shared sampler GT labels/sidecar diagnostics; forward separately measures B0/B2/B3 network execution; wall throughput excludes only subsequent box-metric/CSV reporting and is not deployment FPS')
-    return dict(schema='ct_seqtrack.endpoint_diagnostics.v27', metric_mode='benchmark_compat',
+    version = 'v28' if rows and all(r.get('protocol_version') == 'v28' for r in rows) else 'v27'
+    summary = dict(schema=f'ct_seqtrack.endpoint_diagnostics.{version}', metric_mode='benchmark_compat',
                 evidence_label_scale=1.0, metrics=metrics,
                 runtime=runtime,
                 funnel=dict(prediction_frames=len(predicted), measured_frames=len(measured),
@@ -65,6 +66,10 @@ def summarize_endpoint_diagnostics(rows):
                             all_empty_frames=sum(r.get('acquisition_global_raw_point_count') == 0 for r in measured),
                             mode_unique_count_mean=float(np.mean([r.get('ct_vote_mode_unique_count', 0.) for r in structural])) if structural else None),
                 interpretation='one-step action harm uses matched current state; closed-loop gains require a separate never rollout')
+    if version == 'v28':
+        from utils.v28_recovery_reporting import summarize_recovery_rows
+        summary['recovery'] = summarize_recovery_rows(rows)
+    return summary
 
 
 def write_endpoint_diagnostics(path, rows):

@@ -1,0 +1,10 @@
+{
+  "scope": "real_B2_B3_and_public_evaluator_with_synthetic_B0_no_nuScenes",
+  "ct_b2_available": 1.0,
+  "ct_search_candidate_valid": 0.0,
+  "selected_point_count": 4.0,
+  "extension_presence_probability": 0.10000000149011612,
+  "calibrated_always_b3_applied": 1.0,
+  "bounded_always_current_host_applies": false,
+  "evaluation_exception": "v27 action applied without a finite structural candidate"
+}

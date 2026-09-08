@@ -1,0 +1,6 @@
+﻿arm,dS,dP,dU,dU_ci_low,dU_ci_high,bootstrap_unit,bootstrap_samples,seed,tracklets,frames
+B0,0.0,0.0,0.0,0.0,0.0,paired tracklet; one dev scene; not causal module isolation,10000,42,12,321
+B1-CfC,1.2461059033360065,1.8302180679555622,1.5381619856457842,-0.47755797976392383,4.68215458066276,paired tracklet; one dev scene; not causal module isolation,10000,42,12,321
+B1-GRU,2.9439251968561675,3.0919002960914765,3.0179127464738222,-0.2475671945644336,7.267587720399693,paired tracklet; one dev scene; not causal module isolation,10000,42,12,321
+B1+B2,-1.3395638324065,-1.3862928369799135,-1.3629283346932066,-6.944140351156609,2.312656271353581,paired tracklet; one dev scene; not causal module isolation,10000,42,12,321
+Full,-0.3582554994110378,-0.35046731060910447,-0.35436140501007113,-1.2907641191376193,0.7862771528611034,paired tracklet; one dev scene; not causal module isolation,10000,42,12,321
