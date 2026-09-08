@@ -118,8 +118,21 @@ def test_real_host_recovers_from_nonfinite_learned_prior_using_actual_cv_record(
 
 
 @pytest.mark.parametrize('empty', [False, True])
-def test_real_host_loss_selected_presence_counters_and_gradient_ownership(sampler_runtime, empty):
+def test_real_host_loss_selected_presence_counters_and_gradient_ownership(sampler_runtime, monkeypatch, empty):
     from utils.v27_training import compute_b3_utility_loss
+    original_cumsum = torch.cumsum
+    count_calls = []
+
+    def integer_count_cumsum(values, dim, *, dtype=None):
+        # 在 CPU 上也拒绝本次导致 CUDA strict 退出的浮点累计路径。
+        assert dtype == torch.int64
+        assert bool(((values == 0) | (values == 1)).all())
+        counts = original_cumsum(values, dim=dim, dtype=dtype)
+        assert torch.equal(counts.to(values.dtype), original_cumsum(values, dim=dim))
+        count_calls.append(values.numel())
+        return counts
+
+    monkeypatch.setattr(torch, 'cumsum', integer_count_cumsum)
     host, batch, output, _, observation, features, b1 = _host_case(
         sampler_runtime, training=True, empty=empty, wide_support=True)
     output['observation_aux_estimation_boxes'] = observation
@@ -144,6 +157,7 @@ def test_real_host_loss_selected_presence_counters_and_gradient_ownership(sample
         assert remaining.any(), 'wide support must expose unselected valid prepool points'
         batch['ct_extension_labels'][0, torch.nonzero(remaining)[0]] = 1.
     losses = _method('_compute_ct_contract_v3_loss')(host, batch, output, batch['box_label'][:, :2])
+    assert len(count_calls) == int(not empty)
     assert all(torch.isfinite(value).all() for value in losses.values())
     assert losses['ct_b2_extension_presence_target_rate'].item() == 0
     assert host.ct_targetness_running_positive_points.item() == 0

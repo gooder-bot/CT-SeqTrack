@@ -5328,8 +5328,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if positive_scores.numel():
             order = torch.argsort(relation_scores_flat, descending=True)
             ordered_target = relation_targets_flat[order].to(dtype)
+            # 二值计数用整数累计，避开 CUDA 浮点 cumsum 的确定性限制。
             precision_at_k = torch.cumsum(
-                ordered_target, dim=0) / torch.arange(
+                ordered_target, dim=0, dtype=torch.int64).to(dtype) / torch.arange(
                     1, ordered_target.numel() + 1,
                     device=device, dtype=dtype)
             relation_auprc = (
@@ -5746,7 +5747,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             if positive_scores.numel():
                 order = torch.argsort(selected_scores, descending=True)
                 sorted_targets = selected_targets[order].to(scores.dtype)
-                precision = torch.cumsum(sorted_targets, dim=0) / torch.arange(
+                precision = torch.cumsum(
+                    sorted_targets, dim=0, dtype=torch.int64).to(scores.dtype) / torch.arange(
                     1, sorted_targets.numel() + 1,
                     device=scores.device, dtype=scores.dtype)
                 auprc = (

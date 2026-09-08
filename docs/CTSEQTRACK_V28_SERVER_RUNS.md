@@ -1,6 +1,12 @@
 # v28 服务器验收与首轮 B0（2026-09-08）
 
-所有命令从 CT-SeqTrack 仓库内运行，使用 [SERVER_PATHS.md](SERVER_PATHS.md) 的数据根。所有工程/新运行输出指定 `artifacts/ct_checks/` 新目录，不覆盖历史 `output/`。下面命令是待执行流程，不代表已通过。
+所有命令从 CT-SeqTrack 仓库内运行，使用 [SERVER_PATHS.md](SERVER_PATHS.md) 的数据根。工程输出指定 `artifacts/ct_checks/` 新目录；按当前确认的安排，三组正式重启使用带日期的 `output/` 新目录，不覆盖历史结果。下面命令是待执行流程，不代表已通过。
+
+## 2026-09-09：Full 的 AP 累计统计修复
+
+随后只有 Full 报 `cumsum_cuda_kernel`，原因是 B2 relation AP/AUPRC 指标把二值标签转成浮点后累计；B0 未启用 B2，因此不进入该路径。该指标仅记录日志，不参与 `loss_ct_plugin_total`。`models/seqtrack3d.py` 的 relation AP 和旧 binary rank AP 两处均改为 `cumsum(..., dtype=torch.int64)`，再转回原浮点类型计算 precision。二值计数及排序/分母保持不变，严格确定性继续开启，没有 CPU 传输或训练参数变化。此次增量运行文件只有 `models/seqtrack3d.py`，先同步服务器，再执行下方三组命令。
+
+定向回归在实际 host loss 上强制整数累计，与旧浮点二值计数逐位比较，并覆盖非空/空支持及 B2/B3 梯度归属；另运行实际 v28 B0/Full 训练与 Adam hooks 回归。本次结果为 **15 passed, 1 skipped**，跳过项是之前 CE 修复的 CUDA 测试。本地没有 CUDA，此处通过不表示完整 CUDA 训练已验收。重启三组前先结束仍在运行的旧 B0 任务，避免同卡重复启动。
 
 ## 2026-09-09：分割 CE 的 CUDA 确定性修复与并行重启
 
@@ -17,8 +23,11 @@
 现有 `28_b0.yaml`、`28_b0_seed52.yaml`、`28_full.yaml` 自动继承新合同。按照当前已确认的并行安排，GPU1 B0/42、GPU2 B0/52、GPU3 Full/42 均重新 scratch；不恢复本次失败运行的 checkpoint，保留失败日志。此安排不代表 B0 的分数恢复已验收。
 
 ```bash
-RUN_ROOT="artifacts/ct_checks/v28_mini_cefix_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RUN_ROOT"
+STAMP=$(date +%Y%m%d-%H%M%S)
+B0_42_DIR="output/${STAMP}-28_b0-mini_car_seed42_60ep_bs16"
+B0_52_DIR="output/${STAMP}-28_b0-mini_car_seed52_60ep_bs16"
+FULL_DIR="output/${STAMP}-28_full-mini_car_seed42_60ep_bs16"
+mkdir -p "$B0_42_DIR" "$B0_52_DIR" "$FULL_DIR"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
@@ -28,30 +37,30 @@ nohup env CUDA_VISIBLE_DEVICES=1 python -u main.py \
   --path /home/lishengjie/data/nuscenes-mini \
   --batch_size 16 --epoch 60 --workers 12 --seed 42 \
   --preloading --check_val_every_n_epoch 5 \
-  --tag ct28_b0_mini_car_seed42_cefix --log_dir "$RUN_ROOT/b0_seed42" \
-  > "$RUN_ROOT/b0_seed42.log" 2>&1 < /dev/null &
-echo $! > "$RUN_ROOT/b0_seed42.pid"
+  --tag mini_car_seed42_60ep_bs16 --log_dir "$B0_42_DIR" \
+  > "$B0_42_DIR/train.log" 2>&1 < /dev/null &
+echo $! > "$B0_42_DIR/train.pid"
 
 nohup env CUDA_VISIBLE_DEVICES=2 python -u main.py \
   --cfg cfgs/ct_seqtrack/28_b0_seed52.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
   --batch_size 16 --epoch 60 --workers 12 --seed 52 \
   --preloading --check_val_every_n_epoch 5 \
-  --tag ct28_b0_mini_car_seed52_cefix --log_dir "$RUN_ROOT/b0_seed52" \
-  > "$RUN_ROOT/b0_seed52.log" 2>&1 < /dev/null &
-echo $! > "$RUN_ROOT/b0_seed52.pid"
+  --tag mini_car_seed52_60ep_bs16 --log_dir "$B0_52_DIR" \
+  > "$B0_52_DIR/train.log" 2>&1 < /dev/null &
+echo $! > "$B0_52_DIR/train.pid"
 
 nohup env CUDA_VISIBLE_DEVICES=3 python -u main.py \
   --cfg cfgs/ct_seqtrack/28_full.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
   --batch_size 16 --epoch 60 --workers 12 --seed 42 \
   --preloading --check_val_every_n_epoch 5 \
-  --tag ct28_full_mini_car_seed42_cefix --log_dir "$RUN_ROOT/full_seed42" \
-  > "$RUN_ROOT/full_seed42.log" 2>&1 < /dev/null &
-echo $! > "$RUN_ROOT/full_seed42.pid"
+  --tag mini_car_seed42_60ep_bs16 --log_dir "$FULL_DIR" \
+  > "$FULL_DIR/train.log" 2>&1 < /dev/null &
+echo $! > "$FULL_DIR/train.pid"
 
-echo "日志目录：$RUN_ROOT"
-tail -f "$RUN_ROOT/b0_seed42.log" "$RUN_ROOT/b0_seed52.log" "$RUN_ROOT/full_seed42.log"
+printf '输出目录：\n%s\n%s\n%s\n' "$B0_42_DIR" "$B0_52_DIR" "$FULL_DIR"
+tail -f "$B0_42_DIR/train.log" "$B0_52_DIR/train.log" "$FULL_DIR/train.log"
 ```
 
 回归覆盖原 CE 整批 loss/梯度（类别不均衡、全背景/全前景、忽略槽）、完整 B0 多种 moving 比例的原目标/更新、B0/Full 训练宿主隔离及新合同身份；另提供严格 CUDA loss/梯度/Adam 重复测试。此次针对性回归为 **47 passed, 1 skipped**，修改文件 compileall 与 diff 检查通过。本地只有 CPU，跳过项为 CUDA 重复测试，实际服务器 CUDA 验收仍待执行。
