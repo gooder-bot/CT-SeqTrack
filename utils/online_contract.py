@@ -399,6 +399,7 @@ def build_online_resume_contract(config):
     }
     if bool(_get(config, "ct_enable_v28", False)):
         for key in ("ct_enable_v28", "ct_reference_baseline", "ct_observation_contract",
+                    "ct_b0_ce_contract",
                     "ct_b0_sampling_contract", "ct_b0_point_feature_source",
                     "ct_deterministic_algorithms", "ct_deterministic_warn_only",
                     "ct_allow_tf32", "ct_cudnn_benchmark", "ct_cudnn_deterministic",
@@ -691,6 +692,7 @@ def validate_scratch_training_contract(config):
                 "ct_observation_contract": "seqtrack_reference_compatible_v1",
                 "ct_b0_sampling_contract": "seqtrack_original_slots_v1",
                 "ct_b0_point_feature_source": "seg_second64_v1",
+                "ct_b0_ce_contract": "class_axis_logsoftmax_flat_nll_v1",
                 "ct_deterministic_algorithms": True,
                 "ct_deterministic_warn_only": False,
                 "ct_allow_tf32": False, "ct_cudnn_benchmark": False,

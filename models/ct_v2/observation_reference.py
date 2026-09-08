@@ -4,6 +4,22 @@ import torch
 import torch.nn.functional as F
 
 
+def seqtrack_segmentation_cross_entropy(logits, labels):
+    """原整批加权 CE，避开 CUDA 空间 NLL 的非确定性 mean 归约。
+
+    保留 [B,2,N] 上的原 log_softmax 计算，只把所得 log-probability
+    转成普通 NLL 的 [B*N,2] 输入。分母仍为全 batch 的 sum(weight[label])，
+    不按 view、帧或点分别平均，也不修改全局 deterministic 设置。
+    """
+    if (logits.ndim != 3 or logits.shape[1] != 2
+            or labels.shape != (logits.shape[0], logits.shape[2])):
+        raise ValueError('SeqTrack segmentation requires logits [B,2,N] and labels [B,N]')
+    log_probabilities = F.log_softmax(logits, dim=1)
+    rows = log_probabilities.movedim(1, -1).reshape(-1, 2)
+    return F.nll_loss(rows, labels.reshape(-1),
+                      weight=logits.new_tensor([.5, 2.]), reduction='mean')
+
+
 def seqtrack_reference_loss(data, output, config, *, use_motion_cls=True,
                             box_aware=True):
     """保留原 batch 分母及采样槽语义，BC 恰好参与一次反传。"""
@@ -18,8 +34,7 @@ def seqtrack_reference_loss(data, output, config, *, use_motion_cls=True,
     updated_refs = output['updated_ref_boxs']
     logits = output['seg_logits']
     losses = {
-        'loss_seg': F.cross_entropy(logits, data['seg_label'],
-                                    weight=logits.new_tensor([.5, 2.])),
+        'loss_seg': seqtrack_segmentation_cross_entropy(logits, data['seg_label']),
         'loss_center': F.smooth_l1_loss(estimate[:, :3], box[:, :3]),
         'loss_angle': F.smooth_l1_loss(estimate[:, 3].sin(), box[:, 3].sin()),
         'loss_center_aux': F.smooth_l1_loss(observed[:, :3], box[:, :3]),

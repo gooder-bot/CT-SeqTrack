@@ -36,6 +36,7 @@ def test_all_v28_arms_obey_scratch_shared_observation_and_numeric_contract(arm, 
     cfg = config(arm, full)
     validate_scratch_training_contract(cfg)
     assert cfg['ct_b0_loss_reduction'] == 'reference_batch'
+    assert cfg['ct_b0_ce_contract'] == 'class_axis_logsoftmax_flat_nll_v1'
     assert cfg['workers'] == 12 and cfg['check_val_every_n_epoch'] == 5
     assert cfg['ct_batch_schema'] == 'ct_seqtrack.train.v4'
     assert not cfg['ct_adam_foreach'] and not cfg['ct_adam_fused']
@@ -54,11 +55,20 @@ def test_reference_is_the_same_b0_implementation_and_training_definition():
 @pytest.mark.parametrize('field,value', (
     ('ct_allow_tf32', True), ('ct_deterministic_warn_only', True),
     ('ct_adam_foreach', None), ('workers', 4), ('epoch', 1),
-    ('limit_train_batches', 100), ('ct_b0_loss_reduction', 'candidate_weighted')))
+    ('limit_train_batches', 100), ('ct_b0_loss_reduction', 'candidate_weighted'),
+    ('ct_b0_ce_contract', None), ('ct_b0_ce_contract', 'spatial_nll_mean')))
 def test_formal_v28_rejects_numerical_and_training_drift(field, value):
     cfg = config(); cfg[field] = value
     with pytest.raises(ValueError):
         validate_scratch_training_contract(cfg)
+
+
+def test_v28_ce_path_is_bound_to_resume_and_calibration_identity():
+    cfg = config()
+    old = dict(cfg)
+    old.pop('ct_b0_ce_contract')
+    assert build_online_resume_contract(cfg) != build_online_resume_contract(old)
+    assert action_calibration_config_identity(cfg) != action_calibration_config_identity(old)
 
 
 def test_engineering_is_bounded_and_identity_separate_from_formal():

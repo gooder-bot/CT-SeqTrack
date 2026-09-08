@@ -9,6 +9,7 @@ ct_observation_contract: seqtrack_reference_compatible_v1
 ct_b0_sampling_contract: seqtrack_original_slots_v1
 ct_b0_point_feature_source: seg_second64_v1
 ct_b0_loss_reduction: reference_batch
+ct_b0_ce_contract: class_axis_logsoftmax_flat_nll_v1
 # 仅作旧字段兼容；v28 不按 view 分组或加权归约。
 ct_b0_candidate_weights: [0.25, 0.25, 0.25, 0.25]
 ct_deterministic_algorithms: true
