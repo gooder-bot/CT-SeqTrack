@@ -1,6 +1,7 @@
 # CT-SeqTrack 服务器路径
 
-本文件记录 Safe-SeqTrack v25（以及只读 v24 证据）需要的服务器路径。历史 KITTI/HTV/M2 路径已移出活动文档。
+本文件记录 CT-SeqTrack v28/v29 使用的服务器路径。v29三臂完整数据使用下述完整nuScenes根路径，
+不预加载；新命令见[服务器运行说明](CTSEQTRACK_V29_SERVER_RUNS.md)。历史 KITTI/HTV/M2 路径已移出活动文档。
 
 ## nuScenes mini
 
@@ -28,9 +29,12 @@
 ```
 
 它必须包含 `v1.0-trainval/` 与 `samples/LIDAR_TOP/`，并在服务器运行前
-通过 `tools/preflight_v26_full.py` 验证。通过 `--path` 显式覆盖配置。
-不得把 mini 路径用于 `25_*_nuscenes_full.yaml`；v25 full 配置固定为
+通过 `tools/preflight_ct_v28.py` 的真实数据路径验证。通过 `--path` 显式覆盖配置。
+不得把 mini 路径用于 `28_*_nuscenes_full.yaml`；v28 full 配置固定为
 `version: v1.0-trainval`。
+
+单组Full/Car/seed42、60轮诊断的命令见 [v28完整数据启动](CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。
+首次省略`--preloading`，避免按轨迹重复缓存整幅点云造成过大的CPU内存占用。
 
 ## Python 环境
 
@@ -51,11 +55,12 @@ export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 ## 正式启动前检查
 
 ```bash
-python tools/verify_ct_slimming.py verify
-python -m pytest -q
-python main.py --cfg cfgs/ct_seqtrack/25_b0.yaml --path DATA_ROOT --help
+python tools/preflight_ct_v28.py --cfg cfgs/ct_seqtrack/28_full_nuscenes_full.yaml --path /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes --output artifacts/ct_checks/v28_full_preflight.json
 ```
 
-完整环境中的真实 batch 前向/反向、100-step resume 等价和点/框可视化仍是
-正式训练前验收项；当前本地环境无法把它们记为已通过。工程验收 checkpoint 必须
-在对照完成后丢弃，正式运行仍从 epoch0 开始。
+不传`--manifest-only`才实际构造数据并检查索引；真实batch短检及正式启动按上述专页执行。
+独立100-step与完整epoch resume等价验收仍须单独记录，不能用本地CPU测试替代。
+工程checkpoint不得用于正式初始化，正式运行仍从epoch0开始。
+
+本地代码回归以pytest为主；`verify_ct_slimming.py verify`固定要求旧HEAD=`001951a`，
+当前后续提交会因历史基点限制失败，不能把它误当成新的full数据运行阻断。

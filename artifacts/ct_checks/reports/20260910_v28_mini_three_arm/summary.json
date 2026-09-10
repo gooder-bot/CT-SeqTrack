@@ -1,0 +1,446 @@
+{
+  "historical_reference": {
+    "S": 50.9857788,
+    "P": 59.9617119
+  },
+  "recovery_target": {
+    "S": 49.986,
+    "P": 58.962
+  },
+  "final": [
+    {
+      "run": "B0 seed42",
+      "S": 45.20021901936708,
+      "P": 47.24288820690543,
+      "delta_historical_S": -5.785559780632916,
+      "delta_historical_P": -12.71882369309457,
+      "passes_historical_target": false,
+      "late3_S": null,
+      "late3_P": null,
+      "frames": 2285,
+      "prediction_frames": 2179,
+      "tracklets": 106,
+      "actions": 0
+    },
+    {
+      "run": "B0 seed52",
+      "S": 52.876367723768986,
+      "P": 64.478117910334,
+      "delta_historical_S": 1.8905889237689877,
+      "delta_historical_P": 4.516406010334009,
+      "passes_historical_target": true,
+      "late3_S": null,
+      "late3_P": null,
+      "frames": 2285,
+      "prediction_frames": 2179,
+      "tracklets": 106,
+      "actions": 0
+    },
+    {
+      "run": "Full seed42 (uncalibrated)",
+      "S": 45.20021901936708,
+      "P": 47.24288820690543,
+      "delta_historical_S": -5.785559780632916,
+      "delta_historical_P": -12.71882369309457,
+      "passes_historical_target": false,
+      "late3_S": null,
+      "late3_P": null,
+      "frames": 2285,
+      "prediction_frames": 2179,
+      "tracklets": 106,
+      "actions": 0
+    }
+  ],
+  "late3_status": "missing epoch58 and epoch59 evaluations; checkpoints alone are insufficient",
+  "full_vs_b0_seed42_endpoint_metrics_identical": true,
+  "seed52_minus_seed42_pp": {
+    "S": 7.6761487044019034,
+    "P": 17.23522970342858
+  },
+  "seed_summary_descriptive_only": {
+    "S": 49.03829337156803,
+    "P": 55.86050305861971
+  },
+  "paired_tracks": {
+    "total": 106,
+    "higher_P": 77,
+    "lower_P": 20,
+    "unchanged_P": 9,
+    "top10_positive_P_contribution_pp": 7.737417902055663
+  },
+  "statistics": {
+    "B0 seed42": {
+      "endpoint_metadata": {
+        "partition_counts": {
+          "dev": 2285
+        },
+        "scene_counts": {
+          "unknown": 2285
+        },
+        "caveat": "dev/unknown are legacy diagnostic metadata; provenance establishes official two-scene mini_val"
+      },
+      "distance_m": {
+        "scope": "prediction frames only",
+        "median": 1.0527021469810953,
+        "fraction_gt_0_5": 0.7232675539238183,
+        "fraction_gt_1": 0.52088113813676,
+        "fraction_gt_2": 0.2354290959155576
+      },
+      "recovery": {
+        "compatible_sparse": {
+          "duration_right_censored_segments": 7,
+          "frames": 312,
+          "longest_observed_duration_frames": 34,
+          "lost_segments": 14,
+          "mean_observed_duration_frames": 3.8048780487804876,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 47,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 35,
+          "segments": 82
+        },
+        "coverage": {
+          "all_frames": 2285,
+          "prediction_frames": 2179,
+          "raw_count_complete": true,
+          "raw_count_measured_frames": 2179,
+          "raw_count_unknown_frames": 0
+        },
+        "definitions": {
+          "bucket_metric_scale": "percent",
+          "bucket_scope": "prediction_frames_only",
+          "compatible_sparse": "raw_count <= 2 (includes empty)",
+          "empty_crop": "raw_count == 0",
+          "first_zero_iou_exact": true,
+          "lost_iou_below": 0.1,
+          "metric_mode": "benchmark_compat",
+          "output": "final_closed_loop",
+          "raw_count": "current B0 crop before slot regularization; missing is unknown",
+          "return_iou_at_least": 0.5,
+          "return_mean_scope": "observed returns only; not censor-adjusted",
+          "return_window": "after segment end, before next same-kind segment, missing count, or sequence end",
+          "use": "reporting only; fixed thresholds do not select training data, checkpoints, or action policies"
+        },
+        "empty_crop": {
+          "duration_right_censored_segments": 3,
+          "frames": 178,
+          "longest_observed_duration_frames": 33,
+          "lost_segments": 12,
+          "mean_observed_duration_frames": 3.2962962962962963,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 32,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 22,
+          "segments": 54
+        },
+        "first_failure": {
+          "lost_tracklets": 38,
+          "zero_iou_tracklets": 25
+        },
+        "point_count_buckets": {
+          "0": {
+            "P": 38.94662904040365,
+            "S": 37.37359543467003,
+            "frames": 178
+          },
+          "1": {
+            "P": 69.58333321593024,
+            "S": 62.6136363596853,
+            "frames": 66
+          },
+          "11-50": {
+            "P": 46.67779610077159,
+            "S": 44.26961622491653,
+            "frames": 599
+          },
+          "2": {
+            "P": 63.308823366156396,
+            "S": 57.132352965281285,
+            "frames": 68
+          },
+          "3-10": {
+            "P": 57.37084846366266,
+            "S": 50.17527688253409,
+            "frames": 271
+          },
+          ">50": {
+            "P": 38.12688044575954,
+            "S": 38.01153492137655,
+            "frames": 997
+          },
+          "unknown": {
+            "P": null,
+            "S": null,
+            "frames": 0
+          }
+        },
+        "schema": "ct_seqtrack.recovery_diagnostics.v28"
+      },
+      "runtime": {
+        "acquisition_ms": 296115.1747684926,
+        "cuda_peak_allocated_mb": 143.59130859375,
+        "cuda_profile_frames": 2179,
+        "diagnostics_included_in_acquisition": true,
+        "forward_ms": 124172.63445444405,
+        "fps_role": "diagnostic_wall_throughput_not_deployment_fps",
+        "fps_without_initialization": 5.184542478233471,
+        "measured_frames": 2179,
+        "scope": "acquisition includes B1 prepass and shared sampler GT labels/sidecar diagnostics; forward separately measures B0/B2/B3 network execution; wall throughput excludes only subsequent box-metric/CSV reporting and is not deployment FPS",
+        "tracking_elapsed_ms": 420287.80922293663
+      }
+    },
+    "B0 seed52": {
+      "endpoint_metadata": {
+        "partition_counts": {
+          "dev": 2285
+        },
+        "scene_counts": {
+          "unknown": 2285
+        },
+        "caveat": "dev/unknown are legacy diagnostic metadata; provenance establishes official two-scene mini_val"
+      },
+      "distance_m": {
+        "scope": "prediction frames only",
+        "median": 0.4800817172277659,
+        "fraction_gt_0_5": 0.4882973841211565,
+        "fraction_gt_1": 0.26984855438274435,
+        "fraction_gt_2": 0.15603487838458008
+      },
+      "recovery": {
+        "compatible_sparse": {
+          "duration_right_censored_segments": 6,
+          "frames": 308,
+          "longest_observed_duration_frames": 25,
+          "lost_segments": 22,
+          "mean_observed_duration_frames": 3.6666666666666665,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 44,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 40,
+          "segments": 84
+        },
+        "coverage": {
+          "all_frames": 2285,
+          "prediction_frames": 2179,
+          "raw_count_complete": true,
+          "raw_count_measured_frames": 2179,
+          "raw_count_unknown_frames": 0
+        },
+        "definitions": {
+          "bucket_metric_scale": "percent",
+          "bucket_scope": "prediction_frames_only",
+          "compatible_sparse": "raw_count <= 2 (includes empty)",
+          "empty_crop": "raw_count == 0",
+          "first_zero_iou_exact": true,
+          "lost_iou_below": 0.1,
+          "metric_mode": "benchmark_compat",
+          "output": "final_closed_loop",
+          "raw_count": "current B0 crop before slot regularization; missing is unknown",
+          "return_iou_at_least": 0.5,
+          "return_mean_scope": "observed returns only; not censor-adjusted",
+          "return_window": "after segment end, before next same-kind segment, missing count, or sequence end",
+          "use": "reporting only; fixed thresholds do not select training data, checkpoints, or action policies"
+        },
+        "empty_crop": {
+          "duration_right_censored_segments": 0,
+          "frames": 167,
+          "longest_observed_duration_frames": 16,
+          "lost_segments": 22,
+          "mean_observed_duration_frames": 2.693548387096774,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 33,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 29,
+          "segments": 62
+        },
+        "first_failure": {
+          "lost_tracklets": 29,
+          "zero_iou_tracklets": 21
+        },
+        "point_count_buckets": {
+          "0": {
+            "P": 51.407185447831715,
+            "S": 46.61676649918813,
+            "frames": 167
+          },
+          "1": {
+            "P": 66.43835600873787,
+            "S": 58.28767132320224,
+            "frames": 73
+          },
+          "11-50": {
+            "P": 66.73044898080796,
+            "S": 54.82945101654867,
+            "frames": 601
+          },
+          "2": {
+            "P": 63.93382331794676,
+            "S": 56.1764705213992,
+            "frames": 68
+          },
+          "3-10": {
+            "P": 60.94190107829029,
+            "S": 50.316901472856244,
+            "frames": 284
+          },
+          ">50": {
+            "P": 62.411257340128834,
+            "S": 47.78904681760841,
+            "frames": 986
+          },
+          "unknown": {
+            "P": null,
+            "S": null,
+            "frames": 0
+          }
+        },
+        "schema": "ct_seqtrack.recovery_diagnostics.v28"
+      },
+      "runtime": {
+        "acquisition_ms": 119826.78513042629,
+        "cuda_peak_allocated_mb": 143.59130859375,
+        "cuda_profile_frames": 2179,
+        "diagnostics_included_in_acquisition": true,
+        "forward_ms": 127489.77764509618,
+        "fps_role": "diagnostic_wall_throughput_not_deployment_fps",
+        "fps_without_initialization": 8.810570450866953,
+        "measured_frames": 2179,
+        "scope": "acquisition includes B1 prepass and shared sampler GT labels/sidecar diagnostics; forward separately measures B0/B2/B3 network execution; wall throughput excludes only subsequent box-metric/CSV reporting and is not deployment FPS",
+        "tracking_elapsed_ms": 247316.56277552247
+      }
+    },
+    "Full seed42 (uncalibrated)": {
+      "endpoint_metadata": {
+        "partition_counts": {
+          "dev": 2285
+        },
+        "scene_counts": {
+          "unknown": 2285
+        },
+        "caveat": "dev/unknown are legacy diagnostic metadata; provenance establishes official two-scene mini_val"
+      },
+      "distance_m": {
+        "scope": "prediction frames only",
+        "median": 1.0527021469810953,
+        "fraction_gt_0_5": 0.7232675539238183,
+        "fraction_gt_1": 0.52088113813676,
+        "fraction_gt_2": 0.2354290959155576
+      },
+      "recovery": {
+        "compatible_sparse": {
+          "duration_right_censored_segments": 7,
+          "frames": 312,
+          "longest_observed_duration_frames": 34,
+          "lost_segments": 14,
+          "mean_observed_duration_frames": 3.8048780487804876,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 47,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 35,
+          "segments": 82
+        },
+        "coverage": {
+          "all_frames": 2285,
+          "prediction_frames": 2179,
+          "raw_count_complete": true,
+          "raw_count_measured_frames": 2179,
+          "raw_count_unknown_frames": 0
+        },
+        "definitions": {
+          "bucket_metric_scale": "percent",
+          "bucket_scope": "prediction_frames_only",
+          "compatible_sparse": "raw_count <= 2 (includes empty)",
+          "empty_crop": "raw_count == 0",
+          "first_zero_iou_exact": true,
+          "lost_iou_below": 0.1,
+          "metric_mode": "benchmark_compat",
+          "output": "final_closed_loop",
+          "raw_count": "current B0 crop before slot regularization; missing is unknown",
+          "return_iou_at_least": 0.5,
+          "return_mean_scope": "observed returns only; not censor-adjusted",
+          "return_window": "after segment end, before next same-kind segment, missing count, or sequence end",
+          "use": "reporting only; fixed thresholds do not select training data, checkpoints, or action policies"
+        },
+        "empty_crop": {
+          "duration_right_censored_segments": 3,
+          "frames": 178,
+          "longest_observed_duration_frames": 33,
+          "lost_segments": 12,
+          "mean_observed_duration_frames": 3.2962962962962963,
+          "mean_observed_return_delay_frames": 1.0,
+          "observed_recovery_fraction": 0.0,
+          "post_segment_returns": 32,
+          "recovered_lost_segments": 0,
+          "recovery_fraction_role": "observed lower bound; censored segments are not confirmed failures",
+          "return_right_censored_segments": 22,
+          "segments": 54
+        },
+        "first_failure": {
+          "lost_tracklets": 38,
+          "zero_iou_tracklets": 25
+        },
+        "point_count_buckets": {
+          "0": {
+            "P": 38.94662904040365,
+            "S": 37.37359543467003,
+            "frames": 178
+          },
+          "1": {
+            "P": 69.58333321593024,
+            "S": 62.6136363596853,
+            "frames": 66
+          },
+          "11-50": {
+            "P": 46.67779610077159,
+            "S": 44.26961622491653,
+            "frames": 599
+          },
+          "2": {
+            "P": 63.308823366156396,
+            "S": 57.132352965281285,
+            "frames": 68
+          },
+          "3-10": {
+            "P": 57.37084846366266,
+            "S": 50.17527688253409,
+            "frames": 271
+          },
+          ">50": {
+            "P": 38.12688044575954,
+            "S": 38.01153492137655,
+            "frames": 997
+          },
+          "unknown": {
+            "P": null,
+            "S": null,
+            "frames": 0
+          }
+        },
+        "schema": "ct_seqtrack.recovery_diagnostics.v28"
+      },
+      "runtime": {
+        "acquisition_ms": 89355.89430481195,
+        "cuda_peak_allocated_mb": 147.55029296875,
+        "cuda_profile_frames": 2179,
+        "diagnostics_included_in_acquisition": true,
+        "forward_ms": 108615.42057432234,
+        "fps_role": "diagnostic_wall_throughput_not_deployment_fps",
+        "fps_without_initialization": 11.006645085578818,
+        "measured_frames": 2179,
+        "scope": "acquisition includes B1 prepass and shared sampler GT labels/sidecar diagnostics; forward separately measures B0/B2/B3 network execution; wall throughput excludes only subsequent box-metric/CSV reporting and is not deployment FPS",
+        "tracking_elapsed_ms": 197971.3148791343
+      }
+    }
+  },
+  "verdict": "seed52 meets historical final target; seed42 fails. Stable B0 recovery and matched-reference/late3 acceptance are incomplete."
+}

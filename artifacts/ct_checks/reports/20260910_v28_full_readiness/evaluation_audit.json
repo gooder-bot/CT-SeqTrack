@@ -1,0 +1,93 @@
+{
+  "date": "2026-09-10",
+  "scope": "single_full_nuscenes_car_seed42_60epoch_diagnostic",
+  "evaluation_interface_blocker_found": false,
+  "server_full_run_executed": false,
+  "configuration": {
+    "version": "v1.0-trainval",
+    "train_split": "train_track",
+    "val_split": "val",
+    "test_split": "val",
+    "ct_v28_expected_mini_car_updates_per_epoch": null,
+    "category_name": "Car",
+    "seed": 42,
+    "epoch": 60,
+    "ct_keep_final_window_checkpoints": 3,
+    "ct_require_action_calibration": true
+  },
+  "scenes": {
+    "train": 350,
+    "calibration": 17,
+    "dev": 18,
+    "official_val": 150,
+    "calibration_and_dev_overlap_parameter_training": true,
+    "official_val_overlaps_parameter_training": false
+  },
+  "late_checkpoints": [
+    "formal_checkpoints/epoch=058.ckpt",
+    "formal_checkpoints/epoch=059.ckpt",
+    "formal_checkpoints/epoch=060.ckpt"
+  ],
+  "calibration": {
+    "per_checkpoint": true,
+    "entrypoint": "tools/calibrate_ct_actions.py --v28",
+    "roles": [
+      "calibration",
+      "dev"
+    ],
+    "max_distinct_calibration_rollouts": 4,
+    "max_distinct_dev_rollouts": 2,
+    "official_val_not_used_for_fitting": true,
+    "identity_bindings": [
+      "checkpoint_sha256",
+      "config_sha256",
+      "code_content_sha256",
+      "scene_manifest_sha256",
+      "metric_and_score_definitions"
+    ]
+  },
+  "metadata_fix": {
+    "files": [
+      "models/base_model.py",
+      "tests/test_ct_v28_export_metadata.py"
+    ],
+    "scope": "export copies after evaluate_one_sequence only",
+    "preserves": [
+      "sequence frame dictionaries",
+      "recursive state key",
+      "sampling RNG",
+      "S/P metric inputs",
+      "monitor tags",
+      "historical output"
+    ],
+    "mapping": [
+      "single loader/list",
+      "dataset wrappers",
+      "tracklet_indices",
+      "torch Subset indices",
+      "source virtual_rate_meta scene_token to NuScenes scene name"
+    ],
+    "unreliable_mapping": "unknown metadata, overlap null, row metadata_error and RuntimeWarning"
+  },
+  "verification": {
+    "command": "python -m pytest -q tests/test_ct_v28_export_metadata.py tests/test_ct_v27_evaluation.py tests/test_ct_v28_motion_restore.py",
+    "passed": 29,
+    "compileall": "passed",
+    "scoped_diff_check": "passed",
+    "CUDA_full_training": "not_run"
+  },
+  "diagnostic_costs": {
+    "mini_endpoint_csv_bytes": 3992202,
+    "mini_candidate_csv_bytes": 3386031,
+    "mini_reference_frames": 2285,
+    "runtime_type": "diagnostic throughput including sidecars and per-frame CUDA synchronization",
+    "memory_warning": "all endpoint dictionaries and multiple calibration policies accumulated before serialization"
+  },
+  "historical_20260528_input_budget_verification": {
+    "source": "../seqtrack/output/20260528-1633-seqtrack3d_nuscenes_mini-seqtrack_mini_baseline_car_60ep_bs16/lightning_logs/version_0/hparams.yaml",
+    "point_sample_size": 1024,
+    "hist_num": 3,
+    "batch_size": 16,
+    "is_512_slots": false
+  }
+}

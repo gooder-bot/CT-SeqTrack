@@ -34,7 +34,7 @@ class B3UtilityUpdater(nn.Module):
                  radius_base=.5, radius_per_second=.5, radius_max=2.,
                  require_calibration=False, consensus_features=True,
                  helpful_init_probability=.05, harmful_init_probability=.5,
-                 mode_summary_dim=4):
+                 mode_summary_dim=4, use_shared_policy_transition=False):
         super().__init__()
         if radius_base <= 0 or radius_per_second < 0 or radius_max <= 0:
             raise ValueError("invalid action radius")
@@ -44,6 +44,7 @@ class B3UtilityUpdater(nn.Module):
         self.consensus_features = bool(consensus_features)
         self.mode_summary_dim = int(mode_summary_dim)
         self.observation_stats_dim = int(observation_stats_dim)
+        self.use_shared_policy_transition = bool(use_shared_policy_transition)
         self.register_buffer("decision_threshold", torch.tensor(float(decision_threshold)), persistent=False)
         self.register_buffer("calibrated", torch.tensor(not require_calibration), persistent=False)
         self.action_policy = {"kind": "threshold", "threshold": float(decision_threshold)}
@@ -148,9 +149,16 @@ class B3UtilityUpdater(nn.Module):
         else:
             decision = score > self.decision_threshold.to(score)
         deployable = bool(enabled) and (bool(self.calibrated) or not self.require_calibration)
-        applied = valid & decision & deployable
-        final = torch.cat((torch.where(applied[:, None], observation[:, :2] + bounded,
-                                     observation[:, :2]), observation[:, 2:]), 1)
+        if self.use_shared_policy_transition:
+            from utils.v29_policy import policy_transition
+            bounded_candidate = torch.cat((observation[:, :2] + bounded,
+                                           observation[:, 2:]), dim=1)
+            final, applied = policy_transition(observation, bounded_candidate,
+                valid, score, self.action_policy if deployable else {'kind': 'never'})
+        else:
+            applied = valid & decision & deployable
+            final = torch.cat((torch.where(applied[:, None], observation[:, :2] + bounded,
+                                         observation[:, :2]), observation[:, 2:]), 1)
         return final, {
             "ct_b3_help_logit": help_logit, "ct_b3_harm_logit": harm_logit,
             "ct_b3_help_probability": help_logit.sigmoid(), "ct_b3_harm_probability": harm_logit.sigmoid(),

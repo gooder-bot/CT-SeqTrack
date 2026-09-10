@@ -1,0 +1,17 @@
+{
+  "source": "validation_curve.csv",
+  "audience": "research experiment audit; no target publisher specified",
+  "transformations": "raw scheduled validation scores at epochs5,10,...,60; connecting segments guide the eye; no smoothing, interpolation estimates or seed selection",
+  "missing": "no epoch58/59 evaluations; no late3 values inferred; no unscheduled validation points plotted",
+  "uncertainty": "none: two B0 training seeds and one uncalibrated Full run, no inferential interval",
+  "units": "percent; differences in percentage points",
+  "baseline": "historical reference and reference-minus-one recovery target, not protocol-matched measured controls",
+  "alt_text": "Success and Precision validation curves. Seed52 finishes at 52.88/64.48, seed42 at 45.20/47.24. Uncalibrated Full exactly overlaps seed42. Seed42 declines after intermediate epochs and misses both recovery targets.",
+  "python": "3.12.7",
+  "matplotlib": "3.9.2",
+  "numpy": "1.26.4",
+  "formats": [
+    "PNG 2300x960 pixels at 200 dpi",
+    "PDF 11.5x4.8 inches"
+  ]
+}

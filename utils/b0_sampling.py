@@ -19,6 +19,13 @@ def regularize_b0_seqtrack_compat(points, sample_size, seed=None):
     return regularize_pc(points, sample_size, seed=seed)
 
 
+def regularize_b0_sparse_v29(points, sample_size, seed=None):
+    """v29 保留1/2个真实测量；空输入与至少3点的原采样路径不变。"""
+    from datasets.points_utils import regularize_pc
+
+    return regularize_pc(points, sample_size, seed=seed)
+
+
 @contextmanager
 def isolated_observation_rng(seed):
     """原随机采样算法使用逐样本随机域，不移动调用方或其他模块 RNG。"""

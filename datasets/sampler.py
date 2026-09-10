@@ -264,6 +264,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     """
     v27 = bool(getattr(config, 'ct_enable_v27', False))
     v28 = bool(getattr(config, 'ct_enable_v28', False))
+    v29 = bool(getattr(config, 'ct_enable_v29', False))
     from utils.point_identity import raw_point_ids, sampled_identity
     from functools import partial
     crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
@@ -271,6 +272,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     b0_crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
                                 canonicalize=v27 and not v28)
     regularize_b0 = regularize_b0_seqtrack_compat if v28 else points_utils.regularize_pc
+    if v29:
+        from utils.b0_sampling import regularize_b0_sparse_v29
+        regularize_b0 = regularize_b0_sparse_v29
     prev_frames = data['prev_frames']
     this_frame = data['this_frame']
     candidate_id = data['candidate_id']
@@ -1113,6 +1117,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         if v27:
             support_kwargs.update(enable_v27=True,
                                   first_frame_size=data['first_frame']['3d_bbox'].wlh)
+        if v29 and use_ct_joint_full and joint_contract_v2:
+            support_kwargs.update(enable_v29=True, b0_crop_box=ref_boxs[0],
+                                  b0_crop_scale=config.bb_scale, b0_crop_offset=config.bb_offset)
         if use_ct_joint_full and joint_contract_v2:
             (search_v2_box,
              ct_search_box,
@@ -1217,6 +1224,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 max_width=float(getattr(
                     config, 'ct_corridor_max_width', 6.0)),
                 **({'enable_v27': True} if v27 else {}),
+                **({'enable_v29': True, 'b0_crop_box': ref_boxs[0],
+                    'b0_crop_scale': config.bb_scale, 'b0_crop_offset': config.bb_offset} if v29 else {}),
             )
             if corridor_box is not None:
                 corridor_pc = crop_subwindow(
@@ -1244,7 +1253,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         motion_anchor_box.center, motion_anchor_theta).astype('float32')
 
     this_box    = points_utils.transform_box(this_box, ref_boxs[0]) 
-    prev_boxs   = [points_utils.transform_box(prev_box, ref_boxs[0]) for prev_box in prev_boxs] 
+    prev_boxs   = [points_utils.transform_box(prev_box, ref_boxs[0]) for prev_box in (ground_truth_history if v29 else prev_boxs)]
     ref_boxs    = [points_utils.transform_box(ref_box, ref_boxs[0]) for ref_box in ref_boxs]    
     motion_boxs = [points_utils.transform_box(this_box, prev_box) for prev_box in prev_boxs]  
 
@@ -1624,8 +1633,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     seg_mask_prev_list = [geometry_utils.points_in_box(ref_box, prev_points.T[:3,:], config.bb_scale).astype(float) for ref_box,prev_points in zip(ref_boxs,prev_points_list)]#应当只考虑xyz特征
     predicted_history = v28 and (online_recursive_state is not None
                                   or bool(data.get('_ct_inference', False)))
-    soften_history_prior = (int(this_frame_id) != 1 if predicted_history
-                            else candidate_id != 0)
+    if v29 and predicted_history:
+        if 'is_initial_query' not in data:
+            raise KeyError('v29 predicted history requires explicit is_initial_query')
+        # 局部起点若已扰动，仍是软 prior；初始化 query 与历史可靠性不能混为一谈。
+        soften_history_prior = not bool(data.get('history_reference_reliable', data['is_initial_query']))
+    else:
+        soften_history_prior = (int(this_frame_id) != 1 if predicted_history
+                                else candidate_id != 0)
     if soften_history_prior:
         for seg_mask_prev in seg_mask_prev_list:
             # Here we use 0.2/0.8 instead of 0/1 to indicate that the previous box is not GT.
@@ -1718,6 +1733,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         np.append(motion_box.center, theta_motion).astype('float32')
         for motion_box, theta_motion in zip(motion_boxs, theta_motion_list)
     ]
+    if v29:
+        # 物理位移在输入 anchor 坐标轴表示；预测历史只决定输入，不能成为标签。
+        motion_label_list = [np.asarray([*(this_box.center - prev.center),
+            theta_motion], dtype=np.float32)
+            for prev, theta_motion in zip(prev_boxs, theta_motion_list)]
     motion_state_label_list = [ 
         np.sqrt(np.sum((this_box.center - prev_box.center)**2))
         > config.motion_threshold for prev_box in prev_boxs
@@ -2157,10 +2177,24 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     if v27:
         import hashlib
         margin_target = None
+        max_support_boxes_v29 = ()
+        actual_margin_v29 = ((support_prediction or {}).get('acquisition_margin_parallel_perp', (2., 1.))
+                             if search_v2_diagnostics.get('prior_source') == 'b1' else (2., 1.))
+        if v29 and use_ct_joint_full:
+            from utils.acquisition_v29 import maximum_acquisition_supports_v29
+            max_support_boxes_v29 = maximum_acquisition_supports_v29(
+                search_v2_box, ct_search_box, corridor_box, actual_margins=actual_margin_v29,
+                b0_crop_box=coordinate_anchor_box, b0_crop_scale=config.bb_scale,
+                b0_crop_offset=config.bb_offset)
         identities = [sampled_identity(pc, result[1], config.point_sample_size)
                       for pc, result in zip(prev_frame_pcs, prev_regularized)]
         identities.append(sampled_identity(this_frame_pc, this_sample_indices,
                                            config.point_sample_size))
+        if v29:
+            for i, exists in enumerate(valid_mask):
+                if not exists:
+                    identities[i] = (np.full_like(identities[i][0], -1),
+                        np.zeros_like(identities[i][1]), np.zeros_like(identities[i][2]))
         data_dict.update({
             'b0_point_ids': np.stack([item[0] for item in identities]),
             'b0_point_valid_mask': np.stack([item[1] for item in identities]),
@@ -2180,6 +2214,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             'target_bbox_size': np.asarray(canonical_this_box.wlh, dtype=np.float32),
             'timestamps_effective': np.asarray(effective_local_timestamps, dtype=np.float32),
         })
+        if v29:
+            from utils.acquisition_v29 import support_vertical_interval
+            support_boxes_v29 = (search_v2_box, ct_search_box, corridor_box)
+            data_dict['ct_acquisition_support_exists'] = np.asarray(
+                [box is not None for box in support_boxes_v29], dtype=np.int64)
+            data_dict['ct_acquisition_support_z_intervals'] = np.stack([
+                support_vertical_interval(box) if box is not None else np.zeros(2)
+                for box in support_boxes_v29]).astype(np.float32)
         if v27_b1_input is not None:
             from utils.b1_acquisition import b1_input_digest, acquisition_margin_grid_target
             data_dict['motion_acquisition_features'] = v27_b1_input['acquisition_features']
@@ -2194,16 +2236,26 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             for key in margin_count_keys:
                 data_dict['motion_margin_' + key] = np.float32(0.)
             if not data.get('_ct_inference', False) and search_v2_box is not None:
-                margin_target = acquisition_margin_grid_target(
-                    this_pc.points.T, raw_point_ids(this_pc),
-                    geometry_utils.points_in_box(canonical_this_box, this_pc.points, 1.0),
-                    raw_point_ids(this_frame_pc),
-                    anchor_center=coordinate_anchor_box.center,
-                    endpoint_center=search_v2_diagnostics['endpoint_center'],
-                    object_wlh=data['first_frame']['3d_bbox'].wlh,
-                    object_yaw=float(coordinate_anchor_box.orientation.radians *
-                                     coordinate_anchor_box.orientation.axis[-1]),
-                    corridor_box=corridor_box)
+                if v29:
+                    from utils.acquisition_v29 import acquisition_margin_grid_target_v29
+                    margin_target = acquisition_margin_grid_target_v29(
+                        this_pc.points[:3].T, raw_point_ids(this_pc),
+                        geometry_utils.points_in_box(canonical_this_box, this_pc.points, 1.0),
+                        raw_point_ids(this_frame_pc), endpoint_box=search_v2_box,
+                        tube_box=ct_search_box, corridor_box=corridor_box,
+                        actual_margins=actual_margin_v29, b0_crop_box=coordinate_anchor_box,
+                        b0_crop_scale=config.bb_scale, b0_crop_offset=config.bb_offset)
+                else:
+                    margin_target = acquisition_margin_grid_target(
+                        this_pc.points.T, raw_point_ids(this_pc),
+                        geometry_utils.points_in_box(canonical_this_box, this_pc.points, 1.0),
+                        raw_point_ids(this_frame_pc),
+                        anchor_center=coordinate_anchor_box.center,
+                        endpoint_center=search_v2_diagnostics['endpoint_center'],
+                        object_wlh=data['first_frame']['3d_bbox'].wlh,
+                        object_yaw=float(coordinate_anchor_box.orientation.radians *
+                                         coordinate_anchor_box.orientation.axis[-1]),
+                        corridor_box=corridor_box)
                 data_dict['motion_acquisition_target'] = margin_target['target_margin']
                 data_dict['motion_acquisition_target_valid'] = np.float32(margin_target['valid'])
                 for key in margin_count_keys:
@@ -2284,7 +2336,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                     support_boxes=(search_v2_box, ct_search_box, corridor_box))
                 from utils.v27_diagnostics import build_acquisition_diagnostics
                 sidecar['acquisition'] = build_acquisition_diagnostics(
-                    **sidecar.pop('_construction'), margin_target=margin_target)
+                    **sidecar.pop('_construction'), margin_target=margin_target,
+                    **({'enable_v29': True, 'max_support_boxes': max_support_boxes_v29} if v29 else {}))
                 data_dict.update({
                     'ct_acquisition_base_target_count': np.float32(sidecar['acquisition']['base_raw_target_count']),
                     'ct_acquisition_expansion_target_count': np.float32(sidecar['acquisition']['expansion_target_count']),
@@ -2302,13 +2355,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 this_pc, canonical_this_box, coordinate_anchor_box, this_frame_pc,
                 this_points[:, :3], identities[-1][0], None, None, None,
                 empty_xyz, empty_ids, empty_xyz, empty_ids,
-                np.empty(0, dtype=np.float32), empty_ids)
+                np.empty(0, dtype=np.float32), empty_ids,
+                **({'enable_v29': True, 'max_support_boxes': ()} if v29 else {}))
             sidecar['acquisition'].update(
                 acquisition_enabled=False,
                 acquisition_disabled_reason=('observation_only' if observation_only else 'modules_disabled'),
                 selected_point_count=0, selected_target_count=0,
                 selected_background_count=0, selected_target_bearing=0)
 
+    if v29:
+        data_dict['b0_coarse_target'] = np.asarray(motion_label_list[0], dtype=np.float32)
     if str(getattr(
             config, 'ct_observation_payload_mode', 'legacy'
             )).strip().lower() == 'seqtrack_core':
@@ -2821,6 +2877,9 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 raise TypeError(
                     "online recursive sampler requires structured batch indices")
             return self._online_raw_view(*index)
+        if bool(getattr(self.config, 'ct_enable_v29', False)):
+            from utils.v29_rollin import observation_item
+            return observation_item(self, index)
         if bool(getattr(self.config, 'ct_enable_v28', False)):
             return self._getitem_v28_observation(index)
         retry_attempt = 0

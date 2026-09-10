@@ -397,6 +397,10 @@ def build_online_resume_contract(config):
         "val_split": str(_get(config, "val_split", "")),
         "save_top_k": int(_get(config, "save_top_k", 0)),
     }
+    if bool(_get(config, "ct_enable_v29", False)):
+        from utils.v29_contracts import V29_CONTRACTS
+        for key in ("ct_enable_v29", *V29_CONTRACTS):
+            fields[key] = _get(config, key)
     if bool(_get(config, "ct_enable_v28", False)):
         for key in ("ct_enable_v28", "ct_reference_baseline", "ct_observation_contract",
                     "ct_b0_ce_contract",
@@ -558,7 +562,7 @@ def validate_scratch_training_contract(config):
     safe_auto = runtime_protocol == "safe_seqtrack_auto_v1"
 
     if str(_get(config, "net_model", "seqtrack3d")) == "ctseqtrack":
-        if str(_get(config, "ct_training_state_policy", "")) != "observation":
+        if str(_get(config, "ct_training_state_policy", "")) != ("mixed_accepted_v1" if bool(_get(config, "ct_enable_v29", False)) else "observation"):
             errors.append("ct_training_state_policy must be observation")
         if str(_get(config, "ct_module_isolation", "")) != "strict":
             errors.append("ct_module_isolation must be strict")
@@ -689,8 +693,8 @@ def validate_scratch_training_contract(config):
             errors.append("v28 registered training seed must be a positive integer")
         for key, value in {
                 "ct_enable_v27": True,
-                "ct_observation_contract": "seqtrack_reference_compatible_v1",
-                "ct_b0_sampling_contract": "seqtrack_original_slots_v1",
+                "ct_observation_contract": ("seqtrack_adapted_rollin_v1" if _get(config, "ct_enable_v29", False) else "seqtrack_reference_compatible_v1"),
+                "ct_b0_sampling_contract": ("real_sparse_repeat_slots_v1" if _get(config, "ct_enable_v29", False) else "seqtrack_original_slots_v1"),
                 "ct_b0_point_feature_source": "seg_second64_v1",
                 "ct_b0_ce_contract": "class_axis_logsoftmax_flat_nll_v1",
                 "ct_deterministic_algorithms": True,
@@ -727,6 +731,10 @@ def validate_scratch_training_contract(config):
                 value = _get(config, key, 1.0)
                 if not isinstance(value, float) or value != 1.0:
                     errors.append(f"formal v28 {key} must be float 1.0")
+
+    if bool(_get(config, "ct_enable_v29", False)):
+        from utils.v29_contracts import validate_v29_contract
+        validate_v29_contract(config)
 
     b1 = bool(_get(config, "ct_enable_b1", False))
     b2 = bool(_get(config, "ct_enable_b2", False))

@@ -1,0 +1,5 @@
+{
+  "command": "python -m pytest -q -ra",
+  "exit_code": 0,
+  "elapsed_seconds": 238.13949950000097
+}

@@ -63,6 +63,26 @@ class AcquisitionRecord:
     input_digest: str = ''
     parameter_revision: int = 0
     fallback_reason: str = ''
+    # v29 仅供获取审计；endpoint/tube/corridor 的世界 Z 区间，不拼入网络。
+    support_z_intervals: Optional[Tensor] = None
+    support_exists: Optional[Tensor] = None
+
+    def __post_init__(self):
+        if self.support_z_intervals is None and self.support_exists is None:
+            return
+        if self.support_z_intervals is None or self.support_exists is None:
+            raise ValueError('acquisition support Z metadata requires both intervals and existence')
+        batch = self.endpoint_xy.shape[0]
+        if (self.support_z_intervals.shape != (batch, 3, 2)
+                or self.support_exists.shape != (batch, 3)):
+            raise ValueError('acquisition Z metadata requires [B,3,2] intervals and [B,3] existence')
+        if self.support_exists.dtype != torch.bool:
+            raise ValueError('acquisition support existence must be boolean')
+        intervals, valid = self.support_z_intervals, self.support_exists
+        if (not bool(torch.isfinite(intervals).all())
+                or bool((valid & (intervals[..., 1] <= intervals[..., 0])).any())
+                or bool((~valid & (intervals != 0).any(dim=-1)).any())):
+            raise ValueError('acquisition support Z intervals must be finite, ordered, and zero when absent')
 
     def detached(self):
         return AcquisitionRecord(**{
@@ -266,4 +286,3 @@ class DecisionOutput:
     expected_iou_gain: Tensor
     applied: Tensor
     bounded_residual: Tensor
-

@@ -61,6 +61,9 @@ def compute_b3_utility_loss(data, output, config):
     h3_mask &= valid
     def gain_loss(predicted, h1, future_key):
         immediate = _weighted_mean((predicted - h1).square(), valid)
+        if bool(_get(config, 'ct_enable_v29', False)):
+            # v29 q严格预测即时有界动作S/P；H3仅记录回退续推诊断。
+            return immediate
         future = data.get(future_key)
         if future is None:
             if bool(h3_mask.any()):

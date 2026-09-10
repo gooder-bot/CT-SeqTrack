@@ -1,0 +1,526 @@
+{
+  "date": "2026-09-10",
+  "scope": "read_only_protocol_and_reference_audit",
+  "healthy_historical_reference": {
+    "S": 50.98577880859375,
+    "P": 59.96171188354492
+  },
+  "recovery_floor": {
+    "S": 49.98577880859375,
+    "P": 58.96171188354492
+  },
+  "runs": [
+    {
+      "run_dir": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16",
+      "source_commit": "749bc13a0143fcdedba5cee465e2273c639e3b17",
+      "git_status": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ],
+      "dataset": {
+        "train": {
+          "protocol_role": "train",
+          "scene_names": [
+            "scene-0061",
+            "scene-0553",
+            "scene-0655",
+            "scene-0757",
+            "scene-0796",
+            "scene-1077",
+            "scene-1094",
+            "scene-1100"
+          ],
+          "frames": 5051,
+          "tracklets": 274,
+          "split": "mini_train"
+        },
+        "val": {
+          "protocol_role": "test",
+          "scene_names": [
+            "scene-0103",
+            "scene-0916"
+          ],
+          "frames": 2285,
+          "tracklets": 106,
+          "split": "mini_val"
+        }
+      },
+      "training_streams": {
+        "b0_optimizer_steps_per_epoch": 1262,
+        "mechanism_partition": "train",
+        "mechanism_passes_per_epoch": 1,
+        "mechanism_prediction_frames": null,
+        "mechanism_selection_sha256": null,
+        "mechanism_source": null,
+        "mechanism_steps_per_epoch": 0,
+        "mechanism_tracklets": null,
+        "observation_source": "train",
+        "observation_steps_per_epoch": 1262,
+        "topology": "dual_stream"
+      },
+      "observation_update_count_check": {
+        "batch_size": 16,
+        "drop_last": true,
+        "dropped_final_rows": 12,
+        "expected_updates_per_epoch": 1262,
+        "observed_updates_per_epoch": 1262,
+        "registered_formal_epochs": 60,
+        "registered_formal_total_updates": 75720,
+        "samples": 20204
+      },
+      "runtime_environment": {
+        "cublas_workspace_config": ":4096:8",
+        "cuda": "11.8",
+        "cuda_visible_devices": "1",
+        "cudnn": 8700,
+        "cudnn_allow_tf32": false,
+        "cudnn_benchmark": false,
+        "cudnn_deterministic": true,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "devices": [
+          {
+            "capability": [
+              8,
+              6
+            ],
+            "index": 0,
+            "name": "NVIDIA A40",
+            "total_memory": 47622258688,
+            "uuid": "unavailable"
+          }
+        ],
+        "matmul_allow_tf32": false,
+        "matmul_precision": "highest",
+        "nvidia_driver_devices": [
+          "GPU-238ba262-3f9f-55cf-db40-52a1a941621d, 535.247.01",
+          "GPU-35e34272-4fd0-af58-e066-8a5ea1e312f6, 535.247.01",
+          "GPU-4802020b-d23b-50db-3674-4606421c60e4, 535.247.01",
+          "GPU-eb6ca4fd-5bfa-0e6a-bad4-f2f6b1ed2541, 535.247.01"
+        ],
+        "platform": "Linux-5.4.0-166-generic-x86_64-with-glibc2.31",
+        "python": "3.9.19",
+        "pytorch_lightning": "2.0.2",
+        "schema": "ct_seqtrack.runtime_environment.v28",
+        "torch": "2.0.1+cu118"
+      },
+      "seed": 42,
+      "seed_registration": 42,
+      "safe_first_frame_size": true,
+      "metric_mode": "benchmark_compat",
+      "loss_reduction": "reference_batch",
+      "sampling_contract": "seqtrack_original_slots_v1",
+      "ce_contract": "class_axis_logsoftmax_flat_nll_v1",
+      "checkpoint_path": null,
+      "init_checkpoint_path": null,
+      "final_metrics": {
+        "P": 47.24288820690543,
+        "S": 45.20021901936708,
+        "U": 46.22155361313625,
+        "action_harm_mean_severity": 0.0,
+        "action_harm_rate": null,
+        "action_precision_harm_rate": null,
+        "action_success_harm_rate": null,
+        "actions": 0,
+        "coverage": 0.0,
+        "frames": 2285,
+        "geometry_exact_P": 47.24288820690543,
+        "geometry_exact_S": 45.20021901936708,
+        "one_step_net_utility": 0.0,
+        "scenes": 1,
+        "tracklets": 106
+      },
+      "delta_vs_historical_reference": {
+        "S": -5.785559789226667,
+        "P": -12.718823676639495
+      },
+      "final_historical_point_target_pass": false,
+      "endpoint_rows": 2285,
+      "initial_rows": 106,
+      "csv_partition_counts": {
+        "dev": 2285
+      },
+      "csv_scene_id_counts": {
+        "unknown": 2285
+      },
+      "calibration_status_counts": {
+        "not_installed": 2285
+      },
+      "available_evaluation_epochs": [
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55,
+        60
+      ]
+    },
+    {
+      "run_dir": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16",
+      "source_commit": "749bc13a0143fcdedba5cee465e2273c639e3b17",
+      "git_status": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ],
+      "dataset": {
+        "train": {
+          "protocol_role": "train",
+          "scene_names": [
+            "scene-0061",
+            "scene-0553",
+            "scene-0655",
+            "scene-0757",
+            "scene-0796",
+            "scene-1077",
+            "scene-1094",
+            "scene-1100"
+          ],
+          "frames": 5051,
+          "tracklets": 274,
+          "split": "mini_train"
+        },
+        "val": {
+          "protocol_role": "test",
+          "scene_names": [
+            "scene-0103",
+            "scene-0916"
+          ],
+          "frames": 2285,
+          "tracklets": 106,
+          "split": "mini_val"
+        }
+      },
+      "training_streams": {
+        "b0_optimizer_steps_per_epoch": 1262,
+        "mechanism_partition": "train",
+        "mechanism_passes_per_epoch": 1,
+        "mechanism_prediction_frames": null,
+        "mechanism_selection_sha256": null,
+        "mechanism_source": null,
+        "mechanism_steps_per_epoch": 0,
+        "mechanism_tracklets": null,
+        "observation_source": "train",
+        "observation_steps_per_epoch": 1262,
+        "topology": "dual_stream"
+      },
+      "observation_update_count_check": {
+        "batch_size": 16,
+        "drop_last": true,
+        "dropped_final_rows": 12,
+        "expected_updates_per_epoch": 1262,
+        "observed_updates_per_epoch": 1262,
+        "registered_formal_epochs": 60,
+        "registered_formal_total_updates": 75720,
+        "samples": 20204
+      },
+      "runtime_environment": {
+        "cublas_workspace_config": ":4096:8",
+        "cuda": "11.8",
+        "cuda_visible_devices": "2",
+        "cudnn": 8700,
+        "cudnn_allow_tf32": false,
+        "cudnn_benchmark": false,
+        "cudnn_deterministic": true,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "devices": [
+          {
+            "capability": [
+              8,
+              6
+            ],
+            "index": 0,
+            "name": "NVIDIA A40",
+            "total_memory": 47622258688,
+            "uuid": "unavailable"
+          }
+        ],
+        "matmul_allow_tf32": false,
+        "matmul_precision": "highest",
+        "nvidia_driver_devices": [
+          "GPU-238ba262-3f9f-55cf-db40-52a1a941621d, 535.247.01",
+          "GPU-35e34272-4fd0-af58-e066-8a5ea1e312f6, 535.247.01",
+          "GPU-4802020b-d23b-50db-3674-4606421c60e4, 535.247.01",
+          "GPU-eb6ca4fd-5bfa-0e6a-bad4-f2f6b1ed2541, 535.247.01"
+        ],
+        "platform": "Linux-5.4.0-166-generic-x86_64-with-glibc2.31",
+        "python": "3.9.19",
+        "pytorch_lightning": "2.0.2",
+        "schema": "ct_seqtrack.runtime_environment.v28",
+        "torch": "2.0.1+cu118"
+      },
+      "seed": 52,
+      "seed_registration": 52,
+      "safe_first_frame_size": true,
+      "metric_mode": "benchmark_compat",
+      "loss_reduction": "reference_batch",
+      "sampling_contract": "seqtrack_original_slots_v1",
+      "ce_contract": "class_axis_logsoftmax_flat_nll_v1",
+      "checkpoint_path": null,
+      "init_checkpoint_path": null,
+      "final_metrics": {
+        "P": 64.478117910334,
+        "S": 52.87636772376899,
+        "U": 58.6772428170515,
+        "action_harm_mean_severity": 0.0,
+        "action_harm_rate": null,
+        "action_precision_harm_rate": null,
+        "action_success_harm_rate": null,
+        "actions": 0,
+        "coverage": 0.0,
+        "frames": 2285,
+        "geometry_exact_P": 64.478117910334,
+        "geometry_exact_S": 52.87636772376899,
+        "one_step_net_utility": 0.0,
+        "scenes": 1,
+        "tracklets": 106
+      },
+      "delta_vs_historical_reference": {
+        "S": 1.8905889151752433,
+        "P": 4.516406026789085
+      },
+      "final_historical_point_target_pass": true,
+      "endpoint_rows": 2285,
+      "initial_rows": 106,
+      "csv_partition_counts": {
+        "dev": 2285
+      },
+      "csv_scene_id_counts": {
+        "unknown": 2285
+      },
+      "calibration_status_counts": {
+        "not_installed": 2285
+      },
+      "available_evaluation_epochs": [
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55,
+        60
+      ]
+    },
+    {
+      "run_dir": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16",
+      "source_commit": "749bc13a0143fcdedba5cee465e2273c639e3b17",
+      "git_status": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ],
+      "dataset": {
+        "mechanism": {
+          "protocol_role": "train",
+          "scene_names": [
+            "scene-0061",
+            "scene-0553",
+            "scene-0655",
+            "scene-0757",
+            "scene-0796",
+            "scene-1077",
+            "scene-1094",
+            "scene-1100"
+          ],
+          "frames": 5051,
+          "tracklets": 274,
+          "split": "mini_train"
+        },
+        "train": {
+          "protocol_role": "train",
+          "scene_names": [
+            "scene-0061",
+            "scene-0553",
+            "scene-0655",
+            "scene-0757",
+            "scene-0796",
+            "scene-1077",
+            "scene-1094",
+            "scene-1100"
+          ],
+          "frames": 5051,
+          "tracklets": 274,
+          "split": "mini_train"
+        },
+        "val": {
+          "protocol_role": "test",
+          "scene_names": [
+            "scene-0103",
+            "scene-0916"
+          ],
+          "frames": 2285,
+          "tracklets": 106,
+          "split": "mini_val"
+        }
+      },
+      "training_streams": {
+        "b0_optimizer_steps_per_epoch": 1262,
+        "mechanism_partition": "train",
+        "mechanism_passes_per_epoch": 1,
+        "mechanism_prediction_frames": 4777,
+        "mechanism_selection_sha256": "a9edbf6c94c944cda03f80fc13f7e2881d3c1296c91205c7b4e966772f939099",
+        "mechanism_source": "mechanism",
+        "mechanism_steps_per_epoch": 300,
+        "mechanism_tracklets": 268,
+        "observation_source": "train",
+        "observation_steps_per_epoch": 1262,
+        "topology": "dual_stream"
+      },
+      "observation_update_count_check": {
+        "batch_size": 16,
+        "drop_last": true,
+        "dropped_final_rows": 12,
+        "expected_updates_per_epoch": 1262,
+        "observed_updates_per_epoch": 1262,
+        "registered_formal_epochs": 60,
+        "registered_formal_total_updates": 75720,
+        "samples": 20204
+      },
+      "runtime_environment": {
+        "cublas_workspace_config": ":4096:8",
+        "cuda": "11.8",
+        "cuda_visible_devices": "3",
+        "cudnn": 8700,
+        "cudnn_allow_tf32": false,
+        "cudnn_benchmark": false,
+        "cudnn_deterministic": true,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "devices": [
+          {
+            "capability": [
+              8,
+              6
+            ],
+            "index": 0,
+            "name": "NVIDIA A40",
+            "total_memory": 47622258688,
+            "uuid": "unavailable"
+          }
+        ],
+        "matmul_allow_tf32": false,
+        "matmul_precision": "highest",
+        "nvidia_driver_devices": [
+          "GPU-238ba262-3f9f-55cf-db40-52a1a941621d, 535.247.01",
+          "GPU-35e34272-4fd0-af58-e066-8a5ea1e312f6, 535.247.01",
+          "GPU-4802020b-d23b-50db-3674-4606421c60e4, 535.247.01",
+          "GPU-eb6ca4fd-5bfa-0e6a-bad4-f2f6b1ed2541, 535.247.01"
+        ],
+        "platform": "Linux-5.4.0-166-generic-x86_64-with-glibc2.31",
+        "python": "3.9.19",
+        "pytorch_lightning": "2.0.2",
+        "schema": "ct_seqtrack.runtime_environment.v28",
+        "torch": "2.0.1+cu118"
+      },
+      "seed": 42,
+      "seed_registration": 42,
+      "safe_first_frame_size": true,
+      "metric_mode": "benchmark_compat",
+      "loss_reduction": "reference_batch",
+      "sampling_contract": "seqtrack_original_slots_v1",
+      "ce_contract": "class_axis_logsoftmax_flat_nll_v1",
+      "checkpoint_path": null,
+      "init_checkpoint_path": null,
+      "final_metrics": {
+        "P": 47.24288820690543,
+        "S": 45.20021901936708,
+        "U": 46.22155361313625,
+        "action_harm_mean_severity": 0.0,
+        "action_harm_rate": null,
+        "action_precision_harm_rate": null,
+        "action_success_harm_rate": null,
+        "actions": 0,
+        "coverage": 0.0,
+        "frames": 2285,
+        "geometry_exact_P": 47.24288820690543,
+        "geometry_exact_S": 45.20021901936708,
+        "one_step_net_utility": 0.0,
+        "scenes": 1,
+        "tracklets": 106
+      },
+      "delta_vs_historical_reference": {
+        "S": -5.785559789226667,
+        "P": -12.718823676639495
+      },
+      "final_historical_point_target_pass": false,
+      "endpoint_rows": 2285,
+      "initial_rows": 106,
+      "csv_partition_counts": {
+        "dev": 2285
+      },
+      "csv_scene_id_counts": {
+        "unknown": 2285
+      },
+      "calibration_status_counts": {
+        "{\"fallback\": \"observation\", \"loaded\": false, \"reason\": \"missing_calibration_artifact\", \"schema\": \"ct_seqtrack.action_calibration.v28\"}": 2285
+      },
+      "available_evaluation_epochs": [
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55,
+        60
+      ]
+    }
+  ],
+  "reference_config_differences": {
+    "ct_reference_baseline": {
+      "b0": false,
+      "reference": true
+    },
+    "experiment_name": {
+      "b0": "ct28_b0_mini_car_scratch_seed42",
+      "reference": "ct28_seqtrack_reference_mini_car_scratch_seed42"
+    }
+  },
+  "independent_reference_available": false,
+  "late3_available": false,
+  "scene_metadata_warning": "CSV scene_id is unknown for all endpoints; reported scenes=1 counts one unknown label. Actual dataset provenance is official mini_val with two scenes.",
+  "minimum_next_evidence": [
+    "Evaluate existing epoch58/59 checkpoints under the same protocol; do not substitute epoch50/55/60 for late3.",
+    "Calibrate each Full checkpoint on registered training-internal calibration/dev; evaluate never/bounded/selective closed-loop on official mini_val.",
+    "For an independent matched SeqTrack comparison, define a separate upstream implementation adapter with the same causal inputs, budget, evaluator and numerical settings. Current reference config shares B0 implementation.",
+    "Investigate seed42 recovery failure before broad full-data publication runs; do not select seed52 or best epoch to conceal it."
+  ]
+}

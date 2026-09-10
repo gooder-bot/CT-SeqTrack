@@ -1,0 +1,18 @@
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+........................................................................ [ 37%]
+.s...................................................................... [ 49%]
+.............................ssssssss................................... [ 61%]
+.....................................s.................................. [ 74%]
+.........s.............................s................................ [ 86%]
+........................................................................ [ 98%]
+.......                                                                  [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_ct_lightning_runtime.py:16: could not import 'pytorch_lightning': No module named 'pytorch_lightning'
+SKIPPED [1] tests\test_ct_v27_checkpoint_runtime.py:10: could not import 'pytorch_lightning': No module named 'pytorch_lightning'
+SKIPPED [1] tests\test_ct_v27_full_model.py:252: real Lightning required for Trainer integration
+SKIPPED [8] tests\test_ct_v28_components.py:48: CUDA verification requires a CUDA runtime
+SKIPPED [1] tests\test_ct_v28_deterministic_ce.py:55: requires actual CUDA runtime
+SKIPPED [1] tests\test_ct_v28_resume_tool.py:98: could not import 'pytorch_lightning': No module named 'pytorch_lightning'
+SKIPPED [1] tests\test_ct_v29_attention_sampling.py:162: requires actual CUDA strict-attention backward
+571 passed, 14 skipped in 236.69s (0:03:56)

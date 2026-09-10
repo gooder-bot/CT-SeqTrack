@@ -1,0 +1,452 @@
+[
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=058.ckpt",
+    "bytes": 44899210,
+    "sha256": "eef7f1fb11c996f7de06e4dc0aa7a49185cd5781e4888a9809c63771819bf74b"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=059.ckpt",
+    "bytes": 44899274,
+    "sha256": "28210b71e5b89afd0d3d07bf86b1992a7e57c349bb4835e00d806a71102ae81c"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=060.ckpt",
+    "bytes": 44899402,
+    "sha256": "939584433027d2d09406d41a78682e2f515a7ee92f01b1862dc94a45f78eddfb"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_endpoints.csv",
+    "bytes": 2575738,
+    "sha256": "696c6bb7276ea604470e959749c2e1d9009fc3dad26eb976cfbaa162e86c4ae0"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json",
+    "bytes": 151112,
+    "sha256": "59f7d54f50117d4eeeb0b26441573f7b66ae0d4974a47e3d1f477ceda08610c6"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_endpoints.csv",
+    "bytes": 2672973,
+    "sha256": "d5c13d7dcfc5772e52bd74911739d5e7034284910a65e6415a7e01ea53c7da9a"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json",
+    "bytes": 131255,
+    "sha256": "89d5dd2b70d1ccd4be02f5bd1b04fe9121e6e099f68b885bf4e461f2478b7829"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_endpoints.csv",
+    "bytes": 2443777,
+    "sha256": "ffb1a1c2782ae4175c5ac2c13c9dcb44b3efb31a4ff55c5dc6dc42c3139ced0f"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json",
+    "bytes": 201452,
+    "sha256": "5b2912e60248f91ebf93defe4e52f2bb335fb935b4a14b57587e888d5cb27536"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_endpoints.csv",
+    "bytes": 2690573,
+    "sha256": "0828d0c97418ec847e39d3fee5815a421a732aa50413da1f141448d173a4d6d0"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json",
+    "bytes": 111266,
+    "sha256": "c1a4cf387a3b92ce9b4728193106a58ec46e01b6ed4d01442f26b702a6155a8a"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_endpoints.csv",
+    "bytes": 2675982,
+    "sha256": "c3318aeec8736078fda3a5f2fe7e3d006d7d6db4c38d981d35309ac32811a89d"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json",
+    "bytes": 116113,
+    "sha256": "b609a29f2143f95a8d8cde7bfc2cce1385234941e8031902ff27ab25d79681b3"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_endpoints.csv",
+    "bytes": 2646136,
+    "sha256": "1f6f6d8c8b56224ddc81ab095645a5fe72e8d4881d375be75a5d51934623ed86"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json",
+    "bytes": 121461,
+    "sha256": "9d30b205bd45a0933ff9e64f9863fd56f8990b38889527019dbbee2c7b6f0cc6"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_endpoints.csv",
+    "bytes": 2636913,
+    "sha256": "ab256cd4289e05b4513c2744135f36bf73d99db4a2d622823c5260f0d368715d"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json",
+    "bytes": 122531,
+    "sha256": "61c7a8b2fa9bc377b809986c52cd3d92b2e74f71862e35399125fe0d8f40e6da"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_endpoints.csv",
+    "bytes": 2628427,
+    "sha256": "1318bd504567419dc83367e34db6fd543369fcdd50d86729a9ebcdd46a08dcf0"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json",
+    "bytes": 118275,
+    "sha256": "ce7f3ac3d7531ca3ffbc86a4fcff1577820a9d1ebb2f4c2a3860403b6cbe0f98"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_endpoints.csv",
+    "bytes": 2642842,
+    "sha256": "0a3482703db61cb4ccfda2aa1b5ebf6717634cf15ce9b68ace19d5df5cc05267"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json",
+    "bytes": 119358,
+    "sha256": "208737d2db786ca8a50b94dd0a6d57678c611c691621a2c94ba7da70e5a58c08"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_endpoints.csv",
+    "bytes": 2644745,
+    "sha256": "9f23a4d26c7aa6ce330d8a8787432c27d69fb47e89ec4b9596986c337d1c0ca4"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json",
+    "bytes": 117719,
+    "sha256": "e564550ef7237301ac4f5e4ce00ad662dcd36c711cb8adb03aac86df9bfa9bb7"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_endpoints.csv",
+    "bytes": 2652228,
+    "sha256": "c721db65b6bf4361fa53265ffb5b6315a92f05970a0e44f6199ee5e5de00b650"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json",
+    "bytes": 116157,
+    "sha256": "d8bfed2ae67f331f8bedf94f1faca039de3db04808360fd8eed43904df4d92d3"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_endpoints.csv",
+    "bytes": 2648440,
+    "sha256": "3b3908a031be5f463210040e3169017bdb82e62d2f2a1da55f0200a275d6d810"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json",
+    "bytes": 117746,
+    "sha256": "64925740aa45f30aee83f461d0afa66fde8fc9fe33f27b8506655471e31b8108"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/resolved_config.yaml",
+    "bytes": 12846,
+    "sha256": "572999f30f57ffab742230e6edc7dfd8d9d9bc6be25d250dfc334e5679fbddc7"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/run_provenance.json",
+    "bytes": 22777,
+    "sha256": "ed8492ec9b9e8c6ffc468ad34e1d7c7a3ad7119473ba3762feb323f6e71c6417"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/train.log",
+    "bytes": 12357043,
+    "sha256": "a492f5ff16ba35650b812b5dd184859fbe5e0262626d22a9a51ef286d867ecd3"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/formal_checkpoints/epoch=058.ckpt",
+    "bytes": 44899146,
+    "sha256": "39c2fe9b84d3077a6d73ed57d032c994c928ceda035a1cec214dbe7746042a30"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/formal_checkpoints/epoch=059.ckpt",
+    "bytes": 44899274,
+    "sha256": "64463af913df19dd56923f3aaf7b9ee878f235af39b5bc990465d34793724ab5"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/formal_checkpoints/epoch=060.ckpt",
+    "bytes": 44899338,
+    "sha256": "f8535ffe4d4ae17a7679d9dde9b40959c30aca2824ed9f3188726aa7ef54acfc"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_endpoints.csv",
+    "bytes": 2618012,
+    "sha256": "103cd7cabc40ae8e8f2098e9b165cb5b5508447a9b85b346998adc7bbfb19185"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json",
+    "bytes": 119951,
+    "sha256": "bef7d48311f809509cd0b9c80d8c8cefb8da9f1e0ed10cafd8dea2b9eec36354"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_endpoints.csv",
+    "bytes": 2699442,
+    "sha256": "07b1f4dc64fc92061436adc898cb2b55043e5c2db480ace04f936e0730f9c8d9"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json",
+    "bytes": 129777,
+    "sha256": "e1872c682b30acbe92bccf0f96adb2df111cae44cee6a5d4cb7a3550e7ca2cab"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_endpoints.csv",
+    "bytes": 2664946,
+    "sha256": "174b45da44fc4e5e575e881f280458684d847299987958d5e356aec28cb4ed98"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json",
+    "bytes": 117306,
+    "sha256": "baf437873786661de2ca5785bc68aee2aa9b03925946a6d2e7039f5294f05f22"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_endpoints.csv",
+    "bytes": 2626870,
+    "sha256": "ac8e6a48389d76dc2748762209fa353660823ac6cda8b7fafb691cf686afee12"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json",
+    "bytes": 126356,
+    "sha256": "87d83beddbfafa2d8157b1b610e4b678b19dd97fae47fbfeb83721ee0d795b63"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_endpoints.csv",
+    "bytes": 2685400,
+    "sha256": "59a4346da87b16b8f3d2d80957d6102a0d982da4531d29933d2f4d1c8bd02b7e"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json",
+    "bytes": 116144,
+    "sha256": "584649a8ac83897f1885f71efcf7b31aa9b5320778ac0d37676f183cf2d21cfe"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_endpoints.csv",
+    "bytes": 2660252,
+    "sha256": "4fb99319bed3f775cb66721d6a828ce7bfcc1f0f06fcba4c45029ff09cc625c0"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json",
+    "bytes": 125826,
+    "sha256": "2ceae3faa2c15c4c315b0efad0c98dfbed6408170bb5f1219125784123cc22ba"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_endpoints.csv",
+    "bytes": 2671878,
+    "sha256": "d6cb2e2635441577cb791ec9c375bc0979867f3be5e392086cb40be8265fec53"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json",
+    "bytes": 118802,
+    "sha256": "5addc46ad6373c7e87318298a60809e346ad97d123e65ee2f348e56ca7a22d72"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_endpoints.csv",
+    "bytes": 2679354,
+    "sha256": "157758cf8eb00f21e40b9725a7fb53e5dbe127748c7c3650c2bff03aa8c1e417"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json",
+    "bytes": 118808,
+    "sha256": "51afd9a7864adc4fc736134c04351d433e3a9ad1ad351e69c1059d96b14bdf05"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_endpoints.csv",
+    "bytes": 2682134,
+    "sha256": "850dcdec334e1b52073e0730adef8999b537f07521bb929bdf84b03bcb156f8b"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json",
+    "bytes": 122515,
+    "sha256": "bbc6149f6f58014a1dad2d4e3d8d327b6006fa06936a698cec4d4ffcc121ddf1"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_endpoints.csv",
+    "bytes": 2670843,
+    "sha256": "2fc21fdab3dc3d340bf39baaa041e83ffc7412ffaa72a3aa04eea3f18cf9a160"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json",
+    "bytes": 121554,
+    "sha256": "f53ea5864e29fceccf2f03d2c6f014bc4486bdd9fc8ea2c38f9e27cd7777e407"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_endpoints.csv",
+    "bytes": 2676977,
+    "sha256": "1d9f89d5b38df520e4e038793f8a5a0e1aa8e0b4e8bb37e3d020091320664a7b"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json",
+    "bytes": 124140,
+    "sha256": "c9ce8c6f421d63b3cc38281c28d241c7890945ee53a659a0bf937e7db14010e1"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_endpoints.csv",
+    "bytes": 2659003,
+    "sha256": "c2c619113582ef147d73cef74d84a831550f6a9fb7dc9d11e98f8105b52f183f"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json",
+    "bytes": 123140,
+    "sha256": "28adfbe141a65542a8c833d6b2f9bc6f94548aceb8abae77fd34aecdcef861db"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/resolved_config.yaml",
+    "bytes": 12880,
+    "sha256": "0469d1d032c2c7b85374f6c87ae63092b3b382c4043668da99d01edd1e5c8a45"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/run_provenance.json",
+    "bytes": 22825,
+    "sha256": "940c360df3b1870d8a88757e9f05a6360386f253fdccdeec335d58d0a2568c66"
+  },
+  {
+    "path": "output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/train.log",
+    "bytes": 12357033,
+    "sha256": "40e2866e4942518796d098e3cafa59d844517a4c22b44d3a04788fb0ba240bdd"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=058.ckpt",
+    "bytes": 47769590,
+    "sha256": "473cf2110c1a3cb21893b32bafcd1de89f42b546ac6aaa9150ae2f7aa83d1eed"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=059.ckpt",
+    "bytes": 47769654,
+    "sha256": "10c1ed7ef1323ccff0c27a29011fee87e4e50b672ab7f2e16a48147086df5c20"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/formal_checkpoints/epoch=060.ckpt",
+    "bytes": 47769782,
+    "sha256": "8b51ecf356f5942ad28a2f2ce6e24f73449a66ef6d5cb983054a667f97699e80"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_endpoints.csv",
+    "bytes": 3902681,
+    "sha256": "9d65bcc4356062f5873589fde182fa4d2d5e970cfef2abfc3a7cd7ca9cb7eba1"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json",
+    "bytes": 151467,
+    "sha256": "97eb16262df059f4eeedac93dc4b9abd21363b9e4a9a8a4e5f6ebcb15d3caec7"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_endpoints.csv",
+    "bytes": 4039657,
+    "sha256": "d46b7c323221e60b3566572d97b4311c9f473cbfff10f6b08a31ae958af2f8c1"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json",
+    "bytes": 131610,
+    "sha256": "5996b2401e852beb79e26ac68b8c411f16e35ed3051f06a4f251828ea7e7c98a"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_endpoints.csv",
+    "bytes": 3723152,
+    "sha256": "e3abecd1fa06a68e02fa963954fe96b0042ce19480c29134275d94cceb4bfbc9"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json",
+    "bytes": 201803,
+    "sha256": "d17570646015d06444bc516010f8938c3be66509a05c34ae2f6aa7ed08d1a9d1"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_endpoints.csv",
+    "bytes": 4067552,
+    "sha256": "4c3df1d34c5b140aae930f453308377ed8fd664f6237d9932b40e533ec1f727a"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json",
+    "bytes": 111624,
+    "sha256": "febfdac3526d04e348dd68d170b0e87d0c8a92197b2301bef71fec1a729a83e0"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_endpoints.csv",
+    "bytes": 4010973,
+    "sha256": "55b9ee9a36cbfa161a8f67e1bcf9b8b63407cddd239d2fd89ff8d2869fde40a7"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json",
+    "bytes": 116430,
+    "sha256": "c4cdc009c5af6e2448f154608466da6ab018465093e9ae6f424384094b6a9fbd"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_endpoints.csv",
+    "bytes": 3966826,
+    "sha256": "1689ac805920dfe97435c370054514e6b93f2a61e17504c020046ad8f07331cc"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json",
+    "bytes": 121815,
+    "sha256": "246f324f70d7c0407a5ce82ed68ee386de9657627c6687f7a4d3ab6c04a1d2e6"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_endpoints.csv",
+    "bytes": 3976287,
+    "sha256": "ff7c219eee657eeaec491dbbade6b6bb1163b7135314d08517eda6bea560e36d"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json",
+    "bytes": 122896,
+    "sha256": "fd25a3743986738ca569dc4cce2bed28dfc47abcd7cbbb6002d08856cc144d2e"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_endpoints.csv",
+    "bytes": 4009203,
+    "sha256": "028c5e7e360a1b793029f4ec3f758eed19313d32e2a1dee1750cb016fd92e9ce"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json",
+    "bytes": 118630,
+    "sha256": "9ec1acf31062eee3f5528d1f7a5105edc4ff961322e74e75b6c44b71dbdcaff0"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_endpoints.csv",
+    "bytes": 4001211,
+    "sha256": "e51182b932115cdbd10595fb8f0b5c1840cb98b4551031c9503d73e1f750536c"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json",
+    "bytes": 119681,
+    "sha256": "2b75e24de6ed6a8feaff594392f099556827560e7a74f5a5d8b4d28ec6a09550"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_endpoints.csv",
+    "bytes": 4000963,
+    "sha256": "a95f5932e261c055dc77e018ea82bcbed282b32eb4ed44e5aa4cee44a0622a84"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json",
+    "bytes": 118070,
+    "sha256": "bd8aa8e4c31be88bcd4cd637e0ff6c01abf61c78cbdaefec1edbafda9aadc5a1"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_endpoints.csv",
+    "bytes": 4009600,
+    "sha256": "085169bbb2507dde02a46be3720e83dd780a2aa8b7c980b45f291a83e2323a60"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json",
+    "bytes": 116521,
+    "sha256": "db51ec796e9c6b36640cd9971dda768094abe19f13fd14c71c379b4f249e25dd"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_endpoints.csv",
+    "bytes": 3992202,
+    "sha256": "aae90a01bb8c802bc991a2cb3af50977eb8d19ad040aae62d115bc81609975fa"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json",
+    "bytes": 118102,
+    "sha256": "ab43668fef264f445148723ea1f7bd653e4f84664cdc36eb0e532f9351a55393"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/resolved_config.yaml",
+    "bytes": 12994,
+    "sha256": "ae869fd90f470fc388fec639d84f4367db9587a9bb041d9c4e2f89d73e13f0d8"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/run_provenance.json",
+    "bytes": 25100,
+    "sha256": "ced673a4f6fcb69c1aae02d08c78c76c0d09a39e8929bc407407be1b458742bd"
+  },
+  {
+    "path": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/train.log",
+    "bytes": 12359211,
+    "sha256": "da85fab6810e0e57a132d528d51d310d720ecfb3974a00eba4db5305de61df03"
+  }
+]

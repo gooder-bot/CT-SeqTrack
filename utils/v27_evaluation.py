@@ -92,7 +92,7 @@ def evaluate_sequence_v27(host, sequence):
                    cuda_peak_allocated_mb=cuda_peak_mb,
                    calibration_status=json.dumps(status, sort_keys=True) if isinstance(status, dict) else str(status))
         if v28:
-            row['protocol_version'] = 'v28'
+            row['protocol_version'] = ('v29' if bool(getattr(host.config, 'ct_enable_v29', False)) else 'v28')
             # 原始 crop 点数与 B0 采样槽可执行性分别导出；缺失不能伪装为空 crop。
             raw_counts = batch.get('b0_raw_point_count')
             row['b0_raw_point_count'] = (

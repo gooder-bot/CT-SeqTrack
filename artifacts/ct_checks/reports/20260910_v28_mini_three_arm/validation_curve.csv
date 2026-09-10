@@ -1,0 +1,37 @@
+﻿run,epoch,S,P,frames,tracklets,source
+B0 seed42,5,29.65754940624897,31.85229747598946,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json
+B0 seed42,10,39.27024095973379,45.909190182971486,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json
+B0 seed42,15,26.005470547621307,24.055798601693347,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json
+B0 seed42,20,49.532823008964044,65.55689248372546,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json
+B0 seed42,25,52.04266974502763,60.448577423341554,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json
+B0 seed42,30,44.1695844670615,45.606126731559144,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json
+B0 seed42,35,41.863238726634556,43.72428866971439,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json
+B0 seed42,40,41.924507886138734,41.008752560736184,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json
+B0 seed42,45,44.42779013450936,46.13347901231089,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json
+B0 seed42,50,45.20897174559745,47.00656435169133,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json
+B0 seed42,55,45.49562384788135,47.24835865762028,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json
+B0 seed42,60,45.20021901936708,47.24288820690543,2285,106,output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json
+B0 seed52,5,35.044857994846886,33.91794297648533,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json
+B0 seed52,10,35.53938756160911,64.15754894353041,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json
+B0 seed52,15,40.82166323711366,57.70131267085508,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json
+B0 seed52,20,38.87199146408155,42.40481385622883,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json
+B0 seed52,25,51.98796520160442,66.69584219040313,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json
+B0 seed52,30,47.65317308408752,60.30087503239806,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json
+B0 seed52,35,53.52188197557592,65.50218794185106,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json
+B0 seed52,40,54.03391696129573,65.92669557828937,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json
+B0 seed52,45,55.173960736498266,66.81509822623343,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json
+B0 seed52,50,53.62472659396721,64.79759273850878,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json
+B0 seed52,55,53.43435463020721,64.27352271175228,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json
+B0 seed52,60,52.876367723768986,64.478117910334,2285,106,output/20260909-003318-28_b0-mini_car_seed52_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json
+Full seed42 (uncalibrated),5,29.65754940624897,31.85229747598946,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json
+Full seed42 (uncalibrated),10,39.27024095973379,45.909190182971486,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json
+Full seed42 (uncalibrated),15,26.005470547621307,24.055798601693347,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json
+Full seed42 (uncalibrated),20,49.532823008964044,65.55689248372546,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json
+Full seed42 (uncalibrated),25,52.04266974502763,60.448577423341554,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json
+Full seed42 (uncalibrated),30,44.1695844670615,45.606126731559144,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json
+Full seed42 (uncalibrated),35,41.863238726634556,43.72428866971439,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json
+Full seed42 (uncalibrated),40,41.924507886138734,41.008752560736184,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json
+Full seed42 (uncalibrated),45,44.42779013450936,46.13347901231089,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json
+Full seed42 (uncalibrated),50,45.20897174559745,47.00656435169133,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json
+Full seed42 (uncalibrated),55,45.49562384788135,47.24835865762028,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json
+Full seed42 (uncalibrated),60,45.20021901936708,47.24288820690543,2285,106,output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json

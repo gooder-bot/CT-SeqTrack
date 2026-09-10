@@ -965,6 +965,8 @@ if not cfg.test:
             train_loader = DataLoader(
                 train_data,
                 batch_sampler=observation_batch_sampler,
+                **({'collate_fn': __import__('utils.v29_rollin', fromlist=['observation_collate']).observation_collate}
+                   if bool(getattr(cfg, 'ct_enable_v29', False)) else {}),
                 num_workers=cfg.workers,
                 pin_memory=True,
                 worker_init_fn=seed_loader_worker,
@@ -1020,6 +1022,7 @@ if not cfg.test:
         monitor=str(getattr(cfg, 'checkpoint_monitor', 'precision/mini_val')),
         mode=str(getattr(cfg, 'checkpoint_mode', 'max')),
         save_last=True,
+        every_n_epochs=int(getattr(cfg, 'ct_checkpoint_every_n_epochs', 1)),
         # v27 的可续训状态由 host.on_train_epoch_end 提交；验证间隔不能
         # 把 last.ckpt 移到收尾前的 validation_end，也不能跳过未验证的 epoch。
         save_on_train_epoch_end=(True if bool(getattr(cfg, 'ct_enable_v27', False)) else None),
@@ -1038,7 +1041,8 @@ if not cfg.test:
     final_window = int(getattr(
         cfg, 'ct_keep_final_window_checkpoints', 0) or 0)
     if final_window > 0:
-        callbacks.append(FinalWindowCheckpoint(keep=final_window))
+        callbacks.append(FinalWindowCheckpoint(keep=final_window,
+            every_n_epochs=int(getattr(cfg, 'ct_checkpoint_every_n_epochs', 0))))
 
     # init trainer
     # RecursiveTrackState is intentionally process-local.  Until an explicit

@@ -1,17 +1,59 @@
 # CT-SeqTrack 正式实验协议
 
-## v28 当前协议（2026-09-08）
+## v29 当前协议（2026-09-10）
 
-本次服务器启动按用户后续指令更新为三组mini并行：GPU1 B0 seed42、GPU2 B0 seed52
+最新启动调整：用户要求本次仅轻量核对、直接提供三组独立后台命令，不做全套哈希或强制工程报告检查。
+每两轮保存完整checkpoint，额外保留059以维持58/59/60协议；验证仍每5轮。CUDA/长程恢复检查仍属未完成证据，
+不能把直接启动写成已完成工程验收。此前“工程检查后启动”的排程由本条最新要求覆盖。
+
+最新用户批准实施v29，并运行 **B0、Full-CfC、Full-GRU，完整nuScenes Car、seed42、60epoch**。
+三臂比较模块组合及两种时序后端；不据此宣称每个模块的独立贡献。新配置均为`29_*_nuscenes_full.yaml`。
+350个train_track场景训练，150个官方val验证/评测；batch16、workers12、每5轮验证、FP32、
+Adam(1e-4, betas=(0.5,0.999), eps=1e-6, wd=0, foreach/fused=false)、StepLR20×0.1。
+从头训练，所有启用模块从epoch0首个合法事务学习，无冻结、零学习率阶段或跨run初始化。
+
+B0采用适应化语义，不冒用v28 reference兼容声明。原始四候选总体shuffle/drop_last，整batch一次loss，
+candidate0保留teacher与既有重抽；其余从局部起点短递归生成当前模型历史。额外no-grad前向单独计时，
+Adam更新数仍按真实完整数据长度计算。GT仅作合法首帧/窗口初始化和监督，预测历史与GT标签分离。
+机制流以never/always/threshold0行为访问accepted状态，与部署共用纯转移，不能回灌共享B0流。
+
+先进行真实CUDA、同卡100步逐位一致性和epoch边界恢复检查，再正式三臂60轮；不强制再跑mini60。
+完整数据默认不preloading，正式输出新建日期output目录，工程checkpoint不得初始化正式运行。
+final=60，late-3为58/59/60三个分数的算术平均；两Full每个checkpoint分别拟合策略。
+17个内部场景拟合、18个锁定诊断，与参数训练重叠；官方150不选阈值/后端/epoch。
+闭环候选never、always、最多3个筛选阈值；补同权重observation和bounded-always闭环对照。
+“训练内部策略拟合”不等于概率校准、安全保证或全局重定位。得分恢复与涨分以实际结果验收。
+
+具体语义、继承限制见[实施合同](CTSEQTRACK_V29_IMPLEMENTATION.md)，执行与未完成验收见
+[服务器命令](CTSEQTRACK_V29_SERVER_RUNS.md)和[本地验收](CTSEQTRACK_V29_LOCAL_VALIDATION.md)。
+
+## v28 历史协议（2026-09-10；旧排程已被上述v29替代）
+
+9月10日后续指令：进行一组 **Full / Car / seed42 / 完整nuScenes / 从头60epoch** 诊断，
+取得完整数据结果后集中分析。使用现有`28_full_nuscenes_full.yaml`，batch16、workers12、
+每5轮官方val验证，不预加载点云；输出新建于
+`output/YYYYMMDD-HHMMSS-28_full-nuscenes_full_car_seed42_60ep_bs16/`。
+此单组诊断安排替代“mini必须恢复后才能进行任何full运行”的顺序，分数未恢复的事实保留，
+不自动展开五类多臂矩阵。训练及逐58/59/60校准/评测见
+[单组完整数据诊断](CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。以下三组mini安排为已完成记录。
+
+上轮服务器启动按用户后续指令更新为三组mini并行：GPU1 B0 seed42、GPU2 B0 seed52
 （`28_b0_seed52.yaml`独立注册）、GPU3 Full seed42。三组均从头训练60轮、batch16、
-workers12、每5轮官方mini_val验证；这次启动安排替代下面“首轮仅B0”的排程。
+workers12、每5轮官方mini_val验证；这次启动安排替代原“首轮仅B0”的排程。
 数据/数值/模块合同与分数验收要求保持一致；Full训练后的正式评测仍需各checkpoint独立校准。
+正式输出新建于 `output/YYYYMMDD-HHMMSS-28_模块-mini_car_seedXX_60ep_bs16/`，
+每组保存自己的 `train.log`、`train.pid` 和训练产物，不覆盖历史目录。
+两次CUDA执行阻断及修复见 [CUDA排错记录](CTSEQTRACK_V28_CUDA_TROUBLESHOOTING.md)。
+9月10日已核实三组60轮完成；B0/42=45.200/47.243，B0/52=52.876/64.478，
+Full/42未校准=45.200/47.243。seed42未达恢复目标，late-3尚缺，不能直接放行完整矩阵；
+证据与下一步见 [三组结果分析](../artifacts/ct_checks/reports/20260910_v28_mini_three_arm/REPORT.md)。
 
 本节替代下方历史v27/v26/v25/v24中与v28冲突的规定；旧配置和结果不覆盖。
 详细实现与阶段验收见 [v28实施](CTSEQTRACK_V28_IMPLEMENTATION.md) 与
 [服务器流程](CTSEQTRACK_V28_SERVER_RUNS.md)。
 
-- 首轮正式仅28 B0，mini Car、seed42、60epoch、batch16、workers12，每5轮官方val。
+- 已完成B0 seed42、B0 seed52、Full seed42三组mini Car，各自scratch、60epoch、
+  batch16、workers12，每5轮官方val；seed52使用独立登记的`28_b0_seed52.yaml`。
   所有工程checkpoint丢弃；完整结果固定final60与late-3=58/59/60，禁止挑不同best。
 - 每帧1024槽、3帧历史；Adam lr=1e-4、betas=(0.5,0.999)、eps=1e-6、weight_decay=0，
   StepLR每20轮乘0.1、无梯度裁剪。四候选总体自然drop_last，当前mini Car应为1262步/轮、
@@ -27,6 +69,9 @@ workers12、每5轮官方mini_val验证；这次启动安排替代下面“首�
 - 严格FP32、TF32关闭、cuDNN benchmark关闭/确定性开启、Adam foreach/fused关闭，
   CUBLAS工作区:4096:8；不允许warn_only降级。观测与数值合同绑定resume身份，
   同run恢复核对实际环境。合法原始ID及extension-only点证据不随旧槽合同被撤回。
+- 分割CE合同固定`ct_b0_ce_contract=class_axis_logsoftmax_flat_nll_v1`：保留原三维
+  class-axis log_softmax，再展平为二维NLL，维持全batch加权分母，避免空间NLL归约阻断。
+  AP统计使用整数cumsum后转回浮点，避免浮点CUDA cumsum阻断；两项均不关闭严格确定性。
 - B2读取seg_second64_v1真实逐点特征；结构合法性独立于presence，bounded-always/B3/
   导出/校准共享同一候选。Full每个checkpoint重新真实闭环拟合、锁定内部dev诊断后评官方val。
   v28 policy绑定checkpoint/config/source/scene/metric，缺失或失配则observation fallback。

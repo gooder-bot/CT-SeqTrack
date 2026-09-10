@@ -164,6 +164,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.seg_acc = _build_binary_segmentation_accuracy()
         self.ct_enable_v27 = bool(getattr(config, 'ct_enable_v27', False))
         self.ct_enable_v28 = bool(getattr(config, 'ct_enable_v28', False))
+        self.ct_enable_v29 = bool(getattr(config, 'ct_enable_v29', False))
 
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
@@ -1294,6 +1295,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     False)),
                                 consensus_features=bool(getattr(
                                     config, 'ct_b3_consensus_features', False)),
+                                **({'use_shared_policy_transition': True} if self.ct_enable_v29 else {}),
                                 )
                     else:
                         torch.manual_seed(plugin_seed + 24001)
@@ -2946,7 +2948,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 real_timestamp=input_dict.get('timestamps_real'),
                 input_digest=input_dict.get('motion_input_digest', ''),
                 parameter_revision=input_dict.get('ct_acquisition_parameter_revision', 0),
-                fallback_reason=input_dict.get('ct_acquisition_fallback_reason', ''))
+                fallback_reason=input_dict.get('ct_acquisition_fallback_reason', ''),
+                **({'support_z_intervals': actual('ct_acquisition_support_z_intervals'),
+                    'support_exists': input_dict['ct_acquisition_support_exists'].to(
+                        device=current_base_features.device, dtype=torch.bool).detach()}
+                   if getattr(self, 'ct_enable_v29', False) else {}))
             # Project the statistical covariance onto the acquisition axes.
             cosine = (acquisition.direction_xy * acquisition.statistical_direction_xy).sum(-1).clamp(-1, 1)
             variance = (2 * acquisition.statistical_log_sigma).exp()
@@ -3779,7 +3785,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         corner_stamps = self.time_encoder(corner_stamps)
         box_seq_corners = torch.cat((box_seq_corners,corner_stamps),dim=-1) # B*(L*8)*4 where 4 represents features for x, y, z, and timestamp
 
-        solo_x = x.reshape(B*L,-1,chunk_size) # Reshape into separate point clouds
+        if getattr(self, 'ct_enable_v29', False):
+            from utils.v29_observation import frame_aligned_pointnet_input
+            solo_x = frame_aligned_pointnet_input(x, L)
+        else:
+            solo_x = x.reshape(B*L,-1,chunk_size) # legacy frame/channel layout
         collect_pftc_features = self.use_point_feature_tc and self.training
         # v28 B2 读取 SegPointNet 真实逐点特征，保留 FeaturePointNet 原布局。
         collect_point_aligned_features = bool(
@@ -3832,6 +3842,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         NEW_N = feature.shape[1]
         points_feature = feature.reshape(B,L*NEW_N,-1)
 
+        attention_contract = ({'enable_v29': True,
+            'frame_measurement_valid': input_dict['b0_point_valid_mask'].bool().any(dim=-1)}
+            if getattr(self, 'ct_enable_v29', False) else {})
         if (self.use_asymmetric_dual_query
                 or self.use_ct_joint_full
                 or self.use_decoder_token_consistency):
@@ -3840,6 +3853,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 points_feature,
                 input_dict["valid_mask"],
                 return_decoder_state=True,
+                **attention_contract,
             )
             observation_query = (
                 decoder_state[:, -1]
@@ -3851,7 +3865,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         else:
             delta_motion = self.Transformer(
                 box_seq_corners, points_feature,
-                input_dict["valid_mask"])  #B*4*4
+                input_dict["valid_mask"], **attention_contract)  #B*4*4
             observation_query = None
 
         if self.training and self.ct_b0_rng_shift_control:
@@ -5584,7 +5598,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'loss_ct_harmful': loss_harmful,
             'loss_ct_expected_center_gain': loss_center_gain,
             'loss_ct_expected_iou_gain': loss_iou_gain,
-            'loss_ct_h3': loss_b3,
+            ('loss_ct_b3_instantaneous' if getattr(self, 'ct_enable_v29', False) else 'loss_ct_h3'): loss_b3,
             'ct_h1_signed_gain': weighted_mean(
                 center_gain_h1, availability),
             'ct_h1_helpful_rate': weighted_mean(
@@ -7794,6 +7808,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if cuda_audit:
             self._ct_cuda_stage_current = {}
             torch.cuda.reset_peak_memory_stats(device)
+        if isinstance(batch, dict) and 'ct_v29_observation_items' in batch:
+            return batch
         if (isinstance(batch, dict)
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
@@ -7801,8 +7817,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'ct_seqtrack.train.v3', 'ct_seqtrack.train.v4')):
             transferred = {
                 'ct_stream_schema': batch['ct_stream_schema'],
-                'observation': self._move_batch_to_device(
-                    batch['observation'], device),
+                'observation': (batch['observation'] if bool(getattr(self, 'ct_enable_v29', False))
+                    else self._move_batch_to_device(batch['observation'], device)),
                 # Raw nuScenes objects are deliberately processed only after
                 # the current observation optimizer step has completed.
                 'mechanism': batch.get('mechanism'),
@@ -8065,6 +8081,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_b0_auxiliary_only', b0_view_id != 0))
         if b0_auxiliary_only != (b0_view_id != 0):
             raise RuntimeError("b0_view_id/auxiliary marker mismatch")
+        payload['is_initial_query'] = int(raw['this_frame_id']) == 1
+        payload['history_reference_reliable'] = payload['is_initial_query']
         payload['online_recursive_state'] = contract
         payload['candidate_shared_transform'] = contract[
             'candidate_shared_transform']
@@ -8384,6 +8402,30 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'ct_shadow_peak_memory_mb'].new_tensor(
                 max(0, memory_after - memory_before) / (1024.0 ** 2))
 
+    def _apply_v29_mechanism_policy(self, output):
+        """训练 policy 只作用于当前机制事务，不修改部署校准状态。"""
+        from utils.v29_policy import mechanism_behavior_policy, policy_transition
+        observation = output['observation_aux_estimation_boxes']
+        candidate = torch.cat((observation[:, :2].detach()
+            + output['ct_router_bounded_residual_xy'].detach(), observation[:, 2:].detach()), dim=1)
+        rows, accepted, kinds = [], [], []
+        if len(self._ct_online_batch_context) != len(observation):
+            raise RuntimeError('v29 mechanism state context does not match batch')
+        for index, context in enumerate(self._ct_online_batch_context):
+            raw = context['raw']
+            policy = mechanism_behavior_policy(self.config.seed, raw['online_epoch'], str(raw['tracklet_key']))
+            final, applied = policy_transition(observation[index:index+1], candidate[index:index+1],
+                output['ct_router_evidence_valid'][index:index+1],
+                output['ct_b3_action_score'][index:index+1], policy)
+            rows.append(final)
+            accepted.append(applied)
+            kinds.append({'never': 0, 'always': 1, 'threshold': 2}[policy['kind']])
+        final, applied = torch.cat(rows), torch.cat(accepted).to(observation)
+        output.update(ct_v29_behavior_final_boxes=final, ct_final_box=final,
+                      aux_estimation_boxes=final, ct_router_applied_gate=applied,
+                      ct_b3_final_gate=applied, ct_router_soft_box=final,
+                      ct_v29_behavior_kind=observation.new_tensor(kinds))
+
     def _commit_online_recursive_predictions(self, output):
         if not bool(getattr(
                 self.config, 'ct_online_recursive_training', False)):
@@ -8403,12 +8445,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             state_policy = str(getattr(
                 self.config, 'ct_training_state_policy',
                 'observation')).strip().lower()
-            if state_policy != 'observation':
-                raise RuntimeError(
-                    "formal CT training permits only observation recursive "
-                    "state; B2/B3 are shadow learners")
-            final_box = self._local_prediction_to_world(
-                output['observation_aux_estimation_boxes'][index], anchor)
+            if getattr(self, 'ct_enable_v29', False):
+                if state_policy != 'mixed_accepted_v1':
+                    raise RuntimeError('v29 mechanism requires mixed accepted behavior')
+                local_final = output['ct_v29_behavior_final_boxes'][index]
+            else:
+                if state_policy != 'observation':
+                    raise RuntimeError('legacy mechanism requires observation state')
+                local_final = output['observation_aux_estimation_boxes'][index]
+            final_box = self._local_prediction_to_world(local_final, anchor)
             commit_canonical_prediction(
                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
                 raw['this_frame'].get('timestamp'))
@@ -8865,6 +8910,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         Returns:
 
         """
+        if isinstance(batch, dict) and 'ct_v29_observation_items' in batch:
+            from utils.v29_rollin import prepare_observation_batch
+            batch = prepare_observation_batch(self, batch['ct_v29_observation_items'])
         if (isinstance(batch, dict)
                 and batch.get('ct_stream_schema') in (
                     'ct_seqtrack.dual_stream.v1',
@@ -8877,6 +8925,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.use_ct_joint_full, self.use_b1motion_v3,
                 self.ct_enable_b1, self.ct_enable_b2, self.ct_enable_b3)
             try:
+                if (getattr(self, 'ct_enable_v29', False)
+                        and 'ct_v29_observation_items' in batch['observation']):
+                    from utils.v29_rollin import prepare_observation_batch
+                    batch = dict(batch, observation=prepare_observation_batch(
+                        self, batch['observation']['ct_v29_observation_items']))
                 if self.ct_unified_auto:
                     self._ct_record_observation_batch_fingerprint(
                         batch['observation'])
@@ -8986,8 +9039,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 else self(batch))
             self._ct_record_cuda_stage('forward')
             if online_batch:
+                if getattr(self, 'ct_enable_v29', False):
+                    self._apply_v29_mechanism_policy(output)
                 self._attach_h3_shadow_labels(batch, output)
             loss_dict = self.compute_loss(batch, output)
+            if getattr(self, 'ct_enable_v29', False):
+                if online_batch:
+                    for kind, code in (('never', 0), ('always', 1), ('threshold0', 2)):
+                        loss_dict['ct_behavior_' + kind + '_rate'] = (output['ct_v29_behavior_kind'] == code).float().mean()
+                    loss_dict['ct_behavior_accepted_rate'] = output['ct_router_applied_gate'].float().mean()
+                else:
+                    for key, value in getattr(self, '_ct_v29_rollin_diagnostics', {}).items():
+                        loss_dict['ct_b0_rollin_' + key] = output['aux_estimation_boxes'].new_tensor(value)
             if (self.ct_unified_auto and not online_batch
                     and getattr(self, '_ct_auto_return_modules', None)
                     == {'b0'}):

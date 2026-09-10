@@ -24,6 +24,7 @@ def seqtrack_reference_loss(data, output, config, *, use_motion_cls=True,
                             box_aware=True):
     """保留原 batch 分母及采样槽语义，BC 恰好参与一次反传。"""
     box = data['box_label']
+    coarse = data['b0_coarse_target'] if bool(getattr(config, 'ct_enable_v29', False)) else box
     motion = data['motion_label'][:, 0]
     moving = data['motion_state_label'][:, 0]
     refs = data['box_label_prev']
@@ -35,8 +36,8 @@ def seqtrack_reference_loss(data, output, config, *, use_motion_cls=True,
     logits = output['seg_logits']
     losses = {
         'loss_seg': seqtrack_segmentation_cross_entropy(logits, data['seg_label']),
-        'loss_center': F.smooth_l1_loss(estimate[:, :3], box[:, :3]),
-        'loss_angle': F.smooth_l1_loss(estimate[:, 3].sin(), box[:, 3].sin()),
+        'loss_center': F.smooth_l1_loss(estimate[:, :3], coarse[:, :3]),
+        'loss_angle': F.smooth_l1_loss(estimate[:, 3].sin(), coarse[:, 3].sin()),
         'loss_center_aux': F.smooth_l1_loss(observed[:, :3], box[:, :3]),
         'loss_angle_aux': F.smooth_l1_loss(observed[:, 3].sin(), box[:, 3].sin()),
         'loss_center_ref': F.smooth_l1_loss(updated_refs[..., :3], refs[..., :3]),

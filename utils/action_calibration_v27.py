@@ -33,6 +33,10 @@ CODE_FILES = (
     "utils/v28_protocol.py", "models/backbone/pointnet.py",
     "models/ct_v2/observation_reference.py", "utils/b0_sampling.py",
     "utils/deterministic_pooling.py", "utils/v28_recovery_reporting.py",
+    "utils/v29_policy.py", "utils/v29_contracts.py",
+    "utils/v29_rollin.py", "utils/v29_observation.py", "utils/acquisition_v29.py",
+    "models/attn/Models.py", "models/attn/Modules.py",
+    "models/attn/Layers.py", "models/attn/SubLayers.py", "main.py",
 )
 
 
@@ -42,7 +46,13 @@ def action_calibration_config_identity(config):
     excluded = {"ct_protocol_role", "ct_scene_manifest_path", "ct_scene_manifest_sha256",
                 "export_proposal_diagnostics", "export_v3_candidate_diagnostics",
                 "ct_runtime_environment", "ct_observation_update_count_check"}
-    return {key: value for key, value in values.items() if key not in excluded}
+    identity = {key: value for key, value in values.items() if key not in excluded}
+    if bool(values.get('ct_enable_v29', False)):
+        from utils.v29_contracts import V29_CONTRACTS
+        # 绑定实际声明值，不用默认常量补齐缺失项伪装为匹配配置。
+        identity.update({key: values.get(key) for key in V29_CONTRACTS})
+        identity['ct_enable_v29'] = True
+    return identity
 
 
 def code_file_hashes(root=None):
@@ -86,8 +96,8 @@ def policy_mask(scores, structural_available, policy, is_initial=None):
 def validate_scene_manifest(manifest):
     if manifest.get('version') not in ('v1.0-mini', 'v1.0-trainval'):
         raise ValueError('v27 supports only v1.0-mini or v1.0-trainval')
-    v28 = manifest.get("schema") == "ct_seqtrack.scene_protocol.v28"
-    if manifest.get("schema") not in ("ct_seqtrack.scene_protocol.v27", "ct_seqtrack.scene_protocol.v28"):
+    v28 = manifest.get("schema") in ("ct_seqtrack.scene_protocol.v28", "ct_seqtrack.scene_protocol.v29")
+    if manifest.get("schema") not in ("ct_seqtrack.scene_protocol.v27", "ct_seqtrack.scene_protocol.v28", "ct_seqtrack.scene_protocol.v29"):
         raise ValueError("v27 scene manifest schema mismatch")
     body = dict(manifest)
     supplied = body.pop("content_sha256", None)
@@ -216,7 +226,7 @@ def _rank(summary):
     return summary["U"], summary["S"], summary["P"], -summary["actions"]
 
 
-def shortlist_policies(rows, quantiles=41, top_k=3):
+def shortlist_policies(rows, quantiles=41, top_k=3, *, include_controls=False):
     rows = normalize_rows(rows)
     valid_scores = [r["action_score"] for r in rows if r["structural_available"] and not r["is_initial"]]
     policies = [{"kind": "never"}, {"kind": "always"}]
@@ -229,9 +239,17 @@ def shortlist_policies(rows, quantiles=41, top_k=3):
                            [r["structural_available"] > 0 for r in rows], policy,
                            [r["is_initial"] > 0 for r in rows])
         key = mask.tobytes()
-        if key not in seen:
-            seen.add(key)
+        # v29控制策略始终实际闭环；阈值只在阈值候选之间按首轮mask去重。
+        is_control = policy['kind'] in ('never', 'always')
+        if (include_controls and is_control) or key not in seen:
+            if not (include_controls and is_control):
+                seen.add(key)
             unique.append({"policy": policy, "metrics": summarize_rows(rows, policy)})
+    if include_controls:
+        thresholds = [item for item in unique if item['policy']['kind'] == 'threshold']
+        thresholds.sort(key=lambda item: _rank(item['metrics']), reverse=True)
+        always = next(item for item in unique if item['policy']['kind'] == 'always')
+        return [always] + thresholds[:top_k], unique
     non_never = [item for item in unique if item["policy"]["kind"] != "never"]
     non_never.sort(key=lambda item: _rank(item["metrics"]), reverse=True)
     return non_never[:top_k], unique
@@ -246,11 +264,14 @@ def _check_role(rows, role, manifest):
 
 
 def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
-                          config_sha256, scene_manifest, code_sha256=None):
+                          config_sha256, scene_manifest, code_sha256=None,
+                          enable_v29=False):
     """runner(role, policy) 必须重新从首帧执行完整轨迹，返回全帧 endpoint。"""
     validate_scene_manifest(scene_manifest)
+    if enable_v29 and not scene_manifest['parameter_training_overlap']:
+        raise ValueError('v29 policy fitting requires declared training-internal scenes')
     calibration_rows = _check_role(calibration_rows, "calibration", scene_manifest)
-    shortlisted, screen = shortlist_policies(calibration_rows)
+    shortlisted, screen = shortlist_policies(calibration_rows, include_controls=enable_v29)
     policies = [{"kind": "never"}] + [x["policy"] for x in shortlisted]
     evaluated, evaluated_rows = [], {}
     expected_ids = {(r["tracklet_id"], r["frame_id"]) for r in calibration_rows}
@@ -268,7 +289,8 @@ def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
             (r["tracklet_id"], r["frame_id"]) for r in dev_baseline}:
         raise ValueError("dev policies must evaluate identical endpoints")
     artifact = {
-        "schema": ("ct_seqtrack.action_calibration.v28"
+        "schema": ("ct_seqtrack.action_calibration.v29" if enable_v29 else
+                   "ct_seqtrack.action_calibration.v28"
                    if scene_manifest["schema"].endswith(".v28") else SCHEMA),
         "action_policy": chosen["policy"],
         "checkpoint_sha256": str(checkpoint_sha256), "config_sha256": str(config_sha256),
@@ -294,13 +316,24 @@ def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
         "calibration_tracklet_keys_sha256": sha256_json(sorted({r["tracklet_id"] for r in calibration_rows})),
         "dev_tracklet_keys_sha256": sha256_json(sorted({r["tracklet_id"] for r in dev_rows})),
     }
+    if enable_v29:
+        from utils.v29_policy import POLICY_FITTING_CONTRACT, UTILITY_TARGET_CONTRACT, TRANSITION_CONTRACT
+        artifact.update(utility_target=UTILITY_TARGET_CONTRACT,
+                        transition_contract=TRANSITION_CONTRACT,
+                        policy_fitting_contract=POLICY_FITTING_CONTRACT,
+                        fitting_interpretation='internal closed-loop policy selection; not probability calibration',
+                        selection_role='training_internal_policy_fit')
     artifact["artifact_sha256"] = sha256_json(artifact)
     return artifact
 
 
 def validate_action_calibration_v27(artifact, checkpoint_sha256, config_sha256,
-                                    scene_manifest_sha256=None, code_sha256=None):
-    expected_schema = ("ct_seqtrack.action_calibration.v28"
+                                    scene_manifest_sha256=None, code_sha256=None,
+                                    enable_v29=None):
+    if enable_v29 is None:
+        enable_v29 = artifact.get('schema') == 'ct_seqtrack.action_calibration.v29'
+    expected_schema = ("ct_seqtrack.action_calibration.v29" if enable_v29 else
+                       "ct_seqtrack.action_calibration.v28"
                        if artifact.get("scene_manifest", {}).get("schema", "").endswith(".v28") else SCHEMA)
     if artifact.get("schema") != expected_schema:
         raise ValueError("v27 action calibration schema mismatch")
@@ -312,6 +345,12 @@ def validate_action_calibration_v27(artifact, checkpoint_sha256, config_sha256,
                 "score_definition": SCORE_DEFINITION, "metric_mode": METRIC_MODE,
                 "comparator": COMPARATOR, "metric_threshold_count": 21,
                 "code_content_sha256": code_sha256 or code_content_sha256()}
+    if enable_v29:
+        from utils.v29_policy import POLICY_FITTING_CONTRACT, UTILITY_TARGET_CONTRACT, TRANSITION_CONTRACT
+        expected.update(utility_target=UTILITY_TARGET_CONTRACT,
+                        transition_contract=TRANSITION_CONTRACT,
+                        policy_fitting_contract=POLICY_FITTING_CONTRACT,
+                        selection_role='training_internal_policy_fit')
     if scene_manifest_sha256 is not None:
         expected["scene_manifest_sha256"] = str(scene_manifest_sha256)
     for key, value in expected.items():
@@ -340,7 +379,8 @@ def install_v27_action_calibration(model, config, *, scene_splits=None, code_sha
     router.install_policy({"kind": "never"})
     router.calibrated.fill_(False)
     model._ct_action_calibration = None
-    status = {"schema": "ct_seqtrack.action_calibration.v28" if get("ct_enable_v28", False) else SCHEMA,
+    status = {"schema": ("ct_seqtrack.action_calibration.v29" if get('ct_enable_v29', False) else
+                         "ct_seqtrack.action_calibration.v28" if get("ct_enable_v28", False) else SCHEMA),
               "loaded": False, "fallback": "observation", "reason": "missing_calibration_artifact"}
     model._ct_action_calibration_status = status
     path = get("ct_action_calibration_path")
@@ -359,7 +399,8 @@ def install_v27_action_calibration(model, config, *, scene_splits=None, code_sha
         artifact = json.loads(Path(path).read_text(encoding="utf-8"))
         validate_action_calibration_v27(artifact, sha256_file(checkpoint),
             sha256_json(action_calibration_config_identity(config)),
-            scene_manifest_sha256=scene_manifest["content_sha256"], code_sha256=code_sha256)
+            scene_manifest_sha256=scene_manifest["content_sha256"], code_sha256=code_sha256,
+            enable_v29=bool(get('ct_enable_v29', False)))
         router.install_policy(artifact["action_policy"])
         model._ct_action_calibration = artifact
         model._ct_action_calibration_error = None

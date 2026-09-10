@@ -731,6 +731,15 @@ def resolve_joint_search_geometry(
     reuse the same constrained kinematic estimate for endpoint and tube.  No
     current-frame annotation is accepted by this interface.
     """
+    enable_v29 = bool(kwargs.pop('enable_v29', False))
+    b0_crop_box = kwargs.pop('b0_crop_box', None)
+    b0_crop_scale = kwargs.pop('b0_crop_scale', 1.25)
+    b0_crop_offset = kwargs.pop('b0_crop_offset', 2.0)
+    if enable_v29:
+        if not bool(kwargs.get('enable_v27', False)):
+            raise ValueError('v29 supports require the original-ID v27 geometry contract')
+        from utils.acquisition_v29 import b0_vertical_interval
+        b0_vertical_interval(b0_crop_box, scale=b0_crop_scale, offset=b0_crop_offset)
     endpoint_or_tube, diagnostics = resolve_b1_search_support(
         history_boxes, delta_t, valid_mask, **kwargs)
     if endpoint_or_tube is None:
@@ -824,6 +833,15 @@ def resolve_joint_search_geometry(
             endpoint.wlh[0] = tube_diagnostics['base_projected_width'] + 2. * min(fixed_margins[1], 3.)
             endpoint.wlh[1] = tube_diagnostics['base_projected_length'] + 2. * min(fixed_margins[0], 6.)
         diagnostics = {**tube_diagnostics, **diagnostics}
+    if enable_v29:
+        from utils.acquisition_v29 import (
+            Z_CONTRACT, apply_b0_vertical_hull, support_vertical_interval)
+        endpoint, tube = (apply_b0_vertical_hull(box, b0_crop_box,
+                          scale=b0_crop_scale, offset=b0_crop_offset)
+                          for box in (endpoint, tube))
+        diagnostics.update(support_z_contract=Z_CONTRACT,
+                           endpoint_support_z_interval=support_vertical_interval(endpoint),
+                           tube_support_z_interval=support_vertical_interval(tube))
     diagnostics.update({
         "valid": True,
         "endpoint_support_center": np.asarray(
@@ -1477,7 +1495,9 @@ def build_causal_history_corridor(
         first_frame_size=None,
         max_speed=20.0, max_acceleration=8.0,
         max_displacement=12.0, max_length=16.0,
-        width_padding=2.0, max_width=6.0, enable_v27=False):
+        width_padding=2.0, max_width=6.0, enable_v27=False,
+        enable_v29=False, b0_crop_box=None, b0_crop_scale=1.25,
+        b0_crop_offset=2.0):
     """Build a GT-free short-history backup corridor for catastrophic drift."""
     if not bool(enabled):
         return None, {"valid": False, "reason": "coverage_not_needed"}
@@ -1584,7 +1604,7 @@ def build_causal_history_corridor(
     corridor.wlh = first_size
     corridor.wlh[0] = width
     corridor.wlh[1] = length
-    return corridor, {
+    diagnostics = {
         "valid": True,
         "reason": "ok",
         "source_id": 4,
@@ -1604,6 +1624,16 @@ def build_causal_history_corridor(
         "displacement": displacement_norm,
         "query_delta_t": query_gap,
     }
+    if enable_v29:
+        if not enable_v27:
+            raise ValueError('v29 corridor requires the original-ID v27 geometry contract')
+        from utils.acquisition_v29 import (
+            Z_CONTRACT, apply_b0_vertical_hull, support_vertical_interval)
+        corridor = apply_b0_vertical_hull(corridor, b0_crop_box,
+                    scale=b0_crop_scale, offset=b0_crop_offset)
+        diagnostics.update(support_z_contract=Z_CONTRACT,
+                           support_z_interval=support_vertical_interval(corridor))
+    return corridor, diagnostics
 
 
 def _box_local_xyz_size(wlh):

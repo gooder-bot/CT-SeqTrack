@@ -1,0 +1,31 @@
+_base_: 28_formal_base.yaml
+
+# v29：适应化 B0，共享短递归输入；完整 nuScenes 不预加载。
+experiment_family: ct_seqtrack_v29
+ct_enable_v29: true
+ct_observation_contract: seqtrack_adapted_rollin_v1
+ct_b0_sampling_contract: real_sparse_repeat_slots_v1
+ct_b0_frame_layout_contract: batch_frame_channel_point_v1
+ct_b0_attention_mask_contract: frame_measurement_corner_query_v1
+ct_b0_rollin_contract: teacher0_short_current_b0_v1
+ct_b0_supervision_contract: gt_history_input_anchor_v1
+ct_b0_coarse_target_contract: physical_delta_input_axes_v1
+ct_support_z_contract: b0_vertical_hull_v1
+ct_mechanism_behavior_contract: mechanism_behavior_v1
+ct_state_transition_contract: bounded_structural_policy_v1
+ct_b3_target_contract: instantaneous_sp_gain_v1
+ct_policy_fitting_contract: internal_closed_loop_five_v1
+ct_b0_point_feature_source: seg_second64_v1
+ct_b0_loss_reduction: reference_batch
+ct_b0_rollin_max_steps: 3
+ct_training_state_policy: mixed_accepted_v1
+version: v1.0-trainval
+path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
+train_split: train_track
+val_split: val
+test_split: val
+category_name: Car
+ct_v28_expected_mini_car_updates_per_epoch: null
+preloading: false
+# 每两轮持久保存；另保留58/59/60供论文late-3评测。
+ct_checkpoint_every_n_epochs: 2

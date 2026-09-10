@@ -132,10 +132,13 @@ class FinalWindowCheckpoint(Checkpoint):
     necessary: the module owns manual scheduler updates and epoch audits.
     """
 
-    def __init__(self, keep=3, directory_name="formal_checkpoints"):
+    def __init__(self, keep=3, directory_name="formal_checkpoints", every_n_epochs=0):
         super().__init__()
         self.keep = int(keep)
         self.directory_name = str(directory_name)
+        self.every_n_epochs = int(every_n_epochs)
+        if self.every_n_epochs < 0:
+            raise ValueError("checkpoint interval must be nonnegative")
         if self.keep <= 0:
             raise ValueError("final checkpoint window must be positive")
         if not self.directory_name:
@@ -143,15 +146,17 @@ class FinalWindowCheckpoint(Checkpoint):
 
     @property
     def state_key(self):
-        return (
+        key = (
             "ct_seqtrack.FinalWindowCheckpoint."
             f"keep={self.keep}.dir={self.directory_name}")
+        return key + (f".every={self.every_n_epochs}" if self.every_n_epochs else "")
 
     def on_train_epoch_end(self, trainer, pl_module):
         del pl_module
         completed_epoch = int(trainer.current_epoch) + 1
         max_epochs = int(trainer.max_epochs)
-        if completed_epoch <= max_epochs - self.keep:
+        periodic = self.every_n_epochs > 0 and completed_epoch % self.every_n_epochs == 0
+        if completed_epoch <= max_epochs - self.keep and not periodic:
             return
         directory = Path(trainer.default_root_dir) / self.directory_name
         directory.mkdir(parents=True, exist_ok=True)

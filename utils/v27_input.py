@@ -63,7 +63,8 @@ def build_v27_eval_input(host, sequence, frame_id, results_bbs,
         candidate_shared_transform=contract['candidate_shared_transform'],
         point_sampling_seeds=contract['point_sampling_seeds'],
         current_sampling_seed=contract['current_sampling_seed'],
-        ct_observation_only=False, _ct_inference=True)
+        ct_observation_only=False, _ct_inference=True, is_initial_query=(frame_id == 1),
+        history_reference_reliable=(frame_id == 1))
     if motion_prediction is not None:
         payload['motion_prediction'] = motion_prediction
     if diagnostic_sidecar is not None:

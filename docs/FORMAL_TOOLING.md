@@ -1,9 +1,30 @@
 # CT-SeqTrack 正式工具面
 
-## v28 当前工具协议（2026-09-08）
+## v29 当前工具协议（2026-09-10）
+
+训练和评测仍仅从`main.py`进入。新增`tools/run_ct_v29_checks.py`串行调度真实数据preflight、
+四组同卡100步（B0两次、两种Full）和epoch恢复检查，逐位比较失败即停止；不启动正式训练。
+沿用的v28命名数值审计/恢复工具识别新配置身份，工程产物只写`artifacts/ct_checks/`。
+`preflight_ct_v28.py`按v29配置执行新的raw窗口→host roll-in→B0数据通路，不把窗口交给普通tensor collate。
+动作导出/拟合仍使用已有工具，按配置分派v29 schema与完整方法身份，不使用旧v28策略冒充新策略。
+具体参数和正式三臂命令见[服务器运行说明](CTSEQTRACK_V29_SERVER_RUNS.md)。
+旧`run_ct_v28_matrix.py`保留历史用途，不用于当前三臂。
+
+## v28 历史工具协议（2026-09-10）
+
+最新已授权一组Full/Car/seed42完整数据60轮诊断。沿用`main.py`及已有v28 preflight、
+短检和校准工具，命令见[完整数据单组诊断](CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。
+preflight缺少`preloading`时现在补False，保留显式YAML设置；默认按需读取完整数据。
+无需修改或绕过整矩阵工具的执行限制来运行这一组。
 
 以 [v28服务器流程](CTSEQTRACK_V28_SERVER_RUNS.md) 为当前可执行顺序。旧v27工具
 行为保留；新28配置进入reference_batch观测、严格确定性与官方val路由。
+
+当前用户授权的三组mini直接从`main.py`后台启动：GPU1 B0 seed42、GPU2 B0 seed52
+（`28_b0_seed52.yaml`）、GPU3 Full seed42，各自scratch60epoch、batch16、workers12、
+每5轮官方mini_val验证；这组命令不经过下面只允许执行首轮B0的矩阵工具。
+三组CE与Full AP的CUDA报错、修复及验证边界见 [CUDA排错记录](CTSEQTRACK_V28_CUDA_TROUBLESHOOTING.md)。
+必须保留`class_axis_logsoftmax_flat_nll_v1`的CE合同和AP整数cumsum统计修复，不能改为warn_only绕过。
 
 - main.py仍为训练/评估唯一入口。正式28配置不允许epoch/workers/数值设置漂移。
   --ct_engineering_check仅供真实事务短验收，限制1..3epoch、每轮1..100batch，
@@ -20,7 +41,10 @@
 - tools/calibrate_ct_actions.py与export_ct_action_rows.py按28配置自动选择真实闭环runner，
   兼容旧--v27与新--v28；v28策略/rows/scene schema与旧版本区分，源码hash覆盖新输入/主干。
 
-旧output为只读历史证据；新工具输出置于artifacts/ct_checks新目录。
+旧output为只读历史证据；工程/诊断工具输出置于artifacts/ct_checks新目录。
+当前服务器正式训练通过`--log_dir`指定新建的
+`output/YYYYMMDD-HHMMSS-28_模块-mini_car_seedXX_60ep_bs16/`，各目录保存`train.log`、
+`train.pid`和训练产物；这项授权不允许覆盖历史输出，也不改变工程验收目录的限制。
 
 ## v27 当前工具协议（2026-09-05）
 

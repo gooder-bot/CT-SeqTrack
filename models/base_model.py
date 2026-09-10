@@ -54,6 +54,66 @@ from utils.recursive_state import (
 
 import time
 
+
+def _ct_v28_export_metadata(loader, batch_index):
+    """仅解析导出身份；不读/改 sequence、递归状态或观测采样随机流。"""
+    result = dict(scene_id='unknown', tracklet_key='unknown',
+                  source_tracklet_index=None, partition='unknown',
+                  dataset_split='unknown', parameter_training_overlap=None,
+                  metadata_status='unavailable', metadata_error='')
+    try:
+        if isinstance(loader, (list, tuple)):
+            if len(loader) != 1:
+                raise ValueError('expected one evaluation dataloader')
+            loader = loader[0]
+        source = getattr(loader, 'dataset', None)
+        if source is None:
+            raise ValueError('evaluation dataset is unavailable')
+        index, seen, partition = int(batch_index), set(), None
+        while hasattr(source, 'dataset'):
+            if id(source) in seen:
+                raise ValueError('cyclic evaluation dataset wrapper')
+            seen.add(id(source))
+            if partition is None:
+                partition = getattr(source, 'partition', None)
+            mapping = getattr(source, 'tracklet_indices', None)
+            if mapping is None:
+                mapping = getattr(source, 'indices', None)
+            if mapping is not None:
+                if index < 0 or index >= len(mapping):
+                    raise IndexError('evaluation wrapper index is out of range')
+                index = int(mapping[index])
+            source = source.dataset
+        meta = source.virtual_rate_meta
+        if index < 0 or index >= len(meta):
+            raise IndexError('evaluation source tracklet index is out of range')
+        identity = meta[index]
+        tracklet_key = str(source.get_tracklet_key(index))
+        if tracklet_key != str(identity['tracklet_key']):
+            raise ValueError('evaluation tracklet identity mismatch')
+        scene_id = str(source.nusc.get('scene', identity['scene_token'])['name'])
+        manifest = source.ct_scene_manifest
+        role = partition or getattr(source, 'ct_scene_role', None) or getattr(source, 'protocol_role', None)
+        role = 'test' if role in ('val', 'eval') else role
+        if role not in ('train', 'calibration', 'dev', 'test'):
+            raise ValueError('evaluation scene role is unavailable')
+        roles = manifest['scenes']
+        if scene_id not in roles[role]:
+            raise ValueError('evaluation scene is outside its declared role')
+        result.update(scene_id=scene_id, tracklet_key=tracklet_key,
+                      source_tracklet_index=index, partition=role,
+                      dataset_split=manifest['evaluation_source' if role == 'test' else 'training_source'],
+                      parameter_training_overlap=scene_id in roles['train'],
+                      metadata_status='ok')
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+        # 诊断缺失不能猜成官方场景或不重叠；保留 unknown 并同时写入行和日志。
+        import warnings
+        result['metadata_error'] = f'{type(error).__name__}: {error}'
+        warnings.warn('v28 export metadata unavailable: ' + result['metadata_error'],
+                      RuntimeWarning, stacklevel=2)
+    return result
+
+
 class BaseModelMF(pl.LightningModule):
     def __init__(self, config=None, **kwargs):
         super().__init__()
@@ -1740,7 +1800,7 @@ class BaseModelMF(pl.LightningModule):
         if bool(getattr(self.config, 'ct_enable_v28', False)):
             row.update(self._build_v28_motion_diagnostics(
                 output, data_dict, this_box, reference_box, previous_target_box))
-            row['b2_version'] = 'ct_joint_full.v28'
+            row['b2_version'] = ('ct_joint_full.v29' if bool(getattr(self.config, 'ct_enable_v29', False)) else 'ct_joint_full.v28')
         return row
 
     @staticmethod
@@ -2078,6 +2138,10 @@ class BaseModelMF(pl.LightningModule):
         metric_partition = 'dev' if bool(getattr(self.config, 'ct_enable_v27', False)) else 'mini_val'
         start_time = time.time()
         ious, distances, *_ = self.evaluate_one_sequence(sequence)
+        export_metadata = {}
+        if bool(getattr(self.config, 'ct_enable_v28', False)):
+            export_metadata = _ct_v28_export_metadata(
+                getattr(self.trainer, 'val_dataloaders', None), batch_idx)
         epoch_number = int(getattr(self, "current_epoch", 0)) + 1
         if (bool(getattr(
                 self.config, "export_v3_candidate_diagnostics", False))
@@ -2089,6 +2153,7 @@ class BaseModelMF(pl.LightningModule):
                 row["tracklet_id"] = int(batch_idx)
                 row["epoch"] = epoch_number
                 row["partition"] = metric_partition
+                row.update(export_metadata)
                 self._v3_validation_proposal_diagnostics.append(row)
         if bool(getattr(self.config, 'ct_enable_v27', False)):
             if not hasattr(self, '_ct_v27_validation_endpoints'):
@@ -2096,6 +2161,7 @@ class BaseModelMF(pl.LightningModule):
             for endpoint in self._ct_v27_sequence_endpoints:
                 row = dict(endpoint, tracklet_id=str(batch_idx), epoch=epoch_number,
                            partition='dev', parameter_training_overlap=str(getattr(self.config, 'version', 'v1.0-mini')) != 'v1.0-mini')
+                row.update(export_metadata)
                 self._ct_v27_validation_endpoints.append(row)
         end_time = time.time()
         runtime = end_time-start_time
@@ -2214,13 +2280,19 @@ class BaseModelMF(pl.LightningModule):
         sequence = batch[0]  # unwrap the batch with batch size = 1
         start_time = time.time()
         ious, distances, result_bbs, *_= self.evaluate_one_sequence(sequence)
+        export_metadata = {}
+        if bool(getattr(self.config, 'ct_enable_v28', False)):
+            export_metadata = _ct_v28_export_metadata(
+                getattr(self.trainer, 'test_dataloaders', None), batch_idx)
         test_dataset = getattr(
             getattr(self.trainer, "test_dataloaders", None), "dataset", None)
         if test_dataset is None:
             test_loaders = getattr(self.trainer, "test_dataloaders", None)
             if isinstance(test_loaders, (list, tuple)) and test_loaders:
                 test_dataset = getattr(test_loaders[0], "dataset", None)
-        if (test_dataset is not None
+        if export_metadata:
+            tracklet_key = export_metadata['tracklet_key']
+        elif (test_dataset is not None
                 and hasattr(test_dataset, "get_tracklet_key")):
             tracklet_key = test_dataset.get_tracklet_key(batch_idx)
         elif (test_dataset is not None
@@ -2248,6 +2320,7 @@ class BaseModelMF(pl.LightningModule):
                 "final_iou": float(overlap),
                 "final_distance": float(distance),
             })
+            endpoint.update(export_metadata)
             self._tracking_test_endpoints.append(endpoint)
         for row in self._proposal_sequence_diagnostics:
             row = dict(row)
@@ -2257,6 +2330,7 @@ class BaseModelMF(pl.LightningModule):
                 self.config, "ct_eval_partition", None)
             if eval_partition is not None:
                 row["partition"] = str(eval_partition)
+            row.update(export_metadata)
             source_epoch = getattr(
                 self.config, "ct_source_checkpoint_epoch", None)
             if source_epoch is not None:
@@ -2272,6 +2346,7 @@ class BaseModelMF(pl.LightningModule):
             row = dict(row)
             row["tracklet_id"] = int(batch_idx)
             row["tracklet_key"] = str(tracklet_key)
+            row.update(export_metadata)
             self._b3_test_rollouts.append(row)
         end_time = time.time()
         runtime = end_time-start_time

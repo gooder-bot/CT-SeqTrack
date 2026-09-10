@@ -1,0 +1,554 @@
+{
+  "run": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16",
+  "analysis_date": "2026-09-10",
+  "training": {
+    "completed_epoch_count": 60,
+    "global_step": 75720,
+    "epoch_boundary_complete": true,
+    "completion_log_marker": true,
+    "module_audit": {
+      "schema": "ct_seqtrack.module_audit.v2",
+      "epoch": 59,
+      "runtime_protocol": "safe_seqtrack_auto_v1",
+      "optimizer_topology": "unified_auto",
+      "parameter_groups": [
+        "b0",
+        "b1",
+        "b2",
+        "b3"
+      ],
+      "parameter_sha256": {
+        "b0": "a030039448fbb419ff9ac16f1933fa2fee04c818ca74c525f0ba622ce19ab41a",
+        "b1": "bfa467c0953c176212e9db0b14e454437927742192043a48fd7085230ea13e5b",
+        "b2": "449f4f23b316d65dd2c2af8c604bec070fe32c4862b37a52c987b7adaa2cd4f8",
+        "b3": "b08922df4df94607c4cb3264e7bd51ecc47c0068361429976c8ebfee27aa6f24"
+      },
+      "optimizer_lr": {
+        "b0": [
+          1.0000000000000002e-07
+        ],
+        "b1": [
+          1.0000000000000002e-07
+        ],
+        "b2": [
+          1.0000000000000002e-07
+        ],
+        "b3": [
+          1.0000000000000002e-07
+        ]
+      },
+      "update_steps": {
+        "b0": 75720,
+        "b1": 18000,
+        "b2": 18000,
+        "b3": 18000
+      },
+      "last_gradient_norm": {
+        "b0": 5.805428981781006,
+        "b1": 1.083786129951477,
+        "b2": 0.15138831734657288,
+        "b3": 0.0
+      },
+      "max_gradient_norm": {
+        "b0": 407.5415954589844,
+        "b1": 15.706330299377441,
+        "b2": 71.19554901123047,
+        "b3": 2.9837400913238525
+      },
+      "active_frozen_parameters": []
+    },
+    "optimizer_step_histograms": {
+      "b0": {
+        "75720": 236
+      },
+      "b1": {
+        "18000": 20
+      },
+      "b2": {
+        "18000": 45,
+        "17177": 21
+      },
+      "b3": {
+        "18000": 12
+      }
+    },
+    "module_loss_activity": {
+      "b1": {
+        "event_count_including_observation_zero_rows": 93720,
+        "nonzero_loss_rows": 17940,
+        "first_nonzero_logged_step": 8,
+        "first_nonzero_loss": 0.09670033305883408
+      },
+      "b2": {
+        "event_count_including_observation_zero_rows": 93720,
+        "nonzero_loss_rows": 18000,
+        "first_nonzero_logged_step": 4,
+        "first_nonzero_loss": 0.10666463524103165
+      },
+      "b3": {
+        "event_count_including_observation_zero_rows": 93720,
+        "nonzero_loss_rows": 17177,
+        "first_nonzero_logged_step": 8,
+        "first_nonzero_loss": 0.029666567221283913
+      }
+    },
+    "training_streams": {
+      "b0_optimizer_steps_per_epoch": 1262,
+      "mechanism_partition": "train",
+      "mechanism_passes_per_epoch": 1,
+      "mechanism_prediction_frames": 4777,
+      "mechanism_selection_sha256": "a9edbf6c94c944cda03f80fc13f7e2881d3c1296c91205c7b4e966772f939099",
+      "mechanism_source": "mechanism",
+      "mechanism_steps_per_epoch": 300,
+      "mechanism_tracklets": 268,
+      "observation_source": "train",
+      "observation_steps_per_epoch": 1262,
+      "topology": "dual_stream"
+    },
+    "runtime_environment": {
+      "schema": "ct_seqtrack.runtime_environment.v28",
+      "python": "3.9.19",
+      "platform": "Linux-5.4.0-166-generic-x86_64-with-glibc2.31",
+      "pytorch_lightning": "2.0.2",
+      "nvidia_driver_devices": [
+        "GPU-238ba262-3f9f-55cf-db40-52a1a941621d, 535.247.01",
+        "GPU-35e34272-4fd0-af58-e066-8a5ea1e312f6, 535.247.01",
+        "GPU-4802020b-d23b-50db-3674-4606421c60e4, 535.247.01",
+        "GPU-eb6ca4fd-5bfa-0e6a-bad4-f2f6b1ed2541, 535.247.01"
+      ],
+      "torch": "2.0.1+cu118",
+      "cuda": "11.8",
+      "cudnn": 8700,
+      "devices": [
+        {
+          "index": 0,
+          "name": "NVIDIA A40",
+          "capability": [
+            8,
+            6
+          ],
+          "total_memory": 47622258688,
+          "uuid": "unavailable"
+        }
+      ],
+      "cuda_visible_devices": "3",
+      "cublas_workspace_config": ":4096:8",
+      "matmul_precision": "highest",
+      "matmul_allow_tf32": false,
+      "cudnn_allow_tf32": false,
+      "cudnn_benchmark": false,
+      "cudnn_deterministic": true,
+      "deterministic_algorithms": true,
+      "deterministic_warn_only": false
+    }
+  },
+  "validation_curve": [
+    {
+      "epoch": 5,
+      "S": 29.657549406248968,
+      "P": 31.85229747598946,
+      "actions": 0,
+      "structural_prediction_frames": 593,
+      "novel_target_points": 261.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_05_summary.json"
+    },
+    {
+      "epoch": 10,
+      "S": 39.27024095973379,
+      "P": 45.909190182971486,
+      "actions": 0,
+      "structural_prediction_frames": 785,
+      "novel_target_points": 6.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_10_summary.json"
+    },
+    {
+      "epoch": 15,
+      "S": 26.005470547621307,
+      "P": 24.055798601693347,
+      "actions": 0,
+      "structural_prediction_frames": 374,
+      "novel_target_points": 1423.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_15_summary.json"
+    },
+    {
+      "epoch": 20,
+      "S": 49.532823008964044,
+      "P": 65.55689248372546,
+      "actions": 0,
+      "structural_prediction_frames": 863,
+      "novel_target_points": 11.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_20_summary.json"
+    },
+    {
+      "epoch": 25,
+      "S": 52.042669745027624,
+      "P": 60.448577423341554,
+      "actions": 0,
+      "structural_prediction_frames": 473,
+      "novel_target_points": 1.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_25_summary.json"
+    },
+    {
+      "epoch": 30,
+      "S": 44.169584467061505,
+      "P": 45.606126731559144,
+      "actions": 0,
+      "structural_prediction_frames": 349,
+      "novel_target_points": 32.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_30_summary.json"
+    },
+    {
+      "epoch": 35,
+      "S": 41.863238726634556,
+      "P": 43.72428866971439,
+      "actions": 0,
+      "structural_prediction_frames": 532,
+      "novel_target_points": 4.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_35_summary.json"
+    },
+    {
+      "epoch": 40,
+      "S": 41.924507886138734,
+      "P": 41.008752560736184,
+      "actions": 0,
+      "structural_prediction_frames": 894,
+      "novel_target_points": 170.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_40_summary.json"
+    },
+    {
+      "epoch": 45,
+      "S": 44.42779013450936,
+      "P": 46.13347901231089,
+      "actions": 0,
+      "structural_prediction_frames": 709,
+      "novel_target_points": 8.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_45_summary.json"
+    },
+    {
+      "epoch": 50,
+      "S": 45.20897174559745,
+      "P": 47.006564351691324,
+      "actions": 0,
+      "structural_prediction_frames": 657,
+      "novel_target_points": 66.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_50_summary.json"
+    },
+    {
+      "epoch": 55,
+      "S": 45.49562384788135,
+      "P": 47.24835865762028,
+      "actions": 0,
+      "structural_prediction_frames": 682,
+      "novel_target_points": 2.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_55_summary.json"
+    },
+    {
+      "epoch": 60,
+      "S": 45.20021901936708,
+      "P": 47.24288820690543,
+      "actions": 0,
+      "structural_prediction_frames": 567,
+      "novel_target_points": 4.0,
+      "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/dev_diagnostics/epoch_60_summary.json"
+    }
+  ],
+  "final": {
+    "metrics": {
+      "P": 47.24288820690543,
+      "S": 45.20021901936708,
+      "U": 46.22155361313625,
+      "action_harm_mean_severity": 0.0,
+      "action_harm_rate": null,
+      "action_precision_harm_rate": null,
+      "action_success_harm_rate": null,
+      "actions": 0,
+      "coverage": 0.0,
+      "frames": 2285,
+      "geometry_exact_P": 47.24288820690543,
+      "geometry_exact_S": 45.20021901936708,
+      "one_step_net_utility": 0.0,
+      "scenes": 1,
+      "tracklets": 106
+    },
+    "funnel": {
+      "action_frames": 0,
+      "action_stages": {
+        "accepted": {
+          "coverage_all_frames": 0.0,
+          "frames": 0,
+          "harmful_frames": 0,
+          "helpful_frames": 0,
+          "mean_utility_gain": null,
+          "net_utility_all_frames": 0.0
+        },
+        "bounded": {
+          "coverage_all_frames": 0.24814004376367615,
+          "frames": 567,
+          "harmful_frames": 321,
+          "helpful_frames": 157,
+          "mean_utility_gain": -0.07433862397627908,
+          "net_utility_all_frames": -0.018446389406805357
+        },
+        "raw": {
+          "coverage_all_frames": 0.24814004376367615,
+          "frames": 567,
+          "harmful_frames": 491,
+          "helpful_frames": 21,
+          "mean_utility_gain": -0.36944444405121935,
+          "net_utility_all_frames": -0.09167396051511657
+        }
+      },
+      "all_empty_frames": 0,
+      "b2_disabled_frames": 0,
+      "complete": true,
+      "consensus_scope": "top-mode inliers only; compatible modes may also contribute to fused center",
+      "measured_frames": 2179,
+      "mode_unique_count_mean": 17.4673721340388,
+      "n0_current_frames": 178,
+      "n0_current_with_extension_frames": 2,
+      "prediction_frames": 2179,
+      "stages": {
+        "base_raw": {
+          "global_target_recall": 0.838380316764618,
+          "measured_frames": 2179,
+          "points": 589732.0,
+          "target_fraction": 0.19980431789355166,
+          "target_points": 117831.0
+        },
+        "base_sampled": {
+          "global_target_recall": 0.493233532082023,
+          "measured_frames": 2179,
+          "points": 333599.0,
+          "target_fraction": 0.20780038309467355,
+          "target_points": 69322.0
+        },
+        "consensus_top_mode": {
+          "global_target_recall": 2.8460432883184155e-05,
+          "measured_frames": 2179,
+          "points": 9904.0,
+          "target_fraction": 0.0004038772213247173,
+          "target_points": 4.0
+        },
+        "global": {
+          "global_target_recall": 1.0,
+          "measured_frames": 2179,
+          "points": 75664768.0,
+          "target_fraction": 0.0018574827322539336,
+          "target_points": 140546.0
+        },
+        "novel_pool": {
+          "global_target_recall": 2.8460432883184155e-05,
+          "measured_frames": 2179,
+          "points": 15790.0,
+          "target_fraction": 0.000253324889170361,
+          "target_points": 4.0
+        },
+        "prepool": {
+          "global_target_recall": 2.8460432883184155e-05,
+          "measured_frames": 2179,
+          "points": 15790.0,
+          "target_fraction": 0.000253324889170361,
+          "target_points": 4.0
+        },
+        "selected": {
+          "global_target_recall": 2.8460432883184155e-05,
+          "measured_frames": 2179,
+          "points": 13640.0,
+          "target_fraction": 0.0002932551319648094,
+          "target_points": 4.0
+        },
+        "support_novel": {
+          "global_target_recall": 2.8460432883184155e-05,
+          "measured_frames": 2179,
+          "points": 15790.0,
+          "target_fraction": 0.000253324889170361,
+          "target_points": 4.0
+        },
+        "support_raw": {
+          "global_target_recall": 0.5968935437508005,
+          "measured_frames": 2179,
+          "points": 279322.0,
+          "target_fraction": 0.30033796120606326,
+          "target_points": 83891.0
+        }
+      },
+      "structural_frames": 567
+    },
+    "candidate_counts": {
+      "b3_calibrated": {
+        "sum": 0.0,
+        "positive_frames": 0,
+        "mean": 0.0
+      },
+      "router_applied_gate": {
+        "sum": 0.0,
+        "positive_frames": 0,
+        "mean": 0.0
+      },
+      "structural_available": {
+        "sum": 567.0,
+        "positive_frames": 567,
+        "mean": 0.2602111060119321
+      },
+      "b1_valid": {
+        "sum": 2077.0,
+        "positive_frames": 2077,
+        "mean": 0.953189536484626
+      },
+      "target_visible": {
+        "sum": 1755.0,
+        "positive_frames": 1755,
+        "mean": 0.8054153281321708
+      },
+      "global_novel_target_count": {
+        "sum": 22715.0,
+        "positive_frames": 192,
+        "mean": 10.424506654428637
+      },
+      "support_novel_target_count": {
+        "sum": 4.0,
+        "positive_frames": 2,
+        "mean": 0.0018357044515832951
+      },
+      "prepool_target_count": {
+        "sum": 4.0,
+        "positive_frames": 2,
+        "mean": 0.0018357044515832951
+      },
+      "selected_target_count": {
+        "sum": 4.0,
+        "positive_frames": 2,
+        "mean": 0.0018357044515832951
+      },
+      "learned_motion_error": {
+        "sum": 462.3121937466929,
+        "positive_frames": 2141,
+        "mean": 0.21216713802051074
+      },
+      "kinematic_error": {
+        "sum": 552.56539171684,
+        "positive_frames": 2062,
+        "mean": 0.25358668734136763
+      },
+      "learned_endpoint_error": {
+        "sum": 6036.526087410741,
+        "positive_frames": 2179,
+        "mean": 2.770319452689647
+      },
+      "kinematic_endpoint_error": {
+        "sum": 6137.058909817745,
+        "positive_frames": 2179,
+        "mean": 2.8164565900953398
+      },
+      "support_actual_length": {
+        "sum": 17875.429407596588,
+        "positive_frames": 2077,
+        "mean": 8.203501334372
+      },
+      "support_actual_width": {
+        "sum": 10974.402304410934,
+        "positive_frames": 2077,
+        "mean": 5.036439790918281
+      }
+    },
+    "novel_point_acquisition_recall": 0.00017609509134932863,
+    "candidate_csv_prediction_frames": 2179,
+    "source": "output/20260909-003318-28_full-mini_car_seed42_60ep_bs16/lightning_logs/version_0/candidate_diagnostics/epoch_60.csv"
+  },
+  "late3": {
+    "checkpoint_epochs_present": [
+      58,
+      59,
+      60
+    ],
+    "evaluation_epochs_present": [
+      60
+    ],
+    "missing_evaluation_epochs": [
+      58,
+      59
+    ],
+    "mean_available": false
+  },
+  "b3_calibration": {
+    "ct_action_calibration_path": null,
+    "require_action_calibration": true,
+    "calibrated_prediction_frames": 0,
+    "all_12_validation_action_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "interpretation": "All reported Full validation rollouts fail closed to the observation output; not calibrated Full improvement evidence."
+  },
+  "b0_vs_full_seed42": {
+    "baseline_run": "output/20260909-003318-28_b0-mini_car_seed42_60ep_bs16",
+    "final_b0_state_tensors_checked": 320,
+    "all_final_b0_tensors_bitwise_equal": true,
+    "b0_prefix_hash_checkpoints": 63,
+    "all_prefix_hashes_equal": true,
+    "first_100_observation_fingerprints_equal": true,
+    "early_adam_hashes_equal": true,
+    "final_adam_parameters_checked": 236,
+    "final_adam_state_differences": [],
+    "observation_loss_steps_checked": 75720,
+    "all_observation_loss_values_equal": true,
+    "event_disambiguation": "Full loss_loss_b0_transaction logs observation and mechanism-shadow rows. Compare the first record per global_step (75720 rows), not all 93720 rows."
+  },
+  "training_supply_final": {
+    "epoch": 60,
+    "experiment_name": "ct28_full_mini_car_scratch_seed42",
+    "populations": {
+      "candidate0": {
+        "eligible_rows": 210.0,
+        "point_recall": 0.6955631399317406,
+        "pool_targets": 7325.0,
+        "recovery_fallback_rows": 0.0,
+        "recovery_positive_rows": 0.0,
+        "retained_rows": 210.0,
+        "row_recall": 1.0,
+        "sampled_targets": 5095.0
+      }
+    },
+    "schema": "ct_seqtrack.acquisition_training_supply.v1",
+    "seed": 42,
+    "targetness_balance": {
+      "negative_points": 1626556.0,
+      "negative_weight": 0.5759153081726052,
+      "positive_points": 246961.0,
+      "positive_weight": 3.793143451800082,
+      "source": "online_canonical_preflight"
+    }
+  },
+  "data_identity": {
+    "train_scenes": [
+      "scene-0061",
+      "scene-0553",
+      "scene-0655",
+      "scene-0757",
+      "scene-0796",
+      "scene-1077",
+      "scene-1094",
+      "scene-1100"
+    ],
+    "val_scenes": [
+      "scene-0103",
+      "scene-0916"
+    ]
+  },
+  "limitations": [
+    "The diagnostic CSV partition=dev and summary scenes=1 are misleading metadata: provenance records official mini_val scene-0103 and scene-0916; endpoint scene_id is unknown, so do not use this export for scene-specific or scene-bootstrap inference.",
+    "The one-step raw/bounded action gains hold the current state fixed and are not closed-loop Full-minus-B3 scores.",
+    "First 100 layer-by-layer server audits and same-card repeated runs are not present in these outputs; cross-arm checkpoint/loss identity is strong evidence for this run, not universal deterministic validation.",
+    "Baseline final45.200/47.243 is below recovery target49.986/58.962; epoch25 high score must not replace fixed final/late3 acceptance."
+  ]
+}

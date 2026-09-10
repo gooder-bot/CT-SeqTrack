@@ -39,7 +39,8 @@ def build_acquisition_diagnostics(
         global_pc, gt_box, anchor_box, baseline_pc,
         sampled_base_xyz, sampled_base_ids, endpoint_pc, tube_pc,
         corridor_pc, pool_xyz, pool_ids, prepool_xyz, prepool_ids,
-        prepool_valid, source, *, support_boxes=(), margin_target=None):
+        prepool_valid, source, *, support_boxes=(), margin_target=None,
+        enable_v29=False, max_support_boxes=None):
     """Return loss-independent, exact-ID stage counts for one endpoint.
 
     ``global_pc`` coordinates and GT/support boxes are world-frame; all other
@@ -193,4 +194,45 @@ def build_acquisition_diagnostics(
                     'selected_background_count'):
             if key in margin_target:
                 result[f'margin_label_{key}'] = margin_target[key]
+    if enable_v29:
+        if max_support_boxes is None:
+            raise ValueError('v29 reachability diagnostics require explicit maximum legal supports')
+
+        def union_mask(specs, ignore_z=False):
+            mask = np.zeros(len(global_xyz), dtype=bool)
+            for spec in specs:
+                if spec is None:
+                    continue
+                box, scale, offset = spec if isinstance(spec, tuple) else (spec, 1., 0.)
+                mask |= _in_box(global_xyz, box, scale=scale, offset=offset, ignore_z=ignore_z)
+            return mask & finite
+
+        novel_target_mask = target_global_mask & ~np.isin(global_ids, baseline_ids)
+        actual_xy, actual_xyz = union_mask(support_boxes, True), union_mask(support_boxes)
+        maximum_xy, maximum_xyz = union_mask(max_support_boxes, True), union_mask(max_support_boxes)
+        reachable_mask = novel_target_mask & maximum_xyz
+        reachable_ids = set(global_ids[reachable_mask].tolist())
+        reachable = len(reachable_ids)
+        actual_reachable = len(novel & reachable_ids)
+        actual_target_ids = novel & target_set
+        result.update(
+            acquisition_schema_version='ct_acquisition.v5',
+            support_z_contract='b0_vertical_hull_v1',
+            support_novel_xy_target_count=int(np.sum(novel_target_mask & actual_xy)),
+            support_novel_xyz_target_count=int(np.sum(novel_target_mask & actual_xyz)),
+            support_novel_z_excluded_target_count=int(np.sum(novel_target_mask & actual_xy & ~actual_xyz)),
+            max_legal_support_available=int(any(spec is not None for spec in max_support_boxes)),
+            max_legal_novel_xy_target_count=int(np.sum(novel_target_mask & maximum_xy)),
+            max_legal_novel_target_count=reachable,
+            max_legal_novel_z_excluded_target_count=int(np.sum(novel_target_mask & maximum_xy & ~maximum_xyz)),
+            max_legal_unreachable_target_count=len(global_novel_targets) - reachable,
+            max_legal_novel_denominator_valid=int(reachable > 0),
+            global_novel_opportunity=int(bool(global_novel_targets)),
+            max_legal_novel_opportunity=int(reachable > 0),
+            actual_support_reachable_target_count=actual_reachable,
+            actual_support_novel_outside_maximum_count=len(actual_target_ids - reachable_ids),
+            support_novel_recall_of_reachable=ratio(actual_reachable, reachable),
+            prepool_reachable_target_count=len(prepool & reachable_ids),
+            prepool_recall_of_reachable=ratio(len(prepool & reachable_ids), reachable),
+            prepool_novel_target_retention=ratio(count_targets(prepool), count_targets(novel)))
     return result

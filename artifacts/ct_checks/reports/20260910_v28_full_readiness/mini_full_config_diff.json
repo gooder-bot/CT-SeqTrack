@@ -1,0 +1,30 @@
+{
+  "ct_v28_expected_mini_car_updates_per_epoch": {
+    "mini": 1262,
+    "full": null
+  },
+  "experiment_name": {
+    "mini": "ct28_full_mini_car_scratch_seed42",
+    "full": "ct28_full_nuscenes_full_scratch_seed42"
+  },
+  "path": {
+    "mini": "/home/lishengjie/data/nuscenes-mini",
+    "full": "/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/"
+  },
+  "test_split": {
+    "mini": "mini_val",
+    "full": "val"
+  },
+  "train_split": {
+    "mini": "mini_train",
+    "full": "train_track"
+  },
+  "val_split": {
+    "mini": "mini_val",
+    "full": "val"
+  },
+  "version": {
+    "mini": "v1.0-mini",
+    "full": "v1.0-trainval"
+  }
+}

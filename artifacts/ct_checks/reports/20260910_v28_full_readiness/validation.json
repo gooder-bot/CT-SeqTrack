@@ -1,0 +1,62 @@
+{
+  "compileall": {
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff_check": {
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/CTSEQTRACK_V28_CHANGE_AUDIT.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/CTSEQTRACK_V28_IMPLEMENTATION.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/CTSEQTRACK_V28_LOCAL_VALIDATION.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/CTSEQTRACK_V28_SERVER_RUNS.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/EXPERIMENT_PROTOCOL.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/FORMAL_TOOLING.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/SERVER_PATHS.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'need_to_do.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'tools/preflight_ct_v28.py', LF will be replaced by CRLF the next time Git touches it\n"
+  },
+  "protected_mini_sources": {
+    "files": 90,
+    "changed": [],
+    "passed": true
+  },
+  "server_full_data_cuda_executed": false,
+  "slimming": {
+    "passed": false,
+    "reason": "fixed historical HEAD gate",
+    "expected": "001951a3aee15fdad6e5d5e32ca02d87bf083f3a",
+    "observed": "749bc13a0143fcdedba5cee465e2273c639e3b17"
+  },
+  "source_hashes": {
+    "models\\base_model.py": "97a04c9f6a8a422d461cfacde1a267b2d66ca36d5fe5297f2e14f1e66f0f0d78",
+    "tools\\preflight_ct_v28.py": "4050e3464ab336bf84e7e948e2f60bcea019257a9cc093ab658ce52096a9e9ec",
+    "tests\\test_ct_v28_export_metadata.py": "c38e6acec0b7036593ae6e1d4534687d6de6b95a51dcb142cc76e56025936604",
+    "tests\\test_ct_v28_preflight_data_entry.py": "5788419b8c9b765489a019ab965d0fc74e4387c36c81bfd9e9bb92075f6cb294"
+  },
+  "production_diff_paths": [
+    "models/base_model.py",
+    "tools/preflight_ct_v28.py"
+  ],
+  "bash_syntax": {
+    "checked_by": "full_dataset_contract_audit",
+    "commands": 2,
+    "passed": true,
+    "files": [
+      "document_command_1.sh",
+      "document_command_2.sh",
+      "launch_full_car_seed42.sh"
+    ]
+  },
+  "pytest_before_patch": {
+    "passed": 466,
+    "skipped": 13,
+    "seconds": 181.52
+  },
+  "new_report_links_validated": true,
+  "pytest_after_patch": {
+    "passed": 481,
+    "skipped": 13,
+    "seconds": 177.9,
+    "returncode": 0
+  },
+  "readiness": {
+    "single_full_car_seed42_60epoch_code_contracts_passed": true,
+    "actual_server_full_data_verified": false,
+    "b0_stable_score_recovery_passed": false,
+    "launch_executed": false
+  }
+}

@@ -1,22 +1,73 @@
-# CT-SeqTrack v28 当前状态（2026-09-08）
+# CT-SeqTrack 当前状态（2026-09-10）
+
+当前任务为v29实施与三臂完整nuScenes Car/seed42/scratch60实验。使用
+`29_b0_nuscenes_full.yaml`、`29_full_cfc_nuscenes_full.yaml`、`29_full_gru_nuscenes_full.yaml`。
+实现说明见[合同](docs/CTSEQTRACK_V29_IMPLEMENTATION.md)，具体本地结果见
+[验收](docs/CTSEQTRACK_V29_LOCAL_VALIDATION.md)，启动顺序见[服务器命令](docs/CTSEQTRACK_V29_SERVER_RUNS.md)。
+
+- [x] 独立v29方法身份、帧布局/mask/稀疏输入、短roll-in及监督拆分。
+- [x] 获取Z合同/novel可达诊断、机制accepted状态和即时B3效用接口。
+- [x] 当前全量本地回归571 passed/14 skipped；compileall、diff及服务器命令语法检查通过。
+- [ ] 服务器真实CUDA/同卡100步逐位一致性/epoch边界恢复。
+- [ ] 三臂完整60轮、58/59/60各自评测与两Full逐checkpoint策略拟合。
+- [ ] 同协议原SeqTrack对照、独立模块消融、多seed或额外数据集（另行登记）。
+
+尚未通过分数恢复/涨分验收，不用旧481项测试或seed52高分替代v29证据。
+
+## 历史v28结论与旧排程（当前执行以上述v29为准）
+
+最新判定：三组60轮已完成；B0/42=45.200/47.243、B0/52=52.876/64.478，
+Full/42未校准=45.200/47.243（动作0）。seed52达到历史目标但seed42仍不足，
+**B0稳定恢复未通过；先补评、校准与获取诊断，不直接铺开完整数据矩阵。**
+详见[三组结果分析与数据表](artifacts/ct_checks/reports/20260910_v28_mini_three_arm/REPORT.md)。
+
+用户随后明确希望先做一次完整数据60轮诊断再分析。当前按 **Full/Car/seed42、scratch60轮**
+准备，已有配置支持；不因mini未达标阻止这次单组诊断。完整数据资源与校准评测安排见
+[接口审计和服务器命令](docs/CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。
+
+- [x] 核查full350/150及内部17/18、自然更新数、B0—B3隔离和完整端点链路。
+- [x] 修复v28真实preflight的缺省preloading字段；默认按需读取。
+- [ ] 服务器执行完整数据preflight与16步Full真实事务，核对实际调度/梯度及资源。
+- [ ] 一组Full Car完整数据60轮；保留final/58/59/60及全部诊断，不冻结、不跨run初始化。
+- [ ] 每个Full checkpoint独立内部校准、官方val评测，并补同一权重的observation控制；
+  集中分析B0后期退化、B2获取供给和B3动作。full不能沿用mini分数目标作验收线。
 
 以[正式协议顶部](docs/EXPERIMENT_PROTOCOL.md)和[v28实施](docs/CTSEQTRACK_V28_IMPLEMENTATION.md)
-为当前定义。先修清共享观测底座，首轮正式仅28 B0；以下历史章节不代表最新实验状态。
+为当前定义。上轮GPU1 B0/42、GPU2 B0/52、GPU3 Full/42三组mini已完成；
+以下历史章节不代表最新实验状态。处理重启或训练异常先读
+[CUDA故障记录](docs/CTSEQTRACK_V28_CUDA_TROUBLESHOOTING.md)。
 
 - [x] 新增28五臂mini/full与共享实现reference配置，固定seed42/60epoch/bs16/workers12/val5。
 - [x] 注册完整candidate总体shuffle、reference_batch单次BC目标、seg_second64_v1点特征，
   严格确定性与环境记录；保留train.v4、单Adam、scratch及模块所有权。
 - [x] 新增v28 preflight、首轮B0/后续计划矩阵、版本化校准与工程入口约束。
-- [x] v28最终本地回归453 passed、12 skipped；compileall/diff通过。独立原算式、
+- [x] 9月8日v28实施全量回归快照453 passed、12 skipped；compileall/diff通过。独立原算式、
   六配置B0两步更新及真实跨臂审计首步逐位一致，详见[本地验收](docs/CTSEQTRACK_V28_LOCAL_VALIDATION.md)。
+- [x] 已登记`28_b0_seed52.yaml`，三组均scratch/60epoch/bs16/workers12/val5，
+  正式输出使用`output/日期-时间-28_模块-mini_car_seedXX_60ep_bs16/`新目录。
+- [x] 修复三组共同的CUDA空间NLL报错：原三维log_softmax后转二维NLL，保留整批
+  加权CE目标；CE合同进入配置和resume身份。专项47 passed/1 skipped。
+- [x] 修复Full的AP浮点cumsum报错：二值标签int64累计后转回浮点，两处同类路径
+  一起修复。指标不参与总损失；专项15 passed/1 skipped，严格确定性保持开启。
 - [x] v27五臂实际60轮训练已完成；9月7–8日报告与原始日志/逐帧CSV已复核。
   成绩只属于内部dev，Full缺校准且动作0；这不是完成官方mini_val验证。
 - [ ] 服务器真实preflight、同卡B0/B0/GRU 100-step逐位对齐与Full epoch边界连续/恢复验收。
-- [ ] 28 B0从epoch0正式60轮；补官方mini_val的58/59/60，报告final与late-3及失跟诊断。
-- [ ] B0结果可解释后再启动其余mini臂，Full每个checkpoint独立校准；参考实现身份单独披露。
+- [x] 从provenance、日志和checkpoint确认两次修复已同步，三组从epoch0完成60轮，
+  各75720观测更新，保留严格确定性，无本次RuntimeError；不等同于独立重复/恢复验收。
+- [x] 完整报告两seed final与闭环失跟；Full/B0 seed42全部观测loss、末轮模型与Adam
+  一致，插件无冻结且各18000机制事务，未发现本次插件污染B0。
+- [ ] 补官方mini_val的58/59独立评测，按固定58/59/60算late-3；不能用50/55/60。
+- [ ] 定位seed42后期闭环退化；对照独立、协议匹配的SeqTrack实现，不能把共享
+  `28_seqtrack_reference.yaml`标签重复当作独立算法对照，不能挑seed52宣布稳定恢复。
+- [ ] 核查Full获取阶段的新目标供给：192个有机会帧、22715个crop外目标点，仅2帧4点
+  进入support；后续pool/selected保留4点，优先查获取，不能先假定是B3阈值问题。
+- [x] 修正评测日志的`partition=dev`与`scene_id=unknown`元信息，保留原始输出；
+  本轮实际官方mini_val两场景/106轨迹/2285帧，不能将summary scenes=1当真。
+- [ ] Full每个checkpoint独立校准；B0结果可解释后再扩展其余mini臂，参考实现身份单独披露。
 - [ ] mini验收后再考虑完整nuScenes五类30运行矩阵；所有启用参数从头训练。
 
-尚无v28正式训练结果；不声明恢复历史高分、稳定涨分、SOTA或因果time/memory收益。
+v28三组的60轮结果已读入；seed42未达到健康目标，late-3及校准Full仍缺，
+不声明基线稳定恢复、稳定涨分、SOTA或因果time/memory收益。
 工程短跑和CPU合同检查不能替代真实数据/CUDA验收。具体命令见[v28服务器流程](docs/CTSEQTRACK_V28_SERVER_RUNS.md)。
 
 # 以下为 CT-SeqTrack v27 历史状态（2026-09-05）

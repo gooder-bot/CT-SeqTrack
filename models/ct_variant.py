@@ -22,7 +22,10 @@ def get_config(config, name, default=None):
 
 
 def configure_ct_variant(config):
-    if bool(get_config(config, "ct_enable_v28", False)):
+    if bool(get_config(config, "ct_enable_v29", False)):
+        from utils.v29_contracts import validate_v29_contract
+        validate_v29_contract(config)
+    elif bool(get_config(config, "ct_enable_v28", False)):
         if not bool(get_config(config, "ct_enable_v27", False)):
             raise ValueError("v28 requires the v27 endpoint/action envelope")
         expected_v28 = {
@@ -57,7 +60,7 @@ def configure_ct_variant(config):
                 config, "ct_optimizer_topology", "isolated_manual"))),
         "ct_initialization_policy": "scratch_only",
         "ct_b0_initialization_policy": "scratch_only",
-        "ct_training_state_policy": "observation",
+        "ct_training_state_policy": ("mixed_accepted_v1" if bool(get_config(config, "ct_enable_v29", False)) else "observation"),
         "ct_module_isolation": "strict",
         "use_motion_v3_legacy_fusion": False,
     }

@@ -1,0 +1,53 @@
+{
+  "compileall": {
+    "exit_code": 0,
+    "output": ""
+  },
+  "diff_check": {
+    "exit_code": 0,
+    "output": ""
+  },
+  "pytest": {
+    "command": "python -m pytest -q -ra",
+    "exit_code": 0,
+    "elapsed_seconds": 238.13949950000097,
+    "passed": 571,
+    "skipped": 14
+  },
+  "slimming": {
+    "exit_code": 1,
+    "reason": "fixed historical HEAD gate",
+    "expected": "001951a3aee15fdad6e5d5e32ca02d87bf083f3a",
+    "observed": "749bc13a0143fcdedba5cee465e2273c639e3b17"
+  },
+  "bash_syntax": [
+    {
+      "block": 1,
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "block": 2,
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "block": 3,
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "block": 4,
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "block": 5,
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "server_cuda": "not_run",
+  "formal_training": "not_run",
+  "score_recovery": "not_established"
+}

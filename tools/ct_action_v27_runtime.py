@@ -19,7 +19,7 @@ from utils.config import load_yaml_config
 
 def use_v27_runtime(argv):
     """兼容旧 --v27；v28 按配置自动选择真实闭环 runner。"""
-    if "--v27" in argv or "--v28" in argv:
+    if any(flag in argv for flag in ("--v27", "--v28", "--v29")):
         return True
     for index, argument in enumerate(argv):
         if argument == "--config" and index + 1 < len(argv):
@@ -48,6 +48,12 @@ def _write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def rows_schema(config):
+    if config.get("ct_enable_v29", False):
+        return "ct_seqtrack.action_rows.v29"
+    return "ct_seqtrack.action_rows.v28" if config.get("ct_enable_v28", False) else ROWS_SCHEMA
 
 
 class TrackerClosedLoopRunner:
@@ -144,6 +150,10 @@ class TrackerClosedLoopRunner:
                     row.update(tracklet_id=tracklet_key, scene_id=scene_id,
                                category=str(getattr(self.config, "category_name", "unknown")),
                                tracklet_index=index, partition=role)
+                    if getattr(self.config, "ct_enable_v29", False):
+                        row.update(tracklet_key=tracklet_key, role=role,
+                                   parameter_training_overlap=(scene_id in
+                                       set(self.scene_manifest["scenes"]["train"])))
                     rows.append(row)
         rows = normalize_rows(rows)
         self.cache[key] = copy.deepcopy(rows)
@@ -151,7 +161,8 @@ class TrackerClosedLoopRunner:
             write_rows(self.cache_directory / f"{role}_{key[1][:16]}.jsonl", rows)
             from utils.v27_eval_reporting import write_endpoint_diagnostics
             write_endpoint_diagnostics(self.cache_directory / f"{role}_{key[1][:16]}_summary.json", rows)
-        print(json.dumps({"phase": "v27_closed_loop", "role": role, "policy": policy,
+        version = "v29" if getattr(self.config, "ct_enable_v29", False) else "v27"
+        print(json.dumps({"phase": version + "_closed_loop", "role": role, "policy": policy,
                           "metrics": summarize_rows(rows)}, sort_keys=True), flush=True)
         return rows
 
@@ -160,6 +171,7 @@ def _parser(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--v27", action="store_true")
     parser.add_argument("--v28", action="store_true")
+    parser.add_argument("--v29", action="store_true")
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
@@ -180,7 +192,7 @@ def export_main(argv=None):
     write_rows(args.output, rows)
     from utils.v27_eval_reporting import write_endpoint_diagnostics
     write_endpoint_diagnostics(str(args.output) + '.summary.json', rows)
-    manifest = {"schema": ("ct_seqtrack.action_rows.v28" if runner.config.get("ct_enable_v28") else ROWS_SCHEMA), "partition": args.partition,
+    manifest = {"schema": rows_schema(runner.config), "partition": args.partition,
         "checkpoint_sha256": runner.checkpoint_sha256, "config_sha256": runner.config_sha256,
         "score_definition": SCORE_DEFINITION, "metric_mode": "benchmark_compat",
         "scene_manifest": runner.scene_manifest,
@@ -199,7 +211,8 @@ def calibrate_main(argv=None):
     calibration_rows = runner("calibration", {"kind": "never"})
     artifact = calibrate_actions_v27(calibration_rows, runner,
         checkpoint_sha256=runner.checkpoint_sha256, config_sha256=runner.config_sha256,
-        scene_manifest=runner.scene_manifest)
+        scene_manifest=runner.scene_manifest,
+        enable_v29=bool(runner.config.get("ct_enable_v29", False)))
     _write_json(args.output, artifact)
     print(json.dumps({"action_policy": artifact["action_policy"],
                       "dev_locked_metrics": artifact["dev_locked_metrics"],

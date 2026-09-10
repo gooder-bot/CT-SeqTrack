@@ -62,19 +62,70 @@ def inspect_scheduler_coverage(scheduler):
                 full_epoch_coverage=bool(scheduler.full_epoch_coverage))
 
 
-def inspect_protocol(config, scene_splits, *, load_datasets=False):
+def inspect_v29_observation_batch(observation, sampler, config, *, device='auto', host=None):
+    """用生产 collate/roll-in 接口执行一个真实 batch；不构造优化器或更新参数。"""
+    import torch
+    from torch.utils.data import DataLoader
+    from utils.v29_rollin import observation_collate, prepare_observation_batch
+
+    if host is None:
+        from models import get_model
+        target = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
+        host = get_model(config.net_model)(config).to(torch.device(target)).eval()
+    loader = DataLoader(observation, batch_sampler=sampler, num_workers=0,
+                        collate_fn=observation_collate, pin_memory=False)
+    payload = next(iter(loader))
+    if set(payload) != {'ct_v29_observation_items'}:
+        raise RuntimeError('v29 preflight did not use the production observation collate')
+    items = payload['ct_v29_observation_items']
+    with torch.no_grad():
+        batch = prepare_observation_batch(host, items)
+        # 预检只检查 observation host；插件完整训练事务由 main.py 的100步检查覆盖。
+        output = host(batch)
+        losses = host.compute_loss(batch, output)
+    def finite_tensors(value, name):
+        if torch.is_tensor(value):
+            if not bool(torch.isfinite(value).all()):
+                raise RuntimeError('non-finite v29 preflight tensor: ' + name)
+            return 1
+        if isinstance(value, dict):
+            return sum(finite_tensors(item, name + '.' + str(key)) for key, item in value.items())
+        if isinstance(value, (tuple, list)):
+            return sum(finite_tensors(item, name + '.' + str(index)) for index, item in enumerate(value))
+        return 0
+    checked = sum(finite_tensors(value, name) for value, name in
+                  ((batch, 'batch'), (output, 'output'), (losses, 'losses')))
+    if not losses or checked == 0:
+        raise RuntimeError('v29 preflight must check actual tensors and observation losses')
+    return dict(status='passed', rows=len(items),
+                teacher_rows=sum(item['mode'] == 'teacher' for item in items),
+                rollin_rows=sum(item['mode'] == 'rollin' for item in items),
+                checked_finite_tensors=checked,
+                losses={key: float(value.detach().cpu()) for key, value in losses.items()
+                        if torch.is_tensor(value) and value.numel() == 1},
+                rollin_diagnostics=getattr(host, '_ct_v29_rollin_diagnostics', {}),
+                optimizer_steps=0, engineering_only=True)
+
+
+def inspect_protocol(config, scene_splits, *, load_datasets=False, device='auto'):
     from utils.v28_protocol import build_scene_manifest
     from models.ct_variant import configure_ct_variant
     from utils.online_contract import validate_scratch_training_contract, validate_v28_observation_updates
     if not getattr(config, 'ct_enable_v28', False):
         raise ValueError('preflight requires a v28 config')
+    # main.py 的 argparse 会补此字段；独立 YAML 预检也必须提供。
+    # 缺省按需读取，避免完整数据预检意外构造整套内存缓存；保留显式 YAML 值。
+    if not hasattr(config, 'preloading'):
+        config.preloading = False
     configure_ct_variant(config)
     validate_scratch_training_contract(config)
     manifest = build_scene_manifest(scene_splits, config.version, config.ct_partition_seed)
-    result = dict(schema='ct_seqtrack.preflight.v28', scene_manifest=manifest,
+    version = 'v29' if getattr(config, 'ct_enable_v29', False) else 'v28'
+    result = dict(schema='ct_seqtrack.preflight.' + version, scene_manifest=manifest,
                   status='scene_manifest_verified', actual_datasets_verified=False,
                   numeric_contract='strict_deterministic_fp32_no_tf32',
-                  initial_formal_run='B0 only; later arms are pending B0 acceptance')
+                  initial_formal_run=('scratch-only; supports a single full-data diagnostic; '
+                                      'score recovery is assessed separately'))
     if not load_datasets:
         return result
     from datasets import get_dataset
@@ -100,7 +151,8 @@ def inspect_protocol(config, scene_splits, *, load_datasets=False):
     indices = [index for batch in batches for index in batch]
     if len(indices) != len(sampler) * int(config.batch_size) or len(set(indices)) != len(indices):
         raise RuntimeError('v28 observation population repeats or misses registered batch rows')
-    result['observation'].update(sampling_contract='seqtrack_original_slots_v1',
+    result['observation'].update(sampling_contract=getattr(
+        config, 'ct_b0_sampling_contract', 'seqtrack_original_slots_v1'),
         candidate_balancing=False, visited_rows=len(indices),
         dropped_final_rows=len(observation) - len(indices),
         loss_reduction='reference_batch')
@@ -140,6 +192,9 @@ def inspect_protocol(config, scene_splits, *, load_datasets=False):
         raise RuntimeError('official evaluation scene selection mismatch')
     result['evaluation'] = dict(scenes=len(evaluation.dataset.ct_scene_names),
         tracklets=evaluation.dataset.get_num_tracklets(), frames=evaluation.dataset.get_num_frames_total())
+    if getattr(config, 'ct_enable_v29', False):
+        result['observation']['real_batch'] = inspect_v29_observation_batch(
+            observation, sampler, observation_config, device=device)
     result.update(status='passed', actual_datasets_verified=True)
     return result
 
@@ -150,6 +205,7 @@ def main():
     parser.add_argument('--path')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--manifest-only', action='store_true')
+    parser.add_argument('--device', default='auto', help='v29 real observation batch device')
     args = parser.parse_args()
     from easydict import EasyDict
     from nuscenes.utils.splits import create_splits_scenes
@@ -167,7 +223,8 @@ def main():
     target = args.output.resolve()
     if target.is_relative_to((ROOT / 'output').resolve()):
         raise ValueError('preflight artifacts belong in artifacts/ct_checks')
-    result = inspect_protocol(config, create_splits_scenes(), load_datasets=not args.manifest_only)
+    result = inspect_protocol(config, create_splits_scenes(), load_datasets=not args.manifest_only,
+                              device=args.device)
     result['runtime_environment'] = capture_v28_runtime_environment()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

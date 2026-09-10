@@ -1,0 +1,10 @@
+_base_: 29_formal_base.yaml
+experiment_name: ct29_full_gru_nuscenes_car_scratch_seed42
+ct_variant: full
+motion_v3_temporal_backend: gru
+ct_enable_b1: true
+ct_enable_b2: true
+ct_enable_b3: true
+ct_memory_mode: real
+ct_require_action_calibration: true
+proposal_inference_mode: selective

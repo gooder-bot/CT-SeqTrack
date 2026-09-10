@@ -6,7 +6,7 @@ import numpy as np
 
 
 SEQTRACK_OBSERVATION_CORE_FIELDS = frozenset({
-    "points", "box_label", "ref_boxs", "box_label_prev",
+    "points", "box_label", "ref_boxs", "box_label_prev", "b0_coarse_target",
     "motion_label", "motion_state_label", "bbox_size", "seg_label",
     "valid_mask", "delta_T", "num_points_in_search", "candidate_id",
     "prev_bc", "this_bc", "candidate_bc",

@@ -1,6 +1,15 @@
-# v28 服务器验收与首轮 B0（2026-09-08）
+# v28 服务器验收与 mini 三组重启（2026-09-09）
+
+**9月10日最新安排：** 三组mini完成后，用户决定先做一组Full/Car/seed42完整nuScenes、
+从头60轮诊断，再集中分析。现有full配置已核查，完整数据启动、关闭预加载的原因及
+每个checkpoint的后处理命令见 [完整数据单组诊断](CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。
+下文mini重启命令保留历史用途；不能再用旧“首轮仅B0”顺序阻止这次已授权诊断。
 
 所有命令从 CT-SeqTrack 仓库内运行，使用 [SERVER_PATHS.md](SERVER_PATHS.md) 的数据根。工程输出指定 `artifacts/ct_checks/` 新目录；按当前确认的安排，三组正式重启使用带日期的 `output/` 新目录，不覆盖历史结果。下面命令是待执行流程，不代表已通过。
+
+9月10日状态更新：三组已完成上述60轮训练并同步结果，见[三组分析](../artifacts/ct_checks/reports/20260910_v28_mini_three_arm/REPORT.md)。本页三组启动命令保留为运行记录，当前下一步是补58/59评测、Full校准及B0/B2定位；不要因旧的“重启”标题重复训练。B0/42未达恢复目标，尚未进入完整nuScenes大矩阵。
+
+遇到 `nll_loss2d_forward_out_cuda_template`、`cumsum_cuda_kernel` 或紧随其后的 tqdm 异常，先读 [CUDA 故障记录](CTSEQTRACK_V28_CUDA_TROUBLESHOOTING.md)：内含两次根因、修复提交、同步文件、专项测试和未验收项。下面保留可直接使用的三组命令；后文矩阵工具只执行单 B0 的限制属于工具行为，不取消用户已确认通过 `main.py` 并行运行三组的安排。
 
 ## 2026-09-09：Full 的 AP 累计统计修复
 
