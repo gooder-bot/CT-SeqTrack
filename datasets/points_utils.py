@@ -147,21 +147,37 @@ def get_point_to_box_distance(pc, box, wlh_factor=1.0):
     return points2cc_dist
 
 
-def crop_pc_axis_aligned(PC, box, offset=0, scale=1.0, return_mask=False):
+def _copy_cropped_point_cloud(PC, close, copy_selected_only=False):
+    """跳过随即被替换的全云数组；未知子类/附加属性保留原 deepcopy 语义。"""
+    memo = None
+    if (copy_selected_only and type(PC) is PointCloud
+            and set(vars(PC)).issubset({'points', 'point_ids'})):
+        # 仅用于标准 PointCloud。附加属性可能别名引用原数组，因此不得
+        # 把这些对象的 deepcopy memo 偷换为裁剪数组或源数组。
+        memo = {id(PC.points): PC.points}
+        if hasattr(PC, 'point_ids'):
+            memo[id(PC.point_ids)] = PC.point_ids
+    new_PC = copy.deepcopy(PC, memo)
+    new_PC.points = PC.points[:, close]
+    new_PC.point_ids = raw_point_ids(PC)[close].copy()
+    return new_PC
+
+
+def crop_pc_axis_aligned(PC, box, offset=0, scale=1.0, return_mask=False,
+                         copy_selected_only=False):
     """
     crop the pc using the box in the axis-aligned manner
     """
     close = axis_aligned_box_membership_mask(
         PC.points, box, offset=offset, scale=scale)
 
-    new_PC = copy.deepcopy(PC)
-    new_PC.points = PC.points[:, close]
-    new_PC.point_ids = raw_point_ids(PC)[close].copy()
+    new_PC = _copy_cropped_point_cloud(PC, close, copy_selected_only)
     if return_mask:
         return new_PC, close
     return new_PC
 
-def crop_pc_axis_aligned_with_aroundboxs(PC, box, around_boxs, offset=0, scale=1.0, return_mask=False):
+def crop_pc_axis_aligned_with_aroundboxs(PC, box, around_boxs, offset=0, scale=1.0,
+                                      return_mask=False, copy_selected_only=False):
     """
     crop the pc using the box in the axis-aligned manner
     """
@@ -193,9 +209,7 @@ def crop_pc_axis_aligned_with_aroundboxs(PC, box, around_boxs, offset=0, scale=1
     close = np.logical_and(close, z_filt_min)
     close = np.logical_and(close, z_filt_max)
 
-    new_PC = copy.deepcopy(PC)
-    new_PC.points = PC.points[:, close]
-    new_PC.point_ids = raw_point_ids(PC)[close].copy()
+    new_PC = _copy_cropped_point_cloud(PC, close, copy_selected_only)
     if return_mask:
         return new_PC, close
     return new_PC
@@ -281,7 +295,7 @@ def generate_subwindow(pc, sample_bb, scale, offset=2, oriented=True):
     return new_pc
 
 def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, oriented=True,
-                                     canonicalize=False):
+                                     canonicalize=False, copy_selected_only=False):
     """
     generating the search area using the sample_bb
 
@@ -312,7 +326,8 @@ def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, or
         new_pc.rotate(rot_mat)
         box_tmp.rotate(Quaternion(matrix=rot_mat))
        
-        new_pc = crop_pc_axis_aligned(new_pc, box_tmp, scale=scale, offset=offset)
+        new_pc = crop_pc_axis_aligned(new_pc, box_tmp, scale=scale, offset=offset,
+                                     copy_selected_only=copy_selected_only)
 
         if canonicalize:
             # Membership may use a support frame, but every retained ID is
@@ -335,7 +350,8 @@ def generate_subwindow_with_aroundboxs(pc, sample_bb, ref_o, scale, offset=2, or
 
 
     else:
-        new_pc = crop_pc_axis_aligned(pc, sample_bb, scale=scale, offset=offset)
+        new_pc = crop_pc_axis_aligned(pc, sample_bb, scale=scale, offset=offset,
+                                     copy_selected_only=copy_selected_only)
 
         # transform to the coordinate system of sample_bb
         new_pc.translate(trans)

@@ -10,6 +10,7 @@ from torch.utils.data._utils.collate import default_collate
 from utils.sampling_utils import stable_uint32_seed, sample_candidate_offset
 from utils.b0_sampling import isolated_observation_rng
 from utils.training_isolation import capture_global_rng_state, restore_global_rng_state
+from utils.v29_performance import performance_enabled, restore_changed_buffers
 
 
 def observation_collate(items):
@@ -28,7 +29,17 @@ def observation_item(sampler, index):
     tracklet, endpoint = sampler._locate_tracklet(anno_id)
     start = max(0, endpoint - 4)
     frames = sampler.dataset.get_frames(tracklet, frame_ids=list(range(start, endpoint + 1)))
-    first = sampler.dataset.get_frames(tracklet, frame_ids=[0])[0]
+    if performance_enabled(getattr(sampler, 'config', None)):
+        if start == 0:
+            # 窗口首帧就是整条轨迹首帧；只传递实际消费的框元数据。
+            first = {key: value for key, value in frames[0].items() if key != 'pc'}
+        elif hasattr(sampler.dataset, 'get_frame_metadata'):
+            first = sampler.dataset.get_frame_metadata(tracklet, 0)
+        else:
+            # 其他数据集保留兼容读取；不把窗口首框尺寸冒充轨迹首框尺寸。
+            first = sampler.dataset.get_frames(tracklet, frame_ids=[0])[0]
+    else:
+        first = sampler.dataset.get_frames(tracklet, frame_ids=[0])[0]
     key = (sampler.dataset.get_tracklet_key(tracklet)
            if hasattr(sampler.dataset, 'get_tracklet_key') else str(tracklet))
     return dict(mode='rollin', index=index, candidate=candidate,
@@ -90,8 +101,16 @@ def process_query(item, predictions, frame_id, config):
 
 def prepare_observation_batch(host, items):
     """最多三波 no-grad B0 前向；不使用插件、不提交任何全局递归状态。"""
-    from models.ct_variant import configure_ct_variant
+    from utils.v29_profiling import profile_stage
+    with profile_stage(host, 'rollin'):
+        return _prepare_observation_batch(host, items)
 
+
+def _prepare_observation_batch(host, items):
+    from models.ct_variant import configure_ct_variant
+    from utils.v29_profiling import profile_stage
+
+    optimized = performance_enabled(host.config)
     config = copy.deepcopy(host.config)
     config.ct_variant = 'b0'
     configure_ct_variant(config)
@@ -120,28 +139,40 @@ def prepare_observation_batch(host, items):
                 active = [i for i in rows if items[i]['start'] + step < items[i]['endpoint']]
                 if not active:
                     continue
-                rendered = [process_query(items[i], predictions[i], items[i]['start'] + step, config)
-                            for i in active]
-                batch = host._move_batch_to_device(default_collate([r[0] for r in rendered]), host.device)
-                output = host(batch)['observation_aux_estimation_boxes']
+                with profile_stage(host, 'rollin_cpu_prepare'):
+                    rendered = [process_query(items[i], predictions[i], items[i]['start'] + step, config)
+                                for i in active]
+                with profile_stage(host, 'rollin_transfer'):
+                    batch = host._move_batch_to_device(default_collate([r[0] for r in rendered]), host.device)
+                with profile_stage(host, 'rollin_forward'):
+                    output = host(batch)['observation_aux_estimation_boxes']
                 forwards += len(active)
+                if optimized:
+                    # 保持每wave的网络shape、样本顺序和Box变换，仅合并D2H。
+                    output = output.detach().cpu().numpy()
                 for j, i in enumerate(active):
                     world = host._local_prediction_to_world(output[j], rendered[j][1])
                     world.wlh = np.asarray(items[i]['first']['3d_bbox'].wlh).copy()
                     predictions[i][items[i]['start'] + step] = world
-            for i in rows:
-                results[i] = process_query(items[i], predictions[i], items[i]['endpoint'], config)[0]
+            with profile_stage(host, 'endpoint_cpu_prepare'):
+                for i in rows:
+                    results[i] = process_query(items[i], predictions[i], items[i]['endpoint'], config)[0]
     finally:
-        with torch.no_grad():
-            for name, value in host.named_buffers():
-                if not torch.equal(value, buffers[name]):
-                    value.copy_(buffers[name])
-        for module, flag in flags:
-            module.training = flag
-        for key, value in routing.items():
-            setattr(host, key, value)
-        host._ct_observation_only_forward = old_observation
-        restore_global_rng_state(rng)
+        try:
+            with profile_stage(host, 'rollin_restore'), torch.no_grad():
+                if optimized:
+                    restore_changed_buffers(host, buffers)
+                else:
+                    for name, value in host.named_buffers():
+                        if not torch.equal(value, buffers[name]):
+                            value.copy_(buffers[name])
+        finally:
+            for module, flag in flags:
+                module.training = flag
+            for key, value in routing.items():
+                setattr(host, key, value)
+            host._ct_observation_only_forward = old_observation
+            restore_global_rng_state(rng)
     host._ct_v29_rollin_diagnostics = dict(
         sample_forwards=forwards, elapsed_ms=1000 * (time.perf_counter() - started),
         rows=len(rows), teacher_rows=len(items) - len(rows))

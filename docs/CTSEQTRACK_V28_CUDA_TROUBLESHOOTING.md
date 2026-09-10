@@ -1,5 +1,11 @@
 # v28 CUDA 故障与后续工作提醒（2026-09-09）
 
+2026-09-11性能修改提醒：relation AP计算提取到`utils/v29_diagnostics.py::relation_rank_metrics`，
+原`int64 cumsum → 原dtype`路径保留，旧binary AP仍在host。不要因减频而认为非确定性算子可以保留，
+首次周期日志或epoch尾批flush同样会执行它。`self.log(on_epoch=True)`仍每步更新；H3内的
+deterministic异常必须继续报错，不能被影子诊断的missing处理吞掉。新增检查/命令见
+[v29性能记录](CTSEQTRACK_V29_PERFORMANCE.md)。
+
 这份记录用于后续排错与重启前复核。**9月10日更新：三组已在保留严格确定性的服务器环境完成60轮/75720次B0更新，两种显式执行阻断已消除。** 但B0/42仅45.200/47.243，B0/52为52.876/64.478，基线尚未稳定恢复；独立重复及epoch边界恢复也不由训练完成自动证明。实际结果与证据见[三组分析](../artifacts/ct_checks/reports/20260910_v28_mini_three_arm/REPORT.md)。以下保留9月9日报错与修复历史；最新排程和命令分别见[正式协议](EXPERIMENT_PROTOCOL.md)与[服务器运行说明](CTSEQTRACK_V28_SERVER_RUNS.md)。
 
 ## 事件与定位

@@ -4,6 +4,18 @@ from utils.training_isolation import (
     capture_global_rng_state,
     restore_global_rng_state,
 )
+from utils.v29_profiling import profile_loader_stage
+
+
+def _profiled_observation_batches(loader):
+    iterator = iter(loader)
+    while True:
+        try:
+            with profile_loader_stage('observation_next'):
+                batch = next(iterator)
+        except StopIteration:
+            return
+        yield batch
 
 
 class DualStreamLoader:
@@ -56,7 +68,8 @@ class DualStreamLoader:
         # RNGs too.  Independent DataLoader generators still advance normally.
         rng_state = capture_global_rng_state() if self.isolate_mechanism_rng else None
         try:
-            return next(iterator)
+            with profile_loader_stage('mechanism_next'):
+                return next(iterator)
         finally:
             if rng_state is not None:
                 restore_global_rng_state(rng_state)
@@ -64,7 +77,7 @@ class DualStreamLoader:
     def __iter__(self):
         mechanism_iterator = None
         emitted = 0
-        for step, observation_batch in enumerate(self.observation_loader):
+        for step, observation_batch in enumerate(_profiled_observation_batches(self.observation_loader)):
             mechanism_batch = None
             ticks = ((step + 1) * self.mechanism_steps // self.observation_steps
                      - step * self.mechanism_steps // self.observation_steps)

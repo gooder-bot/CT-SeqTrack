@@ -1,0 +1,7 @@
+_base_: 29_b0_nuscenes_full.yaml
+experiment_name: ct29_b0_nuscenes_car_scratch_seed42_perf
+ct_runtime_optimization: equivalent_v1
+ct_diagnostic_policy: sampled_v1
+ct_scalar_log_every_n_steps: 50
+ct_diagnostic_every_n_steps: 100
+ct_h3_diagnostic_keep_ratio: 0.1

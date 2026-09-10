@@ -20,6 +20,8 @@ from utils.b1_acquisition import b1_input_digest
 from utils.training_isolation import (CheckpointableRNG, candidate_stratified_mean,
     update_cumulative_binary_class_balance)
 from utils.v27_input import build_v27_eval_input
+from utils.v29_performance import diagnostics_sampled
+from utils.v29_diagnostics import diagnostic_call, write_relation_diagnostics, relation_rank_metrics
 from tests.test_ct_v27_input_flow import sampler_runtime, _case
 
 

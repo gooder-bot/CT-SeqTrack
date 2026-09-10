@@ -138,6 +138,11 @@ from utils.recursive_state import (
     rotating_rollout_horizon,
 )
 from utils.sampling_utils import stable_uint32_seed
+from utils.v29_performance import performance_enabled, diagnostics_sampled, scalar_items_to_python
+from utils.v29_diagnostics import (sample_training_diagnostics, accumulate_core_losses,
+    flush_core_losses, diagnostic_call, relation_rank_metrics, write_relation_diagnostics,
+    write_training_scalars, write_gate_histogram)
+from utils.v29_profiling import profile_stage, record_equivalence_transaction
 
 # import vis_tool as vt
 
@@ -1761,6 +1766,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     f"{prefix}")
 
     def on_save_checkpoint(self, checkpoint):
+        summary = getattr(self, '_ct_perf_last_epoch_summary', None)
+        if summary is not None:
+            checkpoint['ct_v29_diagnostic_summary'] = copy.deepcopy(summary)
         if getattr(self, 'ct_enable_v28', False):
             checkpoint['ct_v28_runtime_environment'] = copy.deepcopy(
                 getattr(self.config, 'ct_runtime_environment', {}))
@@ -2063,9 +2071,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     if parameter.grad is not None]
                 if gradients:
                     active.add(name)
-                    norms[name] = float(torch.linalg.vector_norm(torch.stack([
+                    norm = torch.linalg.vector_norm(torch.stack([
                         torch.linalg.vector_norm(value)
-                        for value in gradients])).detach().cpu())
+                        for value in gradients])).detach()
+                    norms[name] = norm if performance_enabled(self.config) else float(norm.cpu())
+            if performance_enabled(self.config):
+                norms = scalar_items_to_python(norms)
             self._ct_pending_auto_updates = active
             previous = dict(getattr(self, '_ct_last_gradient_norm', {}))
             previous.update(norms)
@@ -2115,6 +2126,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self.decoder_token_consistency.update_teacher()
 
     def on_train_epoch_end(self):
+        if diagnostics_sampled(self.config):
+            flush_core_losses(self)
         if (self.ct_separate_optimizers
                 and self.config.optimizer.lower() != 'adamonecycle'):
             schedulers = self.lr_schedulers()
@@ -2233,8 +2246,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 epoch_metrics['utility_score_mse'] = float(np.mean(
                     (utility[:, 2] - utility[:, :2].mean(axis=1)) ** 2))
         if epoch_metrics:
+            if diagnostics_sampled(self.config):
+                epoch_metrics = {'sampled_' + key: value for key, value in epoch_metrics.items()}
+                epoch_metrics['sample_interval'] = int(getattr(self.config, 'ct_diagnostic_every_n_steps', 100))
+                epoch_metrics['sampled_population'] = 1.0
+                for name in binary_names:
+                    epoch_metrics[name + '_sampled_rows'] = sum(len(entry[0]) for entry in rows.get(name, []))
             self.logger.experiment.add_scalars(
-                'ct_epoch_calibration', epoch_metrics,
+                ('ct_epoch_calibration_sampled' if diagnostics_sampled(self.config)
+                 else 'ct_epoch_calibration'), epoch_metrics,
                 global_step=self.global_step)
 
     @staticmethod
@@ -2311,6 +2331,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'calibration': calibration,
         }
 
+    def _ct_accumulate_sampled_binary(self, data, output):
+        from utils.v27_training import accumulate_v27_binary_rows
+        accumulate_v27_binary_rows(self._ct_epoch_binary_rows, data, output, self.ct_enable_b3)
+
     def _accumulate_joint_binary_rows(self, data, output):
         if not (self.training and self.ct_joint_contract_version >= 2
                 and self.use_ct_joint_full and self.ct_enable_b2):
@@ -2320,8 +2344,18 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 'presence': [], 'alpha': [], 'alpha_uplift': []}
         if self.ct_enable_v27:
             from utils.v27_training import accumulate_v27_binary_rows
-            accumulate_v27_binary_rows(
-                self._ct_epoch_binary_rows, data, output, self.ct_enable_b3)
+            if diagnostics_sampled(self.config):
+                data_keys = ('ct_extension_labels', 'ct_extension_valid_mask')
+                output_keys = ('ct_extension_selected_indices', 'ct_extension_selected_valid_mask',
+                    'ct_b2_available', 'ct_b2_extension_presence_probability', 'ct_b3_h1_valid',
+                    'ct_b3_h1_success_gain_label', 'ct_b3_h1_precision_gain_label',
+                    'ct_b3_action_score', 'ct_b3_help_logit', 'ct_b3_harm_logit')
+                diagnostic_call(self, 'binary', self._ct_accumulate_sampled_binary,
+                    {key: data[key] for key in data_keys},
+                    {key: output[key] for key in output_keys if key in output})
+            else:
+                accumulate_v27_binary_rows(
+                    self._ct_epoch_binary_rows, data, output, self.ct_enable_b3)
             return
         if self.ct_joint_contract_version >= 3:
             action_probability = contract_v3_action_probability(
@@ -5318,55 +5352,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             prepool_labels * relation_positive_weight
             + (1.0 - prepool_labels) * relation_negative_weight)
         loss_relation = weighted_mean(relation_error, prepool_valid)
-        relation_probability = torch.sigmoid(
-            output['ct_relation_logits_prepool'])
-        relation_select = prepool_valid > 0
-        relation_scores_flat = relation_probability[relation_select]
-        relation_targets_flat = prepool_labels[relation_select] > 0.5
-        relation_auroc = target_xy.new_tensor(0.5)
-        relation_auprc = target_xy.new_zeros(())
-        relation_ece = target_xy.new_zeros(())
-        positive_scores = relation_scores_flat[relation_targets_flat]
-        negative_scores = relation_scores_flat[~relation_targets_flat]
-        if positive_scores.numel() and negative_scores.numel():
-            ascending = torch.argsort(relation_scores_flat, stable=True)
-            ranks = torch.empty_like(ascending, dtype=dtype)
-            ranks[ascending] = torch.arange(
-                1, ascending.numel() + 1, device=device, dtype=dtype)
-            positive_count = positive_scores.numel()
-            negative_count = negative_scores.numel()
-            relation_auroc = (
-                ranks[relation_targets_flat].sum()
-                - 0.5 * positive_count * (positive_count + 1)) / float(
-                    positive_count * negative_count)
-        if positive_scores.numel():
-            order = torch.argsort(relation_scores_flat, descending=True)
-            ordered_target = relation_targets_flat[order].to(dtype)
-            # 二值计数用整数累计，避开 CUDA 浮点 cumsum 的确定性限制。
-            precision_at_k = torch.cumsum(
-                ordered_target, dim=0, dtype=torch.int64).to(dtype) / torch.arange(
-                    1, ordered_target.numel() + 1,
-                    device=device, dtype=dtype)
-            relation_auprc = (
-                precision_at_k * ordered_target).sum() / torch.clamp(
-                    ordered_target.sum(), min=1.0)
-        if relation_scores_flat.numel():
-            ece_terms = []
-            for bin_index in range(10):
-                lower = bin_index / 10.0
-                upper = (bin_index + 1) / 10.0
-                in_bin = (
-                    (relation_scores_flat >= lower)
-                    & (relation_scores_flat < upper
-                       if bin_index < 9 else relation_scores_flat <= upper))
-                if bool(in_bin.any()):
-                    ece_terms.append(
-                        in_bin.to(dtype).mean()
-                        * torch.abs(
-                            relation_scores_flat[in_bin].mean()
-                            - relation_targets_flat[in_bin].to(dtype).mean()))
-            if ece_terms:
-                relation_ece = torch.stack(ece_terms).sum()
+        if (self.training and diagnostics_sampled(self.config)
+                and getattr(self, '_ct_perf_batch_index', None) is not None):
+            diagnostic_call(self, 'relation', write_relation_diagnostics, self,
+                output['ct_relation_logits_prepool'], prepool_labels, prepool_valid,
+                target_xy, int(self.global_step))
+            relation_metrics = {}
+        else:
+            relation_metrics = relation_rank_metrics(output['ct_relation_logits_prepool'],
+                prepool_labels, prepool_valid, target_xy)
 
         foreground = extension_valid * extension_labels
         vote_target = target_xy.unsqueeze(1).expand_as(
@@ -5571,10 +5565,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             'loss_ct_b3_total': b3_total,
             'loss_ct_targetness': loss_targetness,
             'loss_ct_relation': loss_relation,
-            'ct_relation_auroc': relation_auroc,
-            'ct_relation_ap': relation_auprc,
-            'ct_relation_auprc': relation_auprc,
-            'ct_relation_ece': relation_ece,
+            **relation_metrics,
             'loss_ct_vote': loss_vote,
             'loss_ct_raw_search': loss_raw,
             'loss_ct_presence': loss_presence,
@@ -7770,6 +7761,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         return loss_dict
 
     def on_train_epoch_start(self):
+        self._ct_perf_epoch_losses = {}
+        self._ct_perf_h3_counts = {}
+        self._ct_perf_pending_diagnostics = {}
         pending_rng = getattr(self, '_ct_pending_global_rng_state', None)
         if pending_rng is not None:
             restore_global_rng_state(pending_rng)
@@ -8089,7 +8083,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         payload['point_sampling_seeds'] = contract['point_sampling_seeds']
         payload['current_sampling_seed'] = contract[
             'current_sampling_seed']
-        payload['ct_observation_only'] = b0_auxiliary_only
+        payload['ct_observation_only'] = (b0_auxiliary_only or bool(raw.get('ct_observation_only', False))
+            if performance_enabled(self.config) else b0_auxiliary_only)
         if motion_prediction is not None:
             payload['motion_prediction'] = motion_prediction
         if 'motion_aux_frame_ids' in raw:
@@ -8238,7 +8233,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         return batch, auxiliary_batch
 
     def _local_prediction_to_world(self, local_box, anchor_box):
-        values = local_box.detach().cpu().numpy().reshape(-1)[:4]
+        values = (local_box.detach().cpu().numpy() if torch.is_tensor(local_box)
+                  else np.asarray(local_box)).reshape(-1)[:4]
         return points_utils.getOffsetBB(
             anchor_box, values, degrees=self.config.degrees,
             use_z=self.config.use_z,
@@ -8431,6 +8427,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.config, 'ct_online_recursive_training', False)):
             return
         seen_slots = set()
+        cpu_boxes = cpu_quality = None
+        if performance_enabled(self.config):
+            key = ('ct_v29_behavior_final_boxes' if getattr(self, 'ct_enable_v29', False)
+                   else 'observation_aux_estimation_boxes')
+            cpu_boxes = output[key].detach().cpu().numpy()
+            if self.ct_enable_v27:
+                cpu_quality = output['ct_observation_quality'].detach().cpu().numpy()
         for index, item in enumerate(self._ct_online_batch_context):
             raw = item['raw']
             slot = int(raw['online_slot'])
@@ -8453,13 +8456,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if state_policy != 'observation':
                     raise RuntimeError('legacy mechanism requires observation state')
                 local_final = output['observation_aux_estimation_boxes'][index]
-            final_box = self._local_prediction_to_world(local_final, anchor)
+            final_box = self._local_prediction_to_world(
+                cpu_boxes[index] if cpu_boxes is not None else local_final, anchor)
             commit_canonical_prediction(
                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
                 raw['this_frame'].get('timestamp'))
             if self.ct_enable_v27:
-                state.quality[int(raw['this_frame_id'])] = output[
-                    'ct_observation_quality'][index].detach().cpu().numpy().copy()
+                state.quality[int(raw['this_frame_id'])] = (
+                    cpu_quality[index].copy() if cpu_quality is not None else output[
+                        'ct_observation_quality'][index].detach().cpu().numpy().copy())
 
     def _ensure_ct_scalers(self):
         if self._ct_scalers:
@@ -8910,6 +8915,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         Returns:
 
         """
+        self._ct_perf_batch_index = int(batch_idx)
         if isinstance(batch, dict) and 'ct_v29_observation_items' in batch:
             from utils.v29_rollin import prepare_observation_batch
             batch = prepare_observation_batch(self, batch['ct_v29_observation_items'])
@@ -9003,14 +9009,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             isinstance(batch, list) and batch
             and isinstance(batch[0], dict)
             and batch[0].get('online_recursive_raw', False))
-        if online_batch and self.device.type == 'cuda':
+        measure_online = online_batch and sample_training_diagnostics(self)
+        if measure_online and self.device.type == 'cuda':
             torch.cuda.synchronize(self.device)
-        online_step_start = time.perf_counter() if online_batch else None
+        online_step_start = time.perf_counter() if measure_online else None
         auxiliary_batch = None
         auxiliary_gradients = {}
         if online_batch:
-            batch, auxiliary_batch = self._prepare_online_recursive_batch(
-                batch)
+            with profile_stage(self, 'cpu_prepare'):
+                batch, auxiliary_batch = self._prepare_online_recursive_batch(batch)
             if (self.ct_joint_contract_version >= 3
                     and not bool((batch['b0_view_id'] == 0).all())):
                 raise RuntimeError(
@@ -9033,18 +9040,23 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 observation_audit.begin_observation(
                     batch, int(self.ct_b0_update_step.item()) + 1)
         with autocast_context:
-            output = (
-                self._forward_safe_mechanism(batch)
-                if getattr(self, '_ct_safe_mechanism_forward', False)
-                else self(batch))
+            with profile_stage(self, 'mechanism_forward' if getattr(
+                    self, '_ct_safe_mechanism_forward', False) else 'observation_forward'):
+                output = (self._forward_safe_mechanism(batch)
+                          if getattr(self, '_ct_safe_mechanism_forward', False) else self(batch))
             self._ct_record_cuda_stage('forward')
             if online_batch:
                 if getattr(self, 'ct_enable_v29', False):
                     self._apply_v29_mechanism_policy(output)
-                self._attach_h3_shadow_labels(batch, output)
-            loss_dict = self.compute_loss(batch, output)
+                with profile_stage(self, 'h3'):
+                    self._attach_h3_shadow_labels(batch, output)
+            with profile_stage(self, 'loss'):
+                loss_dict = self.compute_loss(batch, output)
             if getattr(self, 'ct_enable_v29', False):
                 if online_batch:
+                    for key, value in batch.items():
+                        if key.startswith('ct_h3_diagnostic_'):
+                            loss_dict[key] = value
                     for kind, code in (('never', 0), ('always', 1), ('threshold0', 2)):
                         loss_dict['ct_behavior_' + kind + '_rate'] = (output['ct_v29_behavior_kind'] == code).float().mean()
                     loss_dict['ct_behavior_accepted_rate'] = output['ct_router_applied_gate'].float().mean()
@@ -9096,7 +9108,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                      if name in active_modules),
                     output['aux_estimation_boxes'].new_zeros(()))
                 loss_dict['loss_total'] = loss
-        if online_batch:
+        record_equivalence_transaction(self, batch, output, loss_dict)
+        if measure_online:
             if self.device.type == 'cuda':
                 torch.cuda.synchronize(self.device)
             online_step_ms = max(
@@ -9136,16 +9149,24 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                          on_epoch=True, prog_bar=False, logger=True,
                          batch_size=log_batch_size)
 
-        log_dict = {k: v.item() for k, v in loss_dict.items()}
-
-        self.logger.experiment.add_scalars('loss', log_dict,
-                                           global_step=self.global_step)
-        if (online_batch and 'ct_router_gate' in output
-                and hasattr(self.logger.experiment, 'add_histogram')):
-            self.logger.experiment.add_histogram(
-                'ct/router_probability_histogram',
-                output['ct_router_gate'].detach(),
-                global_step=self.global_step)
+        accumulate_core_losses(self, loss_dict, log_batch_size)
+        if diagnostics_sampled(self.config):
+            population = ('mechanism' if getattr(self, '_ct_mechanism_transaction', False)
+                          else 'observation')
+            with profile_stage(self, 'logging'):
+                diagnostic_call(self, 'loss_' + population, write_training_scalars,
+                    self, loss_dict, int(self.global_step), population, scalar=True)
+            if online_batch and 'ct_router_gate' in output:
+                diagnostic_call(self, 'histogram', write_gate_histogram, self,
+                    output['ct_router_gate'], int(self.global_step))
+        else:
+            with profile_stage(self, 'logging'):
+                log_dict = (scalar_items_to_python(loss_dict) if performance_enabled(self.config)
+                            else {k: v.item() for k, v in loss_dict.items()})
+                self.logger.experiment.add_scalars('loss', log_dict,
+                                                   global_step=self.global_step)
+            if online_batch and 'ct_router_gate' in output:
+                write_gate_histogram(self, output['ct_router_gate'].detach(), int(self.global_step))
 
         if online_batch:
             self._commit_online_recursive_predictions(output)

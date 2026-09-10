@@ -1,5 +1,15 @@
 # CT-SeqTrack 当前工作提醒（2026-09-10）
 
+2026-09-11：用户要求加速v29 B0/Full-CfC/Full-GRU，允许昂贵纯诊断抽样，但训练输入、
+损失/更新、BN/RNG、证据与递归耦合不变。仅新`*_nuscenes_full_perf.yaml`启用性能路径；
+旧配置保留。短测速/逐位对照及新日期output命令见[性能记录](docs/CTSEQTRACK_V29_PERFORMANCE.md)。
+不运行全套哈希门禁；本地CPU通过不能写成服务器CUDA或加速比已验证。
+日志不能整体减频：`self.log(on_epoch=True)`和训练统计每步更新，仅直接TB序列化抽样，
+尾批在`on_train_epoch_end`统一flush去重。H3是v29 H1-only目标下的诊断抽样，明确披露覆盖变化，
+记录scheduled/executed/valid/not_sampled；稳定摘要包含事件和版本。保留NLL2D、int64 AP cumsum、
+固定槽max及strict deterministic。普通100步不代表H3已覆盖，另有真实合法事件微基准，
+测速采用同卡ABBA及三卡并行；不启用persistent_workers。
+
 ## 最新：v29已获实施授权
 
 最新启动偏好：仅轻量核对，不重做全套哈希/长测试，不强制`--assert-passed`后才提供命令。

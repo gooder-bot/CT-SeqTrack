@@ -265,12 +265,13 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     v27 = bool(getattr(config, 'ct_enable_v27', False))
     v28 = bool(getattr(config, 'ct_enable_v28', False))
     v29 = bool(getattr(config, 'ct_enable_v29', False))
+    perf = v29 and getattr(config, 'ct_runtime_optimization', '') == 'equivalent_v1'
     from utils.point_identity import raw_point_ids, sampled_identity
     from functools import partial
     crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
-                             canonicalize=v27)
+                             canonicalize=v27, copy_selected_only=perf)
     b0_crop_subwindow = partial(points_utils.generate_subwindow_with_aroundboxs,
-                                canonicalize=v27 and not v28)
+                                canonicalize=v27 and not v28, copy_selected_only=perf)
     regularize_b0 = regularize_b0_seqtrack_compat if v28 else points_utils.regularize_pc
     if v29:
         from utils.b0_sampling import regularize_b0_sparse_v29
@@ -417,12 +418,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     sample_index = int(data.get(
         'sample_index', this_frame_id if this_frame_id is not None else 0))
 
-    # Check the number of empty boxes
-    for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
-        num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
-        if num_points_in_prev_box < config.limit_num_points_in_prev_box:
-            empty_counter += 1
-    if online_recursive_state is None and (not v27 or v28):
+    # 仅 teacher 重抽消费此统计；递归不按 GT/预测框可见性拒绝端点。
+    check_empty_history = online_recursive_state is None and (not v27 or v28)
+    if not perf or check_empty_history:
+        for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
+            num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
+            if num_points_in_prev_box < config.limit_num_points_in_prev_box:
+                empty_counter += 1
+    if check_empty_history:
         if empty_counter >= config.empty_box_limit:
             if v28:
                 raise B0EmptyHistoryError('not enough valid box')
@@ -2748,14 +2751,25 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                                template_transform=self.transform,
                                search_transform=self.transform)
 
+    def _first_and_current_frames(self, tracklet_id, frame_id):
+        """MF 首框仅提供尺寸；其他 template 依赖点云的 sampler 不使用此入口。"""
+        if (bool(getattr(self.config, 'ct_enable_v29', False))
+                and getattr(self.config, 'ct_runtime_optimization', '') == 'equivalent_v1'
+                and hasattr(self.dataset, 'get_frame_metadata')):
+            current = self.dataset.get_frames(tracklet_id, frame_ids=(frame_id,))[0]
+            first = ({key: value for key, value in current.items() if key != 'pc'}
+                     if int(frame_id) == 0 else
+                     self.dataset.get_frame_metadata(tracklet_id, 0))
+            return first, current
+        return self.dataset.get_frames(tracklet_id, frame_ids=(0, frame_id))
+
     def _online_raw_view(
             self, epoch, batch_index, slot, tracklet_id, this_frame_id,
             candidate_id, build_shadow=False):
         offsets = list(range(1, self.dataset.hist_num + 1))
         prev_frame_ids, valid_mask = get_history_frame_ids_and_masks(
             this_frame_id, self.dataset.hist_num, offsets=offsets)
-        first_frame, this_frame = self.dataset.get_frames(
-            tracklet_id, frame_ids=(0, this_frame_id))
+        first_frame, this_frame = self._first_and_current_frames(tracklet_id, this_frame_id)
         prev_frames = self.dataset.get_frames(
             tracklet_id, frame_ids=prev_frame_ids)
         tracklet_key = (
@@ -2850,8 +2864,7 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
             try:
                 with isolated_observation_rng(sample_seed):
                     tracklet_id, frame_id = self._locate_tracklet(anno_id)
-                    first, current = self.dataset.get_frames(
-                        tracklet_id, frame_ids=(0, frame_id))
+                    first, current = self._first_and_current_frames(tracklet_id, frame_id)
                     # 不用 frame-ID map 合并重复历史槽；原算法对每个槽独立扰动/采样。
                     result = self._build_view(
                         tracklet_id, frame_id, first, current, candidate_id,

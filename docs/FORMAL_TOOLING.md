@@ -1,5 +1,16 @@
 # CT-SeqTrack 正式工具面
 
+## v29 性能工具补充（2026-09-11）
+
+- `tools/profile_ct_v29_training.py`：真实`main.py`通路的同卡ABBA、三卡并行ABBA、
+  分段profile或100步紧凑逐位对照。前20步预热、后80步统计；测速与数值快照分开。
+- `tools/benchmark_ct_v29_h3.py`：两个Full分别寻找真实合法H3事件，固定输入/权重做独立ABBA微基准。
+  没有合法事件、没有valid收益标签或逐位不一致均不得当作通过；普通100步不能代替此覆盖。
+- 两者只生成`artifacts/ct_checks/`内的可丢弃工程产物，不加载旧checkpoint，不改变正式训练入口，
+  不运行全套哈希。启动子进程时清理相互污染的审计/微基准环境变量。
+
+配置、诊断统计语义、验收边界及三个正式后台命令见[性能记录](CTSEQTRACK_V29_PERFORMANCE.md)。
+
 ## v29 当前工具协议（2026-09-10）
 
 训练和评测仍仅从`main.py`进入。新增`tools/run_ct_v29_checks.py`串行调度真实数据preflight、

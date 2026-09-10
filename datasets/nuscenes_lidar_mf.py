@@ -975,27 +975,45 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
             seq_annos = self.tracklet_anno_list[seq_id]
             frames = [self._get_frame_from_anno_data(seq_annos[f_id]) for f_id in frame_ids]
 
-        enriched = []
-        for frame, frame_id in zip(frames, frame_ids):
-            frame = dict(frame)
-            endpoint_key = self.get_endpoint_key(seq_id, frame_id)
-            if self.dynamics_time_mode == 'true':
-                effective_timestamp = frame.get('timestamp')
-            elif self.dynamics_time_mode == 'fixed':
-                effective_timestamp = float(frame_id) * self.dynamics_fixed_delta_t
-            else:
-                effective_timestamp = self._shuffled_effective_timestamps[endpoint_key]
-            frame['_ct_endpoint_key'] = endpoint_key
-            frame['_ct_dynamics_time_mode'] = self.dynamics_time_mode
-            frame['_ct_effective_timestamp'] = float(effective_timestamp)
-            enriched.append(frame)
-        return enriched
+        return [self._enrich_frame_metadata(frame, seq_id, frame_id)
+                for frame, frame_id in zip(frames, frame_ids)]
 
-    def _get_frame_from_anno_data(self, anno):
+    def _enrich_frame_metadata(self, frame, seq_id, frame_id):
+        frame = dict(frame)
+        endpoint_key = self.get_endpoint_key(seq_id, frame_id)
+        if self.dynamics_time_mode == 'true':
+            effective_timestamp = frame.get('timestamp')
+        elif self.dynamics_time_mode == 'fixed':
+            effective_timestamp = float(frame_id) * self.dynamics_fixed_delta_t
+        else:
+            effective_timestamp = self._shuffled_effective_timestamps[endpoint_key]
+        frame['_ct_endpoint_key'] = endpoint_key
+        frame['_ct_dynamics_time_mode'] = self.dynamics_time_mode
+        frame['_ct_effective_timestamp'] = float(effective_timestamp)
+        return frame
+
+    def get_frame_metadata(self, seq_id, frame_id):
+        """同一 annotation 的框及时间信息；不加载或变换首帧点云。"""
+        anno = self.tracklet_anno_list[seq_id][frame_id]
+        frame = self._frame_metadata_from_anno(anno)
+        return self._enrich_frame_metadata(frame, seq_id, frame_id)
+
+    @staticmethod
+    def _frame_metadata_from_anno(anno):
         sample_data_lidar = anno['sample_data_lidar']
         box_anno = anno['box_anno']
         bb = Box(box_anno['translation'], box_anno['size'], Quaternion(box_anno['rotation']),
                  name=box_anno['category_name'], token=box_anno['token'])
+        return {
+            '3d_bbox': bb,
+            'meta': anno,
+            'timestamp': sample_data_lidar['timestamp'] * 1e-6,
+            'frame_id': sample_data_lidar['token'],
+        }
+
+    def _get_frame_from_anno_data(self, anno):
+        sample_data_lidar = anno['sample_data_lidar']
+        metadata = self._frame_metadata_from_anno(anno)
         pcl_path = os.path.join(self.path, sample_data_lidar['filename'])
         pc = LidarPointCloud.from_file(pcl_path)
 
@@ -1008,10 +1026,4 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         pc.translate(np.array(poserecord['translation']))
 
         pc = PointCloud(points=pc.points)
-        return {
-            "pc": pc,
-            "3d_bbox": bb,
-            "meta": anno,
-            "timestamp": sample_data_lidar['timestamp'] * 1e-6,
-            "frame_id": sample_data_lidar['token'],
-        }
+        return {"pc": pc, **metadata}

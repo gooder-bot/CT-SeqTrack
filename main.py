@@ -1038,6 +1038,10 @@ if not cfg.test:
         learningrate_callback,
         dataloader_generator_callback,
     ]
+    from utils.v29_profiling import make_runtime_callback
+    runtime_callback = make_runtime_callback()
+    if runtime_callback is not None:
+        callbacks.append(runtime_callback)
     final_window = int(getattr(
         cfg, 'ct_keep_final_window_checkpoints', 0) or 0)
     if final_window > 0:

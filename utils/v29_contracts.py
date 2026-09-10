@@ -28,3 +28,5 @@ def validate_v29_contract(config):
     wrong = [key for key, value in expected.items() if get(key) != value]
     if wrong:
         raise ValueError('v29 contract mismatch: ' + ', '.join(wrong))
+    from utils.v29_performance import validate_performance_contract
+    validate_performance_contract(config)

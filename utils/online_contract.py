@@ -401,6 +401,11 @@ def build_online_resume_contract(config):
         from utils.v29_contracts import V29_CONTRACTS
         for key in ("ct_enable_v29", *V29_CONTRACTS):
             fields[key] = _get(config, key)
+        from utils.v29_performance import PERFORMANCE_DEFAULTS
+        # 仅显式性能配置扩展身份；旧v29 checkpoint仍使用原字段集。
+        if any(_get(config, key) is not None for key in PERFORMANCE_DEFAULTS):
+            for key, default in PERFORMANCE_DEFAULTS.items():
+                fields[key] = _get(config, key, default)
     if bool(_get(config, "ct_enable_v28", False)):
         for key in ("ct_enable_v28", "ct_reference_baseline", "ct_observation_contract",
                     "ct_b0_ce_contract",

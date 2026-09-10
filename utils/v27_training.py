@@ -9,6 +9,9 @@ from torch.utils.data import default_collate
 
 from utils.sampling_utils import stable_uint32_seed
 from utils.tracking_metrics_v27 import local_boxes_metric_gains, box_metric_contributions
+from utils.v29_performance import performance_enabled, diagnostics_sampled, preserved_model_state
+from utils.v29_diagnostics import (sample_training_diagnostics, keep_h3_event,
+    assert_h3_diagnostic_contract, assert_h3_state_unchanged, H1OnlyLabels)
 
 
 def _get(config, key, default):
@@ -30,6 +33,9 @@ def _weighted_mean(error, mask):
 
 def compute_b3_utility_loss(data, output, config):
     """输出两项条件式 gain MSE 和即时 help/harm BCE；返回未乘外层权重的 loss。"""
+    if diagnostics_sampled(config):
+        assert_h3_diagnostic_contract(config)
+        data = H1OnlyLabels(data)
     predicted_s = output.get("ct_b3_expected_success_gain", output.get("ct_b3_expected_iou_gain"))
     predicted_p = output.get("ct_b3_expected_precision_gain", output.get("ct_b3_expected_center_gain"))
     if predicted_s is None or predicted_p is None:
@@ -57,8 +63,9 @@ def compute_b3_utility_loss(data, output, config):
             mode="benchmark_compat", dim=int(_get(config, "IoU_space", 3)))
         h1_s[valid] = torch.as_tensor(gains["success_gain"], device=h1_s.device, dtype=h1_s.dtype)
         h1_p[valid] = torch.as_tensor(gains["precision_gain"], device=h1_p.device, dtype=h1_p.dtype)
-    h3_mask = data.get("ct_h3_valid", torch.zeros_like(predicted_s)).detach().to(valid.device).reshape(-1) > 0
-    h3_mask &= valid
+    if not bool(_get(config, 'ct_enable_v29', False)):
+        h3_mask = data.get("ct_h3_valid", torch.zeros_like(predicted_s)).detach().to(valid.device).reshape(-1) > 0
+        h3_mask &= valid
     def gain_loss(predicted, h1, future_key):
         immediate = _weighted_mean((predicted - h1).square(), valid)
         if bool(_get(config, 'ct_enable_v29', False)):
@@ -122,6 +129,24 @@ def accumulate_v27_binary_rows(rows, data, output, b3_enabled):
 
 
 def attach_h3_shadow_labels_v27(host, batch, output):
+    from utils.v29_h3_benchmark import maybe_benchmark_h3
+    maybe_benchmark_h3(host, batch, output)
+    # v29 H3 is diagnostic only. Its on/off schedule cannot mutate a subsequent
+    # training transaction's BN, counters, module modes or global RNG streams.
+    if diagnostics_sampled(host.config):
+        assert_h3_diagnostic_contract(host.config)
+    has_sample = any(bool(context['raw'].get('shadow_scheduled',
+                         bool(context['raw'].get('shadow_future'))))
+                     and keep_h3_event(host, context['raw'])
+                     for context in getattr(host, '_ct_online_batch_context', []))
+    if (getattr(host, 'training', False) and performance_enabled(host.config)
+            and has_sample):
+        with assert_h3_state_unchanged(host, output), preserved_model_state(host):
+            return _attach_h3_shadow_labels_v27(host, batch, output)
+    return _attach_h3_shadow_labels_v27(host, batch, output)
+
+
+def _attach_h3_shadow_labels_v27(host, batch, output):
     """每次抽样最多两未来帧 × 两 observation 分支，不受 presence 控制。"""
     reference = output["observation_aux_estimation_boxes"]
     count = len(reference)
@@ -132,15 +157,19 @@ def attach_h3_shadow_labels_v27(host, batch, output):
     batch["ct_h3_failure_reason"] = ["not_scheduled"] * count
     if not bool(_get(host.config, "ct_online_recursive_training", False)) or not host.ct_enable_b3:
         return
-    start = time.perf_counter()
+    measure = sample_training_diagnostics(host)
+    start = time.perf_counter() if measure else None
     cuda = host.device.type == "cuda"
-    if cuda:
+    if cuda and measure:
         torch.cuda.synchronize(host.device)
         memory_before = torch.cuda.memory_allocated(host.device)
         torch.cuda.reset_peak_memory_stats(host.device)
     else:
         memory_before = 0
     forwards = 0
+    counts = dict(candidate_events=0, scheduled_events=0, not_sampled_events=0,
+                  sampled_events=0, executed_events=0, valid_events=0,
+                  success_gain_sum=0., precision_gain_sum=0.)
     structural = _structural(output)
     contexts = host._ct_online_batch_context
     if len(contexts) != count:
@@ -157,6 +186,13 @@ def attach_h3_shadow_labels_v27(host, batch, output):
             batch["ct_h3_future_exists"][index] = reference.new_tensor([len(future_rows) >= 1, len(future_rows) >= 2])
         if not scheduled:
             continue
+        counts['candidate_events'] += 1
+        counts['scheduled_events'] += 1
+        if not keep_h3_event(host, raw):
+            counts['not_sampled_events'] += 1
+            batch["ct_h3_failure_reason"][index] = "not_sampled_diagnostic"
+            continue
+        counts['sampled_events'] += 1
         if int(raw["candidate_id"]) != 0:
             raise RuntimeError("v27 H3 may sample canonical candidate0 only")
         if len(future_rows) != 2:
@@ -171,6 +207,7 @@ def attach_h3_shadow_labels_v27(host, batch, output):
             batch["ct_h3_failure_reason"][index] = "nonfinite_action"
             continue
         try:
+            counts['executed_events'] += 1
             state_before = context["state"].clone()
             anchor = state_before.history_boxes([raw["prev_frame_ids"][0]], [1])[0]
             action_local = current.clone()
@@ -210,14 +247,31 @@ def attach_h3_shadow_labels_v27(host, batch, output):
             batch["ct_h3_valid"][index] = 1.
             batch["ct_h3_shadow_valid"][index] = 1.
             batch["ct_h3_failure_reason"][index] = "ok"
+            counts['valid_events'] += 1
+            counts['success_gain_sum'] += float(delayed[0])
+            counts['precision_gain_sum'] += float(delayed[1])
         except torch.cuda.OutOfMemoryError:
             raise
         except (ValueError, KeyError, IndexError, RuntimeError, FloatingPointError) as error:
+            if performance_enabled(host.config) and 'deterministic' in str(error).lower():
+                raise
             # An unsuccessful shadow is missing supervision, never a zero-return action.
             batch["ct_h3_failure_reason"][index] = f"shadow_failure:{type(error).__name__}:{str(error)[:160]}"
-    if cuda:
+    if cuda and measure:
         torch.cuda.synchronize(host.device)
     batch["ct_shadow_forward_count"] = reference.new_tensor(float(forwards))
-    batch["ct_shadow_time_ms"] = reference.new_tensor((time.perf_counter() - start) * 1000.)
-    batch["ct_shadow_peak_memory_mb"] = reference.new_tensor(
-        max(0, torch.cuda.max_memory_allocated(host.device) - memory_before) / 1024**2 if cuda else 0.)
+    if measure:
+        batch["ct_shadow_time_ms"] = reference.new_tensor((time.perf_counter() - start) * 1000.)
+        batch["ct_shadow_peak_memory_mb"] = reference.new_tensor(
+            max(0, torch.cuda.max_memory_allocated(host.device) - memory_before) / 1024**2 if cuda else 0.)
+    else:
+        # Missing timing is not a zero-duration observation.
+        batch.pop("ct_shadow_time_ms", None)
+        batch.pop("ct_shadow_peak_memory_mb", None)
+    if getattr(host, 'training', False) and diagnostics_sampled(host.config):
+        totals = getattr(host, '_ct_perf_h3_counts', None)
+        if totals is None:
+            totals = host._ct_perf_h3_counts = dict.fromkeys(counts, 0)
+        for key, value in counts.items():
+            totals[key] = totals.get(key, 0) + value
+            batch['ct_h3_diagnostic_' + key] = reference.new_tensor(value)
