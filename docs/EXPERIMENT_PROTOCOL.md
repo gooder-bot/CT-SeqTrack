@@ -3,12 +3,15 @@
 ## v29 当前协议（2026-09-10）
 
 最新启动调整：用户要求本次仅轻量核对、直接提供三组独立后台命令，不做全套哈希或强制工程报告检查。
+最新重启要求：停止当前三臂，将workers从12统一改为4，在新日期output目录从头训练，不跨workers续训。
+v29工作进程数校验允许4或12，配置新默认为4；需先同步`utils/online_contract.py`和
+`cfgs/ct_seqtrack/29_formal_base.yaml`，避免旧workers12硬校验阻止启动。历史日志和checkpoint保留。
 每两轮保存完整checkpoint，额外保留059以维持58/59/60协议；验证仍每5轮。CUDA/长程恢复检查仍属未完成证据，
 不能把直接启动写成已完成工程验收。此前“工程检查后启动”的排程由本条最新要求覆盖。
 
 最新用户批准实施v29，并运行 **B0、Full-CfC、Full-GRU，完整nuScenes Car、seed42、60epoch**。
 三臂比较模块组合及两种时序后端；不据此宣称每个模块的独立贡献。新配置均为`29_*_nuscenes_full.yaml`。
-350个train_track场景训练，150个官方val验证/评测；batch16、workers12、每5轮验证、FP32、
+350个train_track场景训练，150个官方val验证/评测；batch16、workers4、每5轮验证、FP32、
 Adam(1e-4, betas=(0.5,0.999), eps=1e-6, wd=0, foreach/fused=false)、StepLR20×0.1。
 从头训练，所有启用模块从epoch0首个合法事务学习，无冻结、零学习率阶段或跨run初始化。
 

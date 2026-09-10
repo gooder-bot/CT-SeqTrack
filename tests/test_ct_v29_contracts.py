@@ -26,6 +26,7 @@ def test_formal_three_arm_protocol(arm, backend, variant):
     assert config['train_split'] == 'train_track'
     assert config['val_split'] == config['test_split'] == 'val'
     assert config['epoch'] == 60 and config['batch_size'] == 16
+    assert config['workers'] == 4
     assert config['preloading'] is False
     identity = action_calibration_config_identity(config)
     resume = build_online_resume_contract(config)['fields']
@@ -48,3 +49,23 @@ def test_v28_checkpoint_cannot_be_relabelled_as_v29():
         validate_v28_evaluation_checkpoint({'hyper_parameters': {'config': old}}, config)
     new = copy.deepcopy(config)
     validate_v28_evaluation_checkpoint({'hyper_parameters': {'config': new}}, config)
+
+
+@pytest.mark.parametrize('arm', ['b0', 'full_cfc', 'full_gru'])
+@pytest.mark.parametrize('workers', [4, 12])
+def test_v29_registered_worker_counts_preserve_resume_identity(arm, workers):
+    config = configure_ct_variant(load_yaml_config(
+        ROOT / f'cfgs/ct_seqtrack/29_{arm}_nuscenes_full.yaml'))
+    other = dict(config, workers=12 if workers == 4 else 4)
+    config['workers'] = workers
+    validate_scratch_training_contract(config)
+    assert build_online_resume_contract(config) != build_online_resume_contract(other)
+
+
+@pytest.mark.parametrize('workers', [0, -1, 8, 4.0, '4', True])
+def test_v29_rejects_unregistered_formal_worker_counts(workers):
+    config = configure_ct_variant(load_yaml_config(
+        ROOT / 'cfgs/ct_seqtrack/29_b0_nuscenes_full.yaml'))
+    config['workers'] = workers
+    with pytest.raises(ValueError, match='formal v29 workers'):
+        validate_scratch_training_contract(config)

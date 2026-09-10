@@ -725,7 +725,13 @@ def validate_scratch_training_contract(config):
                 errors.append("v28 engineering workers must be nonnegative")
         else:
             require_equal("epoch", 60)
-            require_equal("workers", 12)
+            if bool(_get(config, "ct_enable_v29", False)):
+                # v29允许用户登记的4-worker scratch重启；12保留历史运行身份。
+                workers = _get(config, "workers")
+                if type(workers) is not int or workers not in (4, 12):
+                    errors.append("formal v29 workers must be 4 or 12")
+            else:
+                require_equal("workers", 12)
             require_equal("check_val_every_n_epoch", 5)
             for key in ("limit_train_batches", "limit_val_batches"):
                 value = _get(config, key, 1.0)

@@ -3,6 +3,9 @@
 ## 最新：v29已获实施授权
 
 最新启动偏好：仅轻量核对，不重做全套哈希/长测试，不强制`--assert-passed`后才提供命令。
+最新重启要求：停止当前v29三臂，统一改为workers4，从新日期output目录scratch重启。
+先同步`utils/online_contract.py`和`cfgs/ct_seqtrack/29_formal_base.yaml`；v29允许workers4或12，
+4为新默认，不能沿用旧workers12硬校验。保留旧日志/checkpoint，不跨workers续训。
 三臂在物理GPU1/2/3分别后台运行，完整nuScenes、每两轮保存checkpoint，额外保留059；验证每5轮。
 这不代表服务器CUDA/数值恢复工程检查已完成。命令使用最新v29代码，不加preloading。
 

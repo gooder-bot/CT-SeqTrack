@@ -27,5 +27,7 @@ test_split: val
 category_name: Car
 ct_v28_expected_mini_car_updates_per_epoch: null
 preloading: false
+# 最新服务器重启统一使用4个数据加载worker；从头训练，保留旧run。
+workers: 4
 # 每两轮持久保存；另保留58/59/60供论文late-3评测。
 ct_checkpoint_every_n_epochs: 2

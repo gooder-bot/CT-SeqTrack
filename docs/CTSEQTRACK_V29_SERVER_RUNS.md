@@ -1,14 +1,17 @@
 # v29：完整 nuScenes / Car 三臂服务器流程
 
-2026-09-10 登记：B0、Full-CfC、Full-GRU，seed42，各自随机初始化训练60轮，batch16、workers12，每5轮验证。全部启用参数从首个合法事务开始优化；不冻结、不使用工程或其他臂的 checkpoint 初始化。v29 改变观测和机制状态合同，是新实验版本，不能把旧 v28 checkpoint 当作续训起点。
+2026-09-10 登记（按最新重启要求更新）：B0、Full-CfC、Full-GRU，seed42，各自随机初始化训练60轮，batch16、workers4，每5轮验证。全部启用参数从首个合法事务开始优化；不冻结、不使用工程或其他臂的 checkpoint 初始化。v29 改变观测和机制状态合同，是新实验版本，不能把旧 v28 checkpoint 当作续训起点。
 
 这里给出待执行命令。本地 CPU 测试不能替代服务器上的真实数据、CUDA、100步及续训检查；没有在本地启动服务器训练。分数是否改善仍由正式实验决定。
 
 最新用户要求：本次只做轻量配置/历史报错核对，不运行全套哈希检查，也不把工程报告哈希作为启动前置条件。
+本次先停止正在运行的v29三臂，再以workers4在新日期output目录scratch重启。旧日志和checkpoint保留，
+不传`--checkpoint`，不将workers12运行的状态用于workers4续训。v29原有workers12硬校验已调整为允许4或12，
+配置新默认为4；重启前必须同步`utils/online_contract.py`和`cfgs/ct_seqtrack/29_formal_base.yaml`。
 三臂已继承`ct_checkpoint_every_n_epochs: 2`，在完整epoch结束后保存
 `formal_checkpoints/epoch=002.ckpt、004.ckpt……060.ckpt`，另保存059供58/59/60评测。
 `lightning_logs/version_0/checkpoints/last.ckpt`随每两轮保存更新；验证仍每5轮进行。
-先同步最新`main.py`、`utils/lightning_runtime.py`和`29_formal_base.yaml`及其余v29实现。
+先同步最新`main.py`、`utils/lightning_runtime.py`、`utils/online_contract.py`和`29_formal_base.yaml`及其余v29实现。
 
 ## 1. 可选工程检查（保留命令，本次不作为前置步骤）
 
@@ -24,7 +27,7 @@ CHECK_ROOT="artifacts/ct_checks/${STAMP}-v29-engineering"
 mkdir -p artifacts/ct_checks
 
 nohup python -u tools/run_ct_v29_checks.py \
-  --path "$DATA_ROOT" --gpu 1 --workers 12 --output "$CHECK_ROOT" \
+  --path "$DATA_ROOT" --gpu 1 --workers 4 --output "$CHECK_ROOT" \
   > "${CHECK_ROOT}.log" 2>&1 < /dev/null &
 echo $! > "${CHECK_ROOT}.pid"
 printf '工程目录：%s\n' "$CHECK_ROOT"
@@ -67,21 +70,21 @@ mkdir -p "$B0_DIR" "$CFC_DIR" "$GRU_DIR"
 
 nohup env CUDA_VISIBLE_DEVICES=1 python -u main.py \
   --cfg cfgs/ct_seqtrack/29_b0_nuscenes_full.yaml --path "$DATA_ROOT" \
-  --batch_size 16 --epoch 60 --workers 12 --seed 42 \
+  --batch_size 16 --epoch 60 --workers 4 --seed 42 \
   --check_val_every_n_epoch 5 --tag nuscenes_car_seed42_60ep_bs16 \
   --log_dir "$B0_DIR" > "$B0_DIR/train.log" 2>&1 < /dev/null &
 echo $! > "$B0_DIR/train.pid"
 
 nohup env CUDA_VISIBLE_DEVICES=2 python -u main.py \
   --cfg cfgs/ct_seqtrack/29_full_cfc_nuscenes_full.yaml --path "$DATA_ROOT" \
-  --batch_size 16 --epoch 60 --workers 12 --seed 42 \
+  --batch_size 16 --epoch 60 --workers 4 --seed 42 \
   --check_val_every_n_epoch 5 --tag nuscenes_car_seed42_60ep_bs16 \
   --log_dir "$CFC_DIR" > "$CFC_DIR/train.log" 2>&1 < /dev/null &
 echo $! > "$CFC_DIR/train.pid"
 
 nohup env CUDA_VISIBLE_DEVICES=3 python -u main.py \
   --cfg cfgs/ct_seqtrack/29_full_gru_nuscenes_full.yaml --path "$DATA_ROOT" \
-  --batch_size 16 --epoch 60 --workers 12 --seed 42 \
+  --batch_size 16 --epoch 60 --workers 4 --seed 42 \
   --check_val_every_n_epoch 5 --tag nuscenes_car_seed42_60ep_bs16 \
   --log_dir "$GRU_DIR" > "$GRU_DIR/train.log" 2>&1 < /dev/null &
 echo $! > "$GRU_DIR/train.pid"
@@ -112,7 +115,7 @@ for E in 058 059 060; do
   CUDA_VISIBLE_DEVICES=1 python -u main.py \
     --cfg "$B0_DIR/resolved_config.yaml" --path "$DATA_ROOT" \
     --checkpoint "$B0_DIR/formal_checkpoints/epoch=$E.ckpt" --test \
-    --workers 12 --seed 42 --log_dir "$DEST" \
+    --workers 4 --seed 42 --log_dir "$DEST" \
     > "$DEST/eval.log" 2>&1
 done
 )
@@ -135,7 +138,7 @@ for BACKEND in cfc gru; do
       --device cuda --output "$DEST/policy.json" > "$DEST/policy_fit.log" 2>&1
     CUDA_VISIBLE_DEVICES="$GPU" python -u main.py --cfg "$CFG" --path "$DATA_ROOT" \
       --checkpoint "$CKPT" --ct_action_calibration_path "$DEST/policy.json" --test \
-      --workers 12 --seed 42 --log_dir "$DEST/official_val" \
+      --workers 4 --seed 42 --log_dir "$DEST/official_val" \
       > "$DEST/eval.log" 2>&1
   done
 done
