@@ -1,0 +1,9 @@
+arm,epoch,population,eligible_rows,point_recall,pool_targets,recovery_fallback_rows,recovery_positive_rows,retained_rows,row_recall,sampled_targets,balance_negative_points,balance_negative_weight,balance_positive_points,balance_positive_weight,balance_source
+b0,1,candidate0,0.0,,0.0,0.0,0.0,0.0,,0.0,0.0,1.0,0.0,1.0,online_canonical_preflight
+b0,2,candidate0,0.0,,0.0,0.0,0.0,0.0,,0.0,0.0,1.0,0.0,1.0,online_canonical_preflight
+b0,3,candidate0,0.0,,0.0,0.0,0.0,0.0,,0.0,0.0,1.0,0.0,1.0,online_canonical_preflight
+b0,4,candidate0,0.0,,0.0,0.0,0.0,0.0,,0.0,0.0,1.0,0.0,1.0,online_canonical_preflight
+full_cfc,1,candidate0,7071.0,0.5163882106442098,421431.0,0.0,0.0,7070.0,0.9998585772875124,217622.0,3435472.0,0.5316727948881551,217622.0,8.39320932626297,online_canonical_preflight
+full_cfc,2,candidate0,10058.0,0.5456894940994462,669005.0,0.0,0.0,10058.0,1.0,365069.0,6835419.0,0.5426229174831857,582691.0,6.365389202853657,online_canonical_preflight
+full_gru,1,candidate0,7222.0,0.5202270149687409,426756.0,0.0,0.0,7220.0,0.9997230684021047,222010.0,3495962.0,0.5317523474225406,222010.0,8.373433629115805,online_canonical_preflight
+full_gru,2,candidate0,9893.0,0.5401797183581056,665597.0,0.0,0.0,9893.0,1.0,359542.0,6749195.0,0.5430830639802229,581552.0,6.302744208600434,online_canonical_preflight

@@ -1,0 +1,72 @@
+=== 608f963:models/seqtrack3d.py:8405-8475 ===
+8405:     def _apply_v29_mechanism_policy(self, output):
+8406:         """训练 policy 只作用于当前机制事务，不修改部署校准状态。"""
+8407:         from utils.v29_policy import mechanism_behavior_policy, policy_transition
+8408:         observation = output['observation_aux_estimation_boxes']
+8409:         candidate = torch.cat((observation[:, :2].detach()
+8410:             + output['ct_router_bounded_residual_xy'].detach(), observation[:, 2:].detach()), dim=1)
+8411:         rows, accepted, kinds = [], [], []
+8412:         if len(self._ct_online_batch_context) != len(observation):
+8413:             raise RuntimeError('v29 mechanism state context does not match batch')
+8414:         for index, context in enumerate(self._ct_online_batch_context):
+8415:             raw = context['raw']
+8416:             policy = mechanism_behavior_policy(self.config.seed, raw['online_epoch'], str(raw['tracklet_key']))
+8417:             final, applied = policy_transition(observation[index:index+1], candidate[index:index+1],
+8418:                 output['ct_router_evidence_valid'][index:index+1],
+8419:                 output['ct_b3_action_score'][index:index+1], policy)
+8420:             rows.append(final)
+8421:             accepted.append(applied)
+8422:             kinds.append({'never': 0, 'always': 1, 'threshold': 2}[policy['kind']])
+8423:         final, applied = torch.cat(rows), torch.cat(accepted).to(observation)
+8424:         output.update(ct_v29_behavior_final_boxes=final, ct_final_box=final,
+8425:                       aux_estimation_boxes=final, ct_router_applied_gate=applied,
+8426:                       ct_b3_final_gate=applied, ct_router_soft_box=final,
+8427:                       ct_v29_behavior_kind=observation.new_tensor(kinds))
+8428: 
+8429:     def _commit_online_recursive_predictions(self, output):
+8430:         if not bool(getattr(
+8431:                 self.config, 'ct_online_recursive_training', False)):
+8432:             return
+8433:         seen_slots = set()
+8434:         for index, item in enumerate(self._ct_online_batch_context):
+8435:             raw = item['raw']
+8436:             slot = int(raw['online_slot'])
+8437:             if int(raw['candidate_id']) != 0:
+8438:                 continue
+8439:             if slot in seen_slots:
+8440:                 raise RuntimeError("online batch contains duplicate canonical slot")
+8441:             seen_slots.add(slot)
+8442:             state = item['state']
+8443:             anchor = state.history_boxes(
+8444:                 [raw['prev_frame_ids'][0]], [1])[0]
+8445:             state_policy = str(getattr(
+8446:                 self.config, 'ct_training_state_policy',
+8447:                 'observation')).strip().lower()
+8448:             if getattr(self, 'ct_enable_v29', False):
+8449:                 if state_policy != 'mixed_accepted_v1':
+8450:                     raise RuntimeError('v29 mechanism requires mixed accepted behavior')
+8451:                 local_final = output['ct_v29_behavior_final_boxes'][index]
+8452:             else:
+8453:                 if state_policy != 'observation':
+8454:                     raise RuntimeError('legacy mechanism requires observation state')
+8455:                 local_final = output['observation_aux_estimation_boxes'][index]
+8456:             final_box = self._local_prediction_to_world(local_final, anchor)
+8457:             commit_canonical_prediction(
+8458:                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
+8459:                 raw['this_frame'].get('timestamp'))
+8460:             if self.ct_enable_v27:
+8461:                 state.quality[int(raw['this_frame_id'])] = output[
+8462:                     'ct_observation_quality'][index].detach().cpu().numpy().copy()
+8463: 
+8464:     def _ensure_ct_scalers(self):
+8465:         if self._ct_scalers:
+8466:             return
+8467:         names = list(getattr(self, '_ct_optimizer_names', ()))
+8468:         if not names:
+8469:             raise RuntimeError("isolated optimizer names are not configured")
+8470:         enabled = bool(
+8471:             self.ct_manual_amp_enabled and self.device.type == 'cuda')
+8472:         for name in names:
+8473:             try:
+8474:                 scaler = torch.amp.GradScaler('cuda', enabled=enabled)
+8475:             except (AttributeError, TypeError):

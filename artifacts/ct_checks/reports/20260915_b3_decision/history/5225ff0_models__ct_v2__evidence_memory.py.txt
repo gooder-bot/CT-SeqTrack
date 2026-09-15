@@ -1,0 +1,130 @@
+=== 5225ff0:models/ct_v2/evidence_memory.py:740-805 ===
+740: class B3SelectiveUpdater(nn.Module):
+741:     """B3 action-level reliability model with exact observation fallback.
+742: 
+743:     Helpful and harmful risks are predicted separately.  A correction is
+744:     deployable only when structural evidence, calibrated presence, calibrated
+745:     action reliability and the physical residual bound all pass.  B2 inputs
+746:     are detached here as a second line of defence in addition to isolated
+747:     optimizers.
+748:     """
+749: 
+750:     def __init__(
+751:             self,
+752:             observation_stats_dim=5,
+753:             hidden_dim=64,
+754:             presence_threshold=0.5,
+755:             decision_threshold=0.5,
+756:             radius_base=0.5,
+757:             radius_per_second=0.5,
+758:             radius_max=2.0,
+759:             require_calibration=False,
+760:             consensus_features=False,
+761:             helpful_init_probability=0.05,
+762:             harmful_init_probability=0.5):
+763:         super().__init__()
+764:         self.require_calibration = bool(require_calibration)
+765:         self.radius_base = float(radius_base)
+766:         self.radius_per_second = float(radius_per_second)
+767:         self.radius_max = float(radius_max)
+768:         self.consensus_features = bool(consensus_features)
+769:         self.register_buffer(
+770:             "presence_threshold", torch.tensor(float(presence_threshold)),
+771:             persistent=False)
+772:         self.register_buffer(
+773:             "decision_threshold", torch.tensor(float(decision_threshold)),
+774:             persistent=False)
+775:         self.register_buffer(
+776:             "calibrated", torch.tensor(not self.require_calibration,
+777:                                         dtype=torch.bool), persistent=False)
+778:         self.evidence_projection = nn.Sequential(
+779:             nn.Linear(128, 32), nn.GELU())
+780:         # evidence(32), presence(2), coarse/refined agreement(2),
+781:         # observation/prior disagreement(3), observation/evidence
+782:         # disagreement(3), uncertainty(2), dt/gap/age(3), observation
+783:         # statistics(5), point evidence(6).
+784:         point_feature_count = 6 + (7 if self.consensus_features else 0)
+785:         input_dim = 32 + 2 + 2 + 3 + 3 + 2 + 3 + int(
+786:             observation_stats_dim) + point_feature_count
+787:         self.risk_trunk = nn.Sequential(
+788:             nn.Linear(input_dim, int(hidden_dim)),
+789:             nn.GELU(),
+790:         )
+791:         self.helpful_head = nn.Linear(int(hidden_dim), 1)
+792:         self.harmful_head = nn.Linear(int(hidden_dim), 1)
+793:         self.expected_center_gain_head = nn.Linear(int(hidden_dim), 1)
+794:         self.expected_iou_gain_head = nn.Linear(int(hidden_dim), 1)
+795:         for head, probability in (
+796:                 (self.helpful_head, helpful_init_probability),
+797:                 (self.harmful_head, harmful_init_probability)):
+798:             nn.init.zeros_(head.weight)
+799:             nn.init.constant_(
+800:                 head.bias, math.log(probability / (1.0 - probability)))
+801:         for head in (
+802:                 self.expected_center_gain_head,
+803:                 self.expected_iou_gain_head):
+804:             nn.init.zeros_(head.weight)
+805:             nn.init.zeros_(head.bias)
+
+=== 5225ff0:models/ct_v2/evidence_memory.py:930-1004 ===
+930:         risk_feature = self.risk_trunk(torch.nan_to_num(features))
+931:         helpful_logit = self.helpful_head(risk_feature).squeeze(1)
+932:         harmful_logit = self.harmful_head(risk_feature).squeeze(1)
+933:         expected_center_gain = self.expected_center_gain_head(
+934:             risk_feature).squeeze(1)
+935:         expected_iou_gain = self.expected_iou_gain_head(
+936:             risk_feature).squeeze(1)
+937:         helpful_probability = torch.sigmoid(helpful_logit)
+938:         harmful_probability = torch.sigmoid(harmful_logit)
+939:         probability = helpful_probability * (1.0 - harmful_probability)
+940:         apply_logit = helpful_logit - harmful_logit
+941:         radius = torch.clamp(
+942:             self.radius_base + self.radius_per_second * dt,
+943:             max=self.radius_max)
+944:         residual_scale = torch.clamp(
+945:             radius / torch.clamp(residual_norm, min=1e-6), max=1.0)
+946:         bounded_residual = residual * residual_scale.unsqueeze(1)
+947:         evidence_valid = (
+948:             (availability.reshape(batch_size) > 0)
+949:             & (extension_presence_probability
+950:                >= self.presence_threshold.to(extension_presence_probability))
+951:             & raw_finite
+952:             & torch.isfinite(features).all(dim=1))
+953:         deployable = bool(enabled) and (
+954:             bool(self.calibrated) or not self.require_calibration)
+955:         action = evidence_valid & deployable & (
+956:             probability >= self.decision_threshold.to(probability))
+957:         final_xy = torch.where(
+958:             action.unsqueeze(1),
+959:             observation[:, :2] + bounded_residual,
+960:             observation[:, :2])
+961:         final_box = torch.cat((final_xy, observation[:, 2:]), dim=1)
+962:         return final_box, {
+963:             "ct_b3_help_logit": helpful_logit,
+964:             "ct_b3_harm_logit": harmful_logit,
+965:             "ct_b3_help_probability": helpful_probability,
+966:             "ct_b3_harm_probability": harmful_probability,
+967:             "ct_b3_expected_center_gain": expected_center_gain,
+968:             "ct_b3_expected_iou_gain": expected_iou_gain,
+969:             "ct_b3_action_score": probability,
+970:             "ct_b3_calibrated": observation.new_full(
+971:                 (batch_size,), float(bool(self.calibrated))),
+972:             # v23 compatibility aliases.
+973:             "ct_b3_h3_residual": apply_logit,
+974:             "ct_b3_h3_utility": apply_logit,
+975:             "ct_b3_final_gate": action.to(observation.dtype),
+976:             "ct_router_logit": apply_logit,
+977:             "ct_router_gate": probability,
+978:             "ct_router_applied_gate": action.to(observation.dtype),
+979:             "ct_router_evidence_valid": evidence_valid.to(observation.dtype),
+980:             "ct_router_bounded_residual_xy": bounded_residual,
+981:             "ct_router_residual_xy": residual,
+982:             "ct_router_radius": radius,
+983:             "ct_router_clip_rate": (residual_norm > radius).to(
+984:                 observation.dtype),
+985:             "ct_router_soft_box": torch.cat((
+986:                 observation[:, :2] + probability.unsqueeze(1)
+987:                 * bounded_residual,
+988:                 observation[:, 2:],
+989:             ), dim=1),
+990:         }

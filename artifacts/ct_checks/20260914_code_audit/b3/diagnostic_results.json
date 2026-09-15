@@ -1,0 +1,202 @@
+{
+  "note": "Synthetic counterexamples only; not nuScenes empirical results.",
+  "metric_examples": [
+    {
+      "name": "no_overlap_3m_to_2.25m",
+      "before": [
+        0.0,
+        3.0
+      ],
+      "after": [
+        0.0,
+        2.25
+      ],
+      "old_sp": [
+        0.02500000037252903,
+        0.0
+      ],
+      "new_sp": [
+        0.02500000037252903,
+        0.0
+      ],
+      "gain_sp": [
+        0.0,
+        0.0
+      ],
+      "help": false,
+      "harm": false
+    },
+    {
+      "name": "within_same_threshold_bins",
+      "before": [
+        0.301,
+        0.551
+      ],
+      "after": [
+        0.349,
+        0.599
+      ],
+      "old_sp": [
+        0.32500000298023224,
+        0.7249999940395355
+      ],
+      "new_sp": [
+        0.32500000298023224,
+        0.7249999940395355
+      ],
+      "gain_sp": [
+        0.0,
+        0.0
+      ],
+      "help": false,
+      "harm": false
+    },
+    {
+      "name": "cross_precision_threshold",
+      "before": [
+        0.0,
+        2.01
+      ],
+      "after": [
+        0.0,
+        1.99
+      ],
+      "old_sp": [
+        0.02500000037252903,
+        0.0
+      ],
+      "new_sp": [
+        0.02500000037252903,
+        0.025000005960464478
+      ],
+      "gain_sp": [
+        0.0,
+        0.025000005960464478
+      ],
+      "help": true,
+      "harm": false
+    }
+  ],
+  "production_screen_policies": [
+    {
+      "kind": "never"
+    },
+    {
+      "kind": "always"
+    },
+    {
+      "kind": "threshold",
+      "threshold": 0.2
+    },
+    {
+      "kind": "threshold",
+      "threshold": 0.8
+    }
+  ],
+  "production_shortlist": [
+    {
+      "policy": {
+        "kind": "never"
+      },
+      "closed_loop": {
+        "S": 62.5,
+        "P": 62.5,
+        "U": 62.5,
+        "frames": 4,
+        "actions": 0,
+        "coverage": 0.0,
+        "tracklets": 1,
+        "scenes": 1,
+        "action_harm_rate": null,
+        "action_harm_mean_severity": 0.0,
+        "one_step_net_utility": 0.0,
+        "action_success_harm_rate": null,
+        "action_precision_harm_rate": null
+      }
+    },
+    {
+      "policy": {
+        "kind": "always"
+      },
+      "closed_loop": {
+        "S": 45.00000000000001,
+        "P": 45.00000000000001,
+        "U": 45.00000000000001,
+        "frames": 4,
+        "actions": 3,
+        "coverage": 0.75,
+        "tracklets": 1,
+        "scenes": 1,
+        "action_harm_rate": 0.3333333333333333,
+        "action_harm_mean_severity": 0.19999999999999998,
+        "one_step_net_utility": -0.125,
+        "action_success_harm_rate": 0.3333333333333333,
+        "action_precision_harm_rate": 0.3333333333333333
+      }
+    },
+    {
+      "policy": {
+        "kind": "threshold",
+        "threshold": 0.2
+      },
+      "closed_loop": {
+        "S": 45.00000000000001,
+        "P": 45.00000000000001,
+        "U": 45.00000000000001,
+        "frames": 4,
+        "actions": 2,
+        "coverage": 0.5,
+        "tracklets": 1,
+        "scenes": 1,
+        "action_harm_rate": 0.5,
+        "action_harm_mean_severity": 0.3,
+        "one_step_net_utility": -0.125,
+        "action_success_harm_rate": 0.5,
+        "action_precision_harm_rate": 0.5
+      }
+    },
+    {
+      "policy": {
+        "kind": "threshold",
+        "threshold": 0.8
+      },
+      "closed_loop": {
+        "S": 62.5,
+        "P": 62.5,
+        "U": 62.5,
+        "frames": 4,
+        "actions": 0,
+        "coverage": 0.0,
+        "tracklets": 1,
+        "scenes": 1,
+        "action_harm_rate": null,
+        "action_harm_mean_severity": 0.0,
+        "one_step_net_utility": 0.0,
+        "action_success_harm_rate": null,
+        "action_precision_harm_rate": null
+      }
+    }
+  ],
+  "omitted_policy": {
+    "policy": {
+      "kind": "threshold",
+      "threshold": 0.5
+    },
+    "closed_loop": {
+      "S": 75.0,
+      "P": 75.0,
+      "U": 75.0,
+      "frames": 4,
+      "actions": 1,
+      "coverage": 0.25,
+      "tracklets": 1,
+      "scenes": 1,
+      "action_harm_rate": 0.0,
+      "action_harm_mean_severity": 0.0,
+      "one_step_net_utility": 0.024999999999999994,
+      "action_success_harm_rate": 0.0,
+      "action_precision_harm_rate": 0.0
+    }
+  },
+  "same_never_path_mask": true
+}

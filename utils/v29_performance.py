@@ -52,8 +52,12 @@ def validate_performance_contract(config):
     if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio <= 1:
         raise ValueError('ct_h3_diagnostic_keep_ratio must be in (0, 1]')
     if policy == 'sampled_v1':
-        if _get(config, 'ct_b3_target_contract') != 'instantaneous_sp_gain_v1':
-            raise ValueError('sampled H3 requires the v29 H1-only B3 target contract')
+        target = ('same_state_six_action_h1_aux_geometry_v30'
+                  if _get(config, 'ct_enable_v30', False) else 'instantaneous_sp_gain_v1')
+        if _get(config, 'ct_b3_target_contract') != target:
+            raise ValueError('sampled H3 requires the registered instantaneous B3 target contract'
+                             if _get(config, 'ct_enable_v30', False)
+                             else 'sampled H3 requires the v29 H1-only B3 target contract')
         # 抽样指标不允许参与保存、调度、早停或模型选择。
         forbidden = ('sampled_', 'relation_ap', 'relation_auroc', 'relation_auprc',
                      'relation_ece', 'ct_epoch_calibration', 'h3')

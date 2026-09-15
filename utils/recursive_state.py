@@ -133,6 +133,13 @@ class OnlineRecursiveBatchSampler(torch.utils.data.Sampler):
         self.prediction_frames = 0
         base = dataset.dataset
         self.full_epoch_coverage = getattr(base, 'ct_scene_manifest', None) is not None
+        self.dataset_manifest_sha256 = ''
+        if bool(getattr(base, 'ct_enable_v30', False)):
+            from utils.dataset_protocol_v30 import validate_dataset_selection
+            manifest = getattr(base, 'ct_scene_manifest', None)
+            validate_dataset_selection(manifest, base.ct_scene_role, base.ct_scene_names)
+            self.dataset_manifest_sha256 = manifest['content_sha256']
+            self.full_epoch_coverage = True
         for tracklet_id in range(base.get_num_tracklets()):
             key = (
                 base.get_tracklet_key(tracklet_id)

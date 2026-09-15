@@ -9,9 +9,13 @@ from utils.v29_performance import diagnostics_sampled, scalar_items_to_python, _
 
 
 def assert_h3_diagnostic_contract(config):
+    target = ('same_state_six_action_h1_aux_geometry_v30'
+              if _get(config, 'ct_enable_v30', False) else 'instantaneous_sp_gain_v1')
     if (not bool(_get(config, 'ct_enable_v29', False))
-            or _get(config, 'ct_b3_target_contract', None) != 'instantaneous_sp_gain_v1'):
-        raise RuntimeError('H3 sampling requires v29 H1-only utility supervision')
+            or _get(config, 'ct_b3_target_contract', None) != target):
+        raise RuntimeError('H3 sampling requires registered instantaneous utility supervision'
+                           if _get(config, 'ct_enable_v30', False)
+                           else 'H3 sampling requires v29 H1-only utility supervision')
 
 
 class H1OnlyLabels(Mapping):

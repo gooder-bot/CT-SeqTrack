@@ -1,0 +1,103 @@
+{
+  "geometry": {
+    "initial": {
+      "wlh": [
+        4.04,
+        8.08,
+        6.5
+      ],
+      "membership": [
+        false,
+        false,
+        false
+      ]
+    },
+    "reachable_margin_target": [
+      2.0,
+      2.75
+    ],
+    "maximum": {
+      "wlh": [
+        8.0,
+        16.0,
+        6.5
+      ],
+      "membership": [
+        true,
+        false,
+        true
+      ]
+    },
+    "stationary_corridor": {
+      "exists": false,
+      "reason": "stationary"
+    },
+    "b0_half_xy": [
+      4.5,
+      3.25
+    ]
+  },
+  "consensus": {
+    "center": [
+      [
+        5.0,
+        0.0
+      ]
+    ],
+    "target_mass": 4.5,
+    "background_mass": 2.0,
+    "selected_mode_count": [
+      100.0
+    ],
+    "target_vote_gradient_norm": 0.0,
+    "background_vote_gradient_norm": 0.05,
+    "targetness_gradient_norm": 1.8107598498656076e-15,
+    "seed_starvation": {
+      "center": [
+        [
+          5.0,
+          0.0
+        ]
+      ],
+      "selected_mode_count": [
+        1.0
+      ],
+      "foreground_mass": 18.0,
+      "false_positive_mass": 2.94
+    },
+    "candidate_remove_count_factor": {
+      "center": [
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "selected_mode_count": [
+        5.0
+      ]
+    },
+    "candidate_local_mass_seed": {
+      "center": [
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "selected_mode_count": [
+        20.0
+      ]
+    }
+  },
+  "margin_prevalence": {
+    "need_fraction": 0.09,
+    "gradient_at_margin_3_2": [
+      0.005000005476176739,
+      0.005000005476176739
+    ],
+    "loss_by_constant_margin": {
+      "(2.0, 1.0)": 0.15187500417232513,
+      "(3.0, 2.0)": 0.16187499463558197,
+      "(4.0, 2.75)": 0.1706250011920929
+    }
+  }
+}

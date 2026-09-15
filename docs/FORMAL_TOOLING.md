@@ -1,5 +1,20 @@
 # CT-SeqTrack 正式工具面
 
+## v30 当前工具协议（2026-09-15）
+
+训练/评测唯一入口仍为`main.py`；新增`cfgs/ct_seqtrack/30_*`，不改历史正式YAML。
+当前先mini，final60双指标门满足后才进入full/KITTI；晚三轮仅报告。
+
+- `tools/run_ct_v30_server.py`：默认只打印所选单臂命令；用户在Linux显式`--launch`才新建目录并启动。
+- `tools/check_forward_batch.py`、`check_time_batch.py`：v30使用正式raw observation collate及host roll-in；默认有界扫描32 batch，不创建optimizer。
+- `tools/check_train_steps.py`：真实main/Trainer/Adam事务，v30工程配置仅允许1–3epoch、每轮1–100batch，输出限定`artifacts/ct_checks/`。
+- `tools/calibrate_ct_actions.py --v30`、`export_ct_action_rows.py --v30`：按数据集manifest分派；保留真实闭环与全部端点，新动作/权重/配置/源码身份绑定。
+- `tools/summarize_ct_v30_mini.py`：输入三臂各058/059/060的生产`v27_endpoint_summary.json`（文件名兼容、内部schema为v30），输出final/late-3及是否晋级；不启动训练。
+- 既有`compare_ct_v28_audits.py`、`check_ct_v28_resume.py`用于数值及真实epoch边界复现；普通短训练成功不能代替合法H3、校准、完整评测分支覆盖。
+
+本地运行pytest与compileall，不重复要求固定历史HEAD的slimming门禁。本次不运行任何服务器命令。
+具体参数、数据根、环境设置见[v30运行手册](V30_DATA_AND_RUNBOOK.md)。下方均为旧版本工具记录。
+
 ## v29 性能工具补充（2026-09-11）
 
 - `tools/profile_ct_v29_training.py`：真实`main.py`通路的同卡ABBA、三卡并行ABBA、

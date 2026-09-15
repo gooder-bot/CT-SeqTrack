@@ -1,0 +1,127 @@
+=== a43a8ee:utils/v27_training.py:31-89 ===
+31: def compute_b3_utility_loss(data, output, config):
+32:     """输出两项条件式 gain MSE 和即时 help/harm BCE；返回未乘外层权重的 loss。"""
+33:     predicted_s = output.get("ct_b3_expected_success_gain", output.get("ct_b3_expected_iou_gain"))
+34:     predicted_p = output.get("ct_b3_expected_precision_gain", output.get("ct_b3_expected_center_gain"))
+35:     if predicted_s is None or predicted_p is None:
+36:         raise KeyError("v27 utility gain outputs are required")
+37:     observation = output["observation_aux_estimation_boxes"].detach()[:, :4].clone()
+38:     action = observation.clone()
+39:     action[:, :2] += output["ct_router_bounded_residual_xy"].detach()
+40:     target = data["box_label"].detach()[:, :4].clone().to(observation)
+41:     prediction_wlh = data["bbox_size"].detach().to(observation)
+42:     target_wlh = data["target_bbox_size"].detach().to(observation)
+43:     if bool(_get(config, "degrees", False)):
+44:         for boxes in (observation, action, target):
+45:             boxes[:, 3] = torch.deg2rad(boxes[:, 3])
+46:     valid = _structural(output).to(observation.device)
+47:     if "b0_view_id" in data:
+48:         valid &= data["b0_view_id"].to(valid.device).reshape(-1) == 0
+49:     for tensor in (observation, action, target, prediction_wlh, target_wlh):
+50:         valid &= torch.isfinite(tensor).all(1)
+51:     valid &= (prediction_wlh > 0).all(1) & (target_wlh > 0).all(1)
+52:     h1_s, h1_p = torch.zeros_like(predicted_s), torch.zeros_like(predicted_p)
+53:     if bool(valid.any()):
+54:         gains = local_boxes_metric_gains(observation[valid], action[valid], target[valid],
+55:             prediction_wlh[valid], target_wlh[valid],
+56:             up_axis=_get(config, "up_axis", (0, 0, 1)),
+57:             mode="benchmark_compat", dim=int(_get(config, "IoU_space", 3)))
+58:         h1_s[valid] = torch.as_tensor(gains["success_gain"], device=h1_s.device, dtype=h1_s.dtype)
+59:         h1_p[valid] = torch.as_tensor(gains["precision_gain"], device=h1_p.device, dtype=h1_p.dtype)
+60:     h3_mask = data.get("ct_h3_valid", torch.zeros_like(predicted_s)).detach().to(valid.device).reshape(-1) > 0
+61:     h3_mask &= valid
+62:     def gain_loss(predicted, h1, future_key):
+63:         immediate = _weighted_mean((predicted - h1).square(), valid)
+64:         future = data.get(future_key)
+65:         if future is None:
+66:             if bool(h3_mask.any()):
+67:                 raise KeyError(f"valid H3 rows require {future_key}")
+68:             return immediate
+69:         future = future.detach().to(predicted).reshape_as(predicted)
+70:         mask = h3_mask & torch.isfinite(future)
+71:         if not bool(mask.any()):
+72:             return immediate
+73:         # H3 labels contain the future-two-frame mean, never H1 again.
+74:         delayed = _weighted_mean((predicted - torch.nan_to_num(future)).square(), mask)
+75:         return .5 * immediate + .5 * delayed
+76:     loss_s = gain_loss(predicted_s, h1_s, "ct_h3_success_gain")
+77:     loss_p = gain_loss(predicted_p, h1_p, "ct_h3_precision_gain")
+78:     utility = .5 * (h1_s + h1_p)
+79:     helpful, harmful = (utility > 1e-6).to(predicted_s), (utility < -1e-6).to(predicted_s)
+80:     loss_help = _weighted_mean(F.binary_cross_entropy_with_logits(
+81:         output["ct_b3_help_logit"], helpful, reduction="none"), valid)
+82:     loss_harm = _weighted_mean(F.binary_cross_entropy_with_logits(
+83:         output["ct_b3_harm_logit"], harmful, reduction="none"), valid)
+84:     total = loss_s + loss_p + .1 * loss_help + .1 * loss_harm
+85:     return {"loss": total, "loss_success": loss_s, "loss_precision": loss_p,
+86:             "loss_help": loss_help, "loss_harm": loss_harm,
+87:             "help_label": helpful, "harm_label": harmful,
+88:             "h1_success_gain": h1_s, "h1_precision_gain": h1_p,
+89:             "valid": valid.to(predicted_s)}
+
+=== a43a8ee:utils/v27_training.py:145-209 ===
+145:     for index, context in enumerate(contexts):
+146:         raw = context["raw"]
+147:         future_rows = raw.get("shadow_future", [])
+148:         scheduled = bool(raw.get("shadow_scheduled", bool(future_rows)))
+149:         batch["ct_h3_scheduled"][index] = float(scheduled)
+150:         exists = raw.get("shadow_future_exists")
+151:         if exists is not None:
+152:             batch["ct_h3_future_exists"][index] = reference.new_tensor(exists).reshape(2)
+153:         elif future_rows:
+154:             batch["ct_h3_future_exists"][index] = reference.new_tensor([len(future_rows) >= 1, len(future_rows) >= 2])
+155:         if not scheduled:
+156:             continue
+157:         if int(raw["candidate_id"]) != 0:
+158:             raise RuntimeError("v27 H3 may sample canonical candidate0 only")
+159:         if len(future_rows) != 2:
+160:             batch["ct_h3_failure_reason"][index] = "terminal_incomplete_horizon" if exists is not None and not all(exists) else "missing_future_payload"
+161:             continue
+162:         if not bool(structural[index]):
+163:             batch["ct_h3_failure_reason"][index] = "no_structural_evidence"
+164:             continue
+165:         current = reference[index].detach().clone()
+166:         correction = output["ct_router_bounded_residual_xy"][index].detach()
+167:         if not bool(torch.isfinite(current).all() & torch.isfinite(correction).all()):
+168:             batch["ct_h3_failure_reason"][index] = "nonfinite_action"
+169:             continue
+170:         try:
+171:             state_before = context["state"].clone()
+172:             anchor = state_before.history_boxes([raw["prev_frame_ids"][0]], [1])[0]
+173:             action_local = current.clone()
+174:             action_local[:2] += correction
+175:             observation_box = host._local_prediction_to_world(current, anchor)
+176:             action_box = host._local_prediction_to_world(action_local, anchor)
+177:             states = [state_before.clone(), state_before.clone()]
+178:             for state, box in zip(states, (observation_box, action_box)):
+179:                 state.append(raw["this_frame_id"], box, raw["this_frame"].get("timestamp"))
+180:             gains = []
+181:             for source_future in future_rows:
+182:                 future = dict(source_future)
+183:                 future["ct_observation_only"] = True
+184:                 processed = [host._process_online_raw(future, state) for state in states]
+185:                 shadow_batch = host._move_batch_to_device(default_collate(processed), host.device)
+186:                 seed = stable_uint32_seed(int(_get(host.config, "seed", 42)),
+187:                     raw["tracklet_key"], raw["this_frame_id"], future["this_frame_id"], "h3_shadow_observation")
+188:                 forwards += 2
+189:                 with torch.inference_mode():
+190:                     shadow = host._shadow_forward(shadow_batch, seed)
+191:                 predictions = []
+192:                 for branch, state in enumerate(states):
+193:                     future_anchor = state.history_boxes([future["prev_frame_ids"][0]], [1])[0]
+194:                     world = host._local_prediction_to_world(shadow["observation_aux_estimation_boxes"][branch], future_anchor)
+195:                     state.append(future["this_frame_id"], world, future["this_frame"].get("timestamp"))
+196:                     predictions.append(world)
+197:                 target = future["this_frame"]["3d_bbox"]
+198:                 observation_sp, action_sp = [box_metric_contributions(
+199:                     box, target, up_axis=_get(host.config, "up_axis", (0, 0, 1)),
+200:                     mode="benchmark_compat", dim=int(_get(host.config, "IoU_space", 3))) for box in predictions]
+201:                 gains.append(np.asarray(action_sp) - np.asarray(observation_sp))
+202:             delayed = np.mean(gains, axis=0)
+203:             if not np.isfinite(delayed).all():
+204:                 raise ValueError("nonfinite future metric gain")
+205:             batch["ct_h3_success_gain"][index] = float(delayed[0])
+206:             batch["ct_h3_precision_gain"][index] = float(delayed[1])
+207:             batch["ct_h3_valid"][index] = 1.
+208:             batch["ct_h3_shadow_valid"][index] = 1.
+209:             batch["ct_h3_failure_reason"][index] = "ok"

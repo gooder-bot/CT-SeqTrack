@@ -1,5 +1,47 @@
 # CT-SeqTrack 正式实验协议
 
+## v30 当前协议（2026-09-15）
+
+本节覆盖下方旧版本排程。实施仅在本地完成；本次不连接服务器、不修改服务器文件、不启动或停止已有任务。
+最新启动安排：按用户要求轻量核对后提供三组正式后台命令，GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC；
+不把重跑全量测试、全套哈希或工程报告作为新增启动门。CUDA专项尚未执行的证据边界仍保留。
+命令与日志查看见[mini启动专页](CTSEQTRACK_V30_MINI_LAUNCH.md)。
+三臂统一 scratch60、batch16、workers4、FP32、strict deterministic，Adam
+lr=1e-4、betas=(0.5,0.999)、eps=1e-6、weight_decay=0、foreach/fused=false；StepLR 每20轮×0.1。
+每5轮验证，保留058/059/060；final 固定60，late-3为58/59/60算术平均，Full每个权重独立拟合策略。
+
+**进入 nuScenes full 和 KITTI 的条件只有：至少一个预登记 Full 的 final60 S、P 都严格超过同版本 B0。**
+late-3只报告，不设额外门槛；不要求额外 seed 前置实验。通过后仍比较 B0、Full-CfC、Full-GRU 三臂。
+`tools/summarize_ct_v30_mini.py`读取完整官方测试端点报告，核验身份、人口和指标口径，输出结果而不启动训练。
+
+三个实验臂共享新的 B0：有效点 mask 贯穿损失、BN、池化及注意力，真实速度动静标签，概率加权 coarse motion。
+四候选总体与单 batch 归约保持 v29；请求分布25% teacher、62.5%最多3步、12.5%最多8步 roll-in。
+长窗口由稳定哈希选择，短轨迹自然截短。teacher不因空测量换端点；roll-in局部初始化后只接受预测，不因漂移重置GT。
+所有启用模块自epoch0学习；BN隔离与detach是所有权合同，不能冻结参数。B0始终独占递归状态写入。
+
+B1 相对实际 B0 crop 外扩，21维获取上下文，带宽[min=.25/.25,max=4/3,init=.75/.5]m；
+actual/max/9×9标签共用几何，需求/无需求平衡，超出最大范围的目标不当作缩小范围负例。
+B2 768→256预算、128/96/32配额、36 memory tokens，输出3个确定性模式；仅前景vote回归，模式质量软监督。
+B3 比较3模式×半幅/全幅及observation；六动作同状态标签，按合法动作再按行归约，B0/B1/B2输入全部detach。
+机制流行为比例25% never、12.5%证据首模式全幅、12.5%合法动作探索、50% q最大且q>0。
+校准按never每行max-action-q构造阈值，never/always/6阈值及最多2中点共不超过10次拟合闭环；dev只锁定诊断。
+
+mini全部8个mini_train用于参数训练，内部calibration/dev各1场景；官方2个mini_val只评测。
+full全部350个train_track训练、内部17/18拟合/诊断、官方150val评测；内部拟合与参数训练重叠，明确记录。
+KITTI有标签官方training序列0000–0016训练、0017拟合、0018诊断、0019–0020最终测试；
+sensor_relative、原始帧号×0.1s、所有角色preload_offset=-1，无OXTS不宣称世界坐标运动。
+
+mini固定六项消融：旧获取几何、关闭需求平衡、单模式、关闭模式质量监督、证据首模式全幅、关闭8步roll-in。
+额外紧带宽[2,1.5]单独登记。所有消融独立从头训练，不使用不影响最终输出的B1伪消融。
+时间实验另登记nuScenes间隔1/2/4、KITTI间隔1/2/5，均对照true/fixed/shuffled。
+统一记录global novel→最大可达→support→768→256→三模式→被选动作→闭环结果，含unique点数、事件/条件分母及稀疏、速度、年龄、失跟分组。
+
+数据和方法身份进入配置、checkpoint、策略；B0修复与KITTI标定是共同实现基础，不计为插件创新。
+旧配置/历史输出保持可读。不得用训练loss、presence AP或本地测试冒充S/P、SOTA、时序因果收益。
+详见[v30实现](CTSEQTRACK_V30_IMPLEMENTATION.md)与[运行手册](V30_DATA_AND_RUNBOOK.md)。
+
+## 以下为 v29 性能与历史协议
+
 2026-09-11性能实施补充：用户允许昂贵纯诊断抽样，训练输入、监督、Adam更新和模块递归耦合仍保持v29。
 新增独立`*_nuscenes_full_perf.yaml`；旧配置/旧输出保留。执行细则、诊断缺测标记、短测速与逐位对照及
 三GPU命令见[性能记录](CTSEQTRACK_V29_PERFORMANCE.md)。不增加全套哈希门禁，不把本地CPU验证当成CUDA/速度证明。

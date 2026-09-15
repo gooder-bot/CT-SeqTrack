@@ -1,0 +1,45 @@
+{
+  "schema": "ct_seqtrack.v30_mini_launch_review.v1",
+  "local_targeted_pytest": {
+    "passed": 74,
+    "skipped": 1,
+    "seconds": 12.04
+  },
+  "bash_syntax": [
+    {
+      "block": 1,
+      "syntax_passed": true
+    },
+    {
+      "block": 2,
+      "syntax_passed": true
+    },
+    {
+      "block": 3,
+      "syntax_passed": true
+    },
+    {
+      "block": 4,
+      "syntax_passed": true
+    },
+    {
+      "block": 5,
+      "syntax_passed": true
+    },
+    {
+      "block": 6,
+      "syntax_passed": true
+    }
+  ],
+  "gpu_assignment": {
+    "0": "b0",
+    "1": "full_gru",
+    "2": "full_cfc"
+  },
+  "server_modified": false,
+  "training_started": false,
+  "notes": [
+    "Existing 868-pass full-suite result is a previous verification, not rerun or added to this targeted count.",
+    "Omit preloading; v30 uses bounded cloud caching."
+  ]
+}

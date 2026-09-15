@@ -1,0 +1,63 @@
+=== 608f963:utils/v27_training.py:31-92 ===
+31: def compute_b3_utility_loss(data, output, config):
+32:     """输出两项条件式 gain MSE 和即时 help/harm BCE；返回未乘外层权重的 loss。"""
+33:     predicted_s = output.get("ct_b3_expected_success_gain", output.get("ct_b3_expected_iou_gain"))
+34:     predicted_p = output.get("ct_b3_expected_precision_gain", output.get("ct_b3_expected_center_gain"))
+35:     if predicted_s is None or predicted_p is None:
+36:         raise KeyError("v27 utility gain outputs are required")
+37:     observation = output["observation_aux_estimation_boxes"].detach()[:, :4].clone()
+38:     action = observation.clone()
+39:     action[:, :2] += output["ct_router_bounded_residual_xy"].detach()
+40:     target = data["box_label"].detach()[:, :4].clone().to(observation)
+41:     prediction_wlh = data["bbox_size"].detach().to(observation)
+42:     target_wlh = data["target_bbox_size"].detach().to(observation)
+43:     if bool(_get(config, "degrees", False)):
+44:         for boxes in (observation, action, target):
+45:             boxes[:, 3] = torch.deg2rad(boxes[:, 3])
+46:     valid = _structural(output).to(observation.device)
+47:     if "b0_view_id" in data:
+48:         valid &= data["b0_view_id"].to(valid.device).reshape(-1) == 0
+49:     for tensor in (observation, action, target, prediction_wlh, target_wlh):
+50:         valid &= torch.isfinite(tensor).all(1)
+51:     valid &= (prediction_wlh > 0).all(1) & (target_wlh > 0).all(1)
+52:     h1_s, h1_p = torch.zeros_like(predicted_s), torch.zeros_like(predicted_p)
+53:     if bool(valid.any()):
+54:         gains = local_boxes_metric_gains(observation[valid], action[valid], target[valid],
+55:             prediction_wlh[valid], target_wlh[valid],
+56:             up_axis=_get(config, "up_axis", (0, 0, 1)),
+57:             mode="benchmark_compat", dim=int(_get(config, "IoU_space", 3)))
+58:         h1_s[valid] = torch.as_tensor(gains["success_gain"], device=h1_s.device, dtype=h1_s.dtype)
+59:         h1_p[valid] = torch.as_tensor(gains["precision_gain"], device=h1_p.device, dtype=h1_p.dtype)
+60:     h3_mask = data.get("ct_h3_valid", torch.zeros_like(predicted_s)).detach().to(valid.device).reshape(-1) > 0
+61:     h3_mask &= valid
+62:     def gain_loss(predicted, h1, future_key):
+63:         immediate = _weighted_mean((predicted - h1).square(), valid)
+64:         if bool(_get(config, 'ct_enable_v29', False)):
+65:             # v29 q严格预测即时有界动作S/P；H3仅记录回退续推诊断。
+66:             return immediate
+67:         future = data.get(future_key)
+68:         if future is None:
+69:             if bool(h3_mask.any()):
+70:                 raise KeyError(f"valid H3 rows require {future_key}")
+71:             return immediate
+72:         future = future.detach().to(predicted).reshape_as(predicted)
+73:         mask = h3_mask & torch.isfinite(future)
+74:         if not bool(mask.any()):
+75:             return immediate
+76:         # H3 labels contain the future-two-frame mean, never H1 again.
+77:         delayed = _weighted_mean((predicted - torch.nan_to_num(future)).square(), mask)
+78:         return .5 * immediate + .5 * delayed
+79:     loss_s = gain_loss(predicted_s, h1_s, "ct_h3_success_gain")
+80:     loss_p = gain_loss(predicted_p, h1_p, "ct_h3_precision_gain")
+81:     utility = .5 * (h1_s + h1_p)
+82:     helpful, harmful = (utility > 1e-6).to(predicted_s), (utility < -1e-6).to(predicted_s)
+83:     loss_help = _weighted_mean(F.binary_cross_entropy_with_logits(
+84:         output["ct_b3_help_logit"], helpful, reduction="none"), valid)
+85:     loss_harm = _weighted_mean(F.binary_cross_entropy_with_logits(
+86:         output["ct_b3_harm_logit"], harmful, reduction="none"), valid)
+87:     total = loss_s + loss_p + .1 * loss_help + .1 * loss_harm
+88:     return {"loss": total, "loss_success": loss_s, "loss_precision": loss_p,
+89:             "loss_help": loss_help, "loss_harm": loss_harm,
+90:             "help_label": helpful, "harm_label": harmful,
+91:             "h1_success_gain": h1_s, "h1_precision_gain": h1_p,
+92:             "valid": valid.to(predicted_s)}

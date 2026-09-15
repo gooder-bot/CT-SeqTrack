@@ -1,0 +1,91 @@
+=== 96f0baf:models/seqtrack3d.py:4560-4649 ===
+4560:         # deployment-distribution quantity and therefore candidate0-only.
+4561:         loss_base_presence = weighted_mean(
+4562:             base_presence_error, canonical_row)
+4563:         loss_extension_presence = weighted_mean(
+4564:             extension_presence_error, availability * canonical_row)
+4565:         loss_presence = 0.5 * (
+4566:             loss_base_presence + loss_extension_presence)
+4567: 
+4568:         observation_error = torch.linalg.norm(
+4569:             observation_xy - target_xy, dim=1)
+4570:         bounded_xy = (
+4571:             observation_xy
+4572:             + output['ct_router_bounded_residual_xy'].detach())
+4573:         bounded_distance_error = torch.linalg.norm(
+4574:             bounded_xy - target_xy, dim=1)
+4575:         center_gain_h1 = observation_error - bounded_distance_error
+4576: 
+4577:         # Same-size axis-aligned BEV IoU is a stable differentiable proxy for
+4578:         # the expected-IoU head.  Exact oriented IoU remains an evaluation and
+4579:         # calibration metric.
+4580:         size_xy = data['bbox_size'][:, :2].to(
+4581:             device=device, dtype=dtype).clamp_min(1e-3)
+4582: 
+4583:         def same_size_iou(center):
+4584:             overlap = torch.clamp(
+4585:                 size_xy - torch.abs(center - target_xy), min=0.0)
+4586:             intersection = overlap[:, 0] * overlap[:, 1]
+4587:             area = size_xy[:, 0] * size_xy[:, 1]
+4588:             return intersection / torch.clamp(
+4589:                 2.0 * area - intersection, min=1e-6)
+4590: 
+4591:         iou_gain_h1 = (
+4592:             same_size_iou(bounded_xy) - same_size_iou(observation_xy))
+4593:         h3_center_gain = center_gain_h1.new_zeros(center_gain_h1.shape)
+4594:         h3_iou_gain = iou_gain_h1.new_zeros(iou_gain_h1.shape)
+4595:         h3_valid = availability.new_zeros(availability.shape)
+4596:         if 'ct_h3_center_gain' in data:
+4597:             h3_center_gain = data['ct_h3_center_gain'].to(
+4598:                 device=device, dtype=dtype).reshape(-1).detach()
+4599:         elif 'ct_h3_gain' in data:
+4600:             h3_center_gain = data['ct_h3_gain'].to(
+4601:                 device=device, dtype=dtype).reshape(-1).detach()
+4602:         if 'ct_h3_iou_gain' in data:
+4603:             h3_iou_gain = data['ct_h3_iou_gain'].to(
+4604:                 device=device, dtype=dtype).reshape(-1).detach()
+4605:         if 'ct_h3_valid' in data:
+4606:             h3_valid = data['ct_h3_valid'].to(
+4607:                 device=device, dtype=dtype).reshape(-1).detach()
+4608: 
+4609:         combined_center_gain = torch.where(
+4610:             h3_valid > 0,
+4611:             0.5 * (center_gain_h1 + h3_center_gain),
+4612:             center_gain_h1)
+4613:         combined_iou_gain = torch.where(
+4614:             h3_valid > 0,
+4615:             0.5 * (iou_gain_h1 + h3_iou_gain),
+4616:             iou_gain_h1)
+4617:         helpful = (
+4618:             (center_gain_h1 > self.ct_router_help_margin)
+4619:             & (iou_gain_h1 >= 0.0)
+4620:             & ((h3_valid <= 0) | (
+4621:                 (h3_center_gain > self.ct_router_h3_margin)
+4622:                 & (h3_iou_gain >= 0.0))))
+4623:         harmful = (
+4624:             (center_gain_h1 < -self.ct_router_help_margin)
+4625:             | (iou_gain_h1 < 0.0)
+4626:             | ((h3_valid > 0) & (
+4627:                 (h3_center_gain < -self.ct_router_h3_margin)
+4628:                 | (h3_iou_gain < 0.0)))
+4629:             | ~extension_presence_target.to(torch.bool))
+4630:         # B3 risk labels are action labels on the canonical state
+4631:         # distribution.  Auxiliary acquisition views cannot train B3.
+4632:         b3_valid = availability * canonical_row
+4633:         helpful_error = F.binary_cross_entropy_with_logits(
+4634:             output['ct_b3_help_logit'], helpful.to(dtype), reduction='none')
+4635:         harmful_error = F.binary_cross_entropy_with_logits(
+4636:             output['ct_b3_harm_logit'], harmful.to(dtype), reduction='none')
+4637:         loss_helpful = weighted_mean(helpful_error, b3_valid)
+4638:         loss_harmful = weighted_mean(harmful_error, b3_valid)
+4639:         loss_center_gain = weighted_mean(F.smooth_l1_loss(
+4640:             output['ct_b3_expected_center_gain'],
+4641:             combined_center_gain.detach(), reduction='none'), b3_valid)
+4642:         loss_iou_gain = weighted_mean(F.smooth_l1_loss(
+4643:             output['ct_b3_expected_iou_gain'],
+4644:             combined_iou_gain.detach(), reduction='none'), b3_valid)
+4645:         loss_b3 = target_xy.new_zeros(())
+4646:         if self.ct_enable_b3:
+4647:             loss_b3 = (
+4648:                 loss_helpful + loss_harmful
+4649:                 + loss_center_gain + loss_iou_gain)

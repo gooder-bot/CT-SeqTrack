@@ -8,6 +8,7 @@ import numpy as np
 
 
 ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v8"
+V30_ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v30"
 LEGACY_ONLINE_RESUME_SCHEMA = "ct_seqtrack.online_resume_contract.v6"
 
 
@@ -96,7 +97,10 @@ def validate_v28_observation_updates(config, *, sample_count, batch_size,
     mini_car = (str(_get(config, "version", "")) == "v1.0-mini"
                 and str(_get(config, "category_name", "")).lower() == "car")
     expected = _get(config, "ct_v28_expected_mini_car_updates_per_epoch")
-    if mini_car:
+    if bool(_get(config, 'ct_enable_v30', False)):
+        if expected is not None:
+            raise ValueError('v30 uses natural complete-dataset updates, not a historical mini constant')
+    elif mini_car:
         if expected != 1262 or actual != expected:
             raise ValueError(f"v28 mini Car requires 1262 natural observation updates per epoch; "
                              f"observed {actual} from {sample_count} rows; do not repeat or pad rows")
@@ -155,6 +159,8 @@ def build_online_resume_contract(config):
         ONLINE_RESUME_SCHEMA
         if runtime_protocol == "safe_seqtrack_auto_v1"
         else LEGACY_ONLINE_RESUME_SCHEMA)
+    if bool(_get(config, 'ct_enable_v30', False)):
+        schema = V30_ONLINE_RESUME_SCHEMA
     fields = {
         "experiment_name": str(_get(config, "experiment_name", "")),
         "net_model": str(_get(config, "net_model", "seqtrack3d")),
@@ -416,6 +422,10 @@ def build_online_resume_contract(config):
                     "precision", "workers", "ct_engineering_check",
                     "ct_v28_expected_mini_car_updates_per_epoch", "ct_v28_registered_seed"):
             fields[key] = _get(config, key)
+    if bool(_get(config, 'ct_enable_v30', False)):
+        from utils.v30_contracts import V30_IDENTITY_FIELDS
+        for key in V30_IDENTITY_FIELDS:
+            fields[key] = copy.deepcopy(_get(config, key))
     return {"schema": schema, "fields": fields}
 
 
@@ -505,6 +515,9 @@ def validate_scratch_training_contract(config):
     42/52/62 replications are all legal.  The optimizer, update topology, data
     geometry and epoch-0 module availability are invariant across those runs.
     """
+    if bool(_get(config, 'ct_enable_v30', False)):
+        from utils.v30_contracts import validate_v30_scratch_contract
+        return validate_v30_scratch_contract(config)
     policy = str(_get(
         config, "ct_initialization_policy",
         _get(config, "ct_b0_initialization_policy", "legacy")))

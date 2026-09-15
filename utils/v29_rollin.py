@@ -18,7 +18,7 @@ def observation_collate(items):
 
 
 def observation_item(sampler, index):
-    """原请求 candidate 决定模式；teacher 的 actual index 仍可跨 candidate 重抽。"""
+    """原请求candidate决定模式；v30 teacher保留端点，旧版本保留既有重抽。"""
     if not isinstance(index, (int, np.integer)) or not 0 <= index < len(sampler):
         raise IndexError(index)
     index = int(index)
@@ -27,7 +27,14 @@ def observation_item(sampler, index):
         return {'mode': 'teacher', 'sample': sampler._getitem_v28_observation(index)}
     anno_id = sampler.get_anno_index(index)
     tracklet, endpoint = sampler._locate_tracklet(anno_id)
-    start = max(0, endpoint - 4)
+    max_steps = 3
+    if bool(getattr(sampler.config, 'ct_enable_v30', False)):
+        # 四候选等权请求：teacher 1/4、short 5/8、long 1/8。
+        long_enabled = bool(getattr(sampler.config, 'ct_b0_long_rollin_enabled', True))
+        long_row = candidate == 3 and stable_uint32_seed(
+            sampler.config.seed, 'v30-long-rollin', sampler.epoch, index) % 2 == 0
+        max_steps = 8 if long_enabled and long_row else 3
+    start = max(0, endpoint - max_steps - 1)
     frames = sampler.dataset.get_frames(tracklet, frame_ids=list(range(start, endpoint + 1)))
     if performance_enabled(getattr(sampler, 'config', None)):
         if start == 0:
@@ -44,7 +51,8 @@ def observation_item(sampler, index):
            if hasattr(sampler.dataset, 'get_tracklet_key') else str(tracklet))
     return dict(mode='rollin', index=index, candidate=candidate,
                 epoch=int(sampler.epoch), start=start, endpoint=endpoint,
-                tracklet_id=tracklet, tracklet_key=str(key), frames=frames, first=first)
+                tracklet_id=tracklet, tracklet_key=str(key), frames=frames, first=first,
+                max_steps=max_steps)
 
 
 def _initial_box(item, config):
@@ -100,7 +108,7 @@ def process_query(item, predictions, frame_id, config):
 
 
 def prepare_observation_batch(host, items):
-    """最多三波 no-grad B0 前向；不使用插件、不提交任何全局递归状态。"""
+    """v29最多三波、v30混合八波no-grad B0；不提交任何全局递归状态。"""
     from utils.v29_profiling import profile_stage
     with profile_stage(host, 'rollin'):
         return _prepare_observation_batch(host, items)
@@ -135,7 +143,7 @@ def _prepare_observation_batch(host, items):
         for key in routing_names:
             setattr(host, key, False)
         with torch.no_grad():
-            for step in range(1, 4):
+            for step in range(1, max((items[i].get('max_steps', 3) for i in rows), default=3) + 1):
                 active = [i for i in rows if items[i]['start'] + step < items[i]['endpoint']]
                 if not active:
                     continue

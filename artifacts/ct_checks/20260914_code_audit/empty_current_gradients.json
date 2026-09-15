@@ -1,0 +1,7 @@
+{
+  "valid_current_slots": 0,
+  "current_seg_gradient_abs_sum": 0.04669446125626564,
+  "current_bc_gradient_abs_sum": 0.22426250576972961,
+  "all_seg_gradient_abs_sum": 0.10156649351119995,
+  "all_bc_gradient_abs_sum": 0.9669777750968933
+}

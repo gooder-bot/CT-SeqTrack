@@ -280,7 +280,9 @@ class B2EvidenceAcquirer(nn.Module):
             utility_init_probability=None,
             v27_enabled=False,
             exploration_seed=42,
-            v28_enabled=False):
+            v28_enabled=False,
+            v30_enabled=False,
+            mode_count=3):
         super().__init__()
         self.feature_dim = int(feature_dim)
         self.num_heads = int(num_heads)
@@ -288,6 +290,9 @@ class B2EvidenceAcquirer(nn.Module):
         self.presence_threshold = float(presence_threshold)
         self.v27_enabled = bool(v27_enabled)
         self.v28_enabled = bool(v28_enabled)
+        self.v30_enabled = bool(v30_enabled)
+        if self.v30_enabled and not self.v28_enabled:
+            raise ValueError("v30 evidence requires v28 finite geometry and v27 identity")
         if self.v28_enabled and not self.v27_enabled:
             raise ValueError("v28 evidence requires the v27 point identity contract")
         self.exploration_seed = int(exploration_seed)
@@ -323,7 +328,10 @@ class B2EvidenceAcquirer(nn.Module):
 
         self.extension_encoder = mlp(5)
         # longitudinal, lateral, log(dt), gap ratio, B1 validity
-        self.geometry_encoder = mlp(5)
+        self.geometry_encoder = mlp(7 if self.v30_enabled else 5)
+        if self.v30_enabled:
+            from models.ct_v2.evidence_v30 import ModeEvidenceBuilder
+            self.mode_builder = ModeEvidenceBuilder(mode_count=mode_count)
         self.source_embedding = nn.Embedding(
             8 if self.relation_aware_sampling else 4, 64)
         self.memory_metadata_encoder = mlp(8)
@@ -616,7 +624,8 @@ class B2EvidenceAcquirer(nn.Module):
             first_box_size_wlh=None,
             extension_point_ids=None,
             current_base_point_ids=None,
-            current_base_unique_mask=None):
+            current_base_unique_mask=None,
+            support_half_size_parallel_perp=None):
         batch_size, extension_count, _ = extension_points.shape
         if current_base_features.shape != (
                 batch_size, 1024, self.feature_dim):
@@ -688,11 +697,18 @@ class B2EvidenceAcquirer(nn.Module):
         delta = safe_points[..., :2] - center.unsqueeze(1)
         sigma = torch.clamp(
             torch.nan_to_num(b1_sigma_parallel_perp.detach(), nan=1.0),
-            min=0.1)
+            min=1e-6 if self.v30_enabled else 0.1)
+        coordinate_scale = sigma
+        if self.v30_enabled:
+            if support_half_size_parallel_perp is None or support_half_size_parallel_perp.shape != (batch_size, 2):
+                raise ValueError("v30 B2 requires actual support half size [B,2]")
+            half = support_half_size_parallel_perp.detach().to(sigma)
+            geometry_valid &= torch.isfinite(half).all(1) & (half > 0).all(1)
+            coordinate_scale = torch.nan_to_num(half, nan=1., posinf=1., neginf=1.).clamp_min(1e-6)
         longitudinal = (
-            delta * direction.unsqueeze(1)).sum(2) / sigma[:, 0:1]
+            delta * direction.unsqueeze(1)).sum(2) / coordinate_scale[:, 0:1]
         lateral = (
-            delta * perpendicular.unsqueeze(1)).sum(2) / sigma[:, 1:2]
+            delta * perpendicular.unsqueeze(1)).sum(2) / coordinate_scale[:, 1:2]
         dt = torch.clamp(query_delta_t.detach().reshape(batch_size), min=0.0)
         gap = torch.clamp(gap_ratio.detach().reshape(batch_size), min=0.0)
         b1_valid_f = b1_valid.detach().reshape(batch_size).to(safe_points.dtype)
@@ -707,6 +723,8 @@ class B2EvidenceAcquirer(nn.Module):
             gap.unsqueeze(1).expand(-1, extension_count),
             b1_valid_f.unsqueeze(1).expand(-1, extension_count),
         ), dim=2)
+        if self.v30_enabled:
+            geometry = torch.cat((geometry, sigma.log().unsqueeze(1).expand(-1, extension_count, -1)), 2)
         source = extension_source.reshape(
             batch_size, extension_count).long().clamp(
                 0, 7 if self.relation_aware_sampling else 3)
@@ -848,7 +866,16 @@ class B2EvidenceAcquirer(nn.Module):
             votes = safe_points[..., :2] + self.max_vote_offset * normalized_vote_offset
             vote_weights = scores * relation_probability
         weight_sum = vote_weights.sum(dim=1, keepdim=True)
-        if self.robust_consensus_voting:
+        if self.v30_enabled:
+            from models.ct_v2.evidence_v30 import mode_set_consensus
+            modes = self.mode_builder(votes, vote_weights,
+                extension_mask & geometry_valid[:, None], enriched,
+                observation_box[:, :2].detach(), identity_margin_selected,
+                selected_point_ids, b1_center_xy, b1_direction_xy,
+                b1_sigma_parallel_perp, support_half_size_parallel_perp)
+            consensus = mode_set_consensus(modes)
+            raw_xy = consensus["center"]
+        elif self.robust_consensus_voting:
             consensus = self._consensus_vote(
                 votes, vote_weights, extension_mask,
                 observation_box[:, :2].detach(),
@@ -873,6 +900,8 @@ class B2EvidenceAcquirer(nn.Module):
             & torch.isfinite(raw_xy).all(dim=1))
         if self.v28_enabled:
             availability = availability & geometry_valid
+        if self.v30_enabled:
+            availability = availability & modes.valid.any(1)
         if not self.relation_aware_sampling:
             availability = availability & (b1_valid_f > 0)
         observation_xy = observation_box[:, :2].detach()
@@ -991,6 +1020,10 @@ class B2EvidenceAcquirer(nn.Module):
                 "ct_vote_mode_mean_identity_margin": consensus["mode_mean_identity_margin"],
                 "ct_vote_mode_inlier_mask": consensus["mode_inlier_mask"],
             })
+        if self.v30_enabled:
+            result["ct_evidence_modes"] = modes
+            result.update(modes.flat())
+            result["ct_b2_geometry_features_prepool"] = geometry
         return result
 
 class B3SelectiveUpdater(nn.Module):

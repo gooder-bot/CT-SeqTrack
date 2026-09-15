@@ -1,0 +1,34 @@
+{
+  "b0": {
+    "run": "20260911-023000-29_b0_perf-nuscenes_car_seed42_60ep_bs16",
+    "csv_files": 0,
+    "dev_diagnostic_dirs": [],
+    "acquisition_epochs": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "validation_tags": []
+  },
+  "full_cfc": {
+    "run": "20260911-023006-29_full_cfc_perf-nuscenes_car_seed42_60ep_bs16",
+    "csv_files": 0,
+    "dev_diagnostic_dirs": [],
+    "acquisition_epochs": [
+      1,
+      2
+    ],
+    "validation_tags": []
+  },
+  "full_gru": {
+    "run": "20260911-023010-29_full_gru_perf-nuscenes_car_seed42_60ep_bs16",
+    "csv_files": 0,
+    "dev_diagnostic_dirs": [],
+    "acquisition_epochs": [
+      1,
+      2
+    ],
+    "validation_tags": []
+  }
+}

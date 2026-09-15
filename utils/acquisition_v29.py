@@ -131,6 +131,8 @@ def acquisition_margin_grid_target_v29(
     reachable = int(np.sum(table_mask & labels))
     result = dict(target_margin=minimum.astype(np.float32), valid=True,
                   reason='no_novel_target', global_novel_target_count=global_count,
+                  global_novel_point_count=int(novel.sum()),
+                  max_reachable_point_count=int(table_mask.sum()),
                   max_reachable_target_count=reachable, selected_target_count=0,
                   selected_background_count=0, grid_index=np.asarray((0, 0), dtype=np.int64),
                   support_z_contract=Z_CONTRACT)

@@ -1,0 +1,345 @@
+[
+  {
+    "run": "20260911-023000-29_b0_perf-nuscenes_car_seed42_60ep_bs16",
+    "source": "output\\20260911-023000-29_b0_perf-nuscenes_car_seed42_60ep_bs16\\run_provenance.json",
+    "git": {
+      "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+      "dirty_any": true,
+      "dirty_tracked": true,
+      "status_porcelain": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ]
+    },
+    "roles": {
+      "train": {
+        "frames": 202750,
+        "tracklets": 11462,
+        "split": "train_track",
+        "version": "v1.0-trainval",
+        "protocol_role": "train",
+        "scene_count": 350,
+        "unique_scene_count": 350,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 202750,
+          "frames_before": 202750,
+          "mean_tracklet_len": 17.688885011341824,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 11462,
+          "tracklets_before": 11462
+        }
+      },
+      "val": {
+        "frames": 64159,
+        "tracklets": 3660,
+        "split": "val",
+        "version": "v1.0-trainval",
+        "protocol_role": "test",
+        "scene_count": 150,
+        "unique_scene_count": 150,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 64159,
+          "frames_before": 64159,
+          "mean_tracklet_len": 17.529781420765026,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 3660,
+          "tracklets_before": 3660
+        }
+      }
+    },
+    "streams": {
+      "b0_optimizer_steps_per_epoch": 50687,
+      "mechanism_partition": "train",
+      "mechanism_passes_per_epoch": 1,
+      "mechanism_prediction_frames": null,
+      "mechanism_selection_sha256": null,
+      "mechanism_source": null,
+      "mechanism_steps_per_epoch": 0,
+      "mechanism_tracklets": null,
+      "observation_source": "train",
+      "observation_steps_per_epoch": 50687,
+      "topology": "dual_stream"
+    },
+    "protocol": {
+      "batch_size": 16,
+      "epoch": 60,
+      "workers": 4,
+      "seed": 42,
+      "check_val_every_n_epoch": 5,
+      "ct_enable_v29": true,
+      "ct_b0_rollin_max_steps": 3,
+      "ct_runtime_optimization": "equivalent_v1",
+      "ct_diagnostic_policy": "sampled_v1",
+      "dynamics_time_mode": "true",
+      "ct_h3_diagnostic_keep_ratio": 0.1,
+      "ct_b3_target_contract": "instantaneous_sp_gain_v1",
+      "ct_action_max_radius": null,
+      "ct_router_radius_base": 0.5,
+      "ct_router_radius_dt_scale": null
+    }
+  },
+  {
+    "run": "20260911-023006-29_full_cfc_perf-nuscenes_car_seed42_60ep_bs16",
+    "source": "output\\20260911-023006-29_full_cfc_perf-nuscenes_car_seed42_60ep_bs16\\run_provenance.json",
+    "git": {
+      "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+      "dirty_any": true,
+      "dirty_tracked": true,
+      "status_porcelain": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ]
+    },
+    "roles": {
+      "mechanism": {
+        "frames": 202750,
+        "tracklets": 11462,
+        "split": "train_track",
+        "version": "v1.0-trainval",
+        "protocol_role": "train",
+        "scene_count": 350,
+        "unique_scene_count": 350,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 202750,
+          "frames_before": 202750,
+          "mean_tracklet_len": 17.688885011341824,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 11462,
+          "tracklets_before": 11462
+        }
+      },
+      "train": {
+        "frames": 202750,
+        "tracklets": 11462,
+        "split": "train_track",
+        "version": "v1.0-trainval",
+        "protocol_role": "train",
+        "scene_count": 350,
+        "unique_scene_count": 350,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 202750,
+          "frames_before": 202750,
+          "mean_tracklet_len": 17.688885011341824,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 11462,
+          "tracklets_before": 11462
+        }
+      },
+      "val": {
+        "frames": 64159,
+        "tracklets": 3660,
+        "split": "val",
+        "version": "v1.0-trainval",
+        "protocol_role": "test",
+        "scene_count": 150,
+        "unique_scene_count": 150,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 64159,
+          "frames_before": 64159,
+          "mean_tracklet_len": 17.529781420765026,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 3660,
+          "tracklets_before": 3660
+        }
+      }
+    },
+    "streams": {
+      "b0_optimizer_steps_per_epoch": 50687,
+      "mechanism_partition": "train",
+      "mechanism_passes_per_epoch": 1,
+      "mechanism_prediction_frames": 191288,
+      "mechanism_selection_sha256": "c473b2c2aac0abc58ab9feb62d780cab11c1a16641cc859da153b638b16c20cf",
+      "mechanism_source": "mechanism",
+      "mechanism_steps_per_epoch": 11956,
+      "mechanism_tracklets": 10855,
+      "observation_source": "train",
+      "observation_steps_per_epoch": 50687,
+      "topology": "dual_stream"
+    },
+    "protocol": {
+      "batch_size": 16,
+      "epoch": 60,
+      "workers": 4,
+      "seed": 42,
+      "check_val_every_n_epoch": 5,
+      "ct_enable_v29": true,
+      "ct_b0_rollin_max_steps": 3,
+      "ct_runtime_optimization": "equivalent_v1",
+      "ct_diagnostic_policy": "sampled_v1",
+      "dynamics_time_mode": "true",
+      "ct_h3_diagnostic_keep_ratio": 0.1,
+      "ct_b3_target_contract": "instantaneous_sp_gain_v1",
+      "ct_action_max_radius": null,
+      "ct_router_radius_base": 0.5,
+      "ct_router_radius_dt_scale": null
+    }
+  },
+  {
+    "run": "20260911-023010-29_full_gru_perf-nuscenes_car_seed42_60ep_bs16",
+    "source": "output\\20260911-023010-29_full_gru_perf-nuscenes_car_seed42_60ep_bs16\\run_provenance.json",
+    "git": {
+      "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+      "dirty_any": true,
+      "dirty_tracked": true,
+      "status_porcelain": [
+        " D artifacts/ct_checks/b2_diag_v2_export_20260827_140008.tar.gz",
+        "?? artifacts/ct_checks/b1_cfc_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b1_gru_acquisition_dev_e9a2d6d/",
+        "?? artifacts/ct_checks/b2_diag_v2_export_20260827_140008/",
+        "?? artifacts/ct_checks/full_mechanism_fix_20260822/",
+        "?? artifacts/ct_checks/server_logs/",
+        "?? artifacts/ct_checks/v28_mini_cefix_20260909_001534/",
+        "?? artifacts/ct_checks/v28_mini_parallel_20260908_235357/",
+        "?? train_logs/",
+        "?? train_pids/"
+      ]
+    },
+    "roles": {
+      "mechanism": {
+        "frames": 202750,
+        "tracklets": 11462,
+        "split": "train_track",
+        "version": "v1.0-trainval",
+        "protocol_role": "train",
+        "scene_count": 350,
+        "unique_scene_count": 350,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 202750,
+          "frames_before": 202750,
+          "mean_tracklet_len": 17.688885011341824,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 11462,
+          "tracklets_before": 11462
+        }
+      },
+      "train": {
+        "frames": 202750,
+        "tracklets": 11462,
+        "split": "train_track",
+        "version": "v1.0-trainval",
+        "protocol_role": "train",
+        "scene_count": 350,
+        "unique_scene_count": 350,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 202750,
+          "frames_before": 202750,
+          "mean_tracklet_len": 17.688885011341824,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 11462,
+          "tracklets_before": 11462
+        }
+      },
+      "val": {
+        "frames": 64159,
+        "tracklets": 3660,
+        "split": "val",
+        "version": "v1.0-trainval",
+        "protocol_role": "test",
+        "scene_count": 150,
+        "unique_scene_count": 150,
+        "train_official_val_overlap": 0,
+        "calibration_train_overlap": 17,
+        "dev_train_overlap": 18,
+        "virtual_rate_summary": {
+          "cache_tag": "none",
+          "dropped_frame_ratio": 0.0,
+          "frames_after": 64159,
+          "frames_before": 64159,
+          "mean_tracklet_len": 17.529781420765026,
+          "min_tracklet_len": 1,
+          "mode": "none",
+          "tracklets_after": 3660,
+          "tracklets_before": 3660
+        }
+      }
+    },
+    "streams": {
+      "b0_optimizer_steps_per_epoch": 50687,
+      "mechanism_partition": "train",
+      "mechanism_passes_per_epoch": 1,
+      "mechanism_prediction_frames": 191288,
+      "mechanism_selection_sha256": "c473b2c2aac0abc58ab9feb62d780cab11c1a16641cc859da153b638b16c20cf",
+      "mechanism_source": "mechanism",
+      "mechanism_steps_per_epoch": 11956,
+      "mechanism_tracklets": 10855,
+      "observation_source": "train",
+      "observation_steps_per_epoch": 50687,
+      "topology": "dual_stream"
+    },
+    "protocol": {
+      "batch_size": 16,
+      "epoch": 60,
+      "workers": 4,
+      "seed": 42,
+      "check_val_every_n_epoch": 5,
+      "ct_enable_v29": true,
+      "ct_b0_rollin_max_steps": 3,
+      "ct_runtime_optimization": "equivalent_v1",
+      "ct_diagnostic_policy": "sampled_v1",
+      "dynamics_time_mode": "true",
+      "ct_h3_diagnostic_keep_ratio": 0.1,
+      "ct_b3_target_contract": "instantaneous_sp_gain_v1",
+      "ct_action_max_radius": null,
+      "ct_router_radius_base": 0.5,
+      "ct_router_radius_dt_scale": null
+    }
+  }
+]

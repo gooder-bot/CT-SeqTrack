@@ -1,0 +1,84 @@
+=== 5225ff0:utils/action_calibration.py:163-245 ===
+163: def calibrate_actions(
+164:         rows, checkpoint_sha256, config_sha256, tracklet_manifest_sha256,
+165:         dev_rows=None, dev_tracklet_manifest_sha256=None,
+166:         code_version="unknown",
+167:         code_content_sha256=None,
+168:         consensus_feature_schema=CONSENSUS_FEATURE_SCHEMA,
+169:         seed=42, resamples=2000, min_tracklets=30, min_actions=100,
+170:         min_coverage=0.01, max_harmful_upper=0.05):
+171:     """Choose a risk-feasible threshold pair on calibration tracklets."""
+172:     rows = _finite_rows(rows)
+173:     compatibility_mode = dev_rows is None
+174:     dev_rows = rows if compatibility_mode else _finite_rows(dev_rows)
+175:     dev_manifest_sha = (
+176:         str(tracklet_manifest_sha256) if compatibility_mode else
+177:         str(dev_tracklet_manifest_sha256))
+178:     if not dev_manifest_sha:
+179:         raise ValueError("dev tracklet manifest SHA is required")
+180:     calibration_ids = {row["tracklet_id"] for row in rows}
+181:     dev_ids = {row["tracklet_id"] for row in dev_rows}
+182:     if not compatibility_mode and calibration_ids & dev_ids:
+183:         raise ValueError("calibration and dev tracklets must be disjoint")
+184:     if (not compatibility_mode
+185:             and str(tracklet_manifest_sha256) == dev_manifest_sha):
+186:         raise ValueError("calibration and dev manifests must be disjoint")
+187:     presence_values = np.quantile(
+188:         [row["presence_score"] for row in rows],
+189:         np.linspace(0.0, 0.95, 20))
+190:     action_values = np.quantile(
+191:         [row["action_score"] for row in rows],
+192:         np.linspace(0.0, 0.99, 50))
+193:     feasible = []
+194:     evaluated = []
+195:     for presence_threshold in np.unique(presence_values):
+196:         for action_threshold in np.unique(action_values):
+197:             selected = _selected(
+198:                 rows, float(presence_threshold), float(action_threshold))
+199:             metrics = _metrics(selected, len(rows))
+200:             if (metrics["actions"] < int(min_actions)
+201:                     or metrics["tracklets"] < int(min_tracklets)
+202:                     or metrics["coverage"] < float(min_coverage)):
+203:                 continue
+204:             bounds = tracklet_bootstrap_bounds(
+205:                 selected, seed=seed, resamples=resamples)
+206:             candidate = {
+207:                 "presence_threshold": float(presence_threshold),
+208:                 "action_threshold": float(action_threshold),
+209:                 **metrics, **bounds,
+210:             }
+211:             evaluated.append(candidate)
+212:             if (bounds["harmful_rate_upper_95"] <= max_harmful_upper
+213:                     and bounds["center_gain_lower_95"] >= 0.0
+214:                     and bounds["iou_gain_lower_95"] >= 0.0):
+215:                 feasible.append(candidate)
+216:     if feasible:
+217:         chosen = max(
+218:             feasible,
+219:             key=lambda item: (
+220:                 item["center_gain"] + item["iou_gain"], item["coverage"]))
+221:     else:
+222:         chosen = {
+223:             "presence_threshold": 1.0,
+224:             "action_threshold": 1.0,
+225:             **_metrics([], len(rows)),
+226:             **tracklet_bootstrap_bounds([], seed=seed, resamples=resamples),
+227:         }
+228:     calibration_passed = bool(feasible)
+229:     locked_presence = float(chosen["presence_threshold"])
+230:     locked_action = float(chosen["action_threshold"])
+231:     dev_selected = _selected(
+232:         dev_rows, locked_presence, locked_action)
+233:     dev_metrics = _metrics(dev_selected, len(dev_rows))
+234:     dev_bounds = tracklet_bootstrap_bounds(
+235:         dev_selected, seed=seed, resamples=resamples)
+236:     dev_promotion_passed = bool(
+237:         calibration_passed
+238:         and dev_metrics["actions"] >= int(min_actions)
+239:         and dev_metrics["tracklets"] >= int(min_tracklets)
+240:         and dev_metrics["coverage"] >= float(min_coverage)
+241:         and dev_bounds["harmful_rate_upper_95"] <= float(max_harmful_upper)
+242:         and dev_bounds["center_gain_lower_95"] >= 0.0
+243:         and dev_bounds["iou_gain_lower_95"] >= 0.0)
+244:     passed = bool(calibration_passed and dev_promotion_passed)
+245:     deployed_presence = locked_presence if passed else 1.0

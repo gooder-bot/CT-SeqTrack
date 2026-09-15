@@ -18,14 +18,16 @@ from utils.config import load_yaml_config
 
 
 def use_v27_runtime(argv):
-    """兼容旧 --v27；v28 按配置自动选择真实闭环 runner。"""
-    if any(flag in argv for flag in ("--v27", "--v28", "--v29")):
+    """保留历史入口名；v30 必须进入真实闭环，不能退回离线行重筛。"""
+    if any(flag in argv for flag in ("--v27", "--v28", "--v29", "--v30")):
         return True
     for index, argument in enumerate(argv):
         if argument == "--config" and index + 1 < len(argv):
-            return bool(load_yaml_config(argv[index + 1]).get("ct_enable_v28", False))
+            config = load_yaml_config(argv[index + 1])
+            return any(bool(config.get(f'ct_enable_v{version}', False)) for version in (28, 29, 30))
         if argument.startswith("--config="):
-            return bool(load_yaml_config(argument.split("=", 1)[1]).get("ct_enable_v28", False))
+            config = load_yaml_config(argument.split("=", 1)[1])
+            return any(bool(config.get(f'ct_enable_v{version}', False)) for version in (28, 29, 30))
     return False
 
 
@@ -51,9 +53,28 @@ def _write_json(path, value):
 
 
 def rows_schema(config):
+    if config.get('ct_enable_v30', False):
+        return 'ct_seqtrack.action_rows.v30'
     if config.get("ct_enable_v29", False):
         return "ct_seqtrack.action_rows.v29"
     return "ct_seqtrack.action_rows.v28" if config.get("ct_enable_v28", False) else ROWS_SCHEMA
+
+
+def _scene_id(source, index, sequence):
+    """使用数据集无关身份；KITTI 不应为导出而访问不存在的 nusc 对象。"""
+    if sequence and isinstance(sequence[0], dict) and sequence[0].get('scene_id') is not None:
+        return str(sequence[0]['scene_id'])
+    meta = source.virtual_rate_meta[index]
+    if meta.get('scene_id') is not None:
+        return str(meta['scene_id'])
+    return str(source.nusc.get('scene', meta['scene_token'])['name'])
+
+
+def _score_definition(config):
+    if config.get('ct_enable_v30', False):
+        from utils.action_calibration_v30 import SCORE_DEFINITION as v30_score
+        return v30_score
+    return SCORE_DEFINITION
 
 
 class TrackerClosedLoopRunner:
@@ -70,11 +91,13 @@ class TrackerClosedLoopRunner:
         from utils.checkpoint_loading import load_initial_weights
         raw = load_yaml_config(config_path)
         configure_ct_variant(raw)
-        if raw.get("ct_enable_v28", False):
+        if raw.get("ct_enable_v28", False) or raw.get('ct_enable_v30', False):
             from utils.online_contract import configure_v28_numerics
             configure_v28_numerics(raw)
-        if not raw.get("ct_enable_v27") or raw.get("ct_variant") != "full":
+        if not (raw.get("ct_enable_v27") or raw.get('ct_enable_v30')) or raw.get("ct_variant") != "full":
             raise ValueError("v27 action calibration requires a v27 Full config")
+        if raw.get('ct_enable_v30') and preloading:
+            raise ValueError('v30 action calibration uses bounded cloud caching; --preloading is not supported')
         self.config_sha256 = sha256_json(action_calibration_config_identity(raw))
         self.checkpoint_sha256 = sha256_file(checkpoint_path)
         raw.update({"preloading": preloading, "ct_action_calibration_path": None,
@@ -139,8 +162,7 @@ class TrackerClosedLoopRunner:
             for index in range(len(dataset)):
                 sequence = dataset[index]
                 tracklet_key = str(source.get_tracklet_key(index))
-                meta = source.virtual_rate_meta[index]
-                scene_id = str(source.nusc.get("scene", meta["scene_token"])["name"])
+                scene_id = _scene_id(source, index, sequence)
                 self.model.evaluate_one_sequence(sequence)
                 endpoints = getattr(self.model, "_ct_v27_sequence_endpoints", None)
                 if endpoints is None or len(endpoints) != len(sequence):
@@ -150,18 +172,25 @@ class TrackerClosedLoopRunner:
                     row.update(tracklet_id=tracklet_key, scene_id=scene_id,
                                category=str(getattr(self.config, "category_name", "unknown")),
                                tracklet_index=index, partition=role)
-                    if getattr(self.config, "ct_enable_v29", False):
+                    if getattr(self.config, "ct_enable_v29", False) or getattr(self.config, 'ct_enable_v30', False):
                         row.update(tracklet_key=tracklet_key, role=role,
                                    parameter_training_overlap=(scene_id in
                                        set(self.scene_manifest["scenes"]["train"])))
+                    if getattr(self.config, 'ct_enable_v30', False):
+                        if row.get('structural_available') and not row.get('is_initial') and 'max_action_q' not in row:
+                            raise RuntimeError('v30 host must export max_action_q for each available endpoint')
+                        row.update(dataset=self.scene_manifest['dataset'],
+                                   coordinate_mode=self.scene_manifest['coordinate_mode'],
+                                   dataset_manifest_sha256=self.scene_manifest['content_sha256'])
                     rows.append(row)
         rows = normalize_rows(rows)
         self.cache[key] = copy.deepcopy(rows)
         if self.cache_directory:
             write_rows(self.cache_directory / f"{role}_{key[1][:16]}.jsonl", rows)
             from utils.v27_eval_reporting import write_endpoint_diagnostics
-            write_endpoint_diagnostics(self.cache_directory / f"{role}_{key[1][:16]}_summary.json", rows)
-        version = "v29" if getattr(self.config, "ct_enable_v29", False) else "v27"
+            write_endpoint_diagnostics(self.cache_directory / f"{role}_{key[1][:16]}_summary.json", rows, config=self.config)
+        version = ('v30' if getattr(self.config, 'ct_enable_v30', False) else
+                   "v29" if getattr(self.config, "ct_enable_v29", False) else "v27")
         print(json.dumps({"phase": version + "_closed_loop", "role": role, "policy": policy,
                           "metrics": summarize_rows(rows)}, sort_keys=True), flush=True)
         return rows
@@ -172,6 +201,7 @@ def _parser(description):
     parser.add_argument("--v27", action="store_true")
     parser.add_argument("--v28", action="store_true")
     parser.add_argument("--v29", action="store_true")
+    parser.add_argument('--v30', action='store_true')
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
@@ -191,10 +221,10 @@ def export_main(argv=None):
     rows = runner(args.partition, {"kind": "never"})
     write_rows(args.output, rows)
     from utils.v27_eval_reporting import write_endpoint_diagnostics
-    write_endpoint_diagnostics(str(args.output) + '.summary.json', rows)
+    write_endpoint_diagnostics(str(args.output) + '.summary.json', rows, config=runner.config)
     manifest = {"schema": rows_schema(runner.config), "partition": args.partition,
         "checkpoint_sha256": runner.checkpoint_sha256, "config_sha256": runner.config_sha256,
-        "score_definition": SCORE_DEFINITION, "metric_mode": "benchmark_compat",
+        "score_definition": _score_definition(runner.config), "metric_mode": "benchmark_compat",
         "scene_manifest": runner.scene_manifest,
         "parameter_training_overlap": runner.scene_manifest["parameter_training_overlap"],
         "rows": len(rows), "rows_sha256": sha256_file(args.output),
@@ -209,10 +239,14 @@ def calibrate_main(argv=None):
         device=args.device, scene_manifest_path=args.scene_manifest,
         preloading=args.preloading, cache_directory=cache_directory)
     calibration_rows = runner("calibration", {"kind": "never"})
-    artifact = calibrate_actions_v27(calibration_rows, runner,
-        checkpoint_sha256=runner.checkpoint_sha256, config_sha256=runner.config_sha256,
-        scene_manifest=runner.scene_manifest,
-        enable_v29=bool(runner.config.get("ct_enable_v29", False)))
+    arguments = dict(checkpoint_sha256=runner.checkpoint_sha256, config_sha256=runner.config_sha256,
+                     scene_manifest=runner.scene_manifest)
+    if runner.config.get('ct_enable_v30', False):
+        from utils.action_calibration_v30 import calibrate_actions_v30
+        artifact = calibrate_actions_v30(calibration_rows, runner, **arguments)
+    else:
+        artifact = calibrate_actions_v27(calibration_rows, runner, **arguments,
+            enable_v29=bool(runner.config.get("ct_enable_v29", False)))
     _write_json(args.output, artifact)
     print(json.dumps({"action_policy": artifact["action_policy"],
                       "dev_locked_metrics": artifact["dev_locked_metrics"],

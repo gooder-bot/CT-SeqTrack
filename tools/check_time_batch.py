@@ -77,9 +77,11 @@ def main():
     parser.add_argument("--path", default=None)
     parser.add_argument("--version", default=None)
     parser.add_argument("--split", default=None)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--skip-batches", type=int, default=0)
+    parser.add_argument('--max-batches', type=int, default=32,
+                        help='v30 bounded scan limit, at most 100 batches')
     parser.add_argument("--require-full-history", action="store_true")
     parser.add_argument("--pseudo-time", action="store_true")
     parser.add_argument("--twc", action="store_true",
@@ -87,6 +89,10 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.cfg)
+    if bool(getattr(cfg, 'ct_enable_v30', False)):
+        from tools.ct_v30_batch_runtime import run_real_observation_batch
+        run_real_observation_batch(cfg, args, time_only=True)
+        return
     if args.path is not None:
         cfg.path = args.path
     if args.version is not None:
@@ -95,7 +101,7 @@ def main():
         cfg.use_real_time = False
     if args.twc:
         cfg.use_twc = True
-    cfg.batch_size = args.batch_size
+    cfg.batch_size = 2 if args.batch_size is None else args.batch_size
     cfg.workers = args.workers
 
     split = args.split if args.split is not None else cfg.train_split

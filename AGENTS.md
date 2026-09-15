@@ -1,4 +1,19 @@
-# CT-SeqTrack 当前工作提醒（2026-09-10）
+# CT-SeqTrack 当前工作提醒（2026-09-15）
+
+## 当前v30与最新mini启动安排
+
+当前以用户v30方案、`docs/EXPERIMENT_PROTOCOL.md`顶部及`need_to_do.md`为准。
+本地实现已完成，完整回归868 passed/15 skipped；真实CUDA、正式训练与分数仍待实测。
+最新用户要求轻量核对后给三组独立后台命令，不增加全套哈希/长检查/工程报告门：
+GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC；mini Car、seed42、scratch60、batch16、workers4、val5。
+用`30_b0_mini.yaml`、`30_full_gru_mini.yaml`、`30_full_cfc_mini.yaml`；不加`--preloading`，
+默认每worker256MiB缓存。`CUDA_VISIBLE_DEVICES`选择物理卡，每个进程`trainer_devices=1`。
+输出显式`output/YYYYMMDD-HHMMSS-30_模块-mini_car_seed42_60ep_bs16/`，包含`train.log`和`train.pid`。
+命令见`docs/CTSEQTRACK_V30_MINI_LAUNCH.md`。仅索取命令不等于授权自动修改或启动服务器任务。
+至少一个Full final60 S/P同时高于同版本B0后进入full/KITTI，late-3只报告，无额外seed前置门。
+下方v29及更早“当前”“最新”均为历史记录，不覆盖本节与用户最新指令。
+
+## 历史v29记录
 
 2026-09-11：用户要求加速v29 B0/Full-CfC/Full-GRU，允许昂贵纯诊断抽样，但训练输入、
 损失/更新、BN/RNG、证据与递归耦合不变。仅新`*_nuscenes_full_perf.yaml`启用性能路径；

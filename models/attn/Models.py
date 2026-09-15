@@ -139,7 +139,7 @@ class Seq2SeqFormer(nn.Module):
     def forward(
             self, trg_seq, src_seq, valid_mask,
             return_decoder_state=False, *, enable_v29=False,
-            frame_measurement_valid=None):
+            frame_measurement_valid=None, source_token_valid=None):
         """Run SeqTrack3D's box-sequence decoder.
 
         ``return_decoder_state`` is deliberately opt-in so every historical
@@ -177,6 +177,10 @@ class Seq2SeqFormer(nn.Module):
             frame_source_valid = frame_exists & frame_measurement_valid.to(
                 device=src_seq_.device, dtype=torch.bool)
             source_valid = frame_source_valid.repeat_interleave(tokens_per_frame, dim=1)
+            if source_token_valid is not None:
+                if source_token_valid.shape != source_valid.shape:
+                    raise ValueError('v30 source token validity must match source slots')
+                source_valid = source_valid & source_token_valid.to(source_valid.device).bool()
             corner_valid = frame_exists.repeat_interleave(8, dim=1)
             source_pair_mask = source_valid.unsqueeze(2) & source_valid.unsqueeze(1)
             cross_source_valid = torch.cat((source_valid, source_valid), dim=1)
@@ -186,10 +190,15 @@ class Seq2SeqFormer(nn.Module):
                 global_queries=source_valid.unsqueeze(-1),
                 cross=corner_valid.unsqueeze(2) & cross_source_valid.unsqueeze(1),
                 corners=corner_valid.unsqueeze(-1), frames=frame_exists.unsqueeze(-1))
+            local_valid = source_valid.reshape(batch * frame_count, tokens_per_frame)
+            masks['local_queries'] = (local_valid.unsqueeze(-1) if source_token_valid is not None
+                                       else masks['local'])
+            if source_token_valid is not None:
+                masks['local'] = local_valid.unsqueeze(2) & local_valid.unsqueeze(1)
 
         enc_output, *_ = self.encoder(
             src_seq_.reshape(-1, tokens_per_frame, self.d_model),
-            **(dict(src_mask=masks['local'], query_valid=masks['local'],
+            **(dict(src_mask=masks['local'], query_valid=masks['local_queries'],
                     zero_invalid_rows=True) if masks is not None else {}))
 
         enc_others,*_=self.encoder_global(

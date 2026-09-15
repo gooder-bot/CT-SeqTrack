@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,12 @@ from datasets.protocol_utils import (
     file_sha256,
     payload_with_content_sha256,
     verify_content_sha256,
+)
+from utils.data_cache_v30 import (
+    DEFAULT_POINTCLOUD_CACHE_BYTES, load_pointcloud_arrays, shared_nuscenes_metadata,
+)
+from utils.dataset_protocol_v30 import (
+    apply_frame_stride, validate_dataset_selection, validate_tracklet_timestamps,
 )
 
 # import vis_tool as vt
@@ -68,7 +75,19 @@ tracking_to_general_class = {
 class NuScenesMFDataset(base_dataset.BaseDataset):
     def __init__(self, path, split, category_name="Car", version='v1.0-trainval', **kwargs):
         super().__init__(path, split, category_name, **kwargs)
-        self.nusc = NuScenes(version=version, dataroot=path, verbose=False)
+        self.ct_enable_v30 = bool(kwargs.get('ct_enable_v30', False))
+        self.coordinate_mode = 'global'
+        self.ct_frame_stride = int(kwargs.get('ct_frame_stride', 1))
+        self.ct_pointcloud_cache_bytes = kwargs.get(
+            'ct_pointcloud_cache_bytes', DEFAULT_POINTCLOUD_CACHE_BYTES)
+        if self.ct_enable_v30:
+            if kwargs.get('coordinate_mode', 'global') != 'global':
+                raise ValueError('v30 nuScenes requires global coordinates')
+            if self.preloading:
+                raise ValueError('v30 uses bounded point-cloud caching, not tracklet preloading')
+            self.nusc = shared_nuscenes_metadata(NuScenes, path, version)
+        else:
+            self.nusc = NuScenes(version=version, dataroot=path, verbose=False)
         self.version = version
         self.key_frame_only = kwargs.get('key_frame_only', False)
         self.min_points = kwargs.get('min_points', False)
@@ -101,6 +120,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         self.ct_scene_manifest = kwargs.get('ct_scene_manifest')
         self.ct_scene_names = kwargs.get('ct_scene_names')
         self.ct_scene_role = kwargs.get('ct_scene_role', self.protocol_role)
+        if self.ct_enable_v30 and self.ct_scene_manifest is not None:
+            validate_dataset_selection(self.ct_scene_manifest, self.ct_scene_role, self.ct_scene_names)
         self.virtual_rate_manifest_content_sha256 = ''
         self.virtual_rate_manifest_file_sha256 = ''
         if self.virtual_rate_mode == 'none' and self.virtual_rate_manifest:
@@ -129,12 +150,16 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
 
         self.track_instances = self.filter_instance(split, category_name.lower(), self.min_points)
         self.tracklet_anno_list, self.tracklet_len_list = self._build_tracklet_anno()
+        if self.ct_enable_v30:
+            apply_frame_stride(self, kwargs.get('ct_frame_stride', 1))
         self.virtual_rate_meta = []
         self.virtual_rate_summary = self._build_virtual_rate_summary(
             original_lengths=self.tracklet_len_list,
             filtered_lengths=self.tracklet_len_list)
         self._apply_virtual_rate()
         self._prepare_dynamics_time()
+        if self.ct_enable_v30:
+            validate_tracklet_timestamps(self)
         if self.preloading:
             self.training_samples = self._load_data()
 
@@ -304,6 +329,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         tracklet_key = (
             f"nuscenes_mf/{self.version}/{self.split}/"
             f"{scene_token}/{instance_token}")
+        if getattr(self, 'ct_enable_v30', False):
+            tracklet_key += f'/v30/global/stride/{self.ct_frame_stride}'
         return {
             'tracklet_key': tracklet_key,
             'scene_token': scene_token,
@@ -990,6 +1017,25 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         frame['_ct_endpoint_key'] = endpoint_key
         frame['_ct_dynamics_time_mode'] = self.dynamics_time_mode
         frame['_ct_effective_timestamp'] = float(effective_timestamp)
+        if getattr(self, 'ct_enable_v30', False):
+            anno = self.tracklet_anno_list[seq_id][frame_id]
+            sample = self.nusc.get('sample', anno['box_anno']['sample_token'])
+            scene = self.nusc.get('scene', sample['scene_token'])
+            lidar = anno['sample_data_lidar']
+            sensor = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
+            ego = self.nusc.get('ego_pose', lidar['ego_pose_token'])
+            sensor_to_ego = np.eye(4)
+            sensor_to_ego[:3, :3] = Quaternion(sensor['rotation']).rotation_matrix
+            sensor_to_ego[:3, 3] = sensor['translation']
+            ego_to_world = np.eye(4)
+            ego_to_world[:3, :3] = Quaternion(ego['rotation']).rotation_matrix
+            ego_to_world[:3, 3] = ego['translation']
+            frame.update(scene_id=str(scene['name']), sequence_id=str(sample['scene_token']),
+                         raw_frame_id=str(lidar['token']), raw_frame_token=str(lidar['token']),
+                         coordinate_mode='global', sensor_to_sequence_world=ego_to_world @ sensor_to_ego,
+                         dataset_manifest_sha256=(self.ct_scene_manifest or {}).get('content_sha256', ''))
+            # devkit tables are shared by observation/mechanism/evaluation datasets.
+            frame['meta'] = copy.deepcopy(frame['meta'])
         return frame
 
     def get_frame_metadata(self, seq_id, frame_id):
@@ -997,6 +1043,9 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         anno = self.tracklet_anno_list[seq_id][frame_id]
         frame = self._frame_metadata_from_anno(anno)
         return self._enrich_frame_metadata(frame, seq_id, frame_id)
+
+    def get_frames_metadata(self, seq_id, frame_ids):
+        return [self.get_frame_metadata(seq_id, frame_id) for frame_id in frame_ids]
 
     @staticmethod
     def _frame_metadata_from_anno(anno):
@@ -1014,6 +1063,17 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
     def _get_frame_from_anno_data(self, anno):
         sample_data_lidar = anno['sample_data_lidar']
         metadata = self._frame_metadata_from_anno(anno)
+        if getattr(self, 'ct_enable_v30', False):
+            key = ('nuscenes_mf', str(Path(self.path).expanduser().resolve()), self.version,
+                   'global', str(sample_data_lidar['token']))
+            def read():
+                cloud = self._load_world_pointcloud(sample_data_lidar)
+                return cloud.points, cloud.point_ids
+            points, ids = load_pointcloud_arrays(key, read, self.ct_pointcloud_cache_bytes)
+            return {'pc': PointCloud(points, point_ids=ids), **metadata}
+        return {'pc': self._load_world_pointcloud(sample_data_lidar), **metadata}
+
+    def _load_world_pointcloud(self, sample_data_lidar):
         pcl_path = os.path.join(self.path, sample_data_lidar['filename'])
         pc = LidarPointCloud.from_file(pcl_path)
 
@@ -1025,5 +1085,4 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix)
         pc.translate(np.array(poserecord['translation']))
 
-        pc = PointCloud(points=pc.points)
-        return {"pc": pc, **metadata}
+        return PointCloud(points=pc.points)

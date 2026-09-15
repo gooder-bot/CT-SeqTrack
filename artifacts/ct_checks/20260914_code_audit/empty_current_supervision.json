@@ -1,0 +1,7 @@
+{
+  "raw_current_count": 0,
+  "valid_current_slots": 0,
+  "foreground_supervision_slots": 1024,
+  "box_distance_supervision_mean": 2.2317380905151367,
+  "current_xyz_all_zero": true
+}

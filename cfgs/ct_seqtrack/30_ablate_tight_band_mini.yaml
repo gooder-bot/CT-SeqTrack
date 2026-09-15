@@ -1,0 +1,4 @@
+_base_: 30_full_cfc_mini.yaml
+experiment_name: ct30_ablate_tight_band_mini_car_scratch_seed42
+ct_v30_ablation: tight_band
+ct_acquisition_margin_max: [2.0, 1.5]

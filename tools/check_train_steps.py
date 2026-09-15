@@ -146,6 +146,10 @@ def main() -> None:
 
     config = validate_config(args.cfg, args.b1_backend)
     artifact_dir = args.artifact_dir.resolve()
+    if config.get('ct_enable_v30', False):
+        checks_root = (ROOT / 'artifacts' / 'ct_checks').resolve()
+        if checks_root not in artifact_dir.parents or args.steps > 100:
+            raise ValueError('v30 checks require a directory below artifacts/ct_checks and 1..100 steps')
     protected_output = (ROOT / "output").resolve()
     if artifact_dir == protected_output or protected_output in artifact_dir.parents:
         raise ValueError("acceptance artifacts may not be written under output/")
@@ -155,7 +159,7 @@ def main() -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     command = build_command(args, artifact_dir)
-    if config.get('ct_enable_v28', False):
+    if config.get('ct_enable_v28', False) or config.get('ct_enable_v30', False):
         command.append('--ct_engineering_check')
     environment = os.environ.copy()
     if args.numerical_audit:

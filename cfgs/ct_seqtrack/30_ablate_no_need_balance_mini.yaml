@@ -1,0 +1,5 @@
+_base_: 30_full_cfc_mini.yaml
+experiment_name: ct30_ablate_no_need_balance_mini_car_scratch_seed42
+ct_v30_ablation: no_need_balance
+ct_acquisition_need_balance: false
+ct_acquisition_loss_contract: age_balanced_pinball_v1

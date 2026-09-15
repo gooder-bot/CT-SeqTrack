@@ -1,0 +1,66 @@
+=== 608f963:utils/v29_policy.py:1-65 ===
+1: """v29 机制行为分配与训练/部署共用的纯动作转移，不维护递归状态。"""
+2: import torch
+3: 
+4: from utils.action_calibration_v27 import normalize_policy
+5: from utils.sampling_utils import stable_uint32_seed
+6: from utils.v29_contracts import V29_CONTRACTS
+7: 
+8: 
+9: BEHAVIOR_NAMESPACE = 'mechanism_behavior_v1'
+10: BEHAVIOR_CONTRACT = V29_CONTRACTS['ct_mechanism_behavior_contract']
+11: TRANSITION_CONTRACT = V29_CONTRACTS['ct_state_transition_contract']
+12: UTILITY_TARGET_CONTRACT = V29_CONTRACTS['ct_b3_target_contract']
+13: POLICY_FITTING_CONTRACT = V29_CONTRACTS['ct_policy_fitting_contract']
+14: 
+15: 
+16: def mechanism_behavior_policy(seed, epoch, tracklet_key):
+17:     """epoch使用从0开始的训练轮次；真实轨迹key决定整条轨迹的行为类型。"""
+18:     if not isinstance(tracklet_key, str) or not tracklet_key.strip():
+19:         raise ValueError('v29 mechanism behavior requires a real tracklet key')
+20:     if tracklet_key in ('eval', 'unknown'):
+21:         raise ValueError('v29 mechanism behavior forbids placeholder tracklet keys')
+22:     if int(epoch) < 0:
+23:         raise ValueError('v29 behavior epoch must be nonnegative')
+24:     bucket = stable_uint32_seed(int(seed), int(epoch), tracklet_key,
+25:                                 BEHAVIOR_NAMESPACE) % 4
+26:     if bucket == 0:
+27:         return {'kind': 'never'}
+28:     if bucket == 1:
+29:         return {'kind': 'always'}
+30:     return {'kind': 'threshold', 'threshold': 0.}
+31: 
+32: 
+33: def policy_transition(observation_box, bounded_candidate_box,
+34:                       structural_valid, action_score, policy):
+35:     """同状态完整框[B,D] -> (最终框, accepted[B])；不消费GT/presence/RNG。
+36: 
+37:     bounded_candidate_box已完成动作半径约束；这里不再缩放动作。
+38:     训练和部署都只替换XY，保留B0的Z/yaw及其他框字段。
+39:     """
+40:     policy = normalize_policy(policy)
+41:     if (observation_box.ndim != 2 or observation_box.shape[1] < 4
+42:             or bounded_candidate_box.shape != observation_box.shape):
+43:         raise ValueError('v29 policy transition requires matching boxes [B,D>=4]')
+44:     if (bounded_candidate_box.device != observation_box.device
+45:             or bounded_candidate_box.dtype != observation_box.dtype):
+46:         raise ValueError('v29 transition boxes must share device and dtype')
+47:     batch = len(observation_box)
+48:     if structural_valid.numel() != batch or action_score.numel() != batch:
+49:         raise ValueError('v29 transition requires one validity and score per row')
+50:     observation = observation_box.detach()
+51:     candidate = bounded_candidate_box.detach()
+52:     score = action_score.detach().reshape(-1).to(observation)
+53:     available = structural_valid.detach().reshape(-1).to(observation.device)
+54:     valid = ((available > 0) & torch.isfinite(available)
+55:              & torch.isfinite(observation).all(1)
+56:              & torch.isfinite(candidate).all(1) & torch.isfinite(score))
+57:     if policy['kind'] == 'never':
+58:         accepted = torch.zeros_like(valid)
+59:     elif policy['kind'] == 'always':
+60:         accepted = valid
+61:     else:
+62:         accepted = valid & (score > policy['threshold'])
+63:     final = torch.cat((torch.where(accepted[:, None], candidate[:, :2],
+64:                                    observation[:, :2]), observation[:, 2:]), dim=1)
+65:     return final, accepted

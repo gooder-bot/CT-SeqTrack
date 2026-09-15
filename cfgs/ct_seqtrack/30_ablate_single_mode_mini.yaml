@@ -1,0 +1,4 @@
+_base_: 30_full_cfc_mini.yaml
+experiment_name: ct30_ablate_single_mode_mini_car_scratch_seed42
+ct_v30_ablation: single_mode
+ct_mode_count: 1

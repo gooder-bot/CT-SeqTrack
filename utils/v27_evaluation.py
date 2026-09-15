@@ -12,6 +12,7 @@ def evaluate_sequence_v27(host, sequence):
     results, overlaps, distances, rows, diagnostics = [], [], [], [], []
     v28 = bool(getattr(host.config, 'ct_enable_v28', False))
     state = None
+    lost_length = 0
     for frame_id, frame in enumerate(sequence):
         target = frame['3d_bbox']
         sidecar, output, diagnostic, batch = {}, {}, {}, {}
@@ -58,6 +59,8 @@ def evaluate_sequence_v27(host, sequence):
                 return value
             # v28 的 Full−B3 与 selective 共享结构候选，不继承旧 presence 门。
             available = bool(scalar('ct_b2_available' if v28 else 'ct_policy_candidate_valid'))
+            if bool(getattr(host.config, 'ct_enable_v30', False)) and 'ct_b3_action_valid' in output:
+                available = bool(output['ct_b3_action_valid'][0].any().detach().cpu())
             correction = output.get('ct_router_bounded_residual_xy')
             if correction is not None and available and bool(torch.isfinite(correction[0]).all()):
                 local[:2] += correction[0].detach()
@@ -124,11 +127,24 @@ def evaluate_sequence_v27(host, sequence):
         row['raw_success_gain'] = row['raw_success'] - row['observation_success']
         row['raw_precision_gain'] = row['raw_precision'] - row['observation_precision']
         row['raw_utility_gain'] = (row['raw_success_gain'] + row['raw_precision_gain']) / 2
+        if bool(getattr(host.config, 'ct_enable_v30', False)):
+            from utils.v30_evaluation import add_v30_endpoint
+            delta = (float(batch['current_delta_t_real'].reshape(-1)[0].detach().cpu())
+                     if frame_id > 0 and 'current_delta_t_real' in batch else None)
+            add_v30_endpoint(row, batch, output, target=target,
+                previous_target=sequence[frame_id - 1]['3d_bbox'] if frame_id else None,
+                physical_delta_t=delta, lost_length=lost_length, config=host.config)
+        lost_length = lost_length + 1 if row['final_iou'] <= 0 else 0
         if sidecar.get('acquisition'):
             # Scalar funnel counts share exactly the IDs used by acquisition.
             for key, value in sidecar['acquisition'].items():
                 if isinstance(value, (int, float, bool, np.number)):
                     row['acquisition_' + key] = float(value)
+            if bool(getattr(host.config, 'ct_enable_v30', False)):
+                # 最大可达计数来自实际 raw-ID sidecar；评测不运行 9×9 监督枚举。
+                reachable = sidecar['acquisition'].get('max_legal_novel_target_count')
+                row['acquisition_max_reachable_target_count'] = (
+                    None if reachable is None else float(reachable))
         # Reuse the sampler's exact labels and actual selected slots, independent
         # of optional heavy proposal diagnostics and without forwarding GT.
         b2_enabled = bool(getattr(host.config, 'ct_enable_b2', 'ct_extension_selected_indices' in output))

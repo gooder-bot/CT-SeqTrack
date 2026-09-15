@@ -1,0 +1,119 @@
+{
+  "scope": "synthetic point IO call counts; actual methods AST-extracted unchanged; CPU timings only",
+  "io_calls_per_mechanism_row": [
+    {
+      "perf": false,
+      "shadow": false,
+      "full_cloud_reads": 8,
+      "unique_frame_tokens": 7,
+      "frame_ids": [
+        0,
+        10,
+        9,
+        8,
+        7,
+        8,
+        6,
+        4
+      ],
+      "metadata_reads": 0,
+      "auxiliary_clouds": 3
+    },
+    {
+      "perf": false,
+      "shadow": true,
+      "full_cloud_reads": 24,
+      "unique_frame_tokens": 10,
+      "frame_ids": [
+        0,
+        10,
+        9,
+        8,
+        7,
+        8,
+        6,
+        4,
+        0,
+        11,
+        10,
+        9,
+        8,
+        9,
+        7,
+        5,
+        0,
+        12,
+        11,
+        10,
+        9,
+        10,
+        8,
+        6
+      ],
+      "metadata_reads": 0,
+      "auxiliary_clouds": 9
+    },
+    {
+      "perf": true,
+      "shadow": false,
+      "full_cloud_reads": 7,
+      "unique_frame_tokens": 6,
+      "frame_ids": [
+        10,
+        9,
+        8,
+        7,
+        8,
+        6,
+        4
+      ],
+      "metadata_reads": 1,
+      "auxiliary_clouds": 3
+    },
+    {
+      "perf": true,
+      "shadow": true,
+      "full_cloud_reads": 21,
+      "unique_frame_tokens": 9,
+      "frame_ids": [
+        10,
+        9,
+        8,
+        7,
+        8,
+        6,
+        4,
+        11,
+        10,
+        9,
+        8,
+        9,
+        7,
+        5,
+        12,
+        11,
+        10,
+        9,
+        10,
+        8,
+        6
+      ],
+      "metadata_reads": 3,
+      "auxiliary_clouds": 9
+    }
+  ],
+  "lookup": [
+    {
+      "synthetic_tracklets": 274,
+      "equality": true,
+      "linear_median_ms_4000_queries": 35.92629998456687,
+      "bisect_median_ms_4000_queries": 1.3945999962743372
+    },
+    {
+      "synthetic_tracklets": 10000,
+      "equality": true,
+      "linear_median_ms_4000_queries": 2023.3707999868784,
+      "bisect_median_ms_4000_queries": 1.8832000205293298
+    }
+  ]
+}

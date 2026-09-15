@@ -1,0 +1,234 @@
+[
+  {
+    "revision": "25586b2",
+    "commit": "25586b27f3b1411de479e99e0ac25b087e4248b1",
+    "source": "models/ct_v2/evidence_memory.py",
+    "spans": [
+      [
+        388,
+        497
+      ]
+    ],
+    "excerpt": "25586b2_models__ct_v2__evidence_memory.py.txt"
+  },
+  {
+    "revision": "25586b2",
+    "commit": "25586b27f3b1411de479e99e0ac25b087e4248b1",
+    "source": "models/seqtrack3d.py",
+    "spans": [
+      [
+        4510,
+        4572
+      ]
+    ],
+    "excerpt": "25586b2_models__seqtrack3d.py.txt"
+  },
+  {
+    "revision": "96f0baf",
+    "commit": "96f0baf6d00efaca3583603b73c4211a6c8ca1c8",
+    "source": "models/ct_v2/evidence_memory.py",
+    "spans": [
+      [
+        455,
+        517
+      ],
+      [
+        621,
+        680
+      ]
+    ],
+    "excerpt": "96f0baf_models__ct_v2__evidence_memory.py.txt"
+  },
+  {
+    "revision": "96f0baf",
+    "commit": "96f0baf6d00efaca3583603b73c4211a6c8ca1c8",
+    "source": "models/seqtrack3d.py",
+    "spans": [
+      [
+        4560,
+        4649
+      ]
+    ],
+    "excerpt": "96f0baf_models__seqtrack3d.py.txt"
+  },
+  {
+    "revision": "96f0baf",
+    "commit": "96f0baf6d00efaca3583603b73c4211a6c8ca1c8",
+    "source": "utils/action_calibration.py",
+    "spans": [
+      [
+        128,
+        174
+      ]
+    ],
+    "excerpt": "96f0baf_utils__action_calibration.py.txt"
+  },
+  {
+    "revision": "5225ff0",
+    "commit": "5225ff07e2fcdda96b2e2a78f0d3978024136960",
+    "source": "models/ct_v2/evidence_memory.py",
+    "spans": [
+      [
+        740,
+        805
+      ],
+      [
+        930,
+        1004
+      ]
+    ],
+    "excerpt": "5225ff0_models__ct_v2__evidence_memory.py.txt"
+  },
+  {
+    "revision": "5225ff0",
+    "commit": "5225ff07e2fcdda96b2e2a78f0d3978024136960",
+    "source": "utils/action_calibration.py",
+    "spans": [
+      [
+        163,
+        245
+      ]
+    ],
+    "excerpt": "5225ff0_utils__action_calibration.py.txt"
+  },
+  {
+    "revision": "a43a8ee",
+    "commit": "a43a8eea6ae10081b091d740d1f5d22dc9142220",
+    "source": "models/ct_v2/action_v27.py",
+    "spans": [
+      [
+        1,
+        169
+      ]
+    ],
+    "excerpt": "a43a8ee_models__ct_v2__action_v27.py.txt"
+  },
+  {
+    "revision": "a43a8ee",
+    "commit": "a43a8eea6ae10081b091d740d1f5d22dc9142220",
+    "source": "utils/v27_training.py",
+    "spans": [
+      [
+        31,
+        89
+      ],
+      [
+        145,
+        209
+      ]
+    ],
+    "excerpt": "a43a8ee_utils__v27_training.py.txt"
+  },
+  {
+    "revision": "a43a8ee",
+    "commit": "a43a8eea6ae10081b091d740d1f5d22dc9142220",
+    "source": "utils/action_calibration_v27.py",
+    "spans": [
+      [
+        210,
+        261
+      ]
+    ],
+    "excerpt": "a43a8ee_utils__action_calibration_v27.py.txt"
+  },
+  {
+    "revision": "a43a8ee",
+    "commit": "a43a8eea6ae10081b091d740d1f5d22dc9142220",
+    "source": "models/seqtrack3d.py",
+    "spans": [
+      [
+        8334,
+        8364
+      ]
+    ],
+    "excerpt": "a43a8ee_models__seqtrack3d.py.txt"
+  },
+  {
+    "revision": "69461f1",
+    "commit": "69461f1efdfe9b7605c9d4f64f926e73f19152e3",
+    "source": "models/ct_v2/evidence_memory.py",
+    "spans": [
+      [
+        874,
+        915
+      ]
+    ],
+    "excerpt": "69461f1_models__ct_v2__evidence_memory.py.txt"
+  },
+  {
+    "revision": "608f963",
+    "commit": "608f9631cbf0e22e7005bc5ce46ddaea5052ff43",
+    "source": "utils/v27_training.py",
+    "spans": [
+      [
+        31,
+        92
+      ]
+    ],
+    "excerpt": "608f963_utils__v27_training.py.txt"
+  },
+  {
+    "revision": "608f963",
+    "commit": "608f9631cbf0e22e7005bc5ce46ddaea5052ff43",
+    "source": "utils/v29_policy.py",
+    "spans": [
+      [
+        1,
+        65
+      ]
+    ],
+    "excerpt": "608f963_utils__v29_policy.py.txt"
+  },
+  {
+    "revision": "608f963",
+    "commit": "608f9631cbf0e22e7005bc5ce46ddaea5052ff43",
+    "source": "models/seqtrack3d.py",
+    "spans": [
+      [
+        8405,
+        8475
+      ]
+    ],
+    "excerpt": "608f963_models__seqtrack3d.py.txt"
+  },
+  {
+    "revision": "HEAD",
+    "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+    "source": "models/seqtrack3d.py",
+    "spans": [
+      [
+        1270,
+        1305
+      ]
+    ],
+    "excerpt": "HEAD_models__seqtrack3d.py.txt"
+  },
+  {
+    "revision": "HEAD",
+    "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+    "source": "utils/action_calibration_v27.py",
+    "spans": [
+      [
+        225,
+        262
+      ],
+      [
+        266,
+        328
+      ]
+    ],
+    "excerpt": "HEAD_utils__action_calibration_v27.py.txt"
+  },
+  {
+    "revision": "HEAD",
+    "commit": "525eb543a321a36b5ae65545da967d53d3eb00c3",
+    "source": "docs/CTSEQTRACK_B0_B3_METHOD.md",
+    "spans": [
+      [
+        67,
+        99
+      ]
+    ],
+    "excerpt": "HEAD_docs__CTSEQTRACK_B0_B3_METHOD.md.txt"
+  }
+]

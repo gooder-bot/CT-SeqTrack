@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 
-def summarize_endpoint_diagnostics(rows):
+def summarize_endpoint_diagnostics(rows, *, config=None):
     from utils.action_calibration_v27 import summarize_rows
     rows = list(rows)
     metrics = summarize_rows(rows)
@@ -51,7 +51,10 @@ def summarize_endpoint_diagnostics(rows):
                    cuda_profile_frames=len(gpu_rows),
                    cuda_peak_allocated_mb=max((r['cuda_peak_allocated_mb'] for r in gpu_rows), default=None),
                    scope='acquisition includes B1 prepass and shared sampler GT labels/sidecar diagnostics; forward separately measures B0/B2/B3 network execution; wall throughput excludes only subsequent box-metric/CSV reporting and is not deployment FPS')
-    version = 'v28' if rows and all(r.get('protocol_version') == 'v28' for r in rows) else 'v27'
+    versions = {r.get('protocol_version', 'v27') for r in rows}
+    if 'v30' in versions and versions != {'v30'}:
+        raise ValueError('v30 endpoint reports cannot mix protocol versions')
+    version = next(iter(versions)) if len(versions) == 1 and versions <= {'v28', 'v29', 'v30'} else 'v27'
     summary = dict(schema=f'ct_seqtrack.endpoint_diagnostics.{version}', metric_mode='benchmark_compat',
                 evidence_label_scale=1.0, metrics=metrics,
                 runtime=runtime,
@@ -66,15 +69,18 @@ def summarize_endpoint_diagnostics(rows):
                             all_empty_frames=sum(r.get('acquisition_global_raw_point_count') == 0 for r in measured),
                             mode_unique_count_mean=float(np.mean([r.get('ct_vote_mode_unique_count', 0.) for r in structural])) if structural else None),
                 interpretation='one-step action harm uses matched current state; closed-loop gains require a separate never rollout')
-    if version == 'v28':
+    if version in ('v28', 'v29', 'v30'):
         from utils.v28_recovery_reporting import summarize_recovery_rows
         summary['recovery'] = summarize_recovery_rows(rows)
+    if version == 'v30':
+        from utils.v30_reporting import add_v30_report
+        add_v30_report(summary, rows, config=config)
     return summary
 
 
-def write_endpoint_diagnostics(path, rows):
+def write_endpoint_diagnostics(path, rows, *, config=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    summary = summarize_endpoint_diagnostics(rows)
+    summary = summarize_endpoint_diagnostics(rows, config=config)
     path.write_text(json.dumps(summary, indent=2, sort_keys=True, allow_nan=False) + '\n', encoding='utf-8')
     return summary

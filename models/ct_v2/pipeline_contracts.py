@@ -268,6 +268,40 @@ def validate_motion_prior_support_alignment(
 
 
 @dataclass(frozen=True)
+class EvidenceModeSet:
+    """v30 B2 的完整 K=3 模式；只有 features/quality 保留 B2 梯度。"""
+    centers_xy: Tensor
+    covariance_xy: Tensor
+    valid: Tensor
+    member_mask: Tensor
+    features: Tensor
+    quality_logit: Tensor
+    quality: Tensor
+    unique_count: Tensor
+    mass: Tensor
+    identity: Tensor
+    targetness_mean: Tensor
+    support_score: Tensor
+    seed_point_ids: Tensor
+    evidence_top_index: Tensor
+
+    def detached(self):
+        return EvidenceModeSet(**{name: value.detach()
+                                  for name, value in self.__dict__.items()})
+
+    def flat(self):
+        return {"ct_mode_" + name: value for name, value in self.__dict__.items()}
+
+    @classmethod
+    def from_output(cls, output):
+        value = output.get("ct_evidence_modes")
+        if isinstance(value, cls):
+            return value
+        return cls(**{name: output["ct_mode_" + name]
+                      for name in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
 class EvidenceOutput:
     raw_box: Tensor
     structural_available: Tensor

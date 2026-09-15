@@ -22,6 +22,10 @@ from pyquaternion import Quaternion
 from datasets import base_dataset, points_utils
 from datasets.data_classes import Box, PointCloud
 from datasets.temporal_protocol import TemporalProtocolMixin
+from utils.data_cache_v30 import DEFAULT_POINTCLOUD_CACHE_BYTES, load_pointcloud_arrays
+from utils.dataset_protocol_v30 import (
+    apply_frame_stride, validate_dataset_selection, validate_tracklet_timestamps,
+)
 
 
 _KITTI_LABEL_FIELDS = (
@@ -60,6 +64,20 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             version="kitti_tracking",
             **kwargs):
         super().__init__(path, split, category_name, **kwargs)
+        self.ct_enable_v30 = bool(kwargs.get('ct_enable_v30', False))
+        self.coordinate_mode = 'sensor_relative'
+        self.ct_pointcloud_cache_bytes = kwargs.get(
+            'ct_pointcloud_cache_bytes', DEFAULT_POINTCLOUD_CACHE_BYTES)
+        self.ct_scene_manifest = kwargs.get('ct_scene_manifest')
+        self.ct_scene_names = kwargs.get('ct_scene_names')
+        self.ct_scene_role = kwargs.get('ct_scene_role', kwargs.get('protocol_role', 'train'))
+        if self.ct_enable_v30:
+            if kwargs.get('coordinate_mode', 'sensor_relative') != 'sensor_relative':
+                raise ValueError('v30 KITTI requires explicit sensor_relative coordinates')
+            if self.preloading:
+                raise ValueError('v30 KITTI uses bounded point-cloud caching, not tracklet preloading')
+            if self.ct_scene_manifest is not None:
+                validate_dataset_selection(self.ct_scene_manifest, self.ct_scene_role, self.ct_scene_names)
         self.version = str(version)
         self.hist_num = int(kwargs.get("hist_num", 1))
         if self.hist_num <= 0:
@@ -70,11 +88,13 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             raise ValueError(
                 "KITTI category_name must be one of Car, Van, Pedestrian, "
                 "Cyclist, or All")
-        self.preload_offset = float(kwargs.get("preload_offset", -1))
+        self.preload_offset = -1.0 if self.ct_enable_v30 else float(kwargs.get("preload_offset", -1))
         self.frame_period = float(kwargs.get(
             "frame_period", kwargs.get("default_time_step", 0.1)))
         if not np.isfinite(self.frame_period) or self.frame_period <= 0:
             raise ValueError("KITTI frame_period must be finite and positive")
+        if self.ct_enable_v30 and self.frame_period != .1:
+            raise ValueError('v30 KITTI source frame period must be 0.1 seconds')
         self.kitti_hv_intervals = self._parse_kitti_hv_intervals(
             kwargs.get("kitti_hv_interval", 1))
         self.allow_missing_pointcloud = self._parse_bool(
@@ -87,10 +107,11 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
         self.KITTI_calib = self.data_root / "calib"
         self._validate_layout()
 
-        scene_ids = kwargs.get("scene_ids")
+        scene_ids = self.ct_scene_names if self.ct_enable_v30 and self.ct_scene_names is not None else kwargs.get("scene_ids")
         self.scene_list = self._build_scene_list(split, scene_ids=scene_ids)
         self.velos = defaultdict(dict)
         self.calibs = {}
+        self._level_rotations = {}
 
         self._configure_temporal_protocol(
             kwargs,
@@ -100,7 +121,11 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
         )
         self.tracklet_anno_list, self.tracklet_len_list = (
             self._build_tracklet_anno())
+        if self.ct_enable_v30:
+            apply_frame_stride(self, kwargs.get('ct_frame_stride', 1))
         self._initialize_temporal_protocol()
+        if self.ct_enable_v30:
+            validate_tracklet_timestamps(self)
         if self.preloading:
             self.training_samples = self._load_data()
 
@@ -274,6 +299,8 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             f"kitti_mf/{self.version}/{self.split}/"
             f"{scene_id}/{track_id}/{self.category_name}/"
             f"interval/{interval}/phase/{phase}")
+        if self.ct_enable_v30:
+            tracklet_key += f'/v30/{self.coordinate_mode}/stride/{self.ct_frame_stride}'
         return {
             "tracklet_key": tracklet_key,
             "scene_id": scene_id,
@@ -285,6 +312,10 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
     def _manifest_header(self):
         header = super()._manifest_header()
         header["kitti_hv_intervals"] = list(self.kitti_hv_intervals)
+        if self.ct_enable_v30:
+            header.update(coordinate_mode=self.coordinate_mode,
+                          ct_frame_stride=self.ct_frame_stride,
+                          dataset_manifest_sha256=(self.ct_scene_manifest or {}).get('content_sha256', ''))
         return header
 
     @staticmethod
@@ -363,6 +394,15 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
         return self._enrich_frames_with_effective_time(
             seq_id, frame_ids, frames)
 
+    def get_frame_metadata(self, seq_id, frame_id):
+        """首帧尺寸/辅助监督接口，不读取任何点云。"""
+        anno = self.tracklet_anno_list[int(seq_id)][int(frame_id)]
+        return self._enrich_frames_with_effective_time(
+            int(seq_id), [int(frame_id)], [self._frame_metadata_from_anno(anno)])[0]
+
+    def get_frames_metadata(self, seq_id, frame_ids):
+        return [self.get_frame_metadata(seq_id, frame_id) for frame_id in frame_ids]
+
     def _calibration_for_scene(self, scene_id):
         scene_id = str(scene_id)
         if scene_id in self.calibs:
@@ -381,12 +421,42 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             raise KeyError(
                 f"{calib_path} does not define Tr_velo_cam or "
                 "Tr_velo_to_cam")
+        if self.ct_enable_v30:
+            rectification = next((calibration[key] for key in ('R_rect', 'R0_rect')
+                                  if key in calibration), None)
+            if rectification is None or np.asarray(rectification).size != 9:
+                raise ValueError(f'{calib_path} requires a 3x3 R_rect/R0_rect')
+            rectification = np.asarray(rectification, dtype=np.float64).reshape(3, 3)
+            transform = rectification @ transform
+            if not np.isfinite(transform).all() or not np.allclose(
+                    transform[:, :3] @ transform[:, :3].T, np.eye(3), atol=2e-4):
+                raise ValueError(f'{calib_path} contains an invalid rigid calibration')
+            # 固定传感器水平参考轴，原点仍在 LiDAR；不冒充逐帧 ego/world 补偿。
+            camera_to_tracking = np.asarray([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
+            self._level_rotations[scene_id] = camera_to_tracking @ transform[:, :3]
         self.calibs[scene_id] = transform
         return transform
 
     def _pointcloud_for_frame(self, scene_id, frame_id):
         scene_id = str(scene_id)
         frame_id = int(frame_id)
+        if self.ct_enable_v30:
+            self._calibration_for_scene(scene_id)
+            path = self.KITTI_velo / scene_id / f'{frame_id:06d}.bin'
+            def read():
+                if not path.is_file():
+                    if self.allow_missing_pointcloud:
+                        return np.empty((3, 0), dtype=np.float32), np.empty(0, dtype=np.int64)
+                    raise FileNotFoundError(f'Missing KITTI point cloud: {path}')
+                raw = np.fromfile(path, dtype=np.float32)
+                if raw.size % 4:
+                    raise ValueError(f'Malformed KITTI point cloud {path}: {raw.size} float32 values')
+                cloud = PointCloud(raw.reshape(-1, 4).T)
+                cloud.rotate(self._level_rotations[scene_id])
+                return cloud.points, cloud.point_ids
+            key = ('kitti_mf', str(self.data_root), self.version, 'v30_sensor_relative', scene_id, frame_id)
+            points, ids = load_pointcloud_arrays(key, read, self.ct_pointcloud_cache_bytes)
+            return PointCloud(points, point_ids=ids)
         if frame_id in self.velos[scene_id]:
             return self.velos[scene_id][frame_id]
         velodyne_path = (
@@ -408,7 +478,7 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
         self.velos[scene_id][frame_id] = pointcloud
         return pointcloud
 
-    def _get_frame_from_anno(self, anno):
+    def _frame_metadata_from_anno(self, anno):
         scene_id = str(anno["scene"])
         frame_id = int(anno["frame"])
         velo_to_cam = self._calibration_for_scene(scene_id)
@@ -435,19 +505,23 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             Quaternion(axis=[0, 0, -1], radians=float(anno["rotation_y"]))
             * Quaternion(axis=[0, 0, -1], degrees=90)
         )
+        if self.ct_enable_v30:
+            level = self._level_rotations[scene_id]
+            box_center_velo = level @ box_center_velo
+            yaw = float(anno['rotation_y'])
+            # KITTI length axis R_y*[1,0,0]; use the same complete transform
+            # as the cloud, then express its heading in the level XY plane.
+            heading_rect = np.asarray([np.cos(yaw), 0., -np.sin(yaw)])
+            heading_tracking = level @ np.linalg.solve(velo_to_cam[:, :3], heading_rect)
+            orientation = Quaternion(axis=[0, 0, 1], radians=float(
+                np.arctan2(heading_tracking[1], heading_tracking[0])))
         box = Box(
             box_center_velo,
             size,
             orientation,
             name=str(anno["type"]),
         )
-        pointcloud = self._pointcloud_for_frame(scene_id, frame_id)
-        if self.preload_offset > 0:
-            pointcloud = points_utils.crop_pc_axis_aligned(
-                pointcloud, box, offset=self.preload_offset)
-
-        return {
-            "pc": pointcloud,
+        result = {
             "3d_bbox": box,
             "meta": dict(anno),
             # Preserve the original KITTI frame number. After HTV/stride
@@ -455,6 +529,22 @@ class KITTIMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
             "timestamp": self._anno_timestamp(anno),
             "frame_id": frame_id,
         }
+        if self.ct_enable_v30:
+            result.update(scene_id=scene_id, sequence_id=scene_id,
+                          raw_frame_id=frame_id, raw_frame_token=f'{scene_id}/{frame_id:06d}',
+                          coordinate_mode=self.coordinate_mode,
+                          sensor_to_sequence_world=None,
+                          sensor_to_tracking_rotation=self._level_rotations[scene_id].copy(),
+                          dataset_manifest_sha256=(self.ct_scene_manifest or {}).get('content_sha256', ''))
+        return result
+
+    def _get_frame_from_anno(self, anno):
+        result = self._frame_metadata_from_anno(anno)
+        pointcloud = self._pointcloud_for_frame(anno['scene'], anno['frame'])
+        if self.preload_offset > 0:
+            pointcloud = points_utils.crop_pc_axis_aligned(
+                pointcloud, result['3d_bbox'], offset=self.preload_offset)
+        return {'pc': pointcloud, **result}
 
     @staticmethod
     def _read_calib_file(filepath):

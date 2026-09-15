@@ -19,6 +19,10 @@ from torch import nn
 from models.ct_v2.motion import OrderedPhysicalMotionEncoder
 from utils.config import load_yaml_config
 from utils.dual_stream import DualStreamLoader
+from utils.v29_profiling import profile_stage, record_equivalence_transaction
+from utils.v29_performance import performance_enabled, diagnostics_sampled, scalar_items_to_python
+from utils.v29_diagnostics import (sample_training_diagnostics, accumulate_core_losses,
+    diagnostic_call, write_training_scalars, write_gate_histogram)
 from utils.sampling_utils import StatelessCandidateBatchSampler
 from utils.training_isolation import (
     assert_training_transaction_equal, capture_global_rng_state,

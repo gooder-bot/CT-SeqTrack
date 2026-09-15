@@ -1,0 +1,5 @@
+_base_: 30_full_cfc_mini.yaml
+experiment_name: ct30_ablate_no_long_rollin_mini_car_scratch_seed42
+ct_v30_ablation: no_long_rollin
+ct_b0_long_rollin_enabled: false
+ct_b0_rollin_contract: teacher0_short_current_b0_v1

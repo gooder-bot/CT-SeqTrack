@@ -265,6 +265,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     v27 = bool(getattr(config, 'ct_enable_v27', False))
     v28 = bool(getattr(config, 'ct_enable_v28', False))
     v29 = bool(getattr(config, 'ct_enable_v29', False))
+    v30 = bool(getattr(config, 'ct_enable_v30', False))
     perf = v29 and getattr(config, 'ct_runtime_optimization', '') == 'equivalent_v1'
     from utils.point_identity import raw_point_ids, sampled_identity
     from functools import partial
@@ -419,7 +420,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         'sample_index', this_frame_id if this_frame_id is not None else 0))
 
     # 仅 teacher 重抽消费此统计；递归不按 GT/预测框可见性拒绝端点。
-    check_empty_history = online_recursive_state is None and (not v27 or v28)
+    check_empty_history = (online_recursive_state is None and (not v27 or v28)
+                           and not bool(getattr(config, 'ct_enable_v30', False)))
     if not perf or check_empty_history:
         for prev_box, prev_pc in zip(prev_boxs, prev_pcs):
             num_points_in_prev_box = geometry_utils.points_in_box(prev_box, prev_pc.points[0:3,:]).sum()
@@ -634,6 +636,14 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         effective_relative_timestamps = (-cumulative).tolist()
         effective_local_timestamps = np.asarray(
             effective_relative_timestamps + [0.0], dtype=np.float32)
+    v30_base_crop, v30_crop_context = None, None
+    if v30:
+        cached = data.get('motion_prediction') or {}
+        v30_base_crop = cached.get('_b0_raw_crop')
+        v30_crop_context = cached.get('_b0_crop_context')
+        if v30_base_crop is None:
+            from utils.v30_crop import prepare_base_crop
+            v30_base_crop, v30_crop_context = prepare_base_crop(this_pc, ref_boxs[0], config)
     v27_b1_input = None
     if v27 and use_motion_v3:
         from utils.b1_acquisition import build_b1_input_arrays
@@ -643,7 +653,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             recursive_age=(online_recursive_state or {}).get('recursive_age', 0.),
             first_frame_wlh=data['first_frame']['3d_bbox'].wlh,
             degrees=config.degrees,
-            time_scale=float(getattr(config, 'time_scale', .5)))
+            time_scale=float(getattr(config, 'time_scale', .5)),
+            enable_v30=v30, base_crop_context=v30_crop_context)
         motion_main_ref_boxs = v27_b1_input['ref_boxs']
     motion_aux_contract = None
     if use_motion_v3 and not observation_only and not data.get('_ct_inference', False):
@@ -787,7 +798,8 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                 recursive_age=(online_motion_aux_state or {}).get('recursive_age', 0.),
                 first_frame_wlh=data['first_frame']['3d_bbox'].wlh,
                 degrees=config.degrees,
-                time_scale=float(getattr(config, 'time_scale', .5)))
+                time_scale=float(getattr(config, 'time_scale', .5)),
+                enable_v30=v30, base_crop_context=v30_crop_context)
             motion_aux_ref_boxs = v27_aux_input['ref_boxs']
         if joint_contract_v2:
             motion_aux_physical = build_b1_physical_contract(
@@ -847,7 +859,7 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                                                     offset=config.bb_offset)
         prev_frame_pcs.append(prev_frame_pc)
 
-    this_frame_pc = b0_crop_subwindow(
+    this_frame_pc = v30_base_crop if v30 else b0_crop_subwindow(
         this_pc, ref_boxs[0], ref_boxs[0],
         scale=config.bb_scale,
         offset=config.bb_offset)
@@ -1123,6 +1135,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         if v29 and use_ct_joint_full and joint_contract_v2:
             support_kwargs.update(enable_v29=True, b0_crop_box=ref_boxs[0],
                                   b0_crop_scale=config.bb_scale, b0_crop_offset=config.bb_offset)
+        if v30 and use_ct_joint_full and joint_contract_v2:
+            support_kwargs.update(enable_v30=not bool(getattr(config, 'ct_v30_legacy_acquisition', False)),
+                band_margin_min=tuple(getattr(config, 'ct_acquisition_margin_min', (.25, .25))),
+                band_margin_max=tuple(getattr(config, 'ct_acquisition_margin_max', (4., 3.))))
         if use_ct_joint_full and joint_contract_v2:
             (search_v2_box,
              ct_search_box,
@@ -1518,6 +1534,9 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
     )
     recent_history_valid = bool(
         len(valid_mask) >= 2 and int(valid_mask[0]) and int(valid_mask[1]))
+    if v30:
+        # 首个预测query已有真实anchor；无运动transition不应丢弃最小外部带。
+        recent_history_valid = bool(len(valid_mask) > 0 and int(valid_mask[0]))
     query_dt_value = float(search_v2_diagnostics.get(
         'query_delta_t', effective_delta_t_list[0]))
     time_valid = bool(np.isfinite(query_dt_value) and query_dt_value > 0.0)
@@ -1741,10 +1760,16 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         motion_label_list = [np.asarray([*(this_box.center - prev.center),
             theta_motion], dtype=np.float32)
             for prev, theta_motion in zip(prev_boxs, theta_motion_list)]
-    motion_state_label_list = [ 
+    motion_state_label_list = [
         np.sqrt(np.sum((this_box.center - prev_box.center)**2))
         > config.motion_threshold for prev_box in prev_boxs
     ]
+    if bool(getattr(config, 'ct_enable_v30', False)):
+        # delta_T 是对应历史帧到当前帧的真实跨度，不能误用相邻间隔。
+        spans = np.abs(np.asarray(relative_timestamps[:num_hist], dtype=np.float64))
+        motion_state_label_list = [np.linalg.norm(this_box.center - prev.center)
+            / max(float(span), 1e-3) > float(getattr(config, 'ct_moving_speed_threshold', .3))
+            for prev, span in zip(prev_boxs, spans)]
     current_delta_t_real = delta_t_list[0] if len(delta_t_list) > 0 else default_time_step
     current_delta_t_effective = (
         effective_delta_t_list[0] if len(effective_delta_t_list) > 0
@@ -2183,12 +2208,18 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
         max_support_boxes_v29 = ()
         actual_margin_v29 = ((support_prediction or {}).get('acquisition_margin_parallel_perp', (2., 1.))
                              if search_v2_diagnostics.get('prior_source') == 'b1' else (2., 1.))
+        if v30:
+            actual_margin_v29 = search_v2_diagnostics.get('acquisition_margin_parallel_perp',
+                                                         getattr(config, 'ct_acquisition_margin_min', (.25, .25)))
         if v29 and use_ct_joint_full:
             from utils.acquisition_v29 import maximum_acquisition_supports_v29
+            if v30:
+                from utils.acquisition_v30 import maximum_acquisition_supports_v30 as maximum_acquisition_supports_v29
             max_support_boxes_v29 = maximum_acquisition_supports_v29(
                 search_v2_box, ct_search_box, corridor_box, actual_margins=actual_margin_v29,
                 b0_crop_box=coordinate_anchor_box, b0_crop_scale=config.bb_scale,
-                b0_crop_offset=config.bb_offset)
+                b0_crop_offset=config.bb_offset,
+                **({'margin_max': tuple(config.ct_acquisition_margin_max)} if v30 else {}))
         identities = [sampled_identity(pc, result[1], config.point_sample_size)
                       for pc, result in zip(prev_frame_pcs, prev_regularized)]
         identities.append(sampled_identity(this_frame_pc, this_sample_indices,
@@ -2232,6 +2263,11 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             data_dict['motion_main_ref_boxs'] = v27_b1_input['ref_boxs']
             data_dict['motion_acquisition_target'] = np.asarray((2., 1.), dtype=np.float32)
             data_dict['motion_acquisition_target_valid'] = np.float32(0.)
+            if v30:
+                data_dict['motion_acquisition_demand'] = np.float32(0.)
+                data_dict['ct_acquisition_global_novel_point_count'] = np.float32(
+                    len(this_pc.points.T) - len(this_frame_pc.points.T))
+                data_dict['ct_acquisition_max_reachable_point_count'] = np.float32(0.)
             # 不同slot会同时包含首个query和成熟历史。没有合法获取几何时
             # 仍返回固定字段，target_valid=0屏蔽监督，不能让合批取决于首行。
             margin_count_keys = ('global_novel_target_count', 'max_reachable_target_count',
@@ -2241,13 +2277,17 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             if not data.get('_ct_inference', False) and search_v2_box is not None:
                 if v29:
                     from utils.acquisition_v29 import acquisition_margin_grid_target_v29
+                    if v30:
+                        from utils.acquisition_v30 import acquisition_margin_grid_target_v30 as acquisition_margin_grid_target_v29
                     margin_target = acquisition_margin_grid_target_v29(
                         this_pc.points[:3].T, raw_point_ids(this_pc),
                         geometry_utils.points_in_box(canonical_this_box, this_pc.points, 1.0),
                         raw_point_ids(this_frame_pc), endpoint_box=search_v2_box,
                         tube_box=ct_search_box, corridor_box=corridor_box,
                         actual_margins=actual_margin_v29, b0_crop_box=coordinate_anchor_box,
-                        b0_crop_scale=config.bb_scale, b0_crop_offset=config.bb_offset)
+                        b0_crop_scale=config.bb_scale, b0_crop_offset=config.bb_offset,
+                        **({'margin_min': tuple(config.ct_acquisition_margin_min),
+                            'margin_max': tuple(config.ct_acquisition_margin_max)} if v30 else {}))
                 else:
                     margin_target = acquisition_margin_grid_target(
                         this_pc.points.T, raw_point_ids(this_pc),
@@ -2261,6 +2301,10 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
                         corridor_box=corridor_box)
                 data_dict['motion_acquisition_target'] = margin_target['target_margin']
                 data_dict['motion_acquisition_target_valid'] = np.float32(margin_target['valid'])
+                if v30:
+                    data_dict['motion_acquisition_demand'] = np.float32(margin_target['demand'])
+                    for key in ('global_novel_point_count', 'max_reachable_point_count'):
+                        data_dict['ct_acquisition_' + key] = np.float32(margin_target[key])
                 for key in margin_count_keys:
                     data_dict['motion_margin_' + key] = np.float32(margin_target[key])
         if use_search_evidence_v3 and joint_contract_v3:
@@ -2289,6 +2333,15 @@ def motion_processing_mf(data, config, template_transform=None, search_transform
             learned_acquisition = search_v2_diagnostics.get('prior_source') == 'b1'
             actual_margin = (source_prediction.get('acquisition_margin_parallel_perp', (2., 1.))
                              if learned_acquisition else (2., 1.))
+            if v30:
+                actual_margin = actual_margin_v29
+                data_dict['ct_acquisition_support_novel_point_count'] = np.float32(len(extension_pool_points))
+                data_dict['ct_acquisition_prepool_point_count'] = np.float32(extension_valid_mask.sum())
+                support_box = ct_search_box if ct_search_box is not None else search_v2_box
+                data_dict['ct_acquisition_support_half_size'] = np.asarray(
+                    support_box.wlh[[1, 0]] * .5 if support_box is not None
+                    else coordinate_anchor_box.wlh[[1, 0]] * .5 * config.bb_scale + config.bb_offset,
+                    dtype=np.float32)
             acquisition_yaw = (float(search_v2_box.orientation.radians *
                                      search_v2_box.orientation.axis[-1])
                                if search_v2_box is not None else float(coordinate_anchor_theta))
@@ -2648,9 +2701,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     "Paired views must share the nearest t-1 anchor.")
 
     def _locate_tracklet(self, anno_id):
-        for i in range(0, self.dataset.get_num_tracklets()):
-            if self.tracklet_start_ids[i] <= anno_id < self.tracklet_start_ids[i + 1]:
-                return i, anno_id - self.tracklet_start_ids[i]
+        from bisect import bisect_right
+        i = bisect_right(self.tracklet_start_ids, anno_id) - 1
+        if 0 <= i < self.dataset.get_num_tracklets() and anno_id < self.tracklet_start_ids[i + 1]:
+            return i, anno_id - self.tracklet_start_ids[i]
         raise IndexError(f"anno_id {anno_id} is outside tracklet ranges.")
 
     def _sample_history_offsets(self):
@@ -2727,8 +2781,10 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                     self.dataset.hist_num,
                     offsets=motion_aux_offsets,
                 ))
-            motion_aux_frames = self.dataset.get_frames(
-                tracklet_id, frame_ids=motion_aux_frame_ids)
+            metadata_only = (bool(getattr(self.config, 'ct_enable_v30', False))
+                             and hasattr(self.dataset, 'get_frames_metadata'))
+            reader = self.dataset.get_frames_metadata if metadata_only else self.dataset.get_frames
+            motion_aux_frames = reader(tracklet_id, frame_ids=motion_aux_frame_ids)
             data.update({
                 "motion_aux_prev_frames": create_history_frame_dict(
                     motion_aux_frames),
@@ -2828,7 +2884,12 @@ class MotionTrackingSamplerMF(PointTrackingSampler):
                 'motion_aux_frame_ids': list(motion_aux_frame_ids),
                 'motion_aux_offsets': list(motion_aux_offsets),
             })
-        if build_shadow:
+        keep_shadow = True
+        if build_shadow and bool(getattr(self.config, 'ct_enable_v30', False)):
+            from utils.v29_diagnostics import keep_h3_event
+            keep_shadow = keep_h3_event(self, raw)
+            raw['shadow_sampled_before_io'] = keep_shadow
+        if build_shadow and keep_shadow:
             for future_id in (this_frame_id + 1, this_frame_id + 2):
                 if future_id >= self.dataset.get_num_frames_tracklet(tracklet_id):
                     continue

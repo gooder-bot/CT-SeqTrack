@@ -9,6 +9,7 @@ import torch.nn as nn
 
 from pointnet2.utils.pointnet2_modules import PointnetSAModule
 from utils.deterministic_pooling import DeterministicMaxPool1d
+from utils.masked_observation import masked_sequence, masked_max_pool, mask_values
 
 
 class Pointnet_Backbone(nn.Module):
@@ -176,7 +177,7 @@ class MiniPointNet(nn.Module):
         if output_size >= 0:
             self.fc = nn.Linear(in_channel, output_size)
 
-    def forward(self, x):
+    def forward(self, x, valid_mask=None):
         """
 
         :param x: B,C,N
@@ -186,9 +187,14 @@ class MiniPointNet(nn.Module):
         # x = self.per_point_mlp(x)
         # x = self.pooling(x)
         # x = self.hidden_mlp(x)
-        x = self.features(x)
+        if valid_mask is None:
+            x = self.features(x)
+        else:
+            x, row_valid = masked_sequence(self.features, x, valid_mask.bool())
         if self.output_size > 0:
             x = self.fc(x)
+        if valid_mask is not None:
+            x = mask_values(x, row_valid)
         return x
 
 
@@ -234,7 +240,7 @@ class SegPointNet(nn.Module):
         if output_size >= 0:
             self.fc = nn.Conv1d(in_channel, output_size, 1) #把per_point_mlp2的最后一维直接打成2
 
-    def forward(self, x, return_point_features=False):
+    def forward(self, x, return_point_features=False, valid_mask=None):
         """
 
         :param x: B,C,N
@@ -242,16 +248,19 @@ class SegPointNet(nn.Module):
         """
         second_layer_out = None
         for i, mlp in enumerate(self.seq_per_point):
-            x = mlp(x)
+            x = mlp(x) if valid_mask is None else masked_sequence(mlp, x, valid_mask)[0]
             if i == 1:
                 second_layer_out = x
-        pooled_feature = self.pool(x)  # B,C,1
+        pooled_feature = (self.pool(x) if valid_mask is None
+                          else masked_max_pool(x, valid_mask)[0])  # B,C,1
         pooled_feature_expand = pooled_feature.expand_as(x)
         x = torch.cat([second_layer_out, pooled_feature_expand], dim=1)
         for mlp in self.seq_per_point2:
-            x = mlp(x)
+            x = mlp(x) if valid_mask is None else masked_sequence(mlp, x, valid_mask)[0]
         if self.output_size > 0:
             x = self.fc(x)
+        if valid_mask is not None:
+            x = mask_values(x, valid_mask)
         result = ((x, pooled_feature.squeeze(dim=-1))
                   if self.return_intermediate else x)
         # 原计算图只执行一次；host 按物理点顺序导出给 B2，再在边界 detach。
@@ -294,7 +303,7 @@ class FeaturePointNet(nn.Module):
         if output_size >= 0:
             self.fc = nn.Conv1d(in_channel, output_size, 1) 
 
-    def forward(self, x, return_point_features=False):
+    def forward(self, x, return_point_features=False, valid_mask=None, return_token_mask=False):
         """
 
         :param x: B,C,N
@@ -302,19 +311,31 @@ class FeaturePointNet(nn.Module):
         """
         second_layer_out = None
         for i, mlp in enumerate(self.seq_per_point):
-            x = mlp(x)
+            x = mlp(x) if valid_mask is None else masked_sequence(mlp, x, valid_mask)[0]
             if i == 1:
                 second_layer_out = x
-        pooled_feature = self.pool(x)  
-        pre_pooled_feature = self.pre_pool(second_layer_out) # Pool to a fixed size
+        if valid_mask is None:
+            pooled_feature = self.pool(x)
+            pre_pooled_feature = self.pre_pool(second_layer_out)
+            token_mask = None
+        else:
+            pooled_feature = masked_max_pool(x, valid_mask)[0]
+            pre_pooled_feature, token_mask = masked_max_pool(
+                second_layer_out, valid_mask, self.pre_pool.output_size)
 
         pooled_feature_expand = pooled_feature.expand(pooled_feature.shape[0],pooled_feature.shape[1],pre_pooled_feature.shape[2])
 
         x = torch.cat([pre_pooled_feature, pooled_feature_expand], dim=1) 
         for mlp in self.seq_per_point2:
-            x = mlp(x)
+            x = mlp(x) if token_mask is None else masked_sequence(mlp, x, token_mask)[0]
         if self.output_size > 0:
             x = self.fc(x)
+        if token_mask is not None:
+            x = mask_values(x, token_mask)
+        if return_token_mask:
+            result = ((x, second_layer_out) if return_point_features else
+                      ((x, pooled_feature.squeeze(-1)) if self.return_intermediate else x))
+            return result, token_mask
         if return_point_features:
             return x, second_layer_out
         if self.return_intermediate:

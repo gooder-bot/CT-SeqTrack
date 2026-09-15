@@ -51,6 +51,9 @@ def build_plan(config_path, data_path, output, steps=16, gpu='0', python=sys.exe
         config.pop(key, None)
     config.update(epoch=2, from_epoch=0, path=str(data_path),
                   limit_train_batches=steps, ct_engineering_check=True)
+    if config.get('ct_enable_v30', False):
+        # v30工程检查也实际触发一次有界验证；两个分支使用完全相同的配置。
+        config.update(check_val_every_n_epoch=1, limit_val_batches=1)
     snapshot = output / 'engineering_config.yaml'
     processes = []
     for phase, directory in (('continuous', 'continuous'), ('split', 'split'), ('resume', 'split')):

@@ -94,6 +94,9 @@ def policy_mask(scores, structural_available, policy, is_initial=None):
 
 
 def validate_scene_manifest(manifest):
+    if manifest.get('schema') == 'ct_seqtrack.dataset_protocol.v30':
+        from utils.dataset_protocol_v30 import validate_dataset_manifest
+        return validate_dataset_manifest(manifest)
     if manifest.get('version') not in ('v1.0-mini', 'v1.0-trainval'):
         raise ValueError('v27 supports only v1.0-mini or v1.0-trainval')
     v28 = manifest.get("schema") in ("ct_seqtrack.scene_protocol.v28", "ct_seqtrack.scene_protocol.v29")
@@ -375,6 +378,9 @@ def install_v27_action_calibration(model, config, *, scene_splits=None, code_sha
     from utils.v27_protocol import build_scene_manifest
     def get(key, default=None):
         return config.get(key, default) if isinstance(config, dict) else getattr(config, key, default)
+    if get('ct_enable_v30', False):
+        from utils.action_calibration_v30 import install_v30_action_calibration
+        return install_v30_action_calibration(model, config, scene_splits=scene_splits, code_sha256=code_sha256)
     router = model.ct_joint_router
     router.install_policy({"kind": "never"})
     router.calibrated.fill_(False)

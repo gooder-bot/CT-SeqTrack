@@ -1,0 +1,37 @@
+=== HEAD:models/seqtrack3d.py:1270-1305 ===
+1270:                                     exploration_count=int(getattr(
+1271:                                         config,
+1272:                                         'ct_relation_exploration_count', 32)),
+1273:                                     robust_consensus_voting=bool(getattr(
+1274:                                         config,
+1275:                                         'ct_robust_consensus_voting', False)),
+1276:                                     ))
+1277:                         if self.ct_enable_b3:
+1278:                             with isolated_constructor_rng(
+1279:                                     plugin_seed, 'b3.selective_updater'):
+1280:                                 from models.ct_v2.action_v27 import B3UtilityUpdater
+1281:                                 router_class = B3UtilityUpdater if self.ct_enable_v27 else B3SelectiveUpdater
+1282:                                 self.ct_joint_router = router_class(
+1283:                                 observation_stats_dim=5,
+1284:                                 hidden_dim=int(getattr(
+1285:                                     config, 'ct_router_hidden_dim', 64)),
+1286:                                 presence_threshold=float(getattr(
+1287:                                     config,
+1288:                                     'ct_search_presence_threshold', 0.5)),
+1289:                                 decision_threshold=float(getattr(
+1290:                                     config, 'ct_router_threshold', 0.5)),
+1291:                                 radius_base=float(getattr(
+1292:                                     config, 'ct_router_radius_base', 0.5)),
+1293:                                 radius_per_second=float(getattr(
+1294:                                     config,
+1295:                                     'ct_router_radius_per_second', 0.5)),
+1296:                                 radius_max=float(getattr(
+1297:                                     config, 'ct_router_radius_max', 2.0)),
+1298:                                 require_calibration=bool(getattr(
+1299:                                     config, 'ct_require_action_calibration',
+1300:                                     False)),
+1301:                                 consensus_features=bool(getattr(
+1302:                                     config, 'ct_b3_consensus_features', False)),
+1303:                                 **({'use_shared_policy_transition': True} if self.ct_enable_v29 else {}),
+1304:                                 )
+1305:                     else:

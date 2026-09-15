@@ -1,0 +1,12 @@
+_base_: 30_full_cfc_mini.yaml
+experiment_name: ct30_ablate_legacy_acquisition_mini_car_scratch_seed42
+ct_v30_ablation: legacy_acquisition
+ct_v30_legacy_acquisition: true
+ct_support_xy_contract: v29_object_margin_xy_v1
+ct_acquisition_target_contract: reachable_novel_q90_min_background_v29
+ct_acquisition_margin_min: [2.0, 1.0]
+ct_acquisition_margin_max: [6.0, 3.0]
+# 真实 v29 enable_v27 分支固定 bias=-4.6。
+ct_acquisition_margin_initial: [2.0398072074676173, 1.0199036037338087]
+search_v3_fixed_margin_parallel: 2.0
+search_v3_fixed_margin_perpendicular: 1.0

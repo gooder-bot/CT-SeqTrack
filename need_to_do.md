@@ -1,4 +1,25 @@
-# CT-SeqTrack 当前状态（2026-09-10）
+# CT-SeqTrack 当前状态（2026-09-15）
+
+当前执行v30用户批准方案：先mini三臂，再按final60 S/P双升条件进入full/KITTI。
+最新正式启动安排：GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC，独立后台和日期output目录；
+命令见[mini启动专页](docs/CTSEQTRACK_V30_MINI_LAUNCH.md)，按要求轻量核对，不增加额外启动门。
+
+- [x] B0有效测量loss/BN/池化/注意力、真实速度与长短roll-in。
+- [x] B1实际B0边界获取带、21维上下文、匹配几何标签和需求平衡。
+- [x] B2三模式/质量监督、去除整行raw回归；B3六动作收益选择与逐行归约。
+- [x] 通用数据manifest、KITTI完整标定/时间/无GT预裁剪，元数据复用和256MiB有界云缓存。
+- [x] mini/full/KITTI三臂、六项消融及紧带宽配置；新校准、报告/晋级工具和服务器命令。
+- [x] 最终本地完整回归868 passed/15 skipped；compileall与diff检查通过。
+- [ ] 服务器CUDA真实前向/反向/Adam、合法H3、策略拟合/评测、同卡数值及epoch边界恢复。
+- [ ] mini Car/seed42三臂scratch60，058/059/060逐checkpoint校准评测并报告final和late-3。
+- [ ] 至少一个Full在final60的S、P同时高于B0；late-3只报告，无多seed前置要求。
+- [ ] 六项mini消融；达到mini条件后运行full/KITTI三臂Car及预登记时间间隔控制。
+
+本地验证结果见[实施记录](artifacts/ct_checks/20260915_v30_implementation/REPORT.md)，
+方法见[v30实现](docs/CTSEQTRACK_V30_IMPLEMENTATION.md)，命令见[运行手册](docs/V30_DATA_AND_RUNBOOK.md)。
+本轮未修改服务器、未启动训练；不能声称v30涨分。下方保留历史状态，不覆盖本节。
+
+## 历史v29状态（2026-09-10）
 
 当前任务为v29实施与三臂完整nuScenes Car/seed42/scratch60实验。使用
 `29_b0_nuscenes_full.yaml`、`29_full_cfc_nuscenes_full.yaml`、`29_full_gru_nuscenes_full.yaml`。

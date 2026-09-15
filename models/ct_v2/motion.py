@@ -266,6 +266,70 @@ def acquisition_margin_target_loss(
                 valid=mask * finite.to(mask.dtype))
 
 
+def acquisition_margin_target_loss_v30(
+        predicted_margin, target_margin, valid, demand, quantile=.90, *,
+        age_weights=None, recursive_age=None, recursive_age_valid=None):
+    """v30 有可达需求/无需求分别归一化；GT 和 context 均不反传。
+
+    每个非空需求组内部可继续按递归年龄四桶平衡，再平均非空需求组。
+    返回标量 loss 和逐行有效性，调用者不应再用全体行均值覆盖 loss。
+    """
+    if predicted_margin.ndim != 2 or predicted_margin.shape[1] != 2:
+        raise ValueError('v30 predicted band must have shape [B,2]')
+    device, dtype = predicted_margin.device, predicted_margin.dtype
+    target = torch.as_tensor(target_margin, device=device, dtype=dtype).detach()
+    if target.shape != predicted_margin.shape or not 0 < float(quantile) < 1:
+        raise ValueError('v30 acquisition target shape/quantile is invalid')
+    row_count = predicted_margin.shape[0]
+
+    def row_tensor(value, name, *, binary=False):
+        value = torch.as_tensor(value, device=device, dtype=dtype).detach().reshape(-1)
+        if value.shape != (row_count,) or not bool(torch.isfinite(value).all()):
+            raise ValueError(f'v30 {name} must have one finite value per row')
+        if bool((value < 0).any()) or (binary and bool(((value != 0) & (value != 1)).any())):
+            raise ValueError(f'v30 {name} contains invalid weights/flags')
+        return value
+
+    mask = row_tensor(valid, 'validity', binary=True)
+    has_demand = row_tensor(demand, 'demand', binary=True)
+    finite = torch.isfinite(target).all(1) & torch.isfinite(predicted_margin).all(1)
+    mask = mask * finite.to(dtype)
+    difference = torch.nan_to_num(target) - torch.nan_to_num(predicted_margin)
+    per_sample = torch.maximum(float(quantile) * difference,
+                               (float(quantile) - 1.) * difference).mean(1)
+    weights = torch.ones_like(mask) if age_weights is None else row_tensor(age_weights, 'age weights')
+    age_masks = [torch.ones_like(mask)]
+    if recursive_age is not None:
+        age = row_tensor(recursive_age, 'recursive age')
+        if recursive_age_valid is None:
+            mask = mask * 0.
+        else:
+            mask = mask * row_tensor(recursive_age_valid, 'recursive age validity', binary=True)
+        age_masks = [((age >= lo) & (age < hi)).to(dtype)
+                     for lo, hi in ((0, 2), (2, 4), (4, 8), (8, float('inf')))]
+    group_values, group_exists, counts = [], [], []
+    for group in (has_demand, 1. - has_demand):
+        group_mask = mask * group
+        cell_values, cell_exists = [], []
+        for age_mask in age_masks:
+            cell = group_mask * age_mask * weights
+            count = cell.sum()
+            cell_values.append((torch.where(cell > 0, per_sample, torch.zeros_like(per_sample))
+                                * cell).sum() / count.clamp_min(1e-12))
+            cell_exists.append((count > 0).to(dtype))
+        exists = torch.stack(cell_exists)
+        value = (torch.stack(cell_values) * exists).sum() / exists.sum().clamp_min(1.)
+        group_values.append(value)
+        group_exists.append((exists.sum() > 0).to(dtype))
+        counts.append(group_mask.sum())
+    exists = torch.stack(group_exists)
+    loss = (torch.stack(group_values) * exists).sum() / exists.sum().clamp_min(1.)
+    return dict(loss=loss, loss_per_sample=per_sample, valid=mask,
+                target_parallel_perp=torch.nan_to_num(target),
+                demand_count=counts[0], no_demand_count=counts[1],
+                demand_loss=group_values[0], no_demand_loss=group_values[1])
+
+
 def recursive_gap_age_balanced_mean(
         per_sample, valid, recursive_age=None,
         recursive_age_valid=None, query_gap=None, query_gaps=None):
@@ -567,16 +631,19 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             temporal_backend="gru",
             cfc_backbone_units=105,
             adaptive_acquisition_margin=False,
-            acquisition_margin_min=(2.0, 1.0),
-            acquisition_margin_max=(6.0, 3.0),
+            acquisition_margin_min=None,
+            acquisition_margin_max=None,
             acquisition_margin_bias=-8.0,
             log_sigma_min=math.log(0.1),
             log_sigma_max=2.5,
             enable_v27=False,
-            initialization_seed=42):
+            initialization_seed=42, enable_v30=False,
+            acquisition_margin_initial=(.75, .5)):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
-        self.enable_v27 = bool(enable_v27)
+        self.enable_v30 = bool(enable_v30)
+        self.enable_v27 = bool(enable_v27) or self.enable_v30
+        self.acquisition_feature_dim = 21 if self.enable_v30 else 17
         self.step_dim = int(step_dim)
         self.eps = float(eps)
         self.time_scale = max(float(time_scale), self.eps)
@@ -595,6 +662,10 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         self.log_sigma_min = float(log_sigma_min)
         self.log_sigma_max = float(log_sigma_max)
         self.initial_sigma = float(initial_sigma)
+        if acquisition_margin_min is None:
+            acquisition_margin_min = (.25, .25) if self.enable_v30 else (2., 1.)
+        if acquisition_margin_max is None:
+            acquisition_margin_max = (4., 3.) if self.enable_v30 else (6., 3.)
         margin_min = torch.as_tensor(
             acquisition_margin_min, dtype=torch.float32).reshape(-1)
         margin_max = torch.as_tensor(
@@ -666,7 +737,7 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         if self.adaptive_acquisition_margin:
             if self.enable_v27:
                 self.acquisition_margin_head = nn.Sequential(
-                    nn.Linear(self.hidden_dim + 17, 64),
+                    nn.Linear(self.hidden_dim + self.acquisition_feature_dim, 64),
                     nn.LayerNorm(64), nn.ReLU(inplace=True),
                     nn.Linear(64, 2))
             else:
@@ -688,9 +759,18 @@ class OrderedPhysicalMotionEncoder(nn.Module):
             margin_last = (self.acquisition_margin_head[-1]
                            if self.enable_v27 else self.acquisition_margin_head)
             nn.init.zeros_(margin_last.weight)
-            nn.init.constant_(
-                margin_last.bias,
-                -4.6 if self.enable_v27 else float(acquisition_margin_bias))
+            if self.enable_v30:
+                initial = torch.as_tensor(acquisition_margin_initial, dtype=torch.float32)
+                if (initial.shape != (2,) or not bool(torch.isfinite(initial).all())
+                        or not bool(((initial > margin_min) & (initial < margin_max)).all())):
+                    raise ValueError('v30 initial band must lie strictly inside min/max')
+                fraction = (initial - margin_min) / (margin_max - margin_min)
+                with torch.no_grad():
+                    margin_last.bias.copy_(torch.logit(fraction))
+            else:
+                nn.init.constant_(
+                    margin_last.bias,
+                    -4.6 if self.enable_v27 else float(acquisition_margin_bias))
         nn.init.zeros_(self.velocity_residual_head.weight)
         nn.init.zeros_(self.velocity_residual_head.bias)
         nn.init.zeros_(self.log_sigma_head.weight)
@@ -795,11 +875,11 @@ class OrderedPhysicalMotionEncoder(nn.Module):
         head_input = context.detach()
         if self.enable_v27:
             if acquisition_features is None:
-                raise ValueError('v27 B1 requires acquisition_features [B,17]')
+                raise ValueError(f'B1 requires acquisition_features [B,{self.acquisition_feature_dim}]')
             acquisition_features = torch.as_tensor(
                 acquisition_features, device=context.device, dtype=context.dtype)
-            if acquisition_features.shape != (context.shape[0], 17):
-                raise ValueError('v27 acquisition_features must have shape [B,17]')
+            if acquisition_features.shape != (context.shape[0], self.acquisition_feature_dim):
+                raise ValueError(f'B1 acquisition_features must have shape [B,{self.acquisition_feature_dim}]')
             if not bool(torch.isfinite(acquisition_features).all()):
                 raise ValueError('v27 acquisition_features must be finite')
             head_input = torch.cat((head_input, acquisition_features.detach()), 1)

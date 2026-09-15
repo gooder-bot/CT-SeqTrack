@@ -1,0 +1,14 @@
+{
+  "pytest": {
+    "passed": 868,
+    "skipped": 15,
+    "exit_code": 0,
+    "seconds": 358.73
+  },
+  "compileall_passed": true,
+  "diff_check_passed": true,
+  "document_links_passed": true,
+  "source_unchanged_since_snapshot": true,
+  "server_modified": false,
+  "formal_training_started": false
+}

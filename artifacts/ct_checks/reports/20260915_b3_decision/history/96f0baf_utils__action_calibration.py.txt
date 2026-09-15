@@ -1,0 +1,48 @@
+=== 96f0baf:utils/action_calibration.py:128-174 ===
+128: def calibrate_actions(
+129:         rows, checkpoint_sha256, config_sha256, tracklet_manifest_sha256,
+130:         seed=42, resamples=2000, min_tracklets=30, min_actions=100,
+131:         min_coverage=0.01, max_harmful_upper=0.05):
+132:     """Choose a risk-feasible threshold pair on calibration tracklets."""
+133:     rows = _finite_rows(rows)
+134:     presence_values = np.quantile(
+135:         [row["presence_score"] for row in rows],
+136:         np.linspace(0.0, 0.95, 20))
+137:     action_values = np.quantile(
+138:         [row["action_score"] for row in rows],
+139:         np.linspace(0.0, 0.99, 50))
+140:     feasible = []
+141:     evaluated = []
+142:     for presence_threshold in np.unique(presence_values):
+143:         for action_threshold in np.unique(action_values):
+144:             selected = _selected(
+145:                 rows, float(presence_threshold), float(action_threshold))
+146:             metrics = _metrics(selected, len(rows))
+147:             if (metrics["actions"] < int(min_actions)
+148:                     or metrics["tracklets"] < int(min_tracklets)
+149:                     or metrics["coverage"] < float(min_coverage)):
+150:                 continue
+151:             bounds = tracklet_bootstrap_bounds(
+152:                 selected, seed=seed, resamples=resamples)
+153:             candidate = {
+154:                 "presence_threshold": float(presence_threshold),
+155:                 "action_threshold": float(action_threshold),
+156:                 **metrics, **bounds,
+157:             }
+158:             evaluated.append(candidate)
+159:             if (bounds["harmful_rate_upper_95"] <= max_harmful_upper
+160:                     and bounds["center_gain_lower_95"] >= 0.0
+161:                     and bounds["iou_gain_lower_95"] >= 0.0):
+162:                 feasible.append(candidate)
+163:     if feasible:
+164:         chosen = max(
+165:             feasible,
+166:             key=lambda item: (
+167:                 item["center_gain"] + item["iou_gain"], item["coverage"]))
+168:     else:
+169:         chosen = {
+170:             "presence_threshold": 1.0,
+171:             "action_threshold": 1.0,
+172:             **_metrics([], len(rows)),
+173:             **tracklet_bootstrap_bounds([], seed=seed, resamples=resamples),
+174:         }

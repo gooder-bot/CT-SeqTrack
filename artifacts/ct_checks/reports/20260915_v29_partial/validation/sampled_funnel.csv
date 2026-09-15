@@ -1,0 +1,5 @@
+arm,epoch,logged_batches,target_positive_logged_batches,ct_acquisition_sampled_target_sum,ct_acquisition_prepool_target_sum,ct_acquisition_pool_target_sum,selected_over_prepool_in_logged_batches,selected_over_raw_extension_pool_in_logged_batches,positive_batch_mean_enrichment,positive_batch_median_enrichment,scope
+full_cfc,1,240,96,3952.0,5905.0,7149.0,0.6692633361558001,0.5528045880542733,1.1665923191855352,1.0,"sampled training mechanism batches, not whole epoch or official validation"
+full_cfc,2,241,148,8015.0,10433.0,13086.0,0.768235406882009,0.612486626929543,1.2358274600795798,1.0,"sampled training mechanism batches, not whole epoch or official validation"
+full_gru,1,240,97,4427.0,6495.0,8225.0,0.6816012317167052,0.5382370820668693,1.2534912093398498,1.0145050287246704,"sampled training mechanism batches, not whole epoch or official validation"
+full_gru,2,241,143,7341.0,9538.0,12024.0,0.7696582092681904,0.6105289421157685,1.2422959125125326,1.0,"sampled training mechanism batches, not whole epoch or official validation"

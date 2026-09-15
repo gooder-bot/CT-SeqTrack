@@ -113,6 +113,8 @@ def test_preloaded_shared_frame_objects_remain_unchanged_after_train_and_eval(sa
     before = _raw_snapshot(sequence)
     dataset = SimpleNamespace(preloading=True, training_samples=[sequence], dynamics_time_mode='true',
                               get_endpoint_key=lambda seq, frame: f'track/{seq}/{frame}')
+    enrich = _executable('datasets/nuscenes_lidar_mf.py', '_enrich_frame_metadata')
+    dataset._enrich_frame_metadata = lambda frame, seq, index: enrich(dataset, frame, seq, index)
     fetch = _executable('datasets/nuscenes_lidar_mf.py', 'get_frames')
     first = fetch(dataset, 0, [0, 1, 1, 8])
     assert first[1]['pc'] is first[2]['pc'] is sequence[1]['pc']

@@ -731,6 +731,13 @@ def resolve_joint_search_geometry(
     reuse the same constrained kinematic estimate for endpoint and tube.  No
     current-frame annotation is accepted by this interface.
     """
+    if bool(kwargs.pop('enable_v30', False)):
+        return _resolve_joint_search_geometry_v30(
+            history_boxes, delta_t, valid_mask, **kwargs)
+    # v30 legacy-acquisition 消融沿用统一 sampler 参数，但旧几何没有 band API。
+    # 只在分派边界消耗新参数，避免改变原来的物体 margin 几何和范围。
+    kwargs.pop('band_margin_min', None)
+    kwargs.pop('band_margin_max', None)
     enable_v29 = bool(kwargs.pop('enable_v29', False))
     b0_crop_box = kwargs.pop('b0_crop_box', None)
     b0_crop_scale = kwargs.pop('b0_crop_scale', 1.25)
@@ -849,6 +856,72 @@ def resolve_joint_search_geometry(
         "tube_support_center": np.asarray(
             tube.center, dtype=np.float64).copy(),
     })
+    return endpoint, tube, diagnostics
+
+
+def _resolve_joint_search_geometry_v30(history_boxes, delta_t, valid_mask, **kwargs):
+    """v30 独立分派：均值不经过旧物体 margin 的上下界与 crop 截断。"""
+    from utils.acquisition_v30 import (
+        BAND_INITIAL, BAND_MIN, BAND_MAX, build_acquisition_supports_v30)
+    if not bool(kwargs.get('enable_v27', False)):
+        raise ValueError('v30 supports require the original-ID v27 geometry contract')
+    if not history_boxes:
+        return None, None, dict(valid=False, reason='insufficient_history', prior_source='base_only', source_id=0)
+    latest = history_boxes[0]
+    prediction = kwargs.get('prediction')
+    learned = bool(kwargs.get('use_b1_prepass', False)) and isinstance(prediction, dict)
+    learned = learned and bool(prediction.get('valid', False))
+    if learned:
+        mu = np.asarray(prediction.get('mu_xy'), dtype=np.float64)
+        learned = mu.shape == (2,) and bool(np.isfinite(mu).all())
+    if learned:
+        endpoint_center = (np.asarray(latest.center, dtype=np.float64)
+                           + np.asarray(latest.rotation_matrix, dtype=np.float64) @ np.r_[mu, 0.])
+        margins = prediction.get('acquisition_margin_parallel_perp')
+        if not bool(kwargs.get('use_acquisition_margin', False)):
+            margins = kwargs.get('fixed_margins', BAND_INITIAL)
+        diagnostics = dict(valid=True, reason='ok', prior_source='b1',
+                           source_id=int(prediction.get('source_id', 1)),
+                           query_delta_t=float(prediction.get('current_delta_t', delta_t[0])),
+                           gap_ratio=float(prediction.get('gap_ratio', 1.)),
+                           displacement=float(np.linalg.norm(mu)), constraint_clipped=False)
+    else:
+        estimate = estimate_ordered_trajectory(
+            history_boxes, delta_t, valid_mask=valid_mask,
+            max_speed=kwargs.get('fallback_max_speed', 20.),
+            max_acceleration=kwargs.get('fallback_max_acceleration', 8.),
+            max_displacement=kwargs.get('fallback_max_displacement', 12.),
+            acceleration_weight=kwargs.get('fallback_acceleration_weight', .5),
+            require_recent_transition=kwargs.get('fallback_require_recent_transition', False))
+        if not estimate.get('valid', False):
+            latest_valid = valid_mask is not None and len(valid_mask) > 0 and bool(valid_mask[0])
+            query_gap = _finite_positive(delta_t[0] if len(delta_t) else None, 0.)
+            if not latest_valid or query_gap <= 0:
+                return None, None, {**estimate, 'prior_source': 'base_only', 'source_id': 0}
+            # 首个预测帧有初始化 anchor，但还没有可辨识的速度；可以取边界带，
+            # 不伪造有效运动。真正首帧/无有效 anchor 仍由 host 初始化并回退。
+            endpoint_center = np.asarray(latest.center, dtype=np.float64).copy()
+            margins = kwargs.get('band_margin_min', BAND_MIN)
+            diagnostics = dict(valid=True, reason='anchor_no_transition',
+                               prior_source='fallback_cv', source_id=2,
+                               fallback_kind='anchor_no_transition', motion_prior_valid=False,
+                               query_delta_t=query_gap, gap_ratio=1., displacement=0.)
+        else:
+            endpoint_center = np.asarray(latest.center, dtype=np.float64) + estimate['displacement_vector']
+            margins = kwargs.get('fixed_margins', BAND_INITIAL)
+            diagnostics = {**estimate, 'prior_source': 'fallback_cv', 'source_id': 2,
+                           'motion_prior_valid': True}
+    endpoint, tube, geometry = build_acquisition_supports_v30(
+        b0_crop_box=kwargs.get('b0_crop_box'), endpoint_center=endpoint_center,
+        object_wlh=kwargs.get('first_frame_size') if kwargs.get('first_frame_size') is not None else latest.wlh,
+        object_yaw=_signed_box_yaw(latest), band_margins=margins,
+        support_yaw=acquisition_axis(
+            endpoint_center[:2] - np.asarray(latest.center[:2]), _signed_box_yaw(latest))[1],
+        band_margin_min=kwargs.get('band_margin_min', BAND_MIN),
+        band_margin_max=kwargs.get('band_margin_max', BAND_MAX),
+        b0_crop_scale=kwargs.get('b0_crop_scale', 1.25),
+        b0_crop_offset=kwargs.get('b0_crop_offset', 2.))
+    diagnostics.update(geometry)
     return endpoint, tube, diagnostics
 
 

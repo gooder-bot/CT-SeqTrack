@@ -1,0 +1,43 @@
+=== 69461f1:models/ct_v2/evidence_memory.py:874-915 ===
+874:         if self.v28_enabled:
+875:             availability = availability & geometry_valid
+876:         if not self.relation_aware_sampling:
+877:             availability = availability & (b1_valid_f > 0)
+878:         observation_xy = observation_box[:, :2].detach()
+879:         raw_xy = torch.where(availability.unsqueeze(1), raw_xy, observation_xy)
+880:         raw_box = torch.cat((raw_xy, observation_box[:, 2:].detach()), dim=1)
+881: 
+882:         base_mean = _masked_mean(base_features, base_mask)
+883:         base_max = _masked_max(base_features, base_mask)
+884:         extension_mean = _masked_mean(enriched, extension_mask)
+885:         extension_max = _masked_max(enriched, extension_mask)
+886:         base_presence_logit = self.base_presence_head(torch.cat((
+887:             base_mean, base_max), dim=1)).squeeze(1)
+888:         presence_parts = [
+889:             extension_mean,
+890:             extension_max,
+891:             torch.log1p(extension_point_count.to(enriched.dtype)).unsqueeze(1),
+892:             b1_valid_f.unsqueeze(1),
+893:         ]
+894:         if self.v27_enabled:
+895:             presence_parts.append(torch.stack((
+896:                 torch.log1p(consensus["effective_mass"]),
+897:                 torch.log1p(consensus["mode_unique_count"]),
+898:                 consensus["mode_mean_targetness"],
+899:                 consensus["mode_mean_identity_margin"] / 2.0,
+900:             ), dim=1))
+901:         extension_presence_logit = self.extension_presence_head(
+902:             torch.cat(presence_parts, dim=1)).squeeze(1)
+903:         base_presence_probability = torch.sigmoid(base_presence_logit)
+904:         extension_presence_probability = (
+905:             torch.sigmoid(extension_presence_logit)
+906:             * availability.to(enriched.dtype))
+907:         evidence_present = (
+908:             extension_presence_probability >= self.presence_threshold)
+909:         candidate_valid = (availability if self.v28_enabled
+910:                            else availability & evidence_present)
+911: 
+912:         probability = vote_weights / torch.clamp(weight_sum, min=1e-6)
+913:         entropy = -(probability * torch.log(torch.clamp(
+914:             probability, min=1e-8))).sum(dim=1)
+915:         targetness_mean = scores.sum(dim=1) / torch.clamp(

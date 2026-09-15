@@ -1,0 +1,34 @@
+=== HEAD:docs/CTSEQTRACK_B0_B3_METHOD.md:67-99 ===
+67: ## 6. B3 与经验风险
+68: 
+69: B3 特征包括 B0 coarse/refined agreement、B0--B1/B0--B2 disagreement、B1
+70: uncertainty/dt/gap/age、presence、targetness entropy/ESS、点/voxel 数和 observation
+71: statistics。H=1 与 H=3 shadow rollout 生成：
+72: 
+73: ```text
+74: center_gain = mean(error_observation - error_action)
+75: iou_gain    = mean(iou_action - iou_observation)
+76: ```
+77: 
+78: B3 分别学习 helpful、harmful、expected center gain、expected IoU gain。校准 score
+79: 固定为 `sigmoid(help_logit) * (1 - sigmoid(harm_logit))`。部署动作还必须通过结构、
+80: presence 和 `radius(dt)` 有界残差条件。
+81: 
+82: 阈值在独立 calibration tracklets 上经验选择，统计单位为 tracklet bootstrap。
+83: 论文只报告有限样本经验风险和置信区间，不声称严格 conformal 或分布无关保证。
+84: 
+85: ## 7. 匹配 scratch 不变量
+86: 
+87: 四臂各自随机初始化，不共享 checkpoint。可归因性来自训练事务相同：
+88: 
+89: - B0 只收 observation loss；
+90: - B1 只收 candidate0 mean/NLL；
+91: - B2 只收 candidate0 on-policy evidence；
+92: - B3 只收 candidate0 H1/H3 action-risk labels；
+93: - B2/B3 只做 shadow 学习，canonical recursive state 永远写 observation；
+94: - 每模块独立 optimizer/scaler/scheduler/clip/step/hash。
+95: 
+96: 共享 prefix 的初始化、step1、step100、epoch-end hash 任一不一致，即判消融不匹配，
+97: 不再解释最终分数。
+98: 
+99: ## 8. Claim--evidence map

@@ -1,0 +1,12 @@
+{
+  "history_mask": [
+    1,
+    0,
+    0
+  ],
+  "absent_frame_valid_slots": 0,
+  "original_absent_xyz_nonzero": 12288,
+  "current_seg_logit_max_delta": 0.00938396155834198,
+  "observation_box_max_delta": 0.0,
+  "training_observation_box_max_delta": 0.4629392623901367
+}

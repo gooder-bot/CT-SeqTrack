@@ -36,10 +36,31 @@ def _yaw(box):
     return float(box.orientation.radians * box.orientation.axis[-1])
 
 
+def build_b0_crop_context(raw_count, b0_crop_box, *, scale=1.25, offset=2.0):
+    """v30 当前预测 B0 raw crop 的四个原始量；不接收当前 GT。
+
+    调用者先按实际预测 crop 得到 unique raw IDs，再传它们的数量。
+    返回 [raw_count, empty, local_half_x, local_half_y]；日志变换只在
+    ``build_b1_input_arrays`` 中做一次，crop 的 half 使用 l/w 而非 w/l。
+    """
+    from utils.acquisition_v29 import _box_geometry
+    count, scale, offset = float(raw_count), float(scale), float(offset)
+    if not math.isfinite(count) or count < 0 or count != math.floor(count):
+        raise ValueError('B0 raw count must be a finite non-negative integer')
+    if not math.isfinite(scale) or scale <= 0 or not math.isfinite(offset) or offset < 0:
+        raise ValueError('B0 crop scale/offset must be finite and nonnegative')
+    if b0_crop_box is None:
+        raise ValueError('v30 context requires the actual B0 crop anchor')
+    _, size, _ = _box_geometry(b0_crop_box)
+    half = .5 * size[[1, 0]] * scale + offset
+    return np.asarray((count, float(count == 0), *half), dtype=np.float64)
+
+
 def build_b1_input_arrays(history_boxes, delta_t, valid_mask, *,
                           history_quality=None, recursive_age=0.,
                           first_frame_wlh=None, degrees=False,
-                          time_scale=.5):
+                          time_scale=.5, enable_v30=False,
+                          base_crop_context=None):
     """Build one unbatched causal, planar input; no current GT is accepted.
 
     Quality rows are [raw count, predicted foreground probability,
@@ -88,6 +109,17 @@ def build_b1_input_arrays(history_boxes, delta_t, valid_mask, *,
                      np.log1p(size[[1, 0]]),
                      np.log1p(float(gaps[0]) / max(float(time_scale), 1e-3)),
                      np.log1p(ratio)].astype(np.float32)
+    if enable_v30:
+        current = np.asarray(base_crop_context, dtype=np.float64)
+        if (current.shape != (4,) or not np.isfinite(current).all()
+                or current[0] < 0 or current[0] != math.floor(current[0])
+                or current[1] != float(current[0] == 0)
+                or np.any(current[2:] <= 0)):
+            raise ValueError('v30 requires base_crop_context [raw_count, empty, half_x, half_y]')
+        current_features = np.r_[
+            np.clip(np.log1p(current[0]) / np.log(1025.), 0., 2.),
+            current[1], np.log(current[2:])]
+        features = np.r_[features, current_features].astype(np.float32)
     result = dict(ref_boxs=np.asarray(rows, dtype=np.float32), delta_t=gaps,
                   valid_mask=valid, current_delta_t=np.float32(gaps[0]),
                   acquisition_features=features)
@@ -200,4 +232,3 @@ def acquisition_margin_grid_target(points_xyz, point_ids, target_mask,
                   selected_background_count=int(background_counts[index]),
                   grid_index=np.asarray((index // 9, index % 9), dtype=np.int64))
     return result
-

@@ -170,6 +170,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         self.ct_enable_v27 = bool(getattr(config, 'ct_enable_v27', False))
         self.ct_enable_v28 = bool(getattr(config, 'ct_enable_v28', False))
         self.ct_enable_v29 = bool(getattr(config, 'ct_enable_v29', False))
+        self.ct_enable_v30 = bool(getattr(config, 'ct_enable_v30', False))
 
         self.box_aware = getattr(config, 'box_aware', False)
         self.use_motion_cls = getattr(config, 'use_motion_cls', True)
@@ -1159,6 +1160,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     int(getattr(config, 'seed', 42) or 42), 'b1.motion'):
                 self.physical_motion_encoder = B1PhysicalTimePrior(
                 enable_v27=self.ct_enable_v27,
+                enable_v30=getattr(self, 'ct_enable_v30', False),
+                acquisition_margin_initial=tuple(getattr(config, 'ct_acquisition_margin_initial', (.75, .5))),
                 initialization_seed=int(getattr(config, 'seed', 42) or 42),
                 hidden_dim=int(getattr(
                     config, 'motion_v3_hidden_dim', 128)),
@@ -1244,6 +1247,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     B2EvidenceAcquirer(
                                     v27_enabled=self.ct_enable_v27,
                                     v28_enabled=self.ct_enable_v28,
+                                    v30_enabled=getattr(self, 'ct_enable_v30', False),
+                                    **({'mode_count': int(getattr(config, 'ct_mode_count', 3))}
+                                       if getattr(self, 'ct_enable_v30', False) else {}),
                                     exploration_seed=plugin_seed,
                                     feature_dim=64,
                                     num_heads=4,
@@ -1279,6 +1285,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                                     plugin_seed, 'b3.selective_updater'):
                                 from models.ct_v2.action_v27 import B3UtilityUpdater
                                 router_class = B3UtilityUpdater if self.ct_enable_v27 else B3SelectiveUpdater
+                                if getattr(self, 'ct_enable_v30', False):
+                                    from models.ct_v2.action_v30 import B3ModeUtilityUpdater
+                                    router_class = B3ModeUtilityUpdater
                                 self.ct_joint_router = router_class(
                                 observation_stats_dim=5,
                                 hidden_dim=int(getattr(
@@ -2126,6 +2135,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             self.decoder_token_consistency.update_teacher()
 
     def on_train_epoch_end(self):
+        if getattr(self, 'ct_enable_v30', False):
+            from utils.v30_funnel import flush_funnel
+            flush_funnel(self)
         if diagnostics_sampled(self.config):
             flush_core_losses(self)
         if (self.ct_separate_optimizers
@@ -2625,7 +2637,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if getattr(self, 'ct_enable_v27', False):
             if acquisition_features is None:
                 raise ValueError('v27 prepass requires causal acquisition features')
-            features = as_tensor(acquisition_features).reshape(ref_boxs.shape[0], 17)
+            features = as_tensor(acquisition_features).reshape(ref_boxs.shape[0], 21 if getattr(self, 'ct_enable_v30', False) else 17)
             motion_kwargs['acquisition_features'] = features
         prediction = self.physical_motion_encoder(
             motion_ref_boxs, delta_t, valid_mask, current_delta_t, **motion_kwargs)
@@ -2649,7 +2661,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             history_timestamps, current_timestamp,
             effective_history_timestamps, effective_current_timestamp,
             dynamics_time_mode_value, current_frame_id,
-            history_quality=None, recursive_age=None, first_frame_wlh=None):
+            history_quality=None, recursive_age=None, first_frame_wlh=None,
+            base_crop_context=None):
         """Build the shared causal box/time-only B1 tensor primitives."""
         if int(current_frame_id) <= 0:
             raise ValueError("motion pre-pass is only defined after frame 0")
@@ -2690,7 +2703,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 history_quality=history_quality,
                 recursive_age=max(0, int(current_frame_id) - 1) if recursive_age is None else recursive_age,
                 first_frame_wlh=first_frame_wlh, degrees=self.config.degrees,
-                time_scale=float(getattr(self.config, 'time_scale', .5)))
+                time_scale=float(getattr(self.config, 'time_scale', .5)),
+                enable_v30=getattr(self, 'ct_enable_v30', False), base_crop_context=base_crop_context)
         anchor = history_boxes[0]
         local_rows = []
         for box in history_boxes:
@@ -2770,7 +2784,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             history_timestamps, current_timestamp,
             effective_history_timestamps, effective_current_timestamp,
             dynamics_time_mode_value, current_frame_id,
-            history_quality=None, recursive_age=None, first_frame_wlh=None):
+            history_quality=None, recursive_age=None, first_frame_wlh=None,
+            base_crop_context=None):
         """Execute one row through the shared box/time-only B1 contract."""
         inputs = self._build_motion_prepass_inputs_contract(
             history_boxes, history_ids, valid_mask,
@@ -2778,7 +2793,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             effective_history_timestamps, effective_current_timestamp,
             dynamics_time_mode_value, current_frame_id,
             **(dict(history_quality=history_quality, recursive_age=recursive_age,
-                    first_frame_wlh=first_frame_wlh)
+                    first_frame_wlh=first_frame_wlh, base_crop_context=base_crop_context)
                if getattr(self, 'ct_enable_v27', False) else {}))
         if inputs is None:
             return self._empty_motion_prepass_prediction()
@@ -2810,7 +2825,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         history_boxes = get_last_n_bounding_boxes(results_bbs, valid_mask)
         previous_frames = [sequence[index] for index in history_ids]
         current_frame = sequence[frame_id]
-        return self._predict_motion_prepass_contract(
+        crop, context = None, None
+        if getattr(self, 'ct_enable_v30', False):
+            from utils.v30_crop import prepare_base_crop
+            crop, context = prepare_base_crop(current_frame['pc'], history_boxes[0], self.config)
+        result = self._predict_motion_prepass_contract(
             history_boxes,
             history_ids,
             valid_mask,
@@ -2828,9 +2847,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if recursive_state is not None else None,
                 recursive_age=recursive_state.rollout_age(frame_id)
                 if recursive_state is not None else frame_id - 1,
-                first_frame_wlh=results_bbs[0].wlh)
+                first_frame_wlh=results_bbs[0].wlh, base_crop_context=context)
                if getattr(self, 'ct_enable_v27', False) else {}),
         )
+        if getattr(self, 'ct_enable_v30', False):
+            result['_b0_raw_crop'] = crop
+            result['_b0_crop_context'] = context
+        return result
 
 
     def _forward_ct_contract_v3(
@@ -3032,6 +3055,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     'current_base_point_ids': input_dict['ct_base_point_ids'],
                     'current_base_unique_mask': input_dict['ct_base_unique_mask'],
                 } if self.ct_enable_v27 else {}),
+                **({'support_half_size_parallel_perp': input_dict['ct_acquisition_support_half_size'].detach()}
+                   if getattr(self, 'ct_enable_v30', False) else {}),
             )
         evidence_contract = EvidenceOutput(
             raw_box=joint_output['ct_b2_raw_box'],
@@ -3114,6 +3139,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         if self.ct_enable_b3:
             final_box, router_output = self.ct_joint_router(
                 observation_box=observation_box,
+                **({'evidence_modes': joint_output['ct_evidence_modes']}
+                   if getattr(self, 'ct_enable_v30', False) else {}),
                 raw_box=raw_box,
                 availability=router_availability,
                 base_evidence=joint_output['ct_b2_base_evidence'],
@@ -3211,6 +3238,27 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                     residual_norm > radius).to(observation_box.dtype),
                 'ct_router_soft_box': observation_box,
             }
+            if getattr(self, 'ct_enable_v30', False):
+                from models.ct_v2.action_v30 import mode_action_geometry
+                from utils.v30_policy import choose_mode_action
+                actions = mode_action_geometry(observation_box, joint_output['ct_evidence_modes'],
+                    input_dict['search_v3_query_delta_t'])
+                router_output.update(ct_b3_action_boxes=actions['action_boxes'],
+                    ct_b3_action_valid=actions['action_valid'],
+                    ct_b3_action_scores=observation_box.new_zeros((batch_size, 6)),
+                    ct_b3_action_residual_xy=actions['residual'],
+                    ct_b3_action_raw_residual_xy=actions['raw_residual'],
+                    ct_b3_action_raw_norm=actions['raw_norm'])
+                selection = choose_mode_action(observation_box, actions['action_boxes'],
+                    actions['action_valid'], router_output['ct_b3_action_scores'], {'kind': 'always'})
+                final_box = selection['final_box']
+                router_output.update(ct_b3_chosen_action_index=selection['chosen_action_index'],
+                    ct_b3_best_action_index=selection['best_action_index'],
+                    ct_b3_max_action_score=selection['max_action_score'])
+                for gate in ('ct_b3_final_gate', 'ct_router_applied_gate'):
+                    router_output[gate] = selection['applied'].to(observation_box)
+                from utils.v30_action_output import apply_selection_output
+                apply_selection_output(router_output, observation_box, selection)
         if not self.training:
             mode = self.proposal_inference_mode
             if mode in ('obs', 'obs_only', 'observation'):
@@ -3218,6 +3266,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 if self.ct_enable_v27:
                     for gate_key in ('ct_b3_final_gate', 'ct_router_gate', 'ct_router_applied_gate'):
                         router_output[gate_key] = torch.zeros_like(candidate_available)
+                if getattr(self, 'ct_enable_v30', False):
+                    from utils.v30_policy import choose_mode_action
+                    from utils.v30_action_output import apply_selection_output
+                    selection = choose_mode_action(observation_box, router_output['ct_b3_action_boxes'],
+                        router_output['ct_b3_action_valid'], router_output['ct_b3_action_scores'], {'kind': 'never'})
+                    apply_selection_output(router_output, observation_box, selection)
             elif mode == 'bounded_always':
                 from models.ct_v2.action_v27 import bounded_residual_xy
                 bounded, geometry = bounded_residual_xy(
@@ -3231,6 +3285,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 final_box = torch.where(applies[:, None], executed_box, observation_box)
                 for gate_key in ('ct_b3_final_gate', 'ct_router_gate', 'ct_router_applied_gate'):
                     router_output[gate_key] = applies.to(observation_box.dtype)
+                if getattr(self, 'ct_enable_v30', False):
+                    from utils.v30_policy import choose_mode_action
+                    from utils.v30_action_output import apply_selection_output
+                    selection = choose_mode_action(observation_box, router_output['ct_b3_action_boxes'],
+                        router_output['ct_b3_action_valid'], router_output['ct_b3_action_scores'],
+                        {'kind': 'always'}, evidence_top_index=joint_output['ct_evidence_modes'].evidence_top_index)
+                    final_box = selection['final_box']
+                    apply_selection_output(router_output, observation_box, selection)
             elif mode == 'raw_search':
                 final_box = torch.where(
                     candidate_available.reshape(
@@ -3534,16 +3596,21 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         HL =  input_dict["valid_mask"].shape[1] # Number of historical frames, default 3
         L = HL + 1 # Total length of the point cloud sequence, 1 represents the current frame
         chunk_size = N // L
+        measurement_mask = (input_dict['b0_point_valid_mask'].bool().reshape(B, N)
+                            if getattr(self, 'ct_enable_v30', False) else None)
+        pointnet_mask_args = ({'valid_mask': measurement_mask} if getattr(self, 'ct_enable_v30', False) else {})
+        if measurement_mask is not None:
+            x = x.masked_fill(~measurement_mask[:, None], 0.)
 
         collect_b2_point_features = bool(
             self.use_ct_joint_full and self.ct_joint_contract_version >= 3
             and self.ct_enable_b2 and not b0_auxiliary_only)
         if getattr(self, 'ct_enable_v28', False) and collect_b2_point_features:
-            seg_out, seg_second64 = self.seg_pointnet(x, return_point_features=True)
+            seg_out, seg_second64 = self.seg_pointnet(x, return_point_features=True, **pointnet_mask_args)
             output_dict['b0_point_aligned_features'] = seg_second64.transpose(1, 2).reshape(
                 B, L, chunk_size, 64)
         else:
-            seg_out = self.seg_pointnet(x)
+            seg_out = self.seg_pointnet(x, **pointnet_mask_args)
         seg_logits = seg_out[:, :2, :]  # B,2,N
         obs_stats, obs_aux = self.build_observability_stats(input_dict, seg_logits, chunk_size)
         pred_cls = torch.argmax(seg_logits, dim=1, keepdim=True)  # B,1,N
@@ -3556,7 +3623,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             output_dict['pred_bc'] = pred_bc.transpose(1, 2)
 
         # Coarse initial motion prediction
-        point_feature = self.mini_pointnet(mask_points) #N*256
+        point_feature = self.mini_pointnet(mask_points, **pointnet_mask_args) #N*256
         motion_feature = point_feature
         if self.use_dynamics_encoder:
             dynamics_ref_boxs = input_dict["ref_boxs"]
@@ -3789,7 +3856,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             )
             motion_state_logits = self.motion_state_mlp(
                 motion_state_feature)  # B,2
-            motion_mask = torch.argmax(motion_state_logits, dim=1, keepdim=True)  # B,1
+            motion_mask = (motion_state_logits.softmax(dim=1)[:, 1:2] if getattr(self, 'ct_enable_v30', False)
+                           else torch.argmax(motion_state_logits, dim=1, keepdim=True))
             motion_pred_masked = motion_pred * motion_mask
             output_dict['motion_cls'] = motion_state_logits # B*2
         else:
@@ -3829,7 +3897,11 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         collect_point_aligned_features = bool(
             collect_pftc_features or (collect_b2_point_features and not getattr(self, 'ct_enable_v28', False)))
         feature_result = self.feature_pointnet(
-            solo_x, return_point_features=collect_point_aligned_features)
+            solo_x, return_point_features=collect_point_aligned_features,
+            **({'valid_mask': measurement_mask.reshape(B * L, chunk_size),
+                'return_token_mask': True} if getattr(self, 'ct_enable_v30', False) else {}))
+        if getattr(self, 'ct_enable_v30', False):
+            feature_result, feature_token_mask = feature_result
         if collect_point_aligned_features:
             feature, point_aligned_feature = feature_result
             point_aligned_feature = (
@@ -3879,6 +3951,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         attention_contract = ({'enable_v29': True,
             'frame_measurement_valid': input_dict['b0_point_valid_mask'].bool().any(dim=-1)}
             if getattr(self, 'ct_enable_v29', False) else {})
+        if getattr(self, 'ct_enable_v30', False):
+            attention_contract['source_token_valid'] = feature_token_mask.reshape(B, -1)
         if (self.use_asymmetric_dual_query
                 or self.use_ct_joint_full
                 or self.use_decoder_token_consistency):
@@ -3911,7 +3985,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         updated_aux_box =  delta_motion[:,-1,:]
 
         observation_aux_box = updated_aux_box
-        if self.ct_enable_v27 and not self.training:
+        if self.ct_enable_v27 and not getattr(self, 'ct_enable_v30', False) and not self.training:
             if getattr(self, 'ct_enable_v28', False):
                 # 任意历史或当前槽仍有真实测量时，保留原网络预测。
                 current_valid = input_dict['b0_point_valid_mask'].reshape(B, -1).any(1, keepdim=True)
@@ -5388,7 +5462,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         # A raw candidate is identifiable as extension evidence only on rows
         # where the extension actually contains target points.  Absence rows
         # still train presence below, but never receive a GT center gradient.
-        loss_raw = weighted_mean(raw_error_per_sample, target_bearing)
+        loss_raw = (raw_xy.sum() * 0. if getattr(self, 'ct_enable_v30', False)
+                    else weighted_mean(raw_error_per_sample, target_bearing))
+        loss_mode_quality = raw_xy.sum() * 0.
+        if getattr(self, 'ct_enable_v30', False):
+            from utils.v30_training import mode_quality_loss
+            mode_quality = mode_quality_loss(data, output, self.config)
+            loss_mode_quality = mode_quality['loss']
         base_presence_error = F.binary_cross_entropy_with_logits(
             output['ct_b2_base_presence_logit'],
             base_presence_target, reduction='none')
@@ -5409,7 +5489,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         bounded_distance_error = torch.linalg.norm(bounded_xy - target_xy, dim=1)
         if self.ct_enable_v27:
             from utils.v27_training import compute_b3_utility_loss
+            if getattr(self, 'ct_enable_v30', False) and self.ct_enable_b3:
+                from utils.v30_training import compute_b3_mode_utility_loss as compute_b3_utility_loss
             utility = compute_b3_utility_loss(data, output, self.config)
+            if getattr(self, 'ct_enable_v30', False):
+                for key, value in utility.items():
+                    if key.startswith('action_'):
+                        output['ct_b3_label_' + key.removeprefix('action_')] = value.detach()
             loss_b3 = utility['loss'] if self.ct_enable_b3 else target_xy.new_zeros(())
             loss_helpful, loss_harmful = utility['loss_help'], utility['loss_harm']
             loss_center_gain, loss_iou_gain = utility['loss_precision'], utility['loss_success']
@@ -5551,12 +5637,17 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         acquisition_point_recall = selected_target_sum / torch.clamp(
             prepool_target_sum, min=1.0)
 
+        if getattr(self, 'ct_enable_v30', False) and self.training:
+            from utils.v30_funnel import accumulate_funnel
+            accumulate_funnel(self, data, output, mode_quality, utility)
         b2_total = (
             self.ct_targetness_weight * loss_targetness
             + self.ct_relation_weight * loss_relation
             + self.ct_vote_weight * loss_vote
             + self.ct_raw_search_weight * loss_raw
             + self.ct_presence_weight * loss_presence)
+        if getattr(self, 'ct_enable_v30', False):
+            b2_total = b2_total + float(getattr(self.config, 'ct_mode_quality_weight', .1)) * loss_mode_quality
         b3_total = self.ct_router_weight * loss_b3
         plugin_total = b2_total + b3_total
         return {
@@ -5568,6 +5659,7 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             **relation_metrics,
             'loss_ct_vote': loss_vote,
             'loss_ct_raw_search': loss_raw,
+            **({'loss_ct_mode_quality': loss_mode_quality} if getattr(self, 'ct_enable_v30', False) else {}),
             'loss_ct_presence': loss_presence,
             'loss_ct_base_presence': loss_base_presence,
             'loss_ct_extension_presence': loss_extension_presence,
@@ -6052,6 +6144,14 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 margin_terms['loss_per_sample'], margin_terms['valid'],
                 recursive_age=recursive_age,
                 recursive_age_valid=recursive_age_valid)
+            if getattr(self, 'ct_enable_v30', False) and bool(getattr(self.config, 'ct_acquisition_need_balance', True)):
+                from models.ct_v2.motion import acquisition_margin_target_loss_v30
+                margin_terms = acquisition_margin_target_loss_v30(
+                    output['motion_prior_acquisition_margin_parallel_perp'],
+                    data['motion_acquisition_target'], margin_terms['valid'],
+                    data['motion_acquisition_demand'], quantile=self.ct_acquisition_margin_quantile,
+                    recursive_age=recursive_age, recursive_age_valid=recursive_age_valid)
+                loss_acquisition_margin = margin_terms['loss']
             loss_total += (
                 self.ct_acquisition_margin_weight
                 * loss_acquisition_margin)
@@ -7761,6 +7861,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
         return loss_dict
 
     def on_train_epoch_start(self):
+        self._ct_v30_funnel_counts = {}
+        self._ct_v30_lost_lengths = {}
         self._ct_perf_epoch_losses = {}
         self._ct_perf_h3_counts = {}
         self._ct_perf_pending_diagnostics = {}
@@ -7990,6 +8092,10 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 contract['history_valid_mask'].tolist())
             history_frames = self._ordered_online_history_frames(raw)
             current_frame = raw['this_frame']
+            crop, context = None, None
+            if getattr(self, 'ct_enable_v30', False):
+                from utils.v30_crop import prepare_base_crop
+                crop, context = prepare_base_crop(current_frame['pc'], history_boxes[0], self.config)
             inputs = self._build_motion_prepass_inputs_contract(
                 history_boxes,
                 contract['history_frame_ids'],
@@ -8005,13 +8111,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 int(raw['this_frame_id']),
                 **(dict(history_quality=contract['history_quality'],
                         recursive_age=state.rollout_age(raw['this_frame_id']),
-                        first_frame_wlh=state.target_size)
+                        first_frame_wlh=state.target_size, base_crop_context=context)
                    if self.ct_enable_v27 else {}),
             )
             if inputs is None:
                 raise RuntimeError(
                     "online B1 prepass history length does not match hist_num")
             prepass_inputs.append(inputs)
+            if getattr(self, 'ct_enable_v30', False):
+                inputs['_b0_raw_crop'], inputs['_b0_crop_context'] = crop, context
         prediction = self.predict_motion_from_history(
             np.stack([item['ref_boxs'] for item in prepass_inputs]),
             np.stack([item['delta_t'] for item in prepass_inputs]),
@@ -8031,6 +8139,9 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             for result, inputs in zip(results, prepass_inputs):
                 result['input_digest'] = b1_input_digest(inputs)
                 result['parameter_revision'] = int(self.global_step)
+                if getattr(self, 'ct_enable_v30', False):
+                    result['_b0_raw_crop'] = inputs['_b0_raw_crop']
+                    result['_b0_crop_context'] = inputs['_b0_crop_context']
         return results
 
     def _process_online_raw(
@@ -8109,7 +8220,12 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 "candidate crop/history/Search state contract diverged")
         state_diagnostics = state_diagnostics or {}
         recursive_age = state_diagnostics.get('rollout_age')
+        if getattr(self, 'ct_enable_v30', False) and recursive_age is None:
+            recursive_age = state.rollout_age(raw['this_frame_id'])
         recursive_age_valid = recursive_age is not None
+        if getattr(self, 'ct_enable_v30', False):
+            processed['ct_recursive_lost_length'] = np.int64(getattr(self, '_ct_v30_lost_lengths', {}).get(
+                (int(raw['online_slot']), str(raw['tracklet_key'])), 0))
         current_labels = processed['seg_label'][
             -int(getattr(self.config, 'point_sample_size', 1024)):]
         processed.update({
@@ -8400,6 +8516,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
 
     def _apply_v29_mechanism_policy(self, output):
         """训练 policy 只作用于当前机制事务，不修改部署校准状态。"""
+        if getattr(self, 'ct_enable_v30', False):
+            return self._apply_v30_mechanism_policy(output)
         from utils.v29_policy import mechanism_behavior_policy, policy_transition
         observation = output['observation_aux_estimation_boxes']
         candidate = torch.cat((observation[:, :2].detach()
@@ -8421,6 +8539,38 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                       aux_estimation_boxes=final, ct_router_applied_gate=applied,
                       ct_b3_final_gate=applied, ct_router_soft_box=final,
                       ct_v29_behavior_kind=observation.new_tensor(kinds))
+
+    def _apply_v30_mechanism_policy(self, output):
+        from utils.v30_policy import mechanism_behavior_policy, choose_mode_action
+        observation = output['observation_aux_estimation_boxes']
+        modes = output['ct_evidence_modes']
+        if len(self._ct_online_batch_context) != len(observation):
+            raise RuntimeError('v30 mechanism context must match every row')
+        rows, accepted, kinds, chosen, best, maxima = [], [], [], [], [], []
+        for index, context in enumerate(self._ct_online_batch_context):
+            raw = context['raw']
+            policy = (mechanism_behavior_policy(self.config.seed, raw['online_epoch'],
+                        str(raw['tracklet_key']), frame_index=raw['this_frame_id'])
+                      if self.ct_enable_b3 else {'kind': 'always'})
+            selection = choose_mode_action(observation[index:index+1],
+                output['ct_b3_action_boxes'][index:index+1], output['ct_b3_action_valid'][index:index+1],
+                output['ct_b3_action_scores'][index:index+1], policy,
+                evidence_top_index=modes.evidence_top_index[index:index+1])
+            rows.append(selection['final_box'])
+            accepted.append(selection['applied'])
+            chosen.append(selection['chosen_action_index'])
+            best.append(selection['best_action_index'])
+            maxima.append(selection['max_action_score'])
+            kinds.append({'never': 0, 'always': 1, 'threshold': 2, 'explore': 3}[policy['kind']])
+        final, applied, action = torch.cat(rows), torch.cat(accepted).to(observation), torch.cat(chosen)
+        output.update(ct_v30_behavior_final_boxes=final, ct_v29_behavior_final_boxes=final,
+            ct_final_box=final, aux_estimation_boxes=final, ct_router_applied_gate=applied,
+            ct_b3_final_gate=applied, ct_router_soft_box=final,
+            ct_v29_behavior_kind=observation.new_tensor(kinds), ct_b3_chosen_action_index=action,
+            ct_v30_behavior_action_index=action)
+        from utils.v30_action_output import apply_selection_output
+        apply_selection_output(output, observation, dict(final_box=final, applied=applied.bool(),
+            chosen_action_index=action, best_action_index=torch.cat(best), max_action_score=torch.cat(maxima)))
 
     def _commit_online_recursive_predictions(self, output):
         if not bool(getattr(
@@ -8449,7 +8599,8 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
                 self.config, 'ct_training_state_policy',
                 'observation')).strip().lower()
             if getattr(self, 'ct_enable_v29', False):
-                if state_policy != 'mixed_accepted_v1':
+                expected_policy = 'mixed_accepted_v30' if getattr(self, 'ct_enable_v30', False) else 'mixed_accepted_v1'
+                if state_policy != expected_policy:
                     raise RuntimeError('v29 mechanism requires mixed accepted behavior')
                 local_final = output['ct_v29_behavior_final_boxes'][index]
             else:
@@ -8461,6 +8612,15 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             commit_canonical_prediction(
                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
                 raw['this_frame'].get('timestamp'))
+            if getattr(self, 'ct_enable_v30', False):
+                from utils.tracking_metrics_v27 import box_metrics
+                overlap, _ = box_metrics(final_box, raw['this_frame']['3d_bbox'],
+                    up_axis=self.config.up_axis, mode='benchmark_compat', dim=int(self.config.IoU_space))
+                lost = getattr(self, '_ct_v30_lost_lengths', None)
+                if lost is None:
+                    lost = self._ct_v30_lost_lengths = {}
+                key = (slot, str(raw['tracklet_key']))
+                lost[key] = lost.get(key, 0) + 1 if overlap <= 0 else 0
             if self.ct_enable_v27:
                 state.quality[int(raw['this_frame_id'])] = (
                     cpu_quality[index].copy() if cpu_quality is not None else output[

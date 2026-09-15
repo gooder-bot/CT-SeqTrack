@@ -1,0 +1,53 @@
+=== a43a8ee:utils/action_calibration_v27.py:210-261 ===
+210: def _rank(summary):
+211:     return summary["U"], summary["S"], summary["P"], -summary["actions"]
+212: 
+213: 
+214: def shortlist_policies(rows, quantiles=41, top_k=3):
+215:     rows = normalize_rows(rows)
+216:     valid_scores = [r["action_score"] for r in rows if r["structural_available"] and not r["is_initial"]]
+217:     policies = [{"kind": "never"}, {"kind": "always"}]
+218:     if valid_scores:
+219:         policies += [{"kind": "threshold", "threshold": float(value)}
+220:                      for value in np.unique(np.quantile(valid_scores, np.linspace(0, 1, quantiles)))]
+221:     unique, seen = [], set()
+222:     for policy in policies:
+223:         mask = policy_mask([r["action_score"] for r in rows],
+224:                            [r["structural_available"] > 0 for r in rows], policy,
+225:                            [r["is_initial"] > 0 for r in rows])
+226:         key = mask.tobytes()
+227:         if key not in seen:
+228:             seen.add(key)
+229:             unique.append({"policy": policy, "metrics": summarize_rows(rows, policy)})
+230:     non_never = [item for item in unique if item["policy"]["kind"] != "never"]
+231:     non_never.sort(key=lambda item: _rank(item["metrics"]), reverse=True)
+232:     return non_never[:top_k], unique
+233: 
+234: 
+235: def _check_role(rows, role, manifest):
+236:     rows = normalize_rows(rows)
+237:     allowed = set(manifest["scenes"][role])
+238:     if not {r["scene_id"] for r in rows} <= allowed:
+239:         raise ValueError(f"{role} rows contain a scene from another protocol role")
+240:     return rows
+241: 
+242: 
+243: def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
+244:                           config_sha256, scene_manifest, code_sha256=None):
+245:     """runner(role, policy) 必须重新从首帧执行完整轨迹，返回全帧 endpoint。"""
+246:     validate_scene_manifest(scene_manifest)
+247:     calibration_rows = _check_role(calibration_rows, "calibration", scene_manifest)
+248:     shortlisted, screen = shortlist_policies(calibration_rows)
+249:     policies = [{"kind": "never"}] + [x["policy"] for x in shortlisted]
+250:     evaluated, evaluated_rows = [], {}
+251:     expected_ids = {(r["tracklet_id"], r["frame_id"]) for r in calibration_rows}
+252:     for policy in policies:
+253:         rows = _check_role(runner("calibration", policy), "calibration", scene_manifest)
+254:         if {(r["tracklet_id"], r["frame_id"]) for r in rows} != expected_ids:
+255:             raise ValueError("closed-loop policy runs must evaluate identical complete endpoints")
+256:         evaluated.append({"policy": policy, "metrics": summarize_rows(rows)})
+257:         evaluated_rows[sha256_json(policy)] = rows
+258:     chosen = max(evaluated, key=lambda item: _rank(item["metrics"]))
+259:     # Locked policy only. Never baseline provides interpretable dev net gain; it does not refit.
+260:     dev_rows = _check_role(runner("dev", chosen["policy"]), "dev", scene_manifest)
+261:     dev_baseline = _check_role(runner("dev", {"kind": "never"}), "dev", scene_manifest)

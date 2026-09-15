@@ -1,0 +1,104 @@
+=== HEAD:utils/action_calibration_v27.py:225-262 ===
+225: def _rank(summary):
+226:     return summary["U"], summary["S"], summary["P"], -summary["actions"]
+227: 
+228: 
+229: def shortlist_policies(rows, quantiles=41, top_k=3, *, include_controls=False):
+230:     rows = normalize_rows(rows)
+231:     valid_scores = [r["action_score"] for r in rows if r["structural_available"] and not r["is_initial"]]
+232:     policies = [{"kind": "never"}, {"kind": "always"}]
+233:     if valid_scores:
+234:         policies += [{"kind": "threshold", "threshold": float(value)}
+235:                      for value in np.unique(np.quantile(valid_scores, np.linspace(0, 1, quantiles)))]
+236:     unique, seen = [], set()
+237:     for policy in policies:
+238:         mask = policy_mask([r["action_score"] for r in rows],
+239:                            [r["structural_available"] > 0 for r in rows], policy,
+240:                            [r["is_initial"] > 0 for r in rows])
+241:         key = mask.tobytes()
+242:         # v29控制策略始终实际闭环；阈值只在阈值候选之间按首轮mask去重。
+243:         is_control = policy['kind'] in ('never', 'always')
+244:         if (include_controls and is_control) or key not in seen:
+245:             if not (include_controls and is_control):
+246:                 seen.add(key)
+247:             unique.append({"policy": policy, "metrics": summarize_rows(rows, policy)})
+248:     if include_controls:
+249:         thresholds = [item for item in unique if item['policy']['kind'] == 'threshold']
+250:         thresholds.sort(key=lambda item: _rank(item['metrics']), reverse=True)
+251:         always = next(item for item in unique if item['policy']['kind'] == 'always')
+252:         return [always] + thresholds[:top_k], unique
+253:     non_never = [item for item in unique if item["policy"]["kind"] != "never"]
+254:     non_never.sort(key=lambda item: _rank(item["metrics"]), reverse=True)
+255:     return non_never[:top_k], unique
+256: 
+257: 
+258: def _check_role(rows, role, manifest):
+259:     rows = normalize_rows(rows)
+260:     allowed = set(manifest["scenes"][role])
+261:     if not {r["scene_id"] for r in rows} <= allowed:
+262:         raise ValueError(f"{role} rows contain a scene from another protocol role")
+
+=== HEAD:utils/action_calibration_v27.py:266-328 ===
+266: def calibrate_actions_v27(calibration_rows, runner, *, checkpoint_sha256,
+267:                           config_sha256, scene_manifest, code_sha256=None,
+268:                           enable_v29=False):
+269:     """runner(role, policy) 必须重新从首帧执行完整轨迹，返回全帧 endpoint。"""
+270:     validate_scene_manifest(scene_manifest)
+271:     if enable_v29 and not scene_manifest['parameter_training_overlap']:
+272:         raise ValueError('v29 policy fitting requires declared training-internal scenes')
+273:     calibration_rows = _check_role(calibration_rows, "calibration", scene_manifest)
+274:     shortlisted, screen = shortlist_policies(calibration_rows, include_controls=enable_v29)
+275:     policies = [{"kind": "never"}] + [x["policy"] for x in shortlisted]
+276:     evaluated, evaluated_rows = [], {}
+277:     expected_ids = {(r["tracklet_id"], r["frame_id"]) for r in calibration_rows}
+278:     for policy in policies:
+279:         rows = _check_role(runner("calibration", policy), "calibration", scene_manifest)
+280:         if {(r["tracklet_id"], r["frame_id"]) for r in rows} != expected_ids:
+281:             raise ValueError("closed-loop policy runs must evaluate identical complete endpoints")
+282:         evaluated.append({"policy": policy, "metrics": summarize_rows(rows)})
+283:         evaluated_rows[sha256_json(policy)] = rows
+284:     chosen = max(evaluated, key=lambda item: _rank(item["metrics"]))
+285:     # Locked policy only. Never baseline provides interpretable dev net gain; it does not refit.
+286:     dev_rows = _check_role(runner("dev", chosen["policy"]), "dev", scene_manifest)
+287:     dev_baseline = _check_role(runner("dev", {"kind": "never"}), "dev", scene_manifest)
+288:     if {(r["tracklet_id"], r["frame_id"]) for r in dev_rows} != {
+289:             (r["tracklet_id"], r["frame_id"]) for r in dev_baseline}:
+290:         raise ValueError("dev policies must evaluate identical endpoints")
+291:     artifact = {
+292:         "schema": ("ct_seqtrack.action_calibration.v29" if enable_v29 else
+293:                    "ct_seqtrack.action_calibration.v28"
+294:                    if scene_manifest["schema"].endswith(".v28") else SCHEMA),
+295:         "action_policy": chosen["policy"],
+296:         "checkpoint_sha256": str(checkpoint_sha256), "config_sha256": str(config_sha256),
+297:         "code_content_sha256": code_sha256 or code_content_sha256(),
+298:         "source_files": list(CODE_FILES),
+299:         "score_definition": SCORE_DEFINITION, "metric_mode": METRIC_MODE,
+300:         "comparator": COMPARATOR, "metric_threshold_count": 21,
+301:         "scene_manifest": scene_manifest,
+302:         "scene_manifest_sha256": scene_manifest["content_sha256"],
+303:         "parameter_training_overlap": scene_manifest["parameter_training_overlap"],
+304:         "selection_role": "training_internal_threshold_fit" if scene_manifest["parameter_training_overlap"] else "held_out_threshold_fit",
+305:         "diagnostic_role": "training_internal_closed_loop_diagnostic" if scene_manifest["parameter_training_overlap"] else "held_out_closed_loop_diagnostic",
+306:         "selection_complete": True, "dev_refit": False,
+307:         "screening": screen, "calibration_closed_loop": evaluated,
+308:         "calibration_selected_metrics": chosen["metrics"],
+309:         "dev_locked_metrics": summarize_rows(dev_rows),
+310:         "dev_never_metrics": summarize_rows(dev_baseline),
+311:         "calibration_gain_interval": paired_scene_bootstrap(
+312:             evaluated_rows[sha256_json(chosen["policy"])],
+313:             evaluated_rows[sha256_json({"kind": "never"})]),
+314:         "dev_gain_interval": paired_scene_bootstrap(dev_rows, dev_baseline),
+315:         "calibration_rows_sha256": sha256_json(calibration_rows),
+316:         "calibration_tracklet_keys_sha256": sha256_json(sorted({r["tracklet_id"] for r in calibration_rows})),
+317:         "dev_tracklet_keys_sha256": sha256_json(sorted({r["tracklet_id"] for r in dev_rows})),
+318:     }
+319:     if enable_v29:
+320:         from utils.v29_policy import POLICY_FITTING_CONTRACT, UTILITY_TARGET_CONTRACT, TRANSITION_CONTRACT
+321:         artifact.update(utility_target=UTILITY_TARGET_CONTRACT,
+322:                         transition_contract=TRANSITION_CONTRACT,
+323:                         policy_fitting_contract=POLICY_FITTING_CONTRACT,
+324:                         fitting_interpretation='internal closed-loop policy selection; not probability calibration',
+325:                         selection_role='training_internal_policy_fit')
+326:     artifact["artifact_sha256"] = sha256_json(artifact)
+327:     return artifact
+328: 

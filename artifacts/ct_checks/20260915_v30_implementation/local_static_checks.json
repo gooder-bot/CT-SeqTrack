@@ -1,0 +1,45 @@
+{
+  "compileall": {
+    "argv": [
+      "python",
+      "-m",
+      "compileall",
+      "-q",
+      "models/",
+      "datasets/",
+      "utils/",
+      "tools/"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff_check": {
+    "argv": [
+      "git",
+      "-c",
+      "core.safecrlf=false",
+      "diff",
+      "--check"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "protected_paths": {
+    "argv": [
+      "git",
+      "-c",
+      "core.safecrlf=false",
+      "diff",
+      "--name-only",
+      "--",
+      "output/",
+      "cfgs/ct_seqtrack/24*",
+      "cfgs/ct_seqtrack/29*"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

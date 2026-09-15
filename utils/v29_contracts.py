@@ -22,6 +22,9 @@ V29_CONTRACTS = {
 
 def validate_v29_contract(config):
     get = config.get if isinstance(config, dict) else lambda k, d=None: getattr(config, k, d)
+    if get('ct_enable_v30', False):
+        from utils.v30_contracts import validate_v30_contract
+        return validate_v30_contract(config)
     if not get('ct_enable_v29', False):
         return
     expected = dict(V29_CONTRACTS, ct_enable_v28=True, ct_enable_v27=True)

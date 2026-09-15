@@ -1,0 +1,111 @@
+=== 25586b2:models/ct_v2/evidence_memory.py:388-497 ===
+388: class H3UtilityResidualRouter(nn.Module):
+389:     """Zero-init H3 safety correction on top of the B2 H1 utility logit."""
+390: 
+391:     def __init__(
+392:             self,
+393:             observation_stats_dim=5,
+394:             hidden_dim=64,
+395:             presence_threshold=0.5,
+396:             decision_threshold=0.5,
+397:             radius_base=0.5,
+398:             radius_per_second=0.5,
+399:             radius_max=2.0):
+400:         super().__init__()
+401:         self.presence_threshold = float(presence_threshold)
+402:         self.radius_base = float(radius_base)
+403:         self.radius_per_second = float(radius_per_second)
+404:         self.radius_max = float(radius_max)
+405:         self.register_buffer(
+406:             "decision_threshold", torch.tensor(float(decision_threshold)))
+407:         self.evidence_projection = nn.Sequential(
+408:             nn.Linear(128, 32), nn.GELU())
+409:         # projected base/extension evidence(32), presence(2),
+410:         # utility/gain(2), residual(3), uncertainty(2), dt/gap/age(3),
+411:         # observation statistics.
+412:         input_dim = 32 + 2 + 2 + 3 + 2 + 3 + int(observation_stats_dim)
+413:         self.residual_head = nn.Sequential(
+414:             nn.Linear(input_dim, int(hidden_dim)),
+415:             nn.GELU(),
+416:             nn.Linear(int(hidden_dim), 1),
+417:         )
+418:         nn.init.zeros_(self.residual_head[-1].weight)
+419:         nn.init.zeros_(self.residual_head[-1].bias)
+420: 
+421:     def forward(
+422:             self,
+423:             observation_box,
+424:             raw_box,
+425:             availability,
+426:             base_evidence,
+427:             extension_evidence,
+428:             base_presence_probability,
+429:             extension_presence_probability,
+430:             h1_utility_logit,
+431:             h1_expected_gain,
+432:             observation_stats,
+433:             b1_sigma_parallel_perp,
+434:             query_delta_t,
+435:             gap_ratio,
+436:             recursive_age=None,
+437:             enabled=True):
+438:         observation = observation_box.detach()
+439:         raw = raw_box.detach()
+440:         batch_size = observation.shape[0]
+441:         dt = query_delta_t.reshape(batch_size).detach().clamp(min=0.0)
+442:         gap = gap_ratio.reshape(batch_size).detach().clamp(min=0.0)
+443:         if recursive_age is None:
+444:             recursive_age = torch.zeros_like(dt)
+445:         age = recursive_age.reshape(batch_size).detach().clamp(min=0.0)
+446:         residual = raw[:, :2] - observation[:, :2]
+447:         residual_norm = torch.linalg.norm(residual, dim=1)
+448:         evidence = self.evidence_projection(torch.cat((
+449:             base_evidence.detach(), extension_evidence.detach()), dim=1))
+450:         features = torch.cat((
+451:             evidence,
+452:             base_presence_probability.detach().unsqueeze(1),
+453:             extension_presence_probability.detach().unsqueeze(1),
+454:             h1_utility_logit.detach().unsqueeze(1),
+455:             h1_expected_gain.detach().unsqueeze(1),
+456:             residual,
+457:             residual_norm.unsqueeze(1),
+458:             torch.log(torch.clamp(
+459:                 b1_sigma_parallel_perp.detach(), min=0.1)),
+460:             torch.log1p(dt).unsqueeze(1),
+461:             torch.log1p(gap).unsqueeze(1),
+462:             torch.log1p(age).unsqueeze(1),
+463:             torch.nan_to_num(observation_stats.detach()),
+464:         ), dim=1)
+465:         h3_residual = self.residual_head(features).squeeze(1)
+466:         if not bool(enabled):
+467:             h3_residual = torch.zeros_like(h3_residual)
+468:         apply_logit = h1_utility_logit + h3_residual
+469:         probability = torch.sigmoid(apply_logit)
+470:         radius = torch.clamp(
+471:             self.radius_base + self.radius_per_second * dt,
+472:             max=self.radius_max)
+473:         residual_scale = torch.clamp(
+474:             radius / torch.clamp(residual_norm, min=1e-6), max=1.0)
+475:         bounded_residual = residual * residual_scale.unsqueeze(1)
+476:         evidence_valid = (
+477:             (availability.reshape(batch_size) > 0)
+478:             & (extension_presence_probability >= self.presence_threshold)
+479:             & torch.isfinite(raw).all(dim=1))
+480:         action = evidence_valid & (
+481:             probability >= self.decision_threshold.to(probability))
+482:         final_xy = observation[:, :2] + action.to(
+483:             observation.dtype).unsqueeze(1) * bounded_residual
+484:         final_box = torch.cat((final_xy, observation[:, 2:]), dim=1)
+485:         return final_box, {
+486:             "ct_b3_h3_residual": h3_residual,
+487:             "ct_b3_h3_utility": apply_logit,
+488:             "ct_b3_final_gate": action.to(observation.dtype),
+489:             "ct_router_logit": apply_logit,
+490:             "ct_router_gate": probability,
+491:             "ct_router_applied_gate": action.to(observation.dtype),
+492:             "ct_router_evidence_valid": evidence_valid.to(observation.dtype),
+493:             "ct_router_bounded_residual_xy": bounded_residual,
+494:             "ct_router_residual_xy": residual,
+495:             "ct_router_radius": radius,
+496:             "ct_router_clip_rate": (residual_norm > radius).to(
+497:                 observation.dtype),

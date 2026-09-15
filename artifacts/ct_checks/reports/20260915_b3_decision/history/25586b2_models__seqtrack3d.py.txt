@@ -1,0 +1,64 @@
+=== 25586b2:models/seqtrack3d.py:4510-4572 ===
+4510:             output['ct_search_point_votes'], vote_target,
+4511:             reduction='none').mean(dim=2)
+4512:         foreground_weight = foreground * sample_weight.unsqueeze(1)
+4513:         loss_vote = (vote_error * foreground_weight).sum() / torch.clamp(
+4514:             foreground_weight.sum(), min=1.0)
+4515: 
+4516:         availability = output['ct_b2_available'].detach()
+4517:         observation_xy = output[
+4518:             'observation_aux_estimation_boxes'][:, :2].detach()
+4519:         raw_xy = output['ct_b2_raw_box'][:, :2]
+4520:         raw_error_per_sample = F.smooth_l1_loss(
+4521:             raw_xy, target_xy, reduction='none').mean(dim=1)
+4522:         loss_raw = weighted_mean(raw_error_per_sample, availability)
+4523: 
+4524:         base_presence_target = (
+4525:             (base_labels * base_valid).sum(dim=1) > 0).to(dtype)
+4526:         extension_presence_target = (
+4527:             (extension_labels * extension_valid).sum(dim=1) > 0).to(dtype)
+4528:         base_presence_error = F.binary_cross_entropy_with_logits(
+4529:             output['ct_b2_base_presence_logit'],
+4530:             base_presence_target, reduction='none')
+4531:         extension_presence_error = F.binary_cross_entropy_with_logits(
+4532:             output['ct_b2_extension_presence_logit'],
+4533:             extension_presence_target, reduction='none')
+4534:         loss_base_presence = weighted_mean(base_presence_error)
+4535:         loss_extension_presence = weighted_mean(
+4536:             extension_presence_error, availability)
+4537:         loss_presence = 0.5 * (
+4538:             loss_base_presence + loss_extension_presence)
+4539: 
+4540:         observation_error = torch.linalg.norm(
+4541:             observation_xy - target_xy, dim=1)
+4542:         raw_distance_error = torch.linalg.norm(
+4543:             raw_xy.detach() - target_xy, dim=1)
+4544:         signed_gain = observation_error - raw_distance_error
+4545:         helpful = signed_gain > self.ct_router_help_margin
+4546:         harmful = (
+4547:             (signed_gain < -self.ct_router_help_margin)
+4548:             | ~extension_presence_target.to(torch.bool))
+4549:         decisive = (helpful | harmful).to(dtype) * availability
+4550:         utility_target = helpful.to(dtype)
+4551:         utility_error = F.binary_cross_entropy_with_logits(
+4552:             output['ct_b2_utility_logit'], utility_target,
+4553:             reduction='none')
+4554:         loss_utility_cls = weighted_mean(utility_error, decisive)
+4555:         gain_error = F.smooth_l1_loss(
+4556:             output['ct_b2_expected_gain'], signed_gain.detach(),
+4557:             reduction='none')
+4558:         loss_expected_gain = weighted_mean(gain_error, availability)
+4559:         loss_utility = loss_utility_cls + loss_expected_gain
+4560: 
+4561:         loss_h3 = target_xy.new_zeros(())
+4562:         if self.ct_enable_b3 and 'ct_h3_gain' in data:
+4563:             h3_gain = data['ct_h3_gain'].to(
+4564:                 device=device, dtype=dtype).reshape(-1).detach()
+4565:             h3_valid = data['ct_h3_valid'].to(
+4566:                 device=device, dtype=dtype).reshape(-1).detach()
+4567:             h3_target = (h3_gain > self.ct_router_h3_margin).to(dtype)
+4568:             h3_error = F.binary_cross_entropy_with_logits(
+4569:                 output['ct_b3_h3_utility'], h3_target,
+4570:                 reduction='none')
+4571:             loss_h3 = weighted_mean(
+4572:                 h3_error, h3_valid * availability)

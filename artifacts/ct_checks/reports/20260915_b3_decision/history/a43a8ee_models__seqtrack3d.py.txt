@@ -1,0 +1,32 @@
+=== a43a8ee:models/seqtrack3d.py:8334-8364 ===
+8334:     def _commit_online_recursive_predictions(self, output):
+8335:         if not bool(getattr(
+8336:                 self.config, 'ct_online_recursive_training', False)):
+8337:             return
+8338:         seen_slots = set()
+8339:         for index, item in enumerate(self._ct_online_batch_context):
+8340:             raw = item['raw']
+8341:             slot = int(raw['online_slot'])
+8342:             if int(raw['candidate_id']) != 0:
+8343:                 continue
+8344:             if slot in seen_slots:
+8345:                 raise RuntimeError("online batch contains duplicate canonical slot")
+8346:             seen_slots.add(slot)
+8347:             state = item['state']
+8348:             anchor = state.history_boxes(
+8349:                 [raw['prev_frame_ids'][0]], [1])[0]
+8350:             state_policy = str(getattr(
+8351:                 self.config, 'ct_training_state_policy',
+8352:                 'observation')).strip().lower()
+8353:             if state_policy != 'observation':
+8354:                 raise RuntimeError(
+8355:                     "formal CT training permits only observation recursive "
+8356:                     "state; B2/B3 are shadow learners")
+8357:             final_box = self._local_prediction_to_world(
+8358:                 output['observation_aux_estimation_boxes'][index], anchor)
+8359:             commit_canonical_prediction(
+8360:                 state, raw['candidate_id'], raw['this_frame_id'], final_box,
+8361:                 raw['this_frame'].get('timestamp'))
+8362:             if self.ct_enable_v27:
+8363:                 state.quality[int(raw['this_frame_id'])] = output[
+8364:                     'ct_observation_quality'][index].detach().cpu().numpy().copy()

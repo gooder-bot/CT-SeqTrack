@@ -1,5 +1,8 @@
 # CTSEQTRACK B0--B3 方法与证据合同
 
+> 历史版本：本文保留旧单候选 B3 与早期 B0/B1/B2 合同。当前 v30 三模式、六动作、有效测量及实验顺序以
+> [v30实现](CTSEQTRACK_V30_IMPLEMENTATION.md)和[正式协议顶部](EXPERIMENT_PROTOCOL.md)为准。
+
 ## 1. 论文主线
 
 暂定题目：**Observation-Anchored Evidence Recovery for Irregular-Time 3D

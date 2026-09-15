@@ -91,7 +91,10 @@ def _ct_v28_export_metadata(loader, batch_index):
         tracklet_key = str(source.get_tracklet_key(index))
         if tracklet_key != str(identity['tracklet_key']):
             raise ValueError('evaluation tracklet identity mismatch')
-        scene_id = str(source.nusc.get('scene', identity['scene_token'])['name'])
+        scene_id = identity.get('scene_id')
+        if scene_id is None:
+            scene_id = source.nusc.get('scene', identity['scene_token'])['name']
+        scene_id = str(scene_id)
         manifest = source.ct_scene_manifest
         role = partition or getattr(source, 'ct_scene_role', None) or getattr(source, 'protocol_role', None)
         role = 'test' if role in ('val', 'eval') else role
@@ -1947,7 +1950,10 @@ class BaseModelMF(pl.LightningModule):
         self._write_csv_rows(output_dir / "tracking_endpoints.csv", rows)
         if bool(getattr(self.config, 'ct_enable_v27', False)):
             from utils.v27_eval_reporting import write_endpoint_diagnostics
-            write_endpoint_diagnostics(output_dir / 'v27_endpoint_summary.json', rows)
+            if bool(getattr(self.config, 'ct_enable_v30', False)):
+                from utils.v30_reporting import evaluation_population
+                self.config.ct_evaluation_population = evaluation_population(self.trainer.test_dataloaders)
+            write_endpoint_diagnostics(output_dir / 'v27_endpoint_summary.json', rows, config=self.config)
 
     def _write_b3_test_rollouts(self):
         rows = self._b3_test_rollouts
@@ -2272,7 +2278,7 @@ class BaseModelMF(pl.LightningModule):
             epoch_number = int(getattr(self, 'current_epoch', 0)) + 1
             directory = Path(log_dir) / 'dev_diagnostics'
             self._write_csv_rows(directory / f'epoch_{epoch_number:02d}_endpoints.csv', endpoints)
-            write_endpoint_diagnostics(directory / f'epoch_{epoch_number:02d}_summary.json', endpoints)
+            write_endpoint_diagnostics(directory / f'epoch_{epoch_number:02d}_summary.json', endpoints, config=self.config)
         self._ct_v27_validation_endpoints = []
 
 

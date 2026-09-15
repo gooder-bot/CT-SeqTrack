@@ -60,7 +60,8 @@ def configure_ct_variant(config):
                 config, "ct_optimizer_topology", "isolated_manual"))),
         "ct_initialization_policy": "scratch_only",
         "ct_b0_initialization_policy": "scratch_only",
-        "ct_training_state_policy": ("mixed_accepted_v1" if bool(get_config(config, "ct_enable_v29", False)) else "observation"),
+        "ct_training_state_policy": ("mixed_accepted_v30" if bool(get_config(config, "ct_enable_v30", False))
+                                     else "mixed_accepted_v1" if bool(get_config(config, "ct_enable_v29", False)) else "observation"),
         "ct_module_isolation": "strict",
         "use_motion_v3_legacy_fusion": False,
     }
@@ -147,12 +148,18 @@ def configure_ct_variant(config):
             config, "search_v3_fixed_margin_parallel", 2.0))
         fixed_perpendicular = float(get_config(
             config, "search_v3_fixed_margin_perpendicular", 1.0))
-        if fixed_parallel != 2.0 or fixed_perpendicular != 1.0:
+        v30 = bool(get_config(config, 'ct_enable_v30', False))
+        if not v30 and (fixed_parallel != 2.0 or fixed_perpendicular != 1.0):
             raise ValueError(
                 "safe_seqtrack_auto_v1 requires fixed B2 margins 2m/1m")
+        if v30:
+            lower = get_config(config, 'ct_acquisition_margin_min')
+            upper = get_config(config, 'ct_acquisition_margin_max')
+            if not all(lo <= val <= hi for lo, val, hi in zip(lower, (fixed_parallel, fixed_perpendicular), upper)):
+                raise ValueError('v30 fixed acquisition band must lie within registered bounds')
         set_config(config, "search_v3_use_dynamic_sigma", False)
-        set_config(config, "search_v3_fixed_margin_parallel", 2.0)
-        set_config(config, "search_v3_fixed_margin_perpendicular", 1.0)
+        set_config(config, "search_v3_fixed_margin_parallel", fixed_parallel if v30 else 2.0)
+        set_config(config, "search_v3_fixed_margin_perpendicular", fixed_perpendicular if v30 else 1.0)
     if variant == "b0":
         # The v24 configs inherit data/training defaults from the v23 Full
         # config.  These switches belong to B1/B2 support construction and

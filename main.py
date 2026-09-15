@@ -20,6 +20,7 @@ from pathlib import Path
 
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from torch.utils.data import DataLoader
+from utils.v30_contracts import v30_dataloader_kwargs
 from pytorch_lightning import seed_everything
 
 
@@ -551,6 +552,9 @@ def parse_config():
         default=argparse.SUPPRESS,
         help='P0-C dynamics-only physical-time control.')
     parser.add_argument(
+        '--ct_frame_stride', type=int, default=argparse.SUPPRESS,
+        help='v30 dataset-wide frame stride; preserve original frame IDs and physical timestamps.')
+    parser.add_argument(
         '--dynamics_time_manifest', default=argparse.SUPPRESS,
         help='Offline split permutation manifest required by shuffled mode.')
     parser.add_argument(
@@ -723,7 +727,12 @@ cfg = parse_config()
 if bool(getattr(cfg, 'ct_enable_v28', False)):
     configure_v28_numerics(cfg)
     cfg.ct_runtime_environment = capture_v28_runtime_environment()
-if bool(getattr(cfg, 'ct_enable_v27', False)):
+if bool(getattr(cfg, 'ct_enable_v30', False)):
+    from utils.dataset_protocol_v30 import build_dataset_manifest
+    scene_manifest = build_dataset_manifest(cfg)
+    cfg.ct_dataset_manifest_sha256 = scene_manifest['content_sha256']
+    cfg.ct_scene_manifest_sha256 = scene_manifest['content_sha256']
+elif bool(getattr(cfg, 'ct_enable_v27', False)):
     from nuscenes.utils.splits import create_splits_scenes
     from utils.v27_protocol import build_scene_manifest
     scene_manifest = build_scene_manifest(create_splits_scenes(), cfg.version,
@@ -897,6 +906,7 @@ if not cfg.test:
         mechanism_generator.manual_seed(loader_seed + 41001)
         mechanism_loader = DataLoader(
             mechanism_data,
+            **v30_dataloader_kwargs(cfg),
             batch_sampler=mechanism_batch_sampler,
             num_workers=cfg.workers,
             collate_fn=online_recursive_collate,
@@ -939,6 +949,7 @@ if not cfg.test:
         )
         train_loader = DataLoader(
             train_data,
+            **v30_dataloader_kwargs(cfg),
             batch_sampler=online_batch_sampler,
             num_workers=cfg.workers,
             collate_fn=online_recursive_collate,
@@ -964,6 +975,7 @@ if not cfg.test:
         if observation_batch_sampler is not None:
             train_loader = DataLoader(
                 train_data,
+                **v30_dataloader_kwargs(cfg),
                 batch_sampler=observation_batch_sampler,
                 **({'collate_fn': __import__('utils.v29_rollin', fromlist=['observation_collate']).observation_collate}
                    if bool(getattr(cfg, 'ct_enable_v29', False)) else {}),
@@ -974,6 +986,7 @@ if not cfg.test:
         else:
             train_loader = DataLoader(
                 train_data, batch_size=cfg.batch_size,
+                **v30_dataloader_kwargs(cfg),
                 num_workers=cfg.workers, shuffle=True, drop_last=True,
                 pin_memory=True, worker_init_fn=seed_loader_worker,
                 generator=loader_generator)
@@ -1009,6 +1022,7 @@ if not cfg.test:
     validation_generator.manual_seed(loader_seed + 51001)
     val_loader = DataLoader(
         val_data, batch_size=1, num_workers=cfg.workers,
+        **v30_dataloader_kwargs(cfg),
         collate_fn=lambda x: x, pin_memory=True,
         worker_init_fn=seed_loader_worker,
         generator=validation_generator)
@@ -1115,7 +1129,8 @@ else:
             source_dataset, config=cfg, partition=eval_partition)
     else:
         test_data = source_test_data
-    test_loader = DataLoader(test_data, batch_size=1, num_workers=cfg.workers, collate_fn=lambda x: x, pin_memory=True)
+    test_loader = DataLoader(test_data, batch_size=1, num_workers=cfg.workers,
+                            **v30_dataloader_kwargs(cfg), collate_fn=lambda x: x, pin_memory=True)
     write_run_provenance(
         run_root_dir, cfg, {"test": test_data}, mode="test", root=project_root)
 
