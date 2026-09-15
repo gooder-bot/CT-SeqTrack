@@ -3,7 +3,8 @@
 ## 当前轮次：v30（2026-09-15）
 
 当前实现为 **B0 有效测量观测 → B1 观测边界外获取 → B2 三模式新增证据 → B3 模式×幅度收益选择**。
-已在本地实现；服务器 CUDA 检查和新正式训练尚未执行，没有 v30 涨分结果。
+已在本地实现；首次服务器mini实跑的Full排序错误及B0缓存池问题已分析并本地修复，修复版未重跑，没有v30涨分结果。
+用户接受适度增加显存，当前默认有效BN直接计算，局部重算作为可选；见[预算取舍](docs/CTSEQTRACK_V30_MEMORY_TRADEOFF.md)。
 
 先运行 `30_b0_mini.yaml`、`30_full_cfc_mini.yaml`、`30_full_gru_mini.yaml`：
 Car、seed42、scratch60、batch16、workers4。至少一个预登记 Full 的 **final60 Success、Precision
@@ -13,7 +14,7 @@ Car、seed42、scratch60、batch16、workers4。至少一个预登记 Full 的 *
 - [v30 实现、数据通路和消融](docs/CTSEQTRACK_V30_IMPLEMENTATION.md)
 - [正式实验协议](docs/EXPERIMENT_PROTOCOL.md)、[工具入口](docs/FORMAL_TOOLING.md)
 - [数据适配和服务器检查/运行命令](docs/V30_DATA_AND_RUNBOOK.md)
-- [最新mini后台启动：GPU0 B0 / GPU1 Full-GRU / GPU2 Full-CfC](docs/CTSEQTRACK_V30_MINI_LAUNCH.md)
+- [最新mini四任务：GPU0 Full-GRU / GPU2 Full-CfC / GPU1并行B0 BN重算false与true](docs/CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md)
 - [本地验证记录](artifacts/ct_checks/20260915_v30_implementation/REPORT.md)
 
 `main.py` 仍为唯一训练/评测入口。下面 v29 及更早章节均为历史证据，旧实验顺序不覆盖 v30。

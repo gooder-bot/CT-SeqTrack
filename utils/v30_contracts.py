@@ -35,6 +35,7 @@ V30_CONTRACTS = {
 V30_IDENTITY_FIELDS = (
     'ct_enable_v30', *V30_CONTRACTS,
     'ct_v30_ablation', 'ct_b0_long_rollin_enabled', 'ct_b0_rollin_max_steps',
+    'ct_b0_masked_bn_recompute',
     'ct_v30_legacy_acquisition', 'ct_acquisition_need_balance',
     'ct_acquisition_margin_min', 'ct_acquisition_margin_max', 'ct_acquisition_margin_initial',
     'ct_mode_count', 'ct_mode_quality_weight', 'ct_b3_geometry_aux_weight',
@@ -67,6 +68,8 @@ def validate_v30_contract(config):
     for name in ('ct_b0_long_rollin_enabled', 'ct_v30_legacy_acquisition', 'ct_acquisition_need_balance'):
         if type(_get(config, name)) is not bool:
             raise ValueError(f'{name} must be explicitly boolean')
+    if type(_get(config, 'ct_b0_masked_bn_recompute', False)) is not bool:
+        raise ValueError('ct_b0_masked_bn_recompute must be boolean')
     count = _get(config, 'ct_mode_count')
     if type(count) is not int or count not in (1, 3):
         raise ValueError('v30 mode count must be 1 or 3 within the fixed three-slot schema')

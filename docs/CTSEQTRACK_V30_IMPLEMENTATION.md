@@ -28,6 +28,12 @@ B3损失不能回传B0/B1/B2。启用的网络从首个合法事务训练，无�
 固定1024→128分桶max同时输出token mask，进入局部、全局及交叉注意力。
 Seg/Mini/FeaturePointNet均接受mask，真实1/2点重复补槽保留。
 
+9月15日晚显存修复去除Conv→BN和ReLU周围重复mask，保留每段入口及BN/最终输出的无效隔离。
+用户接受约+5GB显存后，`ct_b0_masked_bn_recompute:false`作为默认，直接计算有效BN。
+显式true才只保存输入、mask/affine并在反向重算原公式；两者running均仅前向更新一次。
+可选重算不支持二阶导数，当前正式Adam仅用一阶导。三臂共享此执行设置并绑定恢复身份。
+详见[预算与文献依据](CTSEQTRACK_V30_MEMORY_TRADEOFF.md)及[故障证据](CTSEQTRACK_V30_CUDA_MEMORY_FIX.md)。
+
 Seg保持三维class-axis log_softmax→二维NLL，以有效标签对应类别权重和为分母；BC按有效点归约；
 reference只按存在历史帧监督。空测量项返回可反传零值，当前框和物理运动监督继续训练。
 全空点云且历史框合法时保留历史query预测，v30不执行旧部署专有的强制零位移覆盖。

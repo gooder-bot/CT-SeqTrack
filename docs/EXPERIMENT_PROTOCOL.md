@@ -3,9 +3,12 @@
 ## v30 当前协议（2026-09-15）
 
 本节覆盖下方旧版本排程。实施仅在本地完成；本次不连接服务器、不修改服务器文件、不启动或停止已有任务。
-最新启动安排：按用户要求轻量核对后提供三组正式后台命令，GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC；
+最新启动安排：GPU0 Full-GRU、GPU2 Full-CfC，GPU1并行B0有效BN反向重算false/true两个任务；
 不把重跑全量测试、全套哈希或工程报告作为新增启动门。CUDA专项尚未执行的证据边界仍保留。
-命令与日志查看见[mini启动专页](CTSEQTRACK_V30_MINI_LAUNCH.md)。
+命令与日志查看见[mini四任务启动专页](CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md)。
+两个Full均保持重算false；主三臂比较使用B0 false，B0 true是额外的执行方式对照。
+两份B0只改变实验名称与`ct_b0_masked_bn_recompute`，不改变有效性监督、BN统计公式或训练超参数。
+同卡并行的耗时受资源竞争影响，不作为两执行方式独立速度差异的证据。
 三臂统一 scratch60、batch16、workers4、FP32、strict deterministic，Adam
 lr=1e-4、betas=(0.5,0.999)、eps=1e-6、weight_decay=0、foreach/fused=false；StepLR 每20轮×0.1。
 每5轮验证，保留058/059/060；final 固定60，late-3为58/59/60算术平均，Full每个权重独立拟合策略。

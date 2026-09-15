@@ -1,0 +1,122 @@
+{
+  "ct_cuda/batch_transfer_allocated_mb": [
+    {
+      "step": 49,
+      "value": 121.744140625
+    }
+  ],
+  "ct_cuda/batch_transfer_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34688.0
+    }
+  ],
+  "ct_cuda/batch_transfer_peak_allocated_mb": [
+    {
+      "step": 49,
+      "value": 121.744140625
+    }
+  ],
+  "ct_cuda/batch_transfer_peak_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34688.0
+    }
+  ],
+  "ct_cuda/forward_allocated_mb": [
+    {
+      "step": 49,
+      "value": 6969.048828125
+    }
+  ],
+  "ct_cuda/forward_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34672.0
+    }
+  ],
+  "ct_cuda/forward_peak_allocated_mb": [
+    {
+      "step": 49,
+      "value": 7059.3388671875
+    }
+  ],
+  "ct_cuda/forward_peak_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34716.0
+    }
+  ],
+  "ct_cuda/loss_allocated_mb": [
+    {
+      "step": 49,
+      "value": 6973.3857421875
+    }
+  ],
+  "ct_cuda/loss_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34672.0
+    }
+  ],
+  "ct_cuda/loss_peak_allocated_mb": [
+    {
+      "step": 49,
+      "value": 7059.3388671875
+    }
+  ],
+  "ct_cuda/loss_peak_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34716.0
+    }
+  ],
+  "ct_cuda/backward_allocated_mb": [
+    {
+      "step": 49,
+      "value": 121.7470703125
+    }
+  ],
+  "ct_cuda/backward_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34672.0
+    }
+  ],
+  "ct_cuda/backward_peak_allocated_mb": [
+    {
+      "step": 49,
+      "value": 7059.3388671875
+    }
+  ],
+  "ct_cuda/backward_peak_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34716.0
+    }
+  ],
+  "ct_cuda/step_allocated_mb": [
+    {
+      "step": 49,
+      "value": 121.74658203125
+    }
+  ],
+  "ct_cuda/step_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34672.0
+    }
+  ],
+  "ct_cuda/step_peak_allocated_mb": [
+    {
+      "step": 49,
+      "value": 7059.3388671875
+    }
+  ],
+  "ct_cuda/step_peak_reserved_mb": [
+    {
+      "step": 49,
+      "value": 34716.0
+    }
+  ]
+}

@@ -24,6 +24,8 @@ ct_dataset_protocol: ct_seqtrack.dataset_protocol.v30
 ct_training_state_policy: mixed_accepted_v30
 ct_v30_ablation: none
 ct_b0_long_rollin_enabled: true
+# 用户接受适度增加显存，默认直接计算有效BN；true仅用于容量受限的显式重算。
+ct_b0_masked_bn_recompute: false
 ct_v30_legacy_acquisition: false
 ct_acquisition_need_balance: true
 ct_acquisition_margin_min: [0.25, 0.25]

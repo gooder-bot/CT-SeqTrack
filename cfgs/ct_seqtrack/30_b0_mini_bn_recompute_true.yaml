@@ -1,0 +1,3 @@
+_base_: 30_b0_mini.yaml
+experiment_name: ct30_b0_mini_car_scratch_seed42_bn_recompute_true
+ct_b0_masked_bn_recompute: true

@@ -30,7 +30,7 @@ def build_command(dataset, arm, gpu, *, path=None, log_dir=None, python=None):
     output = output.resolve()
     overrides = dict(CUDA_VISIBLE_DEVICES=str(gpu), OMP_NUM_THREADS='1', MKL_NUM_THREADS='1',
                      OPENBLAS_NUM_THREADS='1', CUBLAS_WORKSPACE_CONFIG=':4096:8',
-                     PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:64')
+                     PYTORCH_CUDA_ALLOC_CONF='backend:native')
     command = [str(python or sys.executable), '-u', 'main.py', '--cfg', str(config), '--path', data,
                '--workers', '4', '--seed', '42', '--log_dir', str(output)]
     return dict(cwd=str(ROOT), environment=overrides, argv=command, log_dir=str(output),

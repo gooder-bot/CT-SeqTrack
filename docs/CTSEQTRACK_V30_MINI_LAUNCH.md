@@ -1,9 +1,18 @@
-# v30 mini 最新三组后台命令（2026-09-15）
+# v30 mini 三组后台命令（2026-09-15，原排程）
 
-本轮轻量复核未发现新的本地启动阻断。v30本地实现已完成；此前完整回归868 passed/15 skipped。
-三组真实CLI解析及正式配置合同通过，历史CE/AP/池化修复保留。实际服务器CUDA与60轮成绩尚未执行验证。
-本次定向复核74 passed/1 skipped（12.04秒），仅CUDA运行测试跳过；本页6个Bash代码块均通过语法检查。
-本次仅交付本地修改和命令，不自动同步服务器、启动训练或停止任何任务。
+**最新四任务安排已移至[Full两组与B0 BN重算对照](CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md)**：
+GPU0 Full-GRU、GPU2 Full-CfC、GPU1并行B0 false/true。本页保留原三任务命令及首次故障记录。
+
+**9月15日晚报错后更新**：两组Full第4步触发CUDA bool排序，已在本地改为int64稳定排序。
+B0本次第50步实测峰值7059MiB、reserved34716MiB；掩码BN保存过多激活，且旧64MiB分割限制
+不适合当前变化的分配尺寸。已减少掩码拷贝；按用户可接受约+5GB的新预算，默认直接计算BN，
+`ct_b0_masked_bn_recompute: false`，仅容量受限时显式开启原公式重算；下方命令改为
+`PYTORCH_CUDA_ALLOC_CONF=backend:native`，解除旧分割限制。详见[本次故障分析](CTSEQTRACK_V30_CUDA_MEMORY_FIX.md)。
+训练超参数、点数、有效性监督、roll-in比例及严格确定性不变。此前868/15与74/1均为历史CPU检查，
+不能作为这次CUDA失败分支已验证的证据。修复代码尚未重新在服务器实跑；本轮只读服务器已有日志。
+首次修复68 passed/3 skipped；新默认及两执行模式定向回归102 passed/2 skipped（CUDA），
+真实B0旧/新输出、梯度、BN和Adam逐位对照通过。本页6个Bash块语法已检查。
+取舍和文献依据见[显存预算说明](CTSEQTRACK_V30_MEMORY_TRADEOFF.md)，服务器新峰值尚未实测。
 
 ## 配置与参数
 
@@ -32,7 +41,7 @@ CT30_B0_RUN="output/$(date +%Y%m%d-%H%M%S)-30_b0-mini_car_seed42_60ep_bs16"
 mkdir -p "$CT30_B0_RUN"
 nohup env CUDA_VISIBLE_DEVICES=0 \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64 \
+CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=backend:native \
 python -u main.py \
   --cfg cfgs/ct_seqtrack/30_b0_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -58,7 +67,7 @@ CT30_GRU_RUN="output/$(date +%Y%m%d-%H%M%S)-30_full_gru-mini_car_seed42_60ep_bs1
 mkdir -p "$CT30_GRU_RUN"
 nohup env CUDA_VISIBLE_DEVICES=1 \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64 \
+CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=backend:native \
 python -u main.py \
   --cfg cfgs/ct_seqtrack/30_full_gru_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -84,7 +93,7 @@ CT30_CFC_RUN="output/$(date +%Y%m%d-%H%M%S)-30_full_cfc-mini_car_seed42_60ep_bs1
 mkdir -p "$CT30_CFC_RUN"
 nohup env CUDA_VISIBLE_DEVICES=2 \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64 \
+CUBLAS_WORKSPACE_CONFIG=:4096:8 PYTORCH_CUDA_ALLOC_CONF=backend:native \
 python -u main.py \
   --cfg cfgs/ct_seqtrack/30_full_cfc_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -108,6 +117,8 @@ tail -n 100 -f "$(ls -dt output/*-30_full_cfc-mini_car_seed42_60ep_bs16 | head -
 
 ## 历史错误复核及训练后安排
 
+- `Sort currently does not support bool dtype on CUDA`：B3探索的合法动作排序键转int64，保持stable和动作顺序。
+- 本次B0在第90步收到SIGTERM退出，日志未出现OOM。reserved缓存池与allocated实际活跃张量需分开查看。
 - `nll_loss2d_forward_out_cuda_template`：原三维log_softmax→二维NLL路径保留；v30 mask只控制有效标签与类别权重分母。
 - `cumsum_cuda_kernel`：AP二值计数保留int64 cumsum；不恢复浮点累计。
 - 固定槽max、首个最大值梯度、FP32、严格确定性及Adam配置保留；新共识不用浮点scatter累加。

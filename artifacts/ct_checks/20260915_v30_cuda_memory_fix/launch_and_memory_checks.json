@@ -1,0 +1,16 @@
+{
+  "bash_blocks_syntax_checked": 6,
+  "allocator": "backend:native",
+  "training_started": false,
+  "gpu_map": {
+    "0": "b0",
+    "1": "full_gru",
+    "2": "full_cfc"
+  },
+  "cpu_saved_storage_mib": {
+    "old_all_valid": 419.299818,
+    "new_all_valid": 400.795912,
+    "old_partial": 719.812757,
+    "new_partial": 400.730726
+  }
+}

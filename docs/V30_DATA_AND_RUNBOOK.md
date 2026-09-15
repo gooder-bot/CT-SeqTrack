@@ -4,8 +4,9 @@
 正式运行使用新 v30 配置，从 epoch 0 随机初始化；不续接 v29 checkpoint，也不覆盖旧 output。
 本地 CPU 测试只验证接口和数值合同，CUDA、吞吐、闭环 S/P 由实际运行验证。
 
-最新三组后台命令及新终端`tail -f`见[mini启动专页](CTSEQTRACK_V30_MINI_LAUNCH.md)：
-GPU0=B0、GPU1=Full-GRU、GPU2=Full-CfC。按本轮用户要求直接提供正式命令，下面工程专项按需使用，不增加启动门槛。
+最新四任务后台命令及新终端`tail -f`见[mini启动专页](CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md)：
+GPU0=Full-GRU、GPU2=Full-CfC、GPU1并行B0 BN反向重算false/true；两个Full保持false。
+按本轮用户要求直接提供正式命令，下面工程专项按需使用，不增加启动门槛。
 
 ## 数据集身份
 
@@ -66,8 +67,8 @@ nuScenes同进程的相同root/version复用已构造devkit元数据，不重复
 脚本默认只打印命令，不创建文件或启动训练：
 
 ```bash
-python tools/run_ct_v30_server.py --dataset mini --arm b0 --gpu 0
-python tools/run_ct_v30_server.py --dataset mini --arm full_gru --gpu 1
+python tools/run_ct_v30_server.py --dataset mini --arm b0 --gpu 1
+python tools/run_ct_v30_server.py --dataset mini --arm full_gru --gpu 0
 python tools/run_ct_v30_server.py --dataset mini --arm full_cfc --gpu 2
 ```
 
@@ -83,7 +84,8 @@ python tools/run_ct_v30_server.py --dataset mini --arm full_cfc --gpu 2
 
 可用`--path`显式覆盖。脚本以当前Python启动，可用`--python`指定训练环境解释器。
 每次生成新的时间戳/随机后缀目录，或用`--log-dir`指定一个尚不存在的目录；已有目录会拒绝。
-环境限制为指定GPU、OMP/MKL各1线程、`max_split_size_mb:64`；配置batch16/workers4/seed42/scratch60。
+环境限制为指定GPU、OMP/MKL各1线程、`PYTORCH_CUDA_ALLOC_CONF=backend:native`；配置batch16/workers4/seed42/scratch60。
+9月15日晚按[显存分析](CTSEQTRACK_V30_CUDA_MEMORY_FIX.md)解除旧64MiB分割限制；显式设置可覆盖shell中残留的旧值。
 启动后写`train.log`与`train.pid`，不停止任何旧任务。完成情况以训练日志及058/059/060 checkpoint为准。
 
 ## 每个checkpoint单独拟合与评测
@@ -132,7 +134,7 @@ DATA=/home/lishengjie/data/nuscenes-mini
 CFG=cfgs/ct_seqtrack/30_full_cfc_mini.yaml
 CHECK=artifacts/ct_checks/v30_cuda_cfc_run1
 export CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+export PYTORCH_CUDA_ALLOC_CONF=backend:native
 python tools/check_time_batch.py --cfg "$CFG" --path "$DATA" --workers 4
 python tools/check_forward_batch.py --cfg "$CFG" --path "$DATA" --workers 4
 python tools/check_train_steps.py --cfg "$CFG" --path "$DATA" --workers 4 \

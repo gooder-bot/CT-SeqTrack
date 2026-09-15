@@ -1,8 +1,20 @@
 # CT-SeqTrack 当前状态（2026-09-15）
 
+最新预算取舍：用户接受约+5GB，三臂默认`ct_b0_masked_bn_recompute:false`，保留有效BN直接计算、
+mask拷贝优化及native分配器。true为可选低显存执行方式。依据见[预算说明](docs/CTSEQTRACK_V30_MEMORY_TRADEOFF.md)。
+两路径数值与配置定向回归102 passed/2 skipped，未连接服务器；下方68/3是上一轮修复快照。
+
+9月15日晚首次v30 mini实跑：两Full第4步CUDA bool排序报错，B0第90步SIGTERM退出。
+本地已修复排序dtype、BN激活保存及重复mask；启动分配器改回native默认分割策略。
+第50步B0实际peak7059MiB、reserved34716MiB，不能把35GiB全部解释为计算图。
+详见[故障与显存分析](docs/CTSEQTRACK_V30_CUDA_MEMORY_FIX.md)；修改尚未在服务器重跑。
+修复版定向回归68 passed/3 skipped（CUDA），真实B0旧/新数值与三臂共享一致性通过。
+
 当前执行v30用户批准方案：先mini三臂，再按final60 S/P双升条件进入full/KITTI。
-最新正式启动安排：GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC，独立后台和日期output目录；
-命令见[mini启动专页](docs/CTSEQTRACK_V30_MINI_LAUNCH.md)，按要求轻量核对，不增加额外启动门。
+最新正式启动安排：GPU0 Full-GRU、GPU2 Full-CfC、GPU1并行B0有效BN反向重算false/true，独立日期output目录；
+两个Full重算均false；B0 false用于主三臂比较，B0 true为额外执行方式对照。
+两份显式B0配置仅实验名称和重算开关不同，配置合同52 passed，未启动服务器任务。
+命令见[mini四任务启动专页](docs/CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md)，按要求轻量核对，不增加额外启动门。
 
 - [x] B0有效测量loss/BN/池化/注意力、真实速度与长短roll-in。
 - [x] B1实际B0边界获取带、21维上下文、匹配几何标签和需求平衡。

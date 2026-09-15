@@ -34,6 +34,8 @@ def test_registered_v30_configs_are_complete_and_keep_budget(path):
     assert cfg['ct_relation_topk'] + cfg['ct_relation_coverage_count'] + cfg['ct_relation_exploration_count'] == 256
     assert cfg['ct_training_state_policy'] == 'mixed_accepted_v30'
     assert not cfg['preloading'] and not cfg['ct_separate_optimizers']
+    expected_recompute = path.name == '30_b0_mini_bn_recompute_true.yaml'
+    assert cfg['ct_b0_masked_bn_recompute'] is expected_recompute
     if cfg['ct_variant'] == 'b0':
         assert not any(cfg['ct_enable_' + part] for part in ('b1', 'b2', 'b3'))
     elif cfg['ct_variant'] == 'full_minus_b3':
@@ -78,7 +80,8 @@ def test_checkpoint_cannot_cross_v29_v30_or_mode_and_data_identity():
     validate_online_resume_contract(checkpoint, cfg)
     for key, value in [('ct_mode_count', 1), ('ct_frame_stride', 2),
                        ('ct_b0_long_rollin_enabled', False), ('ct_mode_quality_weight', 0.),
-                       ('ct_dataset_manifest_sha256', 'changed')]:
+                       ('ct_dataset_manifest_sha256', 'changed'),
+                       ('ct_b0_masked_bn_recompute', True)]:
         different = dict(cfg, **{key: value})
         with pytest.raises(ValueError, match='online resume contract mismatch'):
             validate_online_resume_contract(checkpoint, different)
@@ -86,6 +89,23 @@ def test_checkpoint_cannot_cross_v29_v30_or_mode_and_data_identity():
         validate_online_resume_contract(checkpoint, old)
     with pytest.raises(ValueError, match='identity mismatch'):
         validate_v28_evaluation_checkpoint({'hyper_parameters': {'config': old}}, cfg)
+
+
+def test_bn_recompute_is_an_explicit_boolean_execution_option():
+    cfg = config()
+    validate_scratch_training_contract(dict(cfg, ct_b0_masked_bn_recompute=True))
+    with pytest.raises(ValueError, match='ct_b0_masked_bn_recompute must be boolean'):
+        validate_scratch_training_contract(dict(cfg, ct_b0_masked_bn_recompute='false'))
+
+
+def test_b0_bn_recompute_pair_changes_only_execution_option_and_experiment_name():
+    direct = config('30_b0_mini_bn_recompute_false.yaml')
+    recompute = config('30_b0_mini_bn_recompute_true.yaml')
+    assert direct.keys() == recompute.keys()
+    assert {key for key in direct if direct[key] != recompute[key]} == {
+        'ct_b0_masked_bn_recompute', 'experiment_name'}
+    baseline = config('30_b0_mini.yaml')
+    assert {key for key in baseline if baseline[key] != direct[key]} == {'experiment_name'}
 
 
 def test_diagnostics_accept_v30_h1_aux_but_cannot_read_h3_labels():

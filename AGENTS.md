@@ -2,14 +2,28 @@
 
 ## 当前v30与最新mini启动安排
 
+后续用户预算更新：可接受比旧B0增加约5GB，优先涨分与迭代速度。现在
+`ct_b0_masked_bn_recompute:false`为三臂共用默认（直接计算）；true是可选低显存重算，
+不应再将下方“现在部分有效BN重算”作为默认。保留掩码/副本优化、bool排序修复和native分配器。
+依据见`docs/CTSEQTRACK_V30_MEMORY_TRADEOFF.md`；本轮102 passed/2 skipped，未连接服务器。
+
+9月15日晚实际报错更新：Full第4步CUDA bool argsort已改int64；B0第50步实际峰值7059MiB、
+reserved34716MiB，旧展开masked BN与重复mask增加激活。现在部分有效BN局部重算原公式，
+running仅前向更新一次；新命令用`PYTORCH_CUDA_ALLOC_CONF=backend:native`解除旧64MiB分割限制。
+见`docs/CTSEQTRACK_V30_CUDA_MEMORY_FIX.md`。真实首次运行失败不能被此前CPU通过覆盖。
+此次服务器只读日志/TB/进程，未同步或重启；B0日志末尾是SIGTERM而非OOM。
+
 当前以用户v30方案、`docs/EXPERIMENT_PROTOCOL.md`顶部及`need_to_do.md`为准。
 本地实现已完成，完整回归868 passed/15 skipped；真实CUDA、正式训练与分数仍待实测。
-最新用户要求轻量核对后给三组独立后台命令，不增加全套哈希/长检查/工程报告门：
-GPU0 B0、GPU1 Full-GRU、GPU2 Full-CfC；mini Car、seed42、scratch60、batch16、workers4、val5。
-用`30_b0_mini.yaml`、`30_full_gru_mini.yaml`、`30_full_cfc_mini.yaml`；不加`--preloading`，
+最新用户要求轻量核对后给四任务独立后台命令，不增加全套哈希/长检查/工程报告门：
+GPU0 Full-GRU、GPU2 Full-CfC，GPU1并行B0有效BN反向重算false/true；mini Car、seed42、scratch60、batch16、workers4、val5。
+Full均保持`ct_b0_masked_bn_recompute:false`，主三臂比较用B0 false，true为额外执行方式对照。
+B0使用`30_b0_mini_bn_recompute_false.yaml`与`30_b0_mini_bn_recompute_true.yaml`；
+Full仍用`30_full_gru_mini.yaml`、`30_full_cfc_mini.yaml`；不加`--preloading`，
 默认每worker256MiB缓存。`CUDA_VISIBLE_DEVICES`选择物理卡，每个进程`trainer_devices=1`。
 输出显式`output/YYYYMMDD-HHMMSS-30_模块-mini_car_seed42_60ep_bs16/`，包含`train.log`和`train.pid`。
-命令见`docs/CTSEQTRACK_V30_MINI_LAUNCH.md`。仅索取命令不等于授权自动修改或启动服务器任务。
+命令见`docs/CTSEQTRACK_V30_MINI_BN_AB_LAUNCH.md`。两份B0仅名称/重算开关不同，配置合同52 passed。
+仅索取命令不等于授权自动修改或启动服务器任务。
 至少一个Full final60 S/P同时高于同版本B0后进入full/KITTI，late-3只报告，无额外seed前置门。
 下方v29及更早“当前”“最新”均为历史记录，不覆盖本节与用户最新指令。
 

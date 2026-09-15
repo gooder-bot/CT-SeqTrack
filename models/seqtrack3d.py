@@ -1081,6 +1081,13 @@ class SEQTRACK3D(base_model.MotionBaseModelMF):
             per_point_mlp1=[64, 64, 64, 128, 1024],
             per_point_mlp2=[512, 256, 128, 128],
             output_size=128, deterministic_pooling=self.ct_enable_v28)
+        if self.ct_enable_v30:
+            # 三臂共享同一显式执行选择；不注册参数、不改变初始化RNG或BN状态键。
+            for pointnet in (self.seg_pointnet, self.mini_pointnet, self.feature_pointnet):
+                for layer in pointnet.modules():
+                    if isinstance(layer, nn.BatchNorm1d):
+                        layer.ct_b0_masked_bn_recompute = bool(getattr(
+                            config, 'ct_b0_masked_bn_recompute', False))
         if self.use_point_feature_tc:
             self.point_feature_tc = PointFeatureTemporalConsistencyLoss(
                 distance_threshold=float(getattr(

@@ -80,7 +80,8 @@ def choose_mode_action(observation_box, action_boxes, action_valid, action_score
         chosen = torch.full_like(best, -1)
     elif policy['kind'] == 'explore':
         # host 每条真实轨迹/帧传入独立 seed；固定六槽，不产生动态 nonzero。
-        legal_order = torch.argsort(~valid, stable=True)
+        # CUDA 不支持 bool 排序；0/1 整数键保持合法槽在前及原槽稳定顺序。
+        legal_order = torch.argsort((~valid).to(torch.int64), stable=True)
         count = valid.sum(1)
         offsets = (policy['action_seed'] + rows * 2654435761) % count.clamp_min(1)
         chosen = legal_order.gather(1, offsets[:, None]).squeeze(1).masked_fill(count == 0, -1)
