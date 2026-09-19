@@ -1,4 +1,24 @@
-# CT-SeqTrack 当前状态（2026-09-15）
+# CT-SeqTrack 当前状态（2026-09-17）
+
+新增[模块传播与参数审阅](artifacts/ct_checks/reports/20260917_v30_coupling_hparams/REPORT.md)：训练机制流epoch60实际动作CfC1390/GRU1371（各4777端点），验证无策略所以动作0。B1获取/sigma各自context.detach；跨真实帧无BPTT，B0内部粗框到decoder仍可微。已失跟且合法565行中549行所有动作ΔS/ΔP为0，需研究可恢复动作/未来收益，不能只改lr或去detach。实际最后20轮lr=1e-6，checkpoint1e-7是下一轮准备值。当前无源码或配置变更；独立插件调度、B1获取反馈等均为后续新版本候选。
+
+## 最新四组结果
+
+[完整分析与表格](artifacts/ct_checks/reports/20260917_v30_mini_four_arm/REPORT.md)：四组60轮完成，final60均S=40.473742/P=47.840262。
+
+- [x] B0 false/true、Full-CfC/GRU实际60轮训练；各75720次B0更新，两Full插件各18000次。
+- [x] 四组B0最终320个state张量、84个BN缓冲、236个参数Adam状态及全部观测loss一致，重算数值真实CUDA等价。
+- [x] 修复后的显存抽样峰值已整理；false约6.66GiB、true约4.82GiB，主配置继续false。
+- [x] 真GRU从服务器只读取回；原本地195151目录内是旧v29 full，未混入本轮。
+- [x] [真实输入+epoch60前向定位](artifacts/ct_checks/reports/20260917_v30_root_cause/REPORT.md)：轨迹14原始motion5.62m/p=.989导致coarse5.56m及final误差6.29m；仅置零raw后误差0.059m。轨迹14/15的XY真值均静止。
+- [x] v28同原始帧前向对照：≤2点清零使mask全空，最终保持anchor；v30实际mask=[1024,0,0,0]。两轨迹共54帧贡献净Success下降31.11%，并非单项改动因果占比。
+- [x] 真实loss探针证明static软门补偿方向；轨迹14实际p高，因此该数学退化不等于首帧直接原因。仅1有效槽替代1024重复槽不改变这两例eval输出。
+- [ ] 两Full每个060/058/059权重独立策略拟合及官方mini_val闭环；当前动作0、只评B0回退。
+- [ ] B0独立058/059/060评测；late-3尚缺，不用50/55替代。
+- [ ] 按[修复设计审阅](artifacts/ct_checks/reports/20260917_v30_root_cause/objective_diff/recommendations.md)建立新B0对照：全行物理motion监督与分类门分工优先，roll-in供给/BC与residual decoder分别研究；本轮未修改源码或重训。
+- [ ] 达到mini S/P双升后再做模块消融、full/KITTI Car及其余类别。
+
+仅整理与研究，服务器只读，未改训练代码/配置或启动后处理。以下9月15日条目保留原始实施记录，完成状态由本节覆盖。
 
 最新预算取舍：用户接受约+5GB，三臂默认`ct_b0_masked_bn_recompute:false`，保留有效BN直接计算、
 mask拷贝优化及native分配器。true为可选低显存执行方式。依据见[预算说明](docs/CTSEQTRACK_V30_MEMORY_TRADEOFF.md)。

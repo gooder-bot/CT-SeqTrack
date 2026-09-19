@@ -1,5 +1,9 @@
 # v30 mini：两组 Full 与 B0 有效BN反向重算对照（2026-09-15）
 
+2026-09-17：本页四组已完成训练，见[结果分析](../artifacts/ct_checks/reports/20260917_v30_mini_four_arm/REPORT.md)。
+下方命令仅训练，不自动拟合Full策略；后处理见[补校准与评测脚本](../artifacts/ct_checks/reports/20260917_v30_mini_four_arm/mechanism/fit_and_eval_full.sh)。
+当前尚无校准后Full闭环分数，不能用训练验证中回退B0的同分选择时间后端。
+
 本页替代此前 GPU0 B0 / GPU1 GRU / GPU2 CfC 的三任务安排。
 这里的 Full 指完整模型；四个任务都使用 **nuScenes-mini / Car**。
 仅本地补充配置及命令，没有同步或启动服务器任务。
@@ -150,4 +154,3 @@ Full每个checkpoint训练后独立拟合并评测策略，训练过程中的未
 本轮配置合同测试52 passed；两份B0解析差异与四组CLI参数已核对。
 此前两执行路径的定向数值回归为102 passed/2 skipped（CUDA），详见[显存预算说明](CTSEQTRACK_V30_MEMORY_TRADEOFF.md)。
 配置检查允许按本页启动；修复后的GPU峰值、耗时及闭环S/P仍由这次服务器实跑取得。
-
