@@ -1,0 +1,4 @@
+_base_: 31_formal_base.yaml
+experiment_name: ct31_full_cfc_mini_car_scratch_seed42
+v31_arm: full
+v31_temporal_backend: cfc

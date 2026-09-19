@@ -12,6 +12,7 @@ from models.ct_v31.losses import box_loss, oriented_iou_labels, quality_targets
 from models.ct_v31.model import JointTracker, select_hypothesis
 from models.ct_v31.observation import box_corners_xyz
 from models.ct_v31.prior import PhysicalTimePrior
+from models.ct_v2.cfc import FullGatedCfCCell
 
 
 @pytest.fixture(autouse=True)
@@ -59,15 +60,17 @@ def make_batch(batch_size=2, point_count=16):
     return batch
 
 
-def model_config(arm='full'):
-    return {'v31_arm': arm, 'ct_engineering_check': True, 'point_sample_size': 16,
+def model_config(arm='full', backend='cfc'):
+    return {'v31_arm': arm, 'v31_temporal_backend': backend,
+            'ct_engineering_check': True, 'point_sample_size': 16,
             'workers': 0, 'batch_size': 2, 'epoch': 2}
 
 
-@pytest.mark.parametrize('arm', ['b0', 'b1', 'b1_b2', 'full'])
-def test_complete_forward_backward_and_optimizer(arm):
+@pytest.mark.parametrize('arm,backend', [('b0', 'cfc'), ('b1', 'cfc'),
+                                        ('b1_b2', 'cfc'), ('full', 'cfc'), ('full', 'gru')])
+def test_complete_forward_backward_and_optimizer(arm, backend):
     torch.manual_seed(11)
-    model = JointTracker(model_config(arm)).train()
+    model = JointTracker(model_config(arm, backend)).train()
     batch = make_batch()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     prior_calls = []
@@ -88,22 +91,24 @@ def test_complete_forward_backward_and_optimizer(arm):
         assert torch.equal(output.selected_index, torch.zeros(2, dtype=torch.long))
 
 
-def test_sigma_cannot_update_mean_or_temporal_features():
-    prior = PhysicalTimePrior()
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_sigma_cannot_update_mean_or_temporal_features(backend):
+    prior = PhysicalTimePrior(temporal_backend=backend)
     out = prior(make_batch())
     out.log_sigma.sum().backward()
     assert prior.sigma_head.bias.grad is not None
     assert prior.mean_head.weight.grad is None
-    assert all(p.grad is None for p in prior.cfc.parameters())
+    assert all(p.grad is None for p in prior.temporal_cell.parameters())
 
 
-def test_acquisition_gradient_reaches_cfc_after_adapter_initialization():
-    prior = PhysicalTimePrior()
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_acquisition_gradient_reaches_temporal_cell_after_adapter_initialization(backend):
+    prior = PhysicalTimePrior(temporal_backend=backend)
     with torch.no_grad():
         prior.acquisition_head[-1].weight.fill_(.01)
     out = prior(make_batch())
     out.acquisition_fraction.sum().backward()
-    assert sum(p.grad.abs().sum() for p in prior.cfc.parameters() if p.grad is not None) > 0
+    assert sum(p.grad.abs().sum() for p in prior.temporal_cell.parameters() if p.grad is not None) > 0
 
 
 def test_pair_mask_excludes_relocalization_without_disabling_acquisition():
@@ -196,3 +201,125 @@ def test_config_rejects_legacy_keys_and_resume_identity_changes():
         normalize_config({'init_checkpoint': 'old.ckpt'})
     assert config_identity({'path': 'a'}) == config_identity({'path': 'b'})
     assert config_identity({'v31_arm': 'full'}) != config_identity({'v31_arm': 'b0'})
+    assert config_identity({'v31_temporal_backend': 'cfc'}) != config_identity({'v31_temporal_backend': 'gru'})
+
+
+def test_three_arms_have_real_temporal_backends_and_fair_common_initialization():
+    torch.manual_seed(42)
+    b0 = JointTracker(model_config('b0'))
+    torch.manual_seed(42)
+    cfc = JointTracker(model_config('full', 'cfc'))
+    cfc_rng = torch.random.get_rng_state()
+    torch.manual_seed(42)
+    gru = JointTracker(model_config('full', 'gru'))
+    gru_rng = torch.random.get_rng_state()
+    assert b0.prior is None and b0.evidence is None
+    assert isinstance(cfc.prior.temporal_cell, FullGatedCfCCell)
+    assert isinstance(gru.prior.temporal_cell, torch.nn.GRUCell)
+    assert cfc.enable_b3 and gru.enable_b3
+    assert torch.equal(cfc_rng, gru_rng)
+    cfc_state, gru_state = cfc.state_dict(), gru.state_dict()
+    common = [key for key in cfc_state if not key.startswith('prior.temporal_cell.')]
+    assert set(common) == {key for key in gru_state if not key.startswith('prior.temporal_cell.')}
+    assert all(torch.equal(cfc_state[key], gru_state[key]) for key in common)
+    for name in ('observation', 'decoder'):
+        expected = getattr(b0, name).state_dict()
+        actual = getattr(cfc, name).state_dict()
+        assert all(torch.equal(actual[key], value) for key, value in expected.items())
+    # 初始 zero residual heads 可以给相同位移，但时序编码必须真有不同。
+    batch = make_batch(1)
+    cfc_feature = cfc.prior(batch).feature
+    gru_feature = gru.prior(batch).feature
+    assert cfc_feature.shape == gru_feature.shape == (1, 128)
+    assert not torch.allclose(cfc_feature, gru_feature)
+
+
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_same_time_conditioning_reaches_both_temporal_backends(backend):
+    batch = make_batch(1)
+    prior = PhysicalTimePrior(temporal_backend=backend)
+    before = prior(batch)
+    retimed = dict(batch, history_times=batch['history_times'] * 2., current_dt=batch['current_dt'] * 2.)
+    after = prior(retimed)
+    assert before.valid.all() and after.valid.all()
+    assert not torch.allclose(before.feature, after.feature)
+    # 等比例拉伸时间不改变恒速轨迹外推的物理距离。
+    torch.testing.assert_close(before.kinematic_xy, after.kinematic_xy)
+
+
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_full_selects_learned_mode_without_any_calibration_artifact(backend):
+    torch.manual_seed(7)
+    model = JointTracker(model_config('full', backend)).eval()
+    batch = make_batch(1)
+    with torch.no_grad():
+        initial = model(batch)
+        available = torch.where(initial.hypothesis_valid[0, 1:])[0]
+        assert available.numel() > 0
+        index = int(available[0]) + 1
+        difference = initial.decoder.decoder_features[0, index] - initial.decoder.decoder_features[0, 0]
+        assert difference.square().sum() > 0
+        # 用实际 quality head 的参数构造 mode>q0，不替换 model/selector。
+        model.decoder.quality_head.weight.copy_(difference[None])
+        model.decoder.quality_head.bias.zero_()
+        selected = model(batch)
+    assert selected.selected_index.item() > 0
+    torch.testing.assert_close(selected.accepted_box, selected.hypothesis_boxes[:, selected.selected_index.item()])
+    assert not torch.allclose(selected.accepted_box, selected.hypothesis_boxes[:, 0])
+
+
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_no_motion_pair_still_allows_context_to_learn_from_localization(backend):
+    model = JointTracker(model_config('full', backend)).eval()
+    batch = make_batch(1)
+    batch['history_pair_valid'].zero_()
+    with torch.no_grad():
+        torch.nn.init.normal_(model.decoder.prior_adapter[-1].weight, std=.03)
+        torch.nn.init.normal_(model.decoder.pose_head.weight, std=.03)
+    output = model(batch)
+    assert not output.prior.valid.any()
+    assert output.prior.context_valid.all()
+    loss = box_loss(output.hypothesis_boxes[:, 0], batch['target_box'], torch.tensor([True]))
+    loss.backward()
+    assert model.prior.context[0].weight.grad is not None
+    assert model.prior.context[0].weight.grad.abs().sum() > 0
+    # 缺速度对不能伪造可训练的物理均值/方差或历史 transition。
+    assert model.prior.mean_head.weight.grad is None
+    assert model.prior.sigma_head.weight.grad is None
+    assert all(p.grad is None or torch.count_nonzero(p.grad) == 0 for p in model.prior.temporal_cell.parameters())
+
+
+def test_missing_history_is_masked_consistently_for_features_prior_and_losses():
+    from models.ct_v31.model import canonicalize_batch
+    batch = make_batch(1)
+    batch['history_valid'][:, :2] = False
+    batch['points'][:, :2] = float('nan')
+    prepared = canonicalize_batch(batch)
+    assert not prepared['point_valid'][:, :2].any()
+    assert torch.count_nonzero(prepared['points'][:, :2]) == 0
+    assert prepared['point_valid'][:, 2:].all()
+
+
+def test_unknown_temporal_backend_is_rejected():
+    with pytest.raises(ValueError, match='temporal_backend'):
+        PhysicalTimePrior(temporal_backend='lstm')
+
+
+@pytest.mark.parametrize('backend', ['cfc', 'gru'])
+def test_zero_initialized_prior_heads_train_the_cell_on_second_optimizer_step(backend):
+    torch.manual_seed(9)
+    prior = PhysicalTimePrior(temporal_backend=backend).train()
+    optimizer = torch.optim.Adam(prior.parameters(), lr=1e-3)
+    batch = make_batch()
+    for step in range(2):
+        optimizer.zero_grad(set_to_none=True)
+        output = prior(batch)
+        loss = ((output.mean_xy - batch['physical_displacement']).square().mean()
+                + (output.acquisition_fraction - batch['acquisition_target']).square().mean())
+        loss.backward()
+        gradients = [parameter.grad for parameter in prior.temporal_cell.parameters()
+                     if parameter.grad is not None]
+        assert gradients and all(torch.isfinite(value).all() for value in gradients)
+        if step == 1:
+            assert sum(value.abs().sum() for value in gradients) > 0
+        optimizer.step()

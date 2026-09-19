@@ -6,7 +6,7 @@ raw ID 只在同一原始帧内有意义。padding 的 ID=-1、valid=False。
 """
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 from torch import Tensor
@@ -26,6 +26,7 @@ class PriorContext:
     envelope: Tensor                # [B,2]
     unit_residual: Tensor           # [B,2]
     box: Tensor                     # [B,4] detached 物理端点/可信速度 fallback
+    context_valid: Optional[Tensor] = None  # [B] 时序表示存在；独立于速度对有效性
 
     def geometry(self) -> Dict[str, Tensor]:
         """仅供离散获取；原始 feature 的计算图仍由 PriorContext 持有。"""

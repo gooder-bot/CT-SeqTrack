@@ -1,5 +1,14 @@
 # CT-SeqTrack 正式工具面
 
+## v31 当前工具协议（2026-09-19）
+
+- `main.py --cfg cfgs/ct_seqtrack/31_{b0,full_cfc,full_gru}_mini.yaml`：独立v31训练路径，默认60轮后自动评测58/59/60。
+- `main.py --cfg 同臂31配置 --checkpoint 路径 --test`：直接闭环评测，不调用旧动作导出或标定。
+- 工程小步仍走 `main.py`，需显式 `--ct_engineering_check`，输出位于 `artifacts/ct_checks/`，工程checkpoint不能正式初始化。
+- 三组正式启动与tail见 [运行说明](CTSEQTRACK_V31_MINI_LAUNCH.md)。本轮仅在本地修改；服务器操作严格只读。
+
+旧 `check_train_steps.py`、`calibrate_ct_actions.py`、v30汇总工具不作为v31入口；未知CLI明确报错，不能静默忽略。以下旧工具仍保留复现。
+
 ## v30 当前工具协议（2026-09-15）
 
 训练/评测唯一入口仍为`main.py`；新增`cfgs/ct_seqtrack/30_*`，不改历史正式YAML。

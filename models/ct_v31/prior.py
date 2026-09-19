@@ -45,15 +45,22 @@ def acquisition_features(batch, pair_valid, time_scale):
 
 
 class PhysicalTimePrior(nn.Module):
-    """沿用 CfC/运动学包络，显式支持独立 transition mask。"""
+    """共用物理时间输入和目标，仅替换 CfC/GRU 时序单元。"""
 
-    def __init__(self, time_scale=.5):
+    def __init__(self, time_scale=.5, temporal_backend='cfc'):
         super().__init__()
         if time_scale <= 0:
             raise ValueError('time_scale must be positive')
+        if temporal_backend not in ('cfc', 'gru'):
+            raise ValueError('v31 temporal_backend must be cfc or gru')
         self.time_scale = float(time_scale)
+        self.temporal_backend = str(temporal_backend)
         self.step_projection = nn.Sequential(nn.Linear(9, 64), nn.LayerNorm(64), nn.ReLU())
-        self.cfc = FullGatedCfCCell(input_size=64, hidden_size=128, backbone_units=105)
+        # 两种 cell 参数量不同；构造时只恢复 CPU RNG，避免改变公共 heads/B2
+        # 初始化，也避免为创建普通 CPU 模块而触发 CUDA 设备初始化。
+        with torch.random.fork_rng(devices=[]):
+            self.temporal_cell = (FullGatedCfCCell(input_size=64, hidden_size=128, backbone_units=105)
+                                  if self.temporal_backend == 'cfc' else nn.GRUCell(64, 128))
         self.context = nn.Sequential(nn.Linear(130, 128), nn.ReLU())
         self.mean_head = nn.Linear(128, 2)
         self.sigma_head = nn.Linear(128, 2)
@@ -96,7 +103,10 @@ class PhysicalTimePrior(nn.Module):
         projected = self.step_projection(steps * pair_valid[..., None])
         hidden = boxes.new_zeros((boxes.shape[0], 128))
         for index in range(2):
-            proposed = self.cfc(projected[:, index], hidden, gap[:, index] / self.time_scale)
+            # GRU 同样读取含 log(gap)、dt/gap 的公共 64d step；仅 CfC
+            # 还在其定义的连续时间 gate 中直接使用 elapsed time。
+            proposed = (self.temporal_cell(projected[:, index], hidden, gap[:, index] / self.time_scale)
+                        if self.temporal_backend == 'cfc' else self.temporal_cell(projected[:, index], hidden))
             hidden = torch.where(pair_valid[:, index, None], proposed, hidden)
         count = pair_valid.sum(1)
         nominal_gap = (gap * pair_valid).sum(1) / count.clamp_min(1)
@@ -129,7 +139,8 @@ class PhysicalTimePrior(nn.Module):
         endpoint = torch.cat((mean.detach(), fallback[:, 2:]), -1)
         endpoint = torch.where(valid[:, None], endpoint, fallback)
         return PriorContext(context, mean, uncertainty['log_sigma_parallel_perp'], valid,
-                            fraction, direction, kinematic, envelope, unit, endpoint)
+                            fraction, direction, kinematic, envelope, unit, endpoint,
+                            context_valid=torch.ones_like(valid))
 
 
 def empty_prior(batch):
@@ -142,4 +153,5 @@ def empty_prior(batch):
     return PriorContext(boxes.new_zeros((b, 128)), zeros, zeros,
                         torch.zeros(b, dtype=torch.bool, device=boxes.device),
                         zeros, direction, zeros, zeros, zeros,
-                        batch['fallback_box'].to(boxes).detach())
+                        batch['fallback_box'].to(boxes).detach(),
+                        context_valid=torch.zeros(b, dtype=torch.bool, device=boxes.device))

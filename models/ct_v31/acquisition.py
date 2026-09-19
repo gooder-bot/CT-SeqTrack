@@ -51,7 +51,9 @@ def build_dual_support(*, b0_box, box_size, prior_center, recovery_center, u,
     local_half = np.r_[(upper - lower) * .5 + [.25, .25] + fraction * [3.75, 2.75],
                        (z_upper - z_lower) * .5]
     local_center = np.r_[b0[:2] + midpoint @ local_rotation.T, (z_lower + z_upper) * .5]
-    recovery_half_xy = np.abs(_rotation(recover_yaw).T @ box_rotation) @ (size[:2] * .5)
+    # R 的 core 是可信传播终点框，recovery_yaw 同时定义其物体轴。
+    # 不能再用漂移 B0 的 yaw 投影，否则 R 的尺寸会随不可信框旋转。
+    recovery_half_xy = size[:2] * .5
     recovery_half = np.r_[recovery_half_xy + [4., 3.] + fraction * [8., 5.],
                           size[2] * .5 + z_margin]
     return {"local": {"center": local_center, "half": local_half, "yaw": local_yaw},
@@ -157,7 +159,8 @@ def acquire_extension(cloud_points, raw_ids, *, b0_raw_ids, anchor, b0_box, box_
         anchor_xyz = np.asarray(anchor, dtype=np.float64).reshape(-1)
         if len(anchor_xyz) not in (3, 4):
             raise ValueError("anchor must be world XYZ or world XYZ/yaw")
-        out_points[:count, :3] -= _vector(anchor_xyz[:3], 3, "anchor").astype(np.float32)
+        # 世界坐标先以 float64 平移再落 float32，避免大地图坐标相减丢精度。
+        out_points[:count, :3] = points[selected, :3] - _vector(anchor_xyz[:3], 3, "anchor")
         out_points[:count, 3:] = np.nan_to_num(out_points[:count, 3:])
         out_ids[:count], out_partition[:count], valid[:count] = ids[selected], partitions, True
     return dict(extension_points=out_points, extension_ids=out_ids, extension_valid=valid,

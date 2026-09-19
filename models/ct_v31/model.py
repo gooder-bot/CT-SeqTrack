@@ -20,7 +20,9 @@ def canonicalize_batch(batch):
     points = batch['points']
     if points.ndim != 4 or points.shape[1] != 4 or points.shape[-1] != 5:
         raise ValueError('v31 points must be [B,4,N,5]')
-    valid = unique_valid_mask(batch['point_valid'], batch.get('point_ids'))
+    # 历史不存在时其点槽也不存在；先合并存在性再去重，使 B0/B1/损失
+    # 使用同一真实测量集合，而非仅由 observation 在内部额外过滤。
+    valid = B0Observation.measurement_mask(batch)
     if valid.shape != points.shape[:-1]:
         raise ValueError('point_valid must align with points')
     if not bool(torch.isfinite(points.masked_select(valid[..., None].expand_as(points))).all()):
@@ -60,7 +62,8 @@ class JointTracker(nn.Module):
         # 公共模块首先构造，启用 B1/B2 不消耗公共初始化之前的 RNG。
         self.observation = B0Observation(token_count=128)
         self.decoder = SharedHypothesisDecoder(prior_dim=128, dropout=.2)
-        self.prior = PhysicalTimePrior(self.config.time_scale) if self.enable_b1 else None
+        self.prior = (PhysicalTimePrior(self.config.time_scale, self.config.v31_temporal_backend)
+                      if self.enable_b1 else None)
         self.evidence = B2IdentityEvidence() if self.enable_b2 else None
 
     def plan_prior(self, batch):

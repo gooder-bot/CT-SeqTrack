@@ -1,5 +1,19 @@
 # CT-SeqTrack 当前状态（2026-09-17）
 
+## 活动版本 v31（2026-09-19，本节覆盖下方旧排程）
+
+- [x] 独立联合模型路径、严格配置入口、B0/Full-CfC/Full-GRU三份mini配置；主训练参数统一。
+- [x] 补齐粗框sin/cos、时序context与速度对语义、真实GRU、恢复域几何、CUDA已知排序/attention兼容点；无旧标定回退。
+- [x] 本地合同测试与Lightning2.0.2完整训练/评测、epoch边界恢复集成；工程权重不用于正式初始化。
+- [x] 服务器只读确认Python3.9/Torch2.0.1/PL2.0.2、mini数据、GPU0/1 A40；读取真实mini一行raw→prior→acquisition接口通过（106轨迹/2285帧）。
+- [ ] 用户上传本轮本地文件；服务器尚为本轮补齐前的HEAD=1c078a7。
+- [ ] 新v31真实CUDA训练约100步/峰值显存与三臂60轮；本次未启动服务器任务。
+- [ ] final60与58–60 late3、获取/目标模式/错误写入/失跟恢复/成本；验证Full超过新版B0及历史mini参照。
+- [ ] mini达标后nuScenes full/KITTI及固定模块、真实时间消融；当前尚无v31涨分结论。
+
+启动分配B0→GPU1、Full-CfC/Full-GRU→GPU0；分别后台运行与tail命令见 [v31说明](docs/CTSEQTRACK_V31_MINI_LAUNCH.md)。
+不再执行旧版“共享B0必须逐位一致/Full先拟合策略”作为v31前置条件。以下内容保留历史。
+
 新增[模块传播与参数审阅](artifacts/ct_checks/reports/20260917_v30_coupling_hparams/REPORT.md)：训练机制流epoch60实际动作CfC1390/GRU1371（各4777端点），验证无策略所以动作0。B1获取/sigma各自context.detach；跨真实帧无BPTT，B0内部粗框到decoder仍可微。已失跟且合法565行中549行所有动作ΔS/ΔP为0，需研究可恢复动作/未来收益，不能只改lr或去detach。实际最后20轮lr=1e-6，checkpoint1e-7是下一轮准备值。当前无源码或配置变更；独立插件调度、B1获取反馈等均为后续新版本候选。
 
 ## 最新四组结果

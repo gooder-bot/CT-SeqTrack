@@ -1,5 +1,13 @@
 # CT-SeqTrack 当前工作提醒（2026-09-17）
 
+## 活动版本更新：v31（2026-09-19）
+
+用户最新授权：服务器 `lishengjie@10.109.253.86` **仅只读**；可修改本地，不得自行上传/安装/启动训练/停止进程。项目路径 `/home/lishengjie/study/lcyu/CT-SeqTrack`。
+`main.py` 根据31配置分流到 `models/ct_v31/entry.py`，独立host为 `models/ctseqtrackv31.py`。本次三臂是31_b0_mini、31_full_cfc_mini、31_full_gru_mini；物理GPU分别1/0/0，单进程一张卡。
+用户已批准同帧联合训练，跨臂B0不再要求逐位相同；sigma/离散几何/GT/跨帧detach保留。Full直接四假设质量选择，不调用旧校准。v31需继承自己的base，不混用旧formal字段、工具或checkpoint。
+正式预算60轮/batch16/workers4/seed42/FP32，Adam(.5,.999)/eps1e-6/lr1e-4，StepLR20轮×.1，每5轮验证，final60及late3=58–60自动评测；不使用旧preloading。
+当前只有本地测试与服务器环境只读核验，真实GPU训练/显存/涨分仍未验证。详见 `docs/CTSEQTRACK_V31_MINI_LAUNCH.md`。下面旧v30状态不能覆盖本节；历史output和旧版本复现入口保留。
+
 ## 最新：四组同分与B0根因已经实际前向定位
 
 先读[根因报告](artifacts/ct_checks/reports/20260917_v30_root_cause/REPORT.md)。四组独立进程，但确定性B0初始化/观测/更新隔离相同，未校准Full提交B0所以同分；当前为单Adam不相交参数组，不是四个手动optimizer。

@@ -133,16 +133,18 @@ class SharedHypothesisDecoder(nn.Module):
         valid = prior.valid.detach().to(effective_coarse.device).bool().reshape(batch)
         if prior.feature.shape != (batch, self.prior_dim):
             raise ValueError("prior.feature has the wrong width")
-        feature = _masked_source(prior.feature, valid, 'prior')
+        context_valid = (valid if prior.context_valid is None else
+                         prior.context_valid.detach().to(effective_coarse.device).bool().reshape(batch))
+        feature = _masked_source(prior.feature, context_valid, 'prior')
         scale = torch.linalg.vector_norm(size[:, :2], dim=-1, keepdim=True).clamp_min(1e-6)
-        delta = (prior.mean_xy.detach() - effective_coarse[:, :2].detach()) / scale
+        delta = (prior.box[:, :2].detach() - effective_coarse[:, :2].detach()) / scale
         gap = (times[:, -1] - times[:, -2]).abs().clamp_min(1e-6)
         summary = torch.cat((delta, prior.log_sigma.detach(), prior.direction_xy.detach(),
                              torch.log1p(gap)[:, None], valid[:, None].to(feature),
                              observation.quality.detach()), dim=-1)
         summary = torch.nan_to_num(summary, nan=0., posinf=0., neginf=0.).detach()
         adapter = self.prior_adapter(torch.cat((feature, summary), dim=-1))
-        return torch.where(valid[:, None], adapter, 0.)
+        return torch.where(context_valid[:, None], adapter, 0.)
 
     def forward(self, observation: ObservationFeatures, evidence: EvidenceHypotheses,
                 batch: Mapping[str, Tensor], prior: PriorContext) -> DecoderOutput:

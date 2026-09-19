@@ -163,7 +163,11 @@ class B0Observation(nn.Module):
         # 四个可观测质量量是真实输入摘要；没有 moving 分类器或概率位姿乘法。
         self.coarse_box_head = nn.Sequential(
             nn.Linear(260, 128), nn.BatchNorm1d(128), nn.ReLU(),
-            nn.Linear(128, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Linear(128, 4))
+            nn.Linear(128, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Linear(128, 5))
+        # XYZ + sin/cos；初始化 yaw=0，消除零向量 atan2 和仅 sin 的角度歧义。
+        with torch.no_grad():
+            self.coarse_box_head[-1].weight[3:].zero_()
+            self.coarse_box_head[-1].bias[3:].copy_(torch.tensor([0., 1.]))
         for layer in self.modules():
             if isinstance(layer, nn.BatchNorm1d):
                 layer.ct_b0_masked_bn_recompute = bool(masked_bn_recompute)
@@ -229,6 +233,10 @@ class B0Observation(nn.Module):
             entropy / math.log(2.), history_valid.to(points.dtype).mean(-1)), dim=-1)
         coarse, _ = masked_sequence(self.coarse_box_head,
             torch.cat((pooled, quality), dim=-1), flat_valid.any(-1))
+        nonzero = coarse[:, 3].square() + coarse[:, 4].square() > 1e-12
+        yaw = torch.atan2(torch.where(nonzero, coarse[:, 3], 0.),
+                          torch.where(nonzero, coarse[:, 4], 1.))
+        coarse = torch.cat((coarse[:, :3], yaw[:, None]), dim=-1)
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
             valid.reshape(batch_size * frames, count))

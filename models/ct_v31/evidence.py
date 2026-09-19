@@ -36,7 +36,7 @@ def select_evidence_points(points, identity_logits, valid, point_ids, partition)
     indices = torch.arange(count, device=points.device)[None]
     xyz = torch.nan_to_num(points[..., :2].detach())
     score = identity_logits.detach()
-    # 整数算子与 stable 排序可在 strict deterministic CUDA 下执行。
+    # 排序键均为 int64/float；不能对 bool 排序。CUDA 仍须真实环境验收。
     hashed = ((point_ids ^ (point_ids >> 16)) * 1103515245 + 12345).remainder(2147483647)
     outputs = []
     already = torch.zeros_like(good)
@@ -79,7 +79,7 @@ def select_evidence_points(points, identity_logits, valid, point_ids, partition)
     spare = order.gather(1, torch.argsort(score.masked_fill(~spare_good, -torch.inf).gather(1, order),
                                         descending=True, stable=True))
     holes = selected < 0
-    position = holes.long().cumsum(1) - 1
+    position = holes.long().cumsum(1, dtype=torch.int64) - 1
     replacement = spare.gather(1, position.clamp(0, count - 1))
     can_borrow = holes & (position < spare_good.sum(1, keepdim=True))
     return torch.where(can_borrow, replacement, selected)
@@ -123,6 +123,8 @@ def _mode_members(votes, weights, valid, point_ids):
 
 def build_live_modes(votes, weights, valid, point_ids):
     """返回 live XYZ center，detached 成员/XY covariance，三个固定槽。"""
+    valid = (valid.bool() & torch.isfinite(votes).all(-1) & torch.isfinite(weights)
+             & (weights > 0) & (point_ids >= 0))
     members, huber, mode_valid = _mode_members(votes, weights, valid, point_ids)
     clean_votes = torch.where(valid[..., None], votes, torch.zeros_like(votes))
     clean_weights = torch.where(valid, weights, torch.zeros_like(weights))
@@ -206,7 +208,11 @@ class B2IdentityEvidence(nn.Module):
         zero = key.new_zeros((len(key), 1, key.shape[-1]))
         key = torch.cat((key, zero), 1)
         valid = torch.cat((valid, torch.ones(len(key), 1, dtype=torch.bool, device=key.device)), 1)
-        return module(query, key, key, key_padding_mask=~valid, need_weights=False)[0]
+        # torch 2.0.1 的 need_weights=False 可隐式进入 memory-efficient SDPA，
+        # 其 CUDA backward 可能与 strict deterministic 冲突。显式普通 MHA
+        # 保留原 Q/K/V 参数与数学语义，不修改全局确定性设置。
+        return module(query, key, key, key_padding_mask=~valid,
+                      need_weights=True, average_attn_weights=False)[0]
 
     def forward(self, observation, batch, prior=None):
         points = batch["extension_points"]

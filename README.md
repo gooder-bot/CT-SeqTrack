@@ -1,5 +1,12 @@
 # CT-SeqTrack
 
+## 当前轮次：v31（2026-09-19）
+
+活动路径改为 `models/ct_v31/` 的联合模型：B0 当前定位、B1 连续时间先验、B2 身份观测、共享四假设定位头。取消跨臂 B0 逐位一致要求，取消旧策略标定依赖。
+本轮按用户要求登记 **B0 / Full-CfC / Full-GRU**，GPU 分配 **1 / 0 / 0**。统一 mini Car、seed42、scratch60、batch16、workers4、FP32、每5轮验证；训练后自动评测58–60。
+
+本地入口、配置和接口已补齐；服务器仅只读核对，尚未同步本轮文件、未运行真实CUDA训练或正式实验。上传清单及分别启动/tail命令见 [v31 mini运行说明](docs/CTSEQTRACK_V31_MINI_LAUNCH.md)。下面 v30 及更早内容是历史记录。
+
 2026-09-17模块与参数补充：[前向链路、梯度所有权和学习率审阅](artifacts/ct_checks/reports/20260917_v30_coupling_hparams/REPORT.md)。
 Full插件实际参与机制训练状态，正式验证因缺策略未提交修正；B1获取loss仅更新获取头，不能回传CfC/GRU。
 约0.75m动作下，已失跟且合法的565行中549行全部动作即时ΔS/ΔP为0；学习率1e-4及StepLR实际与SeqTrack一致，优先查目标/动作耦合，尚无最优参数结论。

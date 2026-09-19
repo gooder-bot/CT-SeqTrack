@@ -18,9 +18,9 @@ from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payl
 
 
 class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
-    def __init__(self, config=None, *, tracker=None, loaders=None, **kwargs):
+    def __init__(self, config=None, *, tracker=None, loaders=None):
         super().__init__()
-        self.config = normalize_config(config or kwargs)
+        self.config = normalize_config(config)
         if tracker is None:
             from models.ct_v31.model import JointTracker
             tracker = JointTracker(self.config)
@@ -88,7 +88,8 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
         if not parameters or len({id(p) for p in parameters}) != len(parameters):
             raise RuntimeError('v31 optimizer requires unique trainable parameters')
-        optimizer = torch.optim.Adam(parameters, lr=self.config.lr, weight_decay=self.config.wd)
+        optimizer = torch.optim.Adam(parameters, lr=self.config.lr, weight_decay=self.config.wd,
+                                     betas=(.5, .999), eps=1e-6, foreach=False, fused=False)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, self.config.lr_decay_step,
                                                    gamma=self.config.lr_decay_rate)
         return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='epoch'))
@@ -110,7 +111,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             self._pending_rng = None
         if self._resume_sampler is not None:
             current = self._loaders['train'].batch_sampler.state_dict()
-            for key in ('lengths', 'seed', 'batch_size', 'short_window', 'long_window', 'curriculum_epochs'):
+            for key in ('lengths', 'source_sha256', 'seed', 'batch_size', 'short_window', 'long_window', 'curriculum_epochs'):
                 if current[key] != self._resume_sampler[key]:
                     raise ValueError('v31 resume dataset/window manifest mismatch: ' + key)
             self._resume_sampler = None
@@ -149,20 +150,22 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         self.log('train/endpoint_rows', float(self._epoch_rows), on_step=False, on_epoch=True)
         self.log('train/adam_steps', float(self._epoch_steps), on_step=False, on_epoch=True)
 
-    def _evaluation_start(self):
+    def _evaluation_start(self, role):
         self.evaluation_builder.reset()
         self.evaluation = TrackingEvaluation()
+        if role in self._loaders:
+            self.evaluation.add_singleton_tracks(self._loaders[role].dataset)
 
     def on_validation_epoch_start(self):
-        self._evaluation_start()
+        self._evaluation_start('val')
 
     def on_test_epoch_start(self):
-        self._evaluation_start()
+        self._evaluation_start('test')
 
     def _evaluation_step(self, rows):
         batch, output = self._forward_raw(rows, self.evaluation_builder, training=False)
-        self.evaluation.add_batch(rows, batch, output)
-        self.evaluation_builder.commit(output, batch)
+        committed = self.evaluation_builder.commit(output, batch, diagnostics=True)
+        self.evaluation.add_batch(rows, batch, output, committed)
 
     def validation_step(self, rows, batch_idx):
         self._evaluation_step(rows)
@@ -172,8 +175,17 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def _evaluation_end(self, role):
         self.evaluation_results = self.evaluation.summary()
+        if role in self._loaders:
+            expected = self._loaders[role].batch_sampler.endpoint_count
+            complete = self.evaluation_results['prediction_frames'] == expected
+            self.evaluation_results['complete_coverage'] = complete
+            if not complete and not self.config.ct_engineering_check:
+                raise RuntimeError('v31 evaluation did not consume every prediction endpoint')
         self.log('success/' + role, self.evaluation_results['success'])
         self.log('precision/' + role, self.evaluation_results['precision'])
+        for key, value in self.evaluation_results['diagnostics'].items():
+            if value is not None:
+                self.log('diagnostic/' + role + '/' + key, float(value))
 
     def on_validation_epoch_end(self):
         self._evaluation_end('val')

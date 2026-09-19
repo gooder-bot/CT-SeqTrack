@@ -104,6 +104,18 @@ def test_history_bc_is_causal_and_current_bc_is_zero():
     torch.testing.assert_close(point_input[:, :3, :, 5], expected_center_distance)
 
 
+@pytest.mark.parametrize('angle', [0., .7, math.pi - 1e-4, -math.pi + 1e-4])
+def test_coarse_yaw_uses_both_sine_and_cosine(angle):
+    model = B0Observation(token_count=4).eval()
+    with torch.no_grad():
+        model.coarse_box_head[-1].weight.zero_()
+        model.coarse_box_head[-1].bias[3:].copy_(torch.tensor([math.sin(angle), math.cos(angle)]))
+    prediction = model(_batch(1)).coarse_box[0, 3]
+    torch.testing.assert_close(prediction, torch.tensor(angle), atol=1e-6, rtol=0)
+    (1 - torch.cos(prediction - (angle + .2))).backward()
+    _assert_finite_gradients(model)
+
+
 def test_raw_id_dedup_is_per_frame_and_invalid_poison_is_inert():
     valid = torch.ones(1, 2, 4, dtype=torch.bool)
     ids = torch.tensor([[[9, 9, 3, -1], [9, 3, 3, 8]]])

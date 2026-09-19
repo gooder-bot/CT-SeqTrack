@@ -42,8 +42,10 @@ class TinySource:
 
 
 def cfg(**updates):
-    return dict(ct_engineering_check=True, point_sample_size=8, workers=0,
-                batch_size=4, v31_arm='full', **updates)
+    config = dict(ct_engineering_check=True, point_sample_size=8, workers=0,
+                  batch_size=4, v31_arm='full')
+    config.update(updates)
+    return config
 
 
 def request(frame, *, branch=3, start=1, end=9, track=0):
@@ -52,7 +54,8 @@ def request(frame, *, branch=3, start=1, end=9, track=0):
 
 def fake_prior(batch):
     return SimpleNamespace(box=batch['fallback_box'].clone(),
-                           acquisition_fraction=torch.full((len(batch['points']), 2), .3))
+                           acquisition_fraction=torch.full((len(batch['points']), 2), .3),
+                           direction_xy=torch.tensor([[1., 0.]]).expand(len(batch['points']), -1))
 
 
 def fake_output(batch, *, delta=0., quality=.9):
@@ -223,3 +226,209 @@ def test_missing_lightning_is_explicit_at_training_boundary():
     model = host.CTSEQTRACKV31(cfg(), tracker=torch.nn.Linear(2, 1))
     with pytest.raises(RuntimeError, match='requires pytorch-lightning'):
         model.train_dataloader()
+
+
+def test_source_identity_changes_with_raw_track_or_physical_time():
+    a = RawEndpointDataset(TinySource(dt=.5))
+    b = RawEndpointDataset(TinySource(dt=.6))
+    assert a.lengths == b.lengths and a.source_sha256 != b.source_sha256
+    assert a.source_sha256 == RawEndpointDataset(TinySource(dt=.5)).source_sha256
+
+
+def test_full_curriculum_epoch_consumes_all_rows_without_gt_reseed():
+    loaders = build_loaders(cfg(batch_size=3), roles=('train',), sources={'train': TinySource((6, 4))})
+    loaders['train'].batch_sampler.set_epoch(9)
+    builder = BatchBuilder(cfg())
+    count = 0
+    for rows in loaders['train']:
+        batch = builder.prepare(rows)
+        builder.acquire(batch, fake_prior(batch), training=False)
+        builder.commit(fake_output(batch, delta=.1), batch)
+        count += len(rows)
+    assert count == 32 and not builder.states and builder._pending is None
+
+
+def test_acquisition_axis_uses_motion_direction_not_object_yaw(monkeypatch):
+    import models.ct_v31.acquisition as acquisition
+    original, observed = acquisition.acquire_extension, []
+    def record(*args, **kwargs):
+        observed.append(kwargs['support_yaw'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(acquisition, 'acquire_extension', record)
+    builder = BatchBuilder(cfg())
+    batch = builder.prepare([RawEndpointDataset(TinySource())[request(1)]])
+    prior = fake_prior(batch)
+    prior.direction_xy[:] = torch.tensor([0., 1.])
+    builder.acquire(batch, prior)
+    assert observed == pytest.approx([np.pi / 2])
+
+
+def test_metric_singletons_diagnostics_and_recovery_intervals():
+    source = TinySource((4, 1))
+    raw = RawEndpointDataset(source)
+    builder, evaluation = BatchBuilder(cfg()), TrackingEvaluation()
+    evaluation.add_singleton_tracks(raw)
+    for frame in (1, 2, 3):
+        rows = [raw[request(frame, branch=4, end=4)]]
+        batch = builder.prepare(rows)
+        builder.acquire(batch, fake_prior(batch), training=False)
+        output = fake_output(batch)
+        output.accepted_box = batch['target_box'].clone()
+        if frame == 1:
+            output.accepted_box[:, 0] += 10
+        committed = builder.commit(output, batch, diagnostics=True)
+        evaluation.add_batch(rows, batch, output, committed)
+    summary = evaluation.summary()
+    assert summary['frames'] == 5 and summary['tracklets'] == 2
+    diagnostic = summary['diagnostics']
+    assert diagnostic['loss_events'] == 1 and diagnostic['recovered_events'] == 1
+    assert diagnostic['mean_recovery_seconds'] == pytest.approx(.5)
+    assert diagnostic['unrecovered_events'] == 0
+    assert diagnostic['memory_writes'] > 0
+    assert diagnostic['mode_formation_rate'] == 0.
+
+
+def test_real_sdk_pointcloud_and_box_shape_contract():
+    from pyquaternion import Quaternion
+    source = TinySource((3,))
+    raw = RawEndpointDataset(source)
+    row = raw[request(1, end=3)]
+    for frame in row['frames'].values():
+        box = frame['3d_bbox']
+        frame['3d_bbox'] = SimpleNamespace(center=box[:3], orientation=Quaternion(axis=[0, 0, 1], radians=box[3]),
+                                          wlh=np.asarray([2., 4., 2.]))
+        frame['pc'] = SimpleNamespace(points=frame['pc'].T, point_ids=frame['point_ids'])
+    batch = BatchBuilder(cfg()).prepare([row])
+    assert batch['box_size'].tolist() == [[4., 2., 2.]]
+    assert batch['current_dt'].item() == pytest.approx(.5)
+    assert batch['anchor_box'][0, 3].item() == pytest.approx(.1)
+
+
+def test_optimizer_keeps_registered_adam_hyperparameters():
+    from models.ctseqtrackv31 import CTSEQTRACKV31
+    model = CTSEQTRACKV31(cfg(), tracker=torch.nn.Linear(2, 1))
+    optimizer = model.configure_optimizers()['optimizer']
+    assert optimizer.defaults['betas'] == (.5, .999)
+    assert optimizer.defaults['eps'] == 1e-6
+    assert optimizer.defaults['foreach'] is False and optimizer.defaults['fused'] is False
+
+
+def test_background_modes_do_not_count_as_target_formation():
+    raw = RawEndpointDataset(TinySource((3,)))
+    row = raw[request(1, branch=4, end=3)]
+    builder, evaluation = BatchBuilder(cfg()), TrackingEvaluation()
+    batch = builder.prepare([row])
+    builder.acquire(batch, fake_prior(batch), training=False)
+    batch['diagnostic_acquired_count'][:] = 1
+    batch['extension_labels'][:] = 0
+    batch['extension_labels'][:, 5] = 1
+    output = fake_output(batch)
+    output.evidence.mode_valid = torch.tensor([[True, False, False]])
+    output.evidence.point_indices = torch.tensor([[0, 1, -1]])
+    output.evidence.point_valid = torch.tensor([[True, True, False]])
+    output.evidence.members = torch.tensor([[[True, True, False], [False] * 3, [False] * 3]])
+    evaluation.add_batch([row], batch, output)
+    diagnostics = evaluation.summary()['diagnostics']
+    assert diagnostics['any_mode_formation_on_acquired_target_rate'] == 1.
+    assert diagnostics['target_mode_formation_on_acquired_target_rate'] == 0.
+
+
+def test_worker_prefetch_preserves_accepted_order():
+    loaders = build_loaders(cfg(workers=2, batch_size=3), roles=('train',),
+                            sources={'train': TinySource((5, 3))})
+    loaders['train'].batch_sampler.set_epoch(9)
+    builder, seen = BatchBuilder(cfg(v31_arm='b0')), 0
+    for rows in loaders['train']:
+        batch = builder.prepare(rows)
+        builder.acquire(batch, fake_prior(batch), training=False)
+        builder.commit(fake_output(batch), batch)
+        seen += len(rows)
+    assert seen == 24 and not builder.states
+
+
+def test_real_joint_model_accepts_single_point_initialization():
+    from models.ctseqtrackv31 import CTSEQTRACKV31
+    rows = [RawEndpointDataset(TinySource((3,)))[request(1, branch=4, end=3)]]
+    for frame in rows[0]['frames'].values():
+        frame['pc'], frame['point_ids'] = frame['pc'][:1], frame['point_ids'][:1]
+    model = CTSEQTRACKV31(cfg())
+    model.eval()
+    thread_count = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        with torch.no_grad():
+            batch, output = model._forward_raw(rows, model.evaluation_builder, training=False)
+        assert batch['memory_valid'].sum() == 1
+        assert batch['point_valid'][0, -1].sum() == 1
+        assert torch.isfinite(output.accepted_box).all()
+        committed = model.evaluation_builder.commit(output, batch, diagnostics=True)
+        assert not committed[0]['memory_write']
+    finally:
+        torch.set_num_threads(thread_count)
+
+
+class TinyJointTracker(torch.nn.Module):
+    """仅用于检查真实 Lightning 生命周期；随机层让 RNG 恢复可被观察。"""
+    def __init__(self):
+        super().__init__()
+        self.shift = torch.nn.Parameter(torch.tensor(.03))
+        self.dropout = torch.nn.Dropout(.25)
+        self.prior_calls = 0
+
+    def plan_prior(self, batch):
+        self.prior_calls += 1
+        return fake_prior(batch)
+
+    def forward(self, batch, prior=None):
+        output = fake_output(batch)
+        offset = self.dropout(self.shift.expand(len(batch['points']), 1))
+        output.accepted_box = output.accepted_box + torch.cat((offset, torch.zeros_like(offset).expand(-1, 3)), -1)
+        output.prior = prior
+        return output
+
+    def compute_losses(self, batch, output):
+        return {'loss_total': (output.accepted_box[:, :2] - batch['target_box'][:, :2]).square().mean()}
+
+
+def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path):
+    pl = pytest.importorskip('pytorch_lightning')
+    from pytorch_lightning.callbacks import Callback
+    from models.ctseqtrackv31 import CTSEQTRACKV31
+    from utils.lightning_runtime import FinalWindowCheckpoint
+    class StopAfterFirst(Callback):
+        def on_train_epoch_end(self, trainer, module):
+            if trainer.current_epoch == 0:
+                trainer.should_stop = True
+    config = cfg(epoch=3, lr_decay_step=1, v31_arm='b0', v31_curriculum_epochs=3)
+    def make(root, stop=False):
+        sources = {'train': TinySource((5, 3))}
+        loaders = build_loaders(config, roles=('train',), sources=sources)
+        model = CTSEQTRACKV31(config, tracker=TinyJointTracker(), loaders=loaders)
+        callbacks = [FinalWindowCheckpoint(keep=3)] + ([StopAfterFirst()] if stop else [])
+        trainer = pl.Trainer(default_root_dir=str(root), accelerator='cpu', devices=1,
+            max_epochs=3, logger=False, callbacks=callbacks, enable_progress_bar=False,
+            enable_model_summary=False, num_sanity_val_steps=0, limit_val_batches=0,
+            reload_dataloaders_every_n_epochs=1)
+        return model, trainer
+    pl.seed_everything(17)
+    reference, trainer = make(tmp_path / 'reference')
+    trainer.fit(reference)
+    expected = deepcopy(reference.state_dict())
+    expected_optimizer = deepcopy(trainer.optimizers[0].state_dict())
+    pl.seed_everything(17)
+    first, interrupted = make(tmp_path / 'resume', stop=True)
+    interrupted.fit(first)
+    checkpoint = tmp_path / 'resume' / 'formal_checkpoints' / 'epoch=001.ckpt'
+    state = torch.load(checkpoint, map_location='cpu')
+    assert state['ct_v31_runtime']['epoch_complete'] is True
+    assert state['ct_v31_runtime']['rows'] == 24
+    assert state['lr_schedulers'][0]['last_epoch'] == 1
+    resumed, continuation = make(tmp_path / 'resume')
+    continuation.fit(resumed, ckpt_path=str(checkpoint))
+    assert continuation.global_step == trainer.global_step
+    assert all(torch.equal(expected[key], value) for key, value in resumed.state_dict().items())
+    assert continuation.optimizers[0].param_groups[0]['lr'] == trainer.optimizers[0].param_groups[0]['lr']
+    for index, values in expected_optimizer['state'].items():
+        assert all(torch.equal(value, continuation.optimizers[0].state_dict()['state'][index][key])
+                   for key, value in values.items())
+    assert resumed.tracker.prior_calls == continuation.global_step - interrupted.global_step

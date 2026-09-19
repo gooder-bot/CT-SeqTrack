@@ -10,7 +10,8 @@ from .contracts import SCHEMA
 
 DEFAULTS = dict(
     net_model='ctseqtrackv31', experiment_family='ct_seqtrack_v31',
-    experiment_name='ct31_full_mini_car_scratch_seed42', v31_arm='full',
+    experiment_name='ct31_full_cfc_mini_car_scratch_seed42', v31_arm='full',
+    v31_temporal_backend='cfc',
     dataset='nuscenes_mf', version='v1.0-mini', category_name='Car',
     path='/home/lishengjie/data/nuscenes-mini', ct_coordinate_mode='global',
     ct_partition_seed=42, ct_frame_stride=1, ct_pointcloud_cache_bytes=268435456,
@@ -50,6 +51,8 @@ def normalize_config(config=None):
         raise ValueError('v31 model and experiment identity must match')
     if cfg.v31_arm not in ('b0', 'b1', 'b1_b2', 'full'):
         raise ValueError('v31_arm must be b0, b1, b1_b2 or full')
+    if cfg.v31_temporal_backend not in ('cfc', 'gru'):
+        raise ValueError('v31_temporal_backend must be cfc or gru')
     if cfg.dataset not in ('nuscenes_mf', 'kitti_mf'):
         raise ValueError('v31 supports registered nuScenes and KITTI datasets')
     if cfg.dataset == 'nuscenes_mf':

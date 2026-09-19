@@ -56,12 +56,13 @@ class ReadyQueueBatchSampler(Sampler):
     SCHEMA = 'ct_seqtrack.v31.ready_queue.v1'
 
     def __init__(self, lengths, batch_size=16, *, seed=42, training=True,
-                 short_window=3, long_window=8, curriculum_epochs=10):
+                 short_window=3, long_window=8, curriculum_epochs=10, source_sha256=''):
         self.lengths = tuple(int(n) for n in lengths)
         self.batch_size = int(batch_size)
         self.seed, self.training, self.epoch = int(seed), bool(training), 0
         self.short_window, self.long_window = int(short_window), int(long_window)
         self.curriculum_epochs = int(curriculum_epochs)
+        self.source_sha256 = str(source_sha256)
         if self.batch_size < 1 or min(self.short_window, self.long_window, self.curriculum_epochs) < 1:
             raise ValueError('v31 batch/window/curriculum sizes must be positive')
         if any(n < 0 for n in self.lengths):
@@ -136,7 +137,8 @@ class ReadyQueueBatchSampler(Sampler):
         payload = dict(schema=self.SCHEMA, epoch=self.epoch, lengths=list(self.lengths),
                        batch_size=self.batch_size, seed=self.seed, training=self.training,
                        short_window=self.short_window, long_window=self.long_window,
-                       curriculum_epochs=self.curriculum_epochs, rows=self.row_count)
+                       curriculum_epochs=self.curriculum_epochs, rows=self.row_count,
+                       source_sha256=self.source_sha256)
         payload['manifest_sha256'] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         return payload
@@ -209,6 +211,24 @@ class RawEndpointDataset(Dataset):
         self.source = source
         self.lengths = tuple(source.get_num_frames_tracklet(i)
                              for i in range(source.get_num_tracklets()))
+        self.source_sha256 = self._source_digest()
+
+    def _source_digest(self):
+        """只读 annotation 元数据；迁移路径不变，但换 track/token/time 必须拒绝续训。"""
+        digest = hashlib.sha256()
+        for index, length in enumerate(self.lengths):
+            key = self.source.get_tracklet_key(index) if hasattr(self.source, 'get_tracklet_key') else str(index)
+            digest.update(json.dumps((key, length), separators=(',', ':')).encode())
+            annotations = getattr(self.source, 'tracklet_anno_list', None)
+            for frame in range(length):
+                endpoint = (self.source.get_endpoint_key(index, frame)
+                            if hasattr(self.source, 'get_endpoint_key') else str(frame))
+                if annotations is not None and hasattr(self.source, '_anno_timestamp'):
+                    timestamp = float(self.source._anno_timestamp(annotations[index][frame]))
+                else:
+                    timestamp = float(metadata(self.source, index, frame)['timestamp'])
+                digest.update(json.dumps((endpoint, timestamp), separators=(',', ':')).encode())
+        return digest.hexdigest()
 
     def __len__(self):
         return sum(max(n - 1, 0) for n in self.lengths)
@@ -257,7 +277,8 @@ def build_loaders(config, roles=('train', 'val'), sources=None):
             seed=int(option(config, 'seed', 42)), training=role == 'train',
             short_window=int(option(config, 'v31_short_window', 3)),
             long_window=int(option(config, 'v31_long_window', 8)),
-            curriculum_epochs=int(option(config, 'v31_curriculum_epochs', 10)))
+            curriculum_epochs=int(option(config, 'v31_curriculum_epochs', 10)),
+            source_sha256=raw.source_sha256)
         workers = int(option(config, 'workers', 4))
         kwargs = dict(num_workers=workers, collate_fn=raw_collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
@@ -432,11 +453,13 @@ class BatchBuilder:
         return result, context
 
     def acquire(self, batch, prior, *, training=True):
-        from .acquisition import acquire_extension, band_grid_target
+        from .acquisition import (acquire_extension, band_grid_target, build_dual_support,
+                                  support_membership)
         if self._pending is None:
             raise RuntimeError('acquisition requires prepared raw rows')
         boxes = prior.box.detach().cpu().numpy()
         fractions = prior.acquisition_fraction.detach().cpu().numpy()
+        directions = prior.direction_xy.detach().cpu().numpy()
         values = []
         for i, context in enumerate(self._pending):
             row, state, anchor = context['row'], context['state'], context['anchor']
@@ -445,11 +468,19 @@ class BatchBuilder:
             target_mask = inside_box(xyz, context['current_gt'], box_size(current['3d_bbox'], current))
             geometry = dict(b0_raw_ids=context['b0_ids'], b0_box=anchor, box_size=state.size,
                 prior_center=boxes[i, :3] + anchor[:3], recovery_center=context['recovery'][:3],
-                support_yaw=float(boxes[i, 3]), recovery_yaw=float(context['recovery'][3]),
+                support_yaw=float(np.arctan2(directions[i, 1], directions[i, 0])),
+                recovery_yaw=float(context['recovery'][3]),
                 crop_scale=float(option(self.config, 'bb_scale', 1.25)),
                 crop_offset=float(option(self.config, 'bb_offset', 2.)))
-            extra = acquire_extension(xyz, ids, anchor=anchor[:3], u=fractions[i],
-                seed=stable_seed(option(self.config, 'seed', 42), row['request']), **geometry)
+            enable_extension = option(self.config, 'v31_arm', 'full') in ('b1_b2', 'full')
+            if enable_extension:
+                extra = acquire_extension(xyz, ids, anchor=anchor[:3], u=fractions[i],
+                    seed=stable_seed(option(self.config, 'seed', 42), row['request']), **geometry)
+            else:
+                extra = dict(extension_points=np.zeros((768, 5), np.float32),
+                             extension_ids=np.full(768, -1, np.int64),
+                             extension_valid=np.zeros(768, bool),
+                             extension_partition=np.full(768, -1, np.int64))
             lookup = {int(raw_id): bool(label) for raw_id, label in zip(ids, target_mask)}
             labels = np.full(768, -1, dtype=np.int64)
             keep = extra['extension_valid']
@@ -462,13 +493,27 @@ class BatchBuilder:
                          acquisition_target=np.asarray(targets['acquisition_target'], dtype=np.float32),
                          acquisition_valid=np.bool_(targets['acquisition_valid']),
                          acquisition_demand=np.bool_(targets['acquisition_demand']))
+            if not training:
+                # 只用于离线诊断的 GT 计数；不改变实际 support、采样、候选或状态。
+                if enable_extension:
+                    maximum = build_dual_support(u=np.ones(2), **{
+                        k: v for k, v in geometry.items() if k != 'b0_raw_ids'})
+                    members = support_membership(xyz, maximum, context['b0_ids'], ids)
+                    reachable = int(((members[0] | members[1]) & target_mask).sum())
+                else:
+                    reachable = 0
+                b0_target_count = int((np.isin(ids, context['b0_ids']) & target_mask).sum())
+                extra.update(diagnostic_target_count=np.int64(target_mask.sum()),
+                             diagnostic_novel_target_count=np.int64(target_mask.sum() - b0_target_count),
+                             diagnostic_reachable_count=np.int64(reachable),
+                             diagnostic_acquired_count=np.int64((labels[keep] == 1).sum()))
             values.append(extra)
         device = batch['points'].device
         for key in values[0]:
             batch[key] = torch.from_numpy(np.stack([x[key] for x in values])).to(device)
         return batch
 
-    def commit(self, output, batch):
+    def commit(self, output, batch, *, diagnostics=False):
         if self._pending is None:
             raise RuntimeError('no pending v31 transaction (duplicate commit)')
         boxes = output.accepted_box.detach().cpu().numpy()
@@ -480,6 +525,7 @@ class BatchBuilder:
         extension_ids = batch['extension_ids'].detach().cpu().numpy()
         extension_valid = batch['extension_valid'].detach().cpu().numpy()
         extension_probabilities = output.evidence.identity_logits.detach().sigmoid().cpu().numpy()
+        records = []
         for index, context in enumerate(self._pending):
             row, state = context['row'], context['state']
             r = row['request']
@@ -514,6 +560,16 @@ class BatchBuilder:
                 state.trusted.append((box.copy(), context['timestamp']))
                 state.trusted[:] = state.trusted[-2:]
                 state.last_supported_time = context['timestamp']
+            if diagnostics:
+                foreground_ids = (state.memory.recent[-1]['ids'][state.memory.recent[-1]['fg']]
+                                  if updated else np.empty(0, dtype=np.int64))
+                foreground_xyz = cloud[[id_to_index[int(value)] for value in foreground_ids]]
+                current = row['frames'][r.frame]
+                correct = inside_box(foreground_xyz, context['current_gt'],
+                                     box_size(current['3d_bbox'], current))
+                records.append(dict(memory_write=bool(updated), memory_fg_count=int(len(correct)),
+                                    memory_true_fg_count=int(correct.sum()),
+                                    memory_wrong_write=bool(updated and correct.mean() < .5)))
             for old in list(state.boxes):
                 if old < r.frame - 2:
                     state.boxes.pop(old)
@@ -522,3 +578,4 @@ class BatchBuilder:
             if r.ends_window:
                 self.states.pop(r.state_key)
         self._pending = None
+        return records

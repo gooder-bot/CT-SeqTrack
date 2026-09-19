@@ -30,6 +30,25 @@ def test_recovery_is_endpoint_only_with_own_vertical_support():
     assert maximum["recovery"]["half"].tolist() == [14., 9., 3.25]
 
 
+def test_recovery_footprint_uses_trusted_yaw_instead_of_drifting_b0_yaw():
+    geometry = _geometry(b0_box=np.array([0., 0., 0., np.pi / 2]))
+    support = build_dual_support(u=[0., 0.], recovery_yaw=0., **geometry)
+    np.testing.assert_allclose(support["recovery"]["half"][:2], [6., 4.])
+    points = np.array([[35.5, 0., 10.], [30., 4.5, 10.]])
+    _, recovery = support_membership(points, support, [], [1, 2])
+    np.testing.assert_array_equal(recovery, [True, False])
+
+
+def test_global_coordinates_translate_before_float32_conversion():
+    anchor = np.array([1e8, -1e8, 100.])
+    offset = np.array([.125, -.25, .0625])
+    geometry = _geometry(b0_box=np.r_[anchor, 0.], prior_center=anchor,
+                         recovery_center=anchor + [30., 0., 0.])
+    result = acquire_extension((anchor + offset)[None], [7], b0_raw_ids=[], anchor=anchor,
+                               u=[0., 0.], **geometry)
+    np.testing.assert_array_equal(result["extension_points"][0, :3], offset.astype(np.float32))
+
+
 def test_raw_id_exclusion_and_padding_keep_distinct_same_position_points():
     cloud = np.array([[2., 0., 0., .2, .3]] * 4 + [[30., 0., 10., .6, .8]])
     raw_ids = np.array([10, 11, 11, 12, 13])
@@ -149,6 +168,17 @@ def test_modes_keep_live_xyz_and_weights_but_fixed_members_and_covariance():
     assert votes.grad[0, 2].abs().sum() == 0
 
 
+def test_modes_exclude_nonfinite_slots_before_live_weighted_sum():
+    votes = torch.tensor([[[0., 0., 4.], [float('nan'), 0., 2.], [3., 0., 2.]]], requires_grad=True)
+    weights = torch.tensor([[1., 1., float('nan')]], requires_grad=True)
+    centers, valid, members, covariance = build_live_modes(votes, weights,
+        torch.ones(1, 3, dtype=torch.bool), torch.tensor([[1, 2, 3]]))
+    assert valid.sum() == 1 and members.sum() == 1
+    assert torch.isfinite(centers).all() and torch.isfinite(covariance).all()
+    centers.sum().backward()
+    assert torch.isfinite(votes.grad).all() and torch.isfinite(weights.grad).all()
+
+
 def _evidence_inputs(empty=False):
     torch.manual_seed(33)
     count = 16
@@ -230,3 +260,45 @@ def test_raw_local_descriptor_is_permutation_invariant_and_cannot_move_raw_coord
     before.sum().backward()
     assert raw.grad is None
     assert geometry.projection[0].weight.grad.abs().sum() > 0
+
+
+def test_evidence_uses_explicit_attention_under_strict_determinism(monkeypatch):
+    # 不以本地 CPU 通过冒充 CUDA 通过；这里防止静默回到 2.0.1 SDPA 分支。
+    def forbidden_sdpa(*args, **kwargs):
+        raise AssertionError("v31 evidence must use explicit math attention")
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", forbidden_sdpa)
+    previous = torch.are_deterministic_algorithms_enabled()
+    previous_warn = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        torch.use_deterministic_algorithms(True)
+        model = B2IdentityEvidence().train()
+        observation, batch = _evidence_inputs()
+        result = model(observation, batch)
+        (result.reliability_logits.square().sum() + result.identity_logits.square().sum()
+         + result.centers_xyz.square().sum()).backward()
+        assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+        assert torch.are_deterministic_algorithms_enabled()
+    finally:
+        torch.use_deterministic_algorithms(previous, warn_only=previous_warn)
+
+
+def test_background_modes_cannot_move_vote_head_through_main_or_quality():
+    from models.ct_v31.model import JointTracker
+    from tests.test_ct_v31_joint import make_batch, model_config
+    previous_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        torch.manual_seed(319)
+        model = JointTracker(model_config()).eval()
+        torch.nn.init.normal_(model.decoder.pose_head.weight, std=.03)
+        torch.nn.init.normal_(model.decoder.quality_head.weight, std=.03)
+        batch = make_batch(1)
+        batch['extension_labels'].zero_()
+        output = model(batch)
+        losses = model.compute_losses(batch, output)
+        assert losses['loss_modes'] == 0 and losses['loss_vote'] == 0
+        (losses['loss_main'] + losses['loss_quality'] + losses['loss_modes']).backward()
+        assert all(p.grad is None or p.grad.count_nonzero() == 0 for p in model.evidence.vote_head.parameters())
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.evidence.point_encoder.parameters())
+    finally:
+        torch.set_num_threads(previous_threads)

@@ -3,6 +3,14 @@ main.py
 Created by zenn at 2021/7/18 15:08
 Modified by Aron Lin at Jun 1  09:42:22 CST 2023
 """
+if __name__ == '__main__':
+    import sys as _sys
+    from models.ct_v31.entry import is_v31_request as _is_v31_request
+    if _is_v31_request(_sys.argv[1:]):
+        from models.ct_v31.entry import main as _v31_main
+        _v31_main(_sys.argv[1:])
+        raise SystemExit(0)
+
 import pytorch_lightning as pl
 import argparse
 import copy
