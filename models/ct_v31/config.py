@@ -1,4 +1,4 @@
-"""v31 独立配置白名单；历史 formal 字段不能静默进入联合模型。"""
+"""v32 配置与权重身份；保留物理模块路径，不允许旧实验静默换算法。"""
 
 import hashlib
 import json
@@ -9,8 +9,8 @@ from .contracts import SCHEMA
 
 
 DEFAULTS = dict(
-    net_model='ctseqtrackv31', experiment_family='ct_seqtrack_v31',
-    experiment_name='ct31_full_cfc_mini_car_scratch_seed42', v31_arm='full',
+    net_model='ctseqtrackv32', experiment_family='ct_seqtrack_v32',
+    experiment_name='ct32_full_cfc_mini_car_scratch_seed42', v31_arm='full',
     v31_temporal_backend='cfc',
     dataset='nuscenes_mf', version='v1.0-mini', category_name='Car',
     path='/home/lishengjie/data/nuscenes-mini', ct_coordinate_mode='global',
@@ -18,13 +18,14 @@ DEFAULTS = dict(
     kitti_frame_period=.1, hist_num=3, point_sample_size=1024,
     bb_scale=1.25, bb_offset=2., time_scale=.5,
     v31_short_window=3, v31_long_window=8, v31_curriculum_epochs=10,
+    v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
     batch_size=16, workers=4, seed=42, epoch=60, lr=.0001, wd=0.,
     lr_decay_step=20, lr_decay_rate=.1, check_val_every_n_epoch=5,
     trainer_devices=1, accelerator='auto', precision=32,
     dynamics_time_mode='true', dynamics_time_manifest=None,
     v31_evaluate_late3=True, ct_engineering_check=False,
     limit_train_batches=1., limit_val_batches=1.,
-    checkpoint=None, init_checkpoint=None, test=False, log_dir=None, tag='v31',
+    checkpoint=None, init_checkpoint=None, test=False, log_dir=None, tag='v32',
     cfg=None, eval_checkpoint_epoch=None,
 )
 
@@ -44,11 +45,17 @@ def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
     unknown = sorted(set(supplied) - set(DEFAULTS))
     if unknown:
-        raise ValueError('v31 unknown/inactive configuration keys: ' + ', '.join(unknown))
+        raise ValueError('v32 unknown/inactive configuration keys: ' + ', '.join(unknown))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
-    if cfg.net_model != 'ctseqtrackv31' or cfg.experiment_family != 'ct_seqtrack_v31':
-        raise ValueError('v31 model and experiment identity must match')
+    if (cfg.net_model not in ('ctseqtrackv32', 'seqtrack_reference')
+            or cfg.experiment_family != 'ct_seqtrack_v32'):
+        raise ValueError('v32 model and experiment identity must match; '
+                         'reproduce frozen v31 with Git b1d886e and its original configs')
+    if cfg.net_model == 'seqtrack_reference' and cfg.v31_arm != 'b0':
+        raise ValueError('SeqTrack reference requires v31_arm=b0')
+    if cfg.net_model == 'seqtrack_reference' and cfg.dynamics_time_mode != 'true':
+        raise ValueError('SeqTrack reference retains its original pseudo-time protocol')
     if cfg.v31_arm not in ('b0', 'b1', 'b1_b2', 'full'):
         raise ValueError('v31_arm must be b0, b1, b1_b2 or full')
     if cfg.v31_temporal_backend not in ('cfc', 'gru'):
@@ -79,15 +86,24 @@ def normalize_config(config=None):
         raise ValueError('v31 requires hist_num=3, FP32 and nonnegative workers')
     if cfg.time_scale <= 0 or cfg.lr <= 0 or cfg.bb_scale <= 0 or cfg.bb_offset < 0:
         raise ValueError('v31 time, optimization and crop scales must be valid')
+    if (isinstance(cfg.v32_reserve_windows, bool)
+            or int(cfg.v32_reserve_windows) != cfg.v32_reserve_windows
+            or cfg.v32_reserve_windows < 0):
+        raise ValueError('v32_reserve_windows must be a nonnegative integer')
+    import math
+    if any(not math.isfinite(float(cfg[key])) or cfg[key] < 0
+           for key in ('v32_seed_translation', 'v32_seed_yaw_degrees')):
+        raise ValueError('v32 seed perturbation bounds must be finite and nonnegative')
     if not cfg.ct_engineering_check:
         fixed = dict(epoch=60, batch_size=16, workers=4, lr=.0001, wd=0.,
                      lr_decay_step=20, lr_decay_rate=.1, point_sample_size=1024,
                      v31_short_window=3, v31_long_window=8, v31_curriculum_epochs=10,
+                     v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
                      limit_train_batches=1., limit_val_batches=1.)
         bad = [key for key, value in fixed.items()
                if cfg[key] != value or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
-            raise ValueError('formal v31 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
+            raise ValueError('formal v32 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
     elif cfg.log_dir:
         root = Path(__file__).resolve().parents[2] / 'artifacts' / 'ct_checks'
         destination = Path(cfg.log_dir).resolve()
@@ -114,5 +130,9 @@ def config_identity(config):
     if manifest:
         payload['dynamics_time_manifest_sha256'] = hashlib.sha256(Path(manifest).read_bytes()).hexdigest()
     payload['schema'] = SCHEMA
+    payload['evaluation_rng_policy'] = 'per_checkpoint_seed_v1'
+    if cfg.net_model == 'seqtrack_reference':
+        from models.seqtrack_reference.protocol import protocol_identity
+        payload['reference_protocol'] = protocol_identity()
     raw = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()

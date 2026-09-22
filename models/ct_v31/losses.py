@@ -1,10 +1,11 @@
-"""v31 唯一目标集合：定位/身份/物理位移各司其职。"""
+"""v32 观测局部监督；B1物理、B2投票和B3模式仍遵循原世界轴目标。"""
 
 import numpy as np
 import torch
 from torch.nn import functional as F
 
 from .motion import physical_motion_uncertainty_loss
+from .geometry import anchor_yaw, transform_boxes
 from utils.tracking_metrics import LocalYawBox, box_metrics
 
 
@@ -53,6 +54,59 @@ def box_loss(predicted, target, valid, center_weight=2., angle_weight=10.):
     return center_weight * masked_mean(xyz, valid) + angle_weight * masked_mean(yaw, valid)
 
 
+def local_observation_box_loss(predicted, target, valid, yaw_anchor,
+                               center_weight=2., angle_weight=10.):
+    """仅 B0 的 coarse/main/history 使用 anchor 局部定位目标。"""
+    valid = valid.to(device=predicted.device).bool()
+    predicted = torch.where(valid[..., None], predicted, 0.)
+    target = torch.where(valid[..., None], target, 0.)
+    return box_loss(transform_boxes(predicted, yaw_anchor),
+                    transform_boxes(target, yaw_anchor), valid, center_weight, angle_weight)
+
+
+def frame_endpoint_mean(frame_values, frame_valid):
+    """先对端点内实际存在的帧等权，再对有监督端点等权。"""
+    valid = frame_valid.bool()
+    per_endpoint = torch.where(valid, frame_values, 0.).sum(-1) / valid.sum(-1).clamp_min(1)
+    return masked_mean(per_endpoint, valid.any(-1))
+
+
+def observation_segmentation_loss(logits, labels, valid):
+    """逐帧唯一点 CE，端点内 current/history 各半；缺组不伪造监督。"""
+    if logits.shape[:-1] != labels.shape or labels.shape != valid.shape or logits.shape[-1] != 2:
+        raise ValueError('observation segmentation expects logits [B,F,N,2] and matching labels/mask')
+    valid = valid.bool()
+    target = labels.long().masked_fill(~valid, 0)
+    class_weights = logits.new_tensor([.5, 2.])
+    log_probabilities = F.log_softmax(logits, dim=-1)
+    terms = F.nll_loss(log_probabilities.reshape(-1, 2), target.reshape(-1),
+                       weight=class_weights, reduction='none').reshape_as(target)
+    numerator = torch.where(valid, terms, 0.).sum(-1)
+    denominator = (class_weights[target] * valid).sum(-1)
+    frame_loss = numerator / denominator.clamp_min(1e-12)
+    frame_valid = valid.any(-1)
+    current, current_valid = frame_loss[:, -1], frame_valid[:, -1]
+    history_valid = frame_valid[:, :-1]
+    history = torch.where(history_valid, frame_loss[:, :-1], 0.).sum(-1)
+    history = history / history_valid.sum(-1).clamp_min(1)
+    history_exists = history_valid.any(-1)
+    groups = torch.stack((current, history), -1)
+    groups_valid = torch.stack((current_valid, history_exists), -1)
+    return (frame_endpoint_mean(groups, groups_valid),
+            masked_mean(current, current_valid), masked_mean(history, history_exists))
+
+
+def observation_bc_loss(predicted, target, point_valid, labels):
+    """无目标帧不回归 BC；点数与历史帧数不改变端点权重。"""
+    foreground_exists = ((labels > 0) & point_valid.bool()).any(-1)
+    valid = point_valid.bool() & foreground_exists[..., None]
+    clean_target = torch.where(valid[..., None], target, 0.)
+    clean_predicted = torch.where(valid[..., None], predicted, 0.)
+    per_point = F.smooth_l1_loss(clean_predicted, clean_target, reduction='none').mean(-1)
+    frame_loss = torch.where(valid, per_point, 0.).sum(-1) / valid.sum(-1).clamp_min(1)
+    return frame_endpoint_mean(frame_loss, valid.any(-1))
+
+
 @torch.no_grad()
 def oriented_iou_labels(boxes, target, size, target_size=None):
     """标签用真实直立有向 3D IoU；不能把 GT 几何送入模型 forward。"""
@@ -83,16 +137,17 @@ def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=T
     labels = batch['segmentation_labels'].long()
     zero = observation.coarse_box.sum() * 0.
     losses = {}
-    losses['loss_coarse'] = box_loss(observation.coarse_box, target, observation.current_valid)
-    losses['loss_main'] = box_loss(decoder.hypothesis_boxes[:, 0], target, observation.current_valid)
-    losses['loss_history'] = box_loss(decoder.history_boxes, batch['history_target_boxes'],
-                                      batch['history_valid'].bool(), .2, 1.)
-    logits = observation.segmentation_logits.permute(0, 3, 1, 2).flatten(2)
-    losses['loss_seg'] = seqtrack_segmentation_cross_entropy(logits, labels.flatten(1), point_valid.flatten(1))
-    # 无 GT 前景的帧不对背景施加 box-distance 回归；判定仅存在于 loss。
-    frame_fg = ((labels > 0) & point_valid).any(-1)
-    losses['loss_bc'] = masked_mean(F.smooth_l1_loss(
-        observation.bc_prediction, batch['bc_targets'], reduction='none'), point_valid & frame_fg[..., None])
+    yaw_anchor = anchor_yaw(batch, target)
+    losses['loss_coarse'] = local_observation_box_loss(
+        observation.coarse_box, target, observation.sequence_valid, yaw_anchor)
+    losses['loss_main'] = local_observation_box_loss(
+        decoder.hypothesis_boxes[:, 0], target, observation.sequence_valid, yaw_anchor)
+    losses['loss_history'] = local_observation_box_loss(
+        decoder.history_boxes, batch['history_target_boxes'], batch['history_valid'].bool(),
+        yaw_anchor, .2, 1.)
+    (losses['loss_seg'], losses['loss_seg_current'], losses['loss_seg_history']) = observation_segmentation_loss(
+        observation.segmentation_logits, labels, point_valid)
+    losses['loss_bc'] = observation_bc_loss(observation.bc_prediction, batch['bc_targets'], point_valid, labels)
 
     if enable_b1:
         physical_valid = batch['physical_valid'].bool() & prior.valid.bool()

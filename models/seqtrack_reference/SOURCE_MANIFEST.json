@@ -1,0 +1,81 @@
+{
+  "origin": "frozen sibling seqtrack (read-only)",
+  "license": "MIT Copyright (c) 2024 Aron Lin",
+  "sources": [
+    {
+      "path": "models/backbone/pointnet.py",
+      "sha256": "8ce3072b58ceabc83be526e2e1144a45a0d4be67778d1612e44d93585796c05c"
+    },
+    {
+      "path": "models/attn/Models.py",
+      "sha256": "31a65b700a27a30249c4bfc9b63c7094d9e29e8331c420d760f77d90c8d15249"
+    },
+    {
+      "path": "models/attn/Layers.py",
+      "sha256": "76afb8c73daf33f2b807bf79210cdb77c3abd643c03d3deff88dce73d55f0aea"
+    },
+    {
+      "path": "models/attn/SubLayers.py",
+      "sha256": "e205cbf92b8119944368979b02519609d3afc4518b49bb29a72bd1d492c31743"
+    },
+    {
+      "path": "models/attn/Modules.py",
+      "sha256": "3720bb948bab3783c5f74e9e89049287486231e021501e36dd45b08e2d9ec92c"
+    },
+    {
+      "path": "datasets/misc_utils.py",
+      "sha256": "60b5866788e912783aae12ce7baa10c6943b50f51ccc8089ed724424b2f9284d"
+    },
+    {
+      "path": "datasets/points_utils.py",
+      "sha256": "75a6b63a54fd9ead72b2f96e5c07188b7734c67c254c30712cb51b22bc475d9b"
+    },
+    {
+      "path": "datasets/sampler.py",
+      "sha256": "1ce27849dbda44ac1c01c176ab9bc36811ae662fa92d7d07052533e7b5f33fd2"
+    },
+    {
+      "path": "models/seqtrack3d.py",
+      "sha256": "739cd18c08a876fb2bf6aad28661769194a7786b5f33137b4ac65493a76c94ef"
+    },
+    {
+      "path": "models/base_model.py",
+      "sha256": "85a386810f5f3db0de68e85a9e434d761c6fb60d94c68f6aa1098d8856f29a6e"
+    },
+    {
+      "path": "cfgs/seqtrack3d_nuscenes.yaml",
+      "sha256": "863126f2002cd301585ddd7c6bce54277d18f8aab670b29729f96a216e2b55e9"
+    }
+  ],
+  "adaptations": [
+    "Only MiniPointNet/SegPointNet/FeaturePointNet extracted; unused PointNet++ import/classes excluded.",
+    "Attention module copied; unused Seq import excluded from Models.py.",
+    "Original SEQTRACK3D init/forward/compute_loss extracted; Lightning/logging metrics excluded; CE weights follow tensor device.",
+    "Original motion_processing_mf and required geometry helpers extracted; local points_in_box replaces unavailable nuscenes dependency.",
+    "Shared datasets.data_classes provides raw geometric containers only; production B0 is never imported.",
+    "Nominal training sampler excludes frame zero; original invalid-history replacement retained and audited.",
+    "Evaluation bbox_size reads initialization box only; partial-batch running BN is host policy.",
+    "Independent strict-CUDA numerics: equivalent fixed-bin first-max pooling; exact adaptive bins and ordered dense-add backward for nondivisible shapes; original log-softmax plus flat unreduced NLL and original weighted denominator. CPU loss scalar reduction rounding allowed; forward, gradients, BN and Adam checked bitwise.",
+    "Cross-platform discrete-label adapter: seg_label/motion_state_label/valid_mask converted to int64 only; Windows original numpy int is int32.",
+    "Shared entry resets registered seed for Python/NumPy/Torch and test loader before each independent test; original per-frame sampling rules unchanged.",
+    "Registered network input contract: both training and evaluation bbox_size read first-frame WLH; original teacher geometry/labels and losses unchanged.",
+    "MIT LICENSE line endings normalized to LF for stable cross-platform implementation identity; original license bytes SHA recorded separately."
+  ],
+  "vendored_files_sha256": {
+    "_vendor/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "_vendor/attn/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "_vendor/attn/Layers.py": "4c3bbbc66c4990c125955ff58256c3da291291fd8152677fa959c17ed0d3b544",
+    "_vendor/attn/Models.py": "1cc58ecd432d70f056ae5a704fca45debba1f5b567decae7aad369c946d05d49",
+    "_vendor/attn/Modules.py": "782739f042c45b8fe5396989fa2b62a669e5874b9ee96c7685768ef0f9351e6d",
+    "_vendor/attn/SubLayers.py": "f79787ea39a951372d77e502e1b5240d5fd2600fc11653e4cca54994ea012ad4",
+    "_vendor/evaluation.original.txt": "71c77b40dd6432e825a6c777593777005f4406e801102c3291cf5be113053f0d",
+    "_vendor/misc.py": "afc3cb37c31542a0bd20253f725b31e74fbc8a3b3abe1d54626d32eaee2a51a8",
+    "_vendor/pointnet.original.txt": "da1b6b6ad2be3573fa97d2ca12a2fc98d5344305182406d562d2ffbd76ab2e51",
+    "_vendor/pointnet.py": "99eda9f45d40f8869074f73c9dc170c73caa8efc90074aa12e769de20a4b51ea",
+    "_vendor/points.py": "e9e11ea5da17e8f906f49021f117bf1ff37587f158d4c308528f5418f6ffea4c",
+    "_vendor/processing.py": "5d7ae9db8774db9be9ffba0d7e09ab7fb7a2b0961608dc6829108c1e89d72943",
+    "_vendor/seqtrack3d.original.txt": "d0bfa7805681fda53a7fb6354719c9cd911c1e29ce61051034d63f05c478f163",
+    "_vendor/spatial.py": "44b29386bdc8c794a7bb052a41bf986a0f00f9f0394df430379dd050bc238cb1"
+  },
+  "license_source_sha256": "1d20a4091174230d48ee59bbb4e88a9335c3bb1b93a4f5b515ff3332c6e66e32"
+}

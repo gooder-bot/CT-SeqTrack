@@ -1,5 +1,20 @@
 # CT-SeqTrack 当前状态（2026-09-22）
 
+## v32 B0 修复（覆盖下方历史“下一轮”安排）
+
+用户已批准只修 B0、递推训练与必要连接，保留 B1/B2/B3 机制。活动代码原位升级 v32，独立 SeqTrack 保留原 teacher4 与有效历史重采样。实现和检查记录见 [v32 修复说明](docs/B0_V32_REPAIR.md)。
+
+- [x] B0局部观测、前景梯度隔离、真实点token、历史支持定位、损失归约与递推/尾批BN已实现。
+- [x] 独立SeqTrack、v32配置/身份、采样审计和四次实验只读验收工具已接入。
+- [x] 最新本地249 passed、3 skipped，包含四组模型真实Lightning合成入口与中断恢复；compileall/diff通过。
+- [ ] 授权服务器环境中的真实批次前向、短训练与 CUDA 检查。
+- [ ] 按用户最新安排先跑 SeqTrack/B0/Full-GRU/Full-CfC，各 seed42，物理 GPU 0/0/1/1，scratch60；[后台命令与 tail](docs/CTSEQTRACK_V32_MINI_LAUNCH.md)。
+- [ ] 本轮检查 seed42 B0 final60 S/P 分别不低于 SeqTrack 超过 2 个百分点，报告两个 Full 对 B0 的差异及四组 late-3。
+- [ ] 后续补齐 B0/reference seed52，才判定原计划的双 seed 条件；现有双 seed 比较工具不接收本轮四臂替代输入。
+- [ ] B0 达标后再处理模式、质量与状态写入问题；本轮 Full 只观察现有机制的联合结果。
+
+下方为 v31 结果与清理的历史状态；v32 尚无正式成绩。
+
 ## 最新实验结论（2026-09-21，覆盖历史待上传/待训练状态）
 
 - [x] 服务器与本地正式版本64ad056；v31 B0/Full-CfC/Full-GRU三组60轮、58–60 late-3均完成。三组均71,911次Adam、1,146,480训练端点曝光；评估106轨迹/2285帧，JSONL重算一致。

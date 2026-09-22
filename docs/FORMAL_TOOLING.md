@@ -1,35 +1,42 @@
-# CT-SeqTrack v31 正式工具面
+# CT-SeqTrack v32 工具面
 
-当前训练、工程检查和闭环评测统一从 `main.py` 进入。旧版工具不再保留于工作树，恢复方法见 [历史索引](HISTORY_EVIDENCE_INDEX.md)。
+唯一入口为main.py。以下命令供用户在同步当前 v32 源码和配置后执行；本次本地检查没有代为上传或启动。四条可直接复制的后台命令和新终端 tail 见 [v32 mini 运行说明](CTSEQTRACK_V32_MINI_LAUNCH.md)。
 
-## 正式训练与评测
+## 四次登记训练
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/31_full_gru_mini.yaml --path DATA_ROOT --tag exp_name
-python main.py --cfg cfgs/ct_seqtrack/31_full_gru_mini.yaml --checkpoint RUN/formal_checkpoints/epoch=060.ckpt --test --log_dir NEW_EVAL_DIR
+python main.py --cfg cfgs/ct_seqtrack/32_seqtrack_ref_mini.yaml --path DATA_ROOT --seed 42 --tag ref_seed42
+python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --path DATA_ROOT --seed 42 --tag b0_seed42
+python main.py --cfg cfgs/ct_seqtrack/32_full_gru_mini.yaml --path DATA_ROOT --seed 42 --tag full_gru_seed42
+python main.py --cfg cfgs/ct_seqtrack/32_full_cfc_mini.yaml --path DATA_ROOT --seed 42 --tag full_cfc_seed42
 ```
 
-正常训练结束自动评测58/59/60，输出 `results.json`；独立 `--test` 直接闭环评测所给 checkpoint，不经过动作导出或标定。评测输出使用新目录，不能覆盖旧训练/评测结果。续训仅使用相同配置身份的完整 epoch 边界 checkpoint，并遵守 [协议](EXPERIMENT_PROTOCOL.md)。
+随机初始化，结束自动评测58/59/60并保存results.json。同身份完整epoch恢复可加`--checkpoint RUN/formal_checkpoints/epoch=020.ckpt`；不使用init_checkpoint。环境和数据根见[SERVER_PATHS](SERVER_PATHS.md)。
 
-每个 run 保存 `resolved_config.yaml`、`run_manifest.json`、CSV/TensorBoard、训练checkpoint和逐帧评测结果。mini三臂后台命令见 [运行说明](CTSEQTRACK_V31_MINI_LAUNCH.md)。
-
-## 工程检查
-
-显式 `--ct_engineering_check` 可运行合成/小步检查；指定 `--log_dir` 时必须位于本仓 `artifacts/ct_checks/`。工程checkpoint不能用于正式初始化。实际数据 smoke 需要相应 SDK、数据根与运行环境；本地合成检查不能代替真实CUDA结论。
+## 评测和工程检查
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/31_b0_mini.yaml --ct_engineering_check --epoch 1 --workers 0 --limit_train_batches 2 --limit_val_batches 1 --no_late3 --log_dir artifacts/ct_checks/NEW_SMOKE
+python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --seed 42 --checkpoint RUN/formal_checkpoints/epoch=060.ckpt --test --log_dir NEW_EVAL_DIR
+python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --ct_engineering_check --epoch 1 --workers 0 --limit_train_batches 2 --limit_val_batches 1 --no_late3 --log_dir artifacts/ct_checks/NEW_SMOKE
 python -m pytest -q
 python -m compileall -q models/ datasets/ utils/ main.py
 git diff --check
 ```
 
-其中 `--limit_* 2` 为batch数量，`--limit_* 1.0` 为比例；不要混淆。示例是待用户执行的接口说明，不代表已执行检查。
+limit_*整数为batch数、小数为比例。SeqTrack及Full可替换相应32_*配置。真实smoke需要SDK/数据；工程输出放入独立artifacts/ct_checks目录，权重不进入正式初始化。
 
-## 保留能力与证据读取
+## 身份与保护
 
-配置加载统一使用支持 `_base_` 的加载器；v31只接受自身配置白名单。保留nuScenes mini/full、KITTI、四个模块臂、CfC/GRU及true/fixed/shuffled时间控制，不再混用旧正式配置。已有实验与诊断读取 [9/21报告](../artifacts/ct_checks/reports/20260921_v31_mini_three_arm/REPORT.md) 及其原始文件。
+本轮四组各自在 `results.json` 保存 final60 与 late-3；逐 checkpoint 的结果在 `evaluation/epoch=058|059|060/`。先比较 seed42 B0/reference 的 final60 S/P，再报告两个 Full 对 B0 的差异。
 
-历史 `verify_ct_slimming.py` 固定要求 `HEAD=001951a`，旧22配置与旧输出清单属于当时快照；不用于当前v31验收。旧可视化和旧checkpoint探针按对应Git版本复跑，不将其旧输入schema当作v31接口。
+下列工具专用于**后续补齐 reference/B0 seed52 后的双 seed 验收**，不是本轮四臂汇总器。它只读固定 final60 差距并从四个基线 run 的全部12份逐帧记录重算指标：
 
-`output/` 与既有 `artifacts/` 全部受保护。本次工作树收敛的检查见 [精简报告](../artifacts/ct_checks/20260922_v31_slimming/REPORT.md)，历史测试数量不等于本次验证结果。服务器当前仅只读，本页命令不构成自行上传或启动任务的授权。
+```bash
+python tools/compare_v32_baselines.py --b0-42 B0_SEED42_RUN --ref-42 REF_SEED42_RUN --b0-52 B0_SEED52_RUN --ref-52 REF_SEED52_RUN
+```
+
+标准输出为JSON：退出码0达标、1未达标、2证据不完整或身份/预算不匹配。不会以late-3替换失败的final60，也不写入训练目录。
+
+run保存resolved config、manifest、CSV/TensorBoard、checkpoint和逐帧结果；参考对照另保存真实重采样曝光。配置和采样身份参与恢复核验。旧31_*仅在Git b1d886e复现，更早版本见[历史索引](HISTORY_EVIDENCE_INDEX.md)。
+
+output/与既有artifacts/受保护；评测使用新目录，不覆盖历史。当前实现和检查边界见[修复说明](B0_V32_REPAIR.md)。

@@ -1,8 +1,9 @@
-"""v31 专用入口；与历史插件参数、标定和训练 host 分离。"""
+"""v32 与独立 SeqTrack 对照入口；保留既有物理模块路径。"""
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,7 @@ def batch_limit(value):
 
 
 def parse_config(argv=None):
-    parser = argparse.ArgumentParser(description='CT-SeqTrack v31 joint training / closed-loop evaluation')
+    parser = argparse.ArgumentParser(description='CT-SeqTrack v32 joint / independent SeqTrack training and evaluation')
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)
@@ -55,14 +56,27 @@ def resolve_run_directory(config):
     if config.log_dir:
         return Path(config.log_dir).resolve()
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    arm = 'b0' if config.v31_arm == 'b0' else config.v31_arm + '_' + config.v31_temporal_backend
+    arm = ('seqtrack_ref' if config.net_model == 'seqtrack_reference' else
+           'b0' if config.v31_arm == 'b0' else config.v31_arm + '_' + config.v31_temporal_backend)
     parent = Path('artifacts/ct_checks') if config.ct_engineering_check else Path('output')
     suffix = '-test' if config.test else ''
-    return (parent / f'{stamp}-31_{arm}-{config.tag}{suffix}').resolve()
+    return (parent / f'{stamp}-32_{arm}-{config.tag}{suffix}').resolve()
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def source_identity():
+    """记录执行时源码内容；未提交的本地修订不能只用git HEAD标识。"""
+    root = Path(__file__).resolve().parents[2]
+    files = [root / 'main.py', root / 'requirement.txt']
+    for name in ('models', 'datasets', 'utils'):
+        files.extend((root / name).rglob('*.py'))
+    hashes = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in sorted(files)}
+    digest = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return dict(sha256=digest, files=hashes)
 
 
 def run(config, *, loaders=None):
@@ -91,27 +105,35 @@ def run(config, *, loaders=None):
     except (OSError, subprocess.CalledProcessError):
         revision = 'unavailable'
     manifest = dict(schema=SCHEMA, config_sha256=config_identity(config), git_head=revision,
+                    model=config.net_model, seed=config.seed,
                     arm=config.v31_arm, temporal_backend=config.v31_temporal_backend,
                     enabled=dict(B1=model.tracker.enable_b1, B2=model.tracker.enable_b2,
                                  B3=model.tracker.enable_b3),
                     parameters=sum(p.numel() for p in model.parameters()),
                     torch=torch.__version__, lightning=pl.__version__, python=sys.version,
                     cuda_visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
-                    calibration_required=False)
+                    calibration_required=False, source=source_identity(),
+                    evaluation_rng_policy='per_checkpoint_seed_v1')
+    if config.net_model == 'seqtrack_reference':
+        from models.seqtrack_reference.protocol import protocol_identity
+        manifest['reference_protocol'] = protocol_identity()
     write_json(root / 'run_manifest.json', manifest)
-    print('[v31] ' + json.dumps(manifest, ensure_ascii=False), flush=True)
+    console_manifest = {key: value for key, value in manifest.items()
+                        if key not in ('source', 'reference_protocol')}
+    console_manifest['source_sha256'] = manifest['source']['sha256']
+    print('[v32] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
     loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
     class ConsoleProgress(Callback):
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
             if batch_idx % 50 == 0:
                 loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
                 value = float(loss.detach()) if torch.is_tensor(loss) else loss
-                print(f'[v31 train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
+                print(f'[v32 train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
                       f'batch={batch_idx + 1}/{trainer.num_training_batches} '
                       f'step={trainer.global_step} loss={value}', flush=True)
 
         def on_validation_end(self, trainer, module):
-            print('[v31 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
+            print('[v32 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
                   json.dumps(module.evaluation_results, ensure_ascii=False), flush=True)
 
     callbacks = [LearningRateMonitor(logging_interval='epoch'), ConsoleProgress()]
@@ -130,6 +152,11 @@ def run(config, *, loaders=None):
         checkpoints = [(config.eval_checkpoint_epoch, Path(config.checkpoint))]
     else:
         trainer.fit(model, ckpt_path=config.checkpoint)
+        write_json(root / 'training_budget.json', dict(
+            schema=SCHEMA, completed_epoch=model._completed_epoch,
+            epoch_complete=model._epoch_complete, last_epoch_rows=model._epoch_rows,
+            last_epoch_steps=model._epoch_steps, optimizer_steps=int(trainer.global_step),
+            sampler=model._loaders['train'].batch_sampler.state_dict()))
         checkpoints = [(epoch, root / 'formal_checkpoints' / f'epoch={epoch:03d}.ckpt')
                        for epoch in range(max(1, config.epoch - 2), config.epoch + 1)]
         if not config.v31_evaluate_late3:
@@ -140,7 +167,15 @@ def run(config, *, loaders=None):
     for epoch, checkpoint in checkpoints:
         model.config.checkpoint = str(checkpoint)
         model.config.eval_checkpoint_epoch = epoch
+        # 原SeqTrack历史点采样使用NumPy全局RNG。每次独立评测重置同一
+        # 起点，确保自动late-3与单独--test对同一权重具有一致采样身份。
+        pl.seed_everything(config.seed, workers=True)
+        from .data import stable_seed
+        model._loader('test').generator.manual_seed(stable_seed(config.seed, 'test'))
         trainer.test(model, ckpt_path=str(checkpoint), verbose=False)
+        if epoch is None:
+            # 独立 --test 没有额外 epoch 参数；以已校验 checkpoint 的运行身份为准。
+            epoch = model._completed_epoch
         result = dict(model.evaluation_results, checkpoint_epoch=epoch, checkpoint=str(checkpoint))
         results.append(result)
         label = f'epoch={epoch:03d}' if epoch is not None else checkpoint.stem
@@ -150,14 +185,14 @@ def run(config, *, loaders=None):
         with (directory / 'frames.jsonl').open('w', encoding='utf-8') as stream:
             for row in model.evaluation.rows:
                 stream.write(json.dumps(row, ensure_ascii=False) + '\n')
-        print('[v31 evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
+        print('[v32 evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
     summary = dict(final=results[-1], late3={name: sum(row[name] for row in results) / len(results)
                    for name in ('success', 'precision')}, checkpoint_epochs=[row['checkpoint_epoch'] for row in results],
                    wall_seconds=time.perf_counter() - started)
     if torch.cuda.is_available():
         summary['peak_gpu_allocated_mib'] = torch.cuda.max_memory_allocated() / 2 ** 20
     write_json(root / 'results.json', summary)
-    print('[v31 complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
+    print('[v32 complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
     return root
 
 

@@ -1,0 +1,4 @@
+_base_: 32_formal_base.yaml
+net_model: seqtrack_reference
+experiment_name: ct32_seqtrack_reference_mini_car_scratch
+v31_arm: b0

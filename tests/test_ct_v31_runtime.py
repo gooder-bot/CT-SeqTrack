@@ -152,7 +152,8 @@ def test_accepted_state_commit_is_unique_detached_and_no_gt_reset():
     a, b = left.prepare(rows), right.prepare(alternative)
     for key in ('points', 'point_valid', 'history_boxes', 'history_pair_valid', 'fallback_box', 'box_size'):
         assert torch.equal(a[key], b[key]), key
-    assert a['anchor_box'][0, 0] == 6.
+    expected_x = first['anchor_box'][0, 0] + output.accepted_box[0, 0].detach()
+    assert a['anchor_box'][0, 0] == expected_x
     assert not a['history_pair_valid'][0, -1]
     assert not a['history_boxes'].requires_grad
     assert not torch.equal(a['target_box'], b['target_box'])
@@ -174,7 +175,8 @@ def test_branch_states_are_independent_and_window_seeds_are_past():
     builder.commit(out, batch)
     next_batch = builder.prepare([raw[request(5, branch=1, start=4, end=7)],
                                   raw[request(5, branch=2, start=4, end=7)]])
-    assert next_batch['anchor_box'][0, 0] - next_batch['anchor_box'][1, 0] == pytest.approx(2.)
+    expected = (batch['anchor_box'][:, 0] + out.accepted_box[:, 0]).numpy()
+    assert next_batch['anchor_box'][0, 0] - next_batch['anchor_box'][1, 0] == pytest.approx(expected[0] - expected[1])
 
 
 def test_bc_corner_channel_order_matches_observation():
@@ -292,7 +294,7 @@ def test_real_sdk_pointcloud_and_box_shape_contract():
     from pyquaternion import Quaternion
     source = TinySource((3,))
     raw = RawEndpointDataset(source)
-    row = raw[request(1, end=3)]
+    row = raw[request(1, branch=0, end=3)]
     for frame in row['frames'].values():
         box = frame['3d_bbox']
         frame['3d_bbox'] = SimpleNamespace(center=box[:3], orientation=Quaternion(axis=[0, 0, 1], radians=box[3]),
@@ -420,8 +422,8 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path):
     interrupted.fit(first)
     checkpoint = tmp_path / 'resume' / 'formal_checkpoints' / 'epoch=001.ckpt'
     state = torch.load(checkpoint, map_location='cpu')
-    assert state['ct_v31_runtime']['epoch_complete'] is True
-    assert state['ct_v31_runtime']['rows'] == 24
+    assert state['ct_v32_runtime']['epoch_complete'] is True
+    assert state['ct_v32_runtime']['rows'] == 24
     assert state['lr_schedulers'][0]['last_epoch'] == 1
     resumed, continuation = make(tmp_path / 'resume')
     continuation.fit(resumed, ckpt_path=str(checkpoint))

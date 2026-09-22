@@ -1,5 +1,8 @@
-"""独立 v31 Lightning host；不继承历史 SeqTrack host 或隔离训练逻辑。"""
+"""v32 Lightning host；保留原模块路径，不继承历史隔离训练逻辑。"""
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -15,19 +18,29 @@ from models.ct_v31.config import normalize_config
 from models.ct_v31.data import BatchBuilder, build_loaders, stable_seed
 from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
+from utils.bn_policy import running_batch_norm
 
 
 class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
     def __init__(self, config=None, *, tracker=None, loaders=None):
         super().__init__()
         self.config = normalize_config(config)
+        self.is_reference = self.config.net_model == 'seqtrack_reference'
+        builder_type, self._loader_factory = BatchBuilder, build_loaders
+        if self.is_reference:
+            from models.seqtrack_reference import (BatchBuilder as ReferenceBuilder,
+                ReferenceTracker, build_loaders as reference_loaders)
+            builder_type, self._loader_factory = ReferenceBuilder, reference_loaders
         if tracker is None:
-            from models.ct_v31.model import JointTracker
-            tracker = JointTracker(self.config)
+            if self.is_reference:
+                tracker = ReferenceTracker(self.config)
+            else:
+                from models.ct_v31.model import JointTracker
+                tracker = JointTracker(self.config)
         self.tracker = tracker
         self._loaders = {} if loaders is None else loaders
-        self.train_builder = BatchBuilder(self.config)
-        self.evaluation_builder = BatchBuilder(self.config)
+        self.train_builder = builder_type(self.config)
+        self.evaluation_builder = builder_type(self.config)
         self.evaluation = TrackingEvaluation()
         self.evaluation_results = {}
         self._pending_train = None
@@ -49,7 +62,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def _loader(self, role):
         if role not in self._loaders:
-            self._loaders.update(build_loaders(self.config, roles=(role,)))
+            self._loaders.update(self._loader_factory(self.config, roles=(role,)))
         loader = self._loaders[role]
         if role == 'train':
             epoch = int(self.current_epoch)
@@ -81,7 +94,14 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         batch = move_tensors(builder.prepare(rows), device)
         prior = self.tracker.plan_prior(batch)
         builder.acquire(batch, prior, training=training)
-        output = self.tracker(batch, prior=prior)
+        # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
+        # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
+        # teacher/单轨迹 EMA 覆盖；只切换 B0 BN，affine 和共享特征仍可学。
+        use_running = training and (len(rows) < self.config.batch_size
+            or any(getattr(row['request'], 'drain', False) for row in rows))
+        bn_scope = getattr(self.tracker, 'observation', self.tracker)
+        with running_batch_norm(bn_scope, enabled=use_running):
+            output = self.tracker(batch, prior=prior)
         return batch, output
 
     def configure_optimizers(self):
@@ -111,7 +131,11 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             self._pending_rng = None
         if self._resume_sampler is not None:
             current = self._loaders['train'].batch_sampler.state_dict()
-            for key in ('lengths', 'source_sha256', 'seed', 'batch_size', 'short_window', 'long_window', 'curriculum_epochs'):
+            identity_keys = ['schema', 'lengths', 'source_sha256', 'seed', 'batch_size']
+            identity_keys += (['resampling', 'nominal_endpoint_exposures'] if self.is_reference else
+                ['short_window', 'long_window', 'curriculum_epochs', 'reserve_windows',
+                 'reserve_policy', 'drain_policy', 'seed_policy', 'seed_translation', 'seed_yaw_degrees'])
+            for key in identity_keys:
                 if current[key] != self._resume_sampler[key]:
                     raise ValueError('v31 resume dataset/window manifest mismatch: ' + key)
             self._resume_sampler = None
@@ -128,6 +152,8 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         for name, value in losses.items():
             if torch.is_tensor(value) and value.ndim == 0:
                 self.log('train/' + name, value, on_step=True, on_epoch=True, batch_size=len(rows))
+        # 普通 mean loss、每批一次标准 Adam；不声称小批按样本数缩放
+        # loss 可以同比缩小 Adam 更新，也不临时改变 LR/scheduler。
         return total
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
@@ -147,8 +173,31 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         if self._epoch_complete and self.train_builder.states:
             raise RuntimeError('v31 completed epoch retains unfinished windows')
         self._completed_epoch = int(self.current_epoch) + 1
+        self._write_epoch_audit(sampler)
         self.log('train/endpoint_rows', float(self._epoch_rows), on_step=False, on_epoch=True)
         self.log('train/adam_steps', float(self._epoch_steps), on_step=False, on_epoch=True)
+
+    def _write_epoch_audit(self, sampler):
+        """按epoch记录真实预算及参考重采样；恢复不会覆盖不同的已有审计。"""
+        if not self.config.log_dir:
+            return
+        audit = dict(schema='ct_seqtrack.v32.training_audit.v1',
+            completed_epoch=self._completed_epoch, epoch_complete=self._epoch_complete,
+            rows=self._epoch_rows, optimizer_steps=self._epoch_steps, sampler=sampler.state_dict())
+        if self.is_reference:
+            audit['exposure'] = self.train_builder.exposure_summary()
+            # 未替换行可由名义sampler重建；只单列替换及其拒绝轨迹，避免重复大日志。
+            audit['resampled_records'] = [row for row in self.train_builder.exposure_records
+                                         if row['rejected']]
+        directory = Path(self.config.log_dir) / 'training_audits'
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f'epoch={self._completed_epoch:03d}.json'
+        content = json.dumps(audit, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
+        if path.exists():
+            if path.read_text(encoding='utf-8') != content:
+                raise FileExistsError('existing epoch audit differs; choose a new run directory: ' + str(path))
+        else:
+            path.write_text(content, encoding='utf-8')
 
     def _evaluation_start(self, role):
         self.evaluation_builder.reset()
@@ -195,13 +244,13 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def on_save_checkpoint(self, checkpoint):
         sampler = self._loaders.get('train')
-        checkpoint['ct_v31_runtime'] = resume_payload(self.config,
+        checkpoint['ct_v32_runtime'] = resume_payload(self.config,
             completed_epoch=self._completed_epoch, complete=self._epoch_complete,
             rows=self._epoch_rows, steps=self._epoch_steps,
             sampler=sampler.batch_sampler.state_dict() if sampler is not None else None)
 
     def on_load_checkpoint(self, checkpoint):
-        payload = validate_resume_payload(checkpoint.get('ct_v31_runtime'), self.config,
+        payload = validate_resume_payload(checkpoint.get('ct_v32_runtime'), self.config,
                                           training=not self.config.test)
         self._completed_epoch = int(payload['completed_epoch'])
         if not self.config.test:

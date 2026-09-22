@@ -1,1 +1,3 @@
 *.sh text eol=lf
+# 固定参考包的字节来源与运行身份，避免跨平台 checkout 改写换行后 SHA 漂移。
+models/seqtrack_reference/** text eol=lf

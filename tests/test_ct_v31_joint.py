@@ -139,10 +139,10 @@ def test_forward_does_not_read_current_gt():
     torch.testing.assert_close(first.quality_logits, second.quality_logits, rtol=0, atol=0)
 
 
-def test_no_current_measurements_produce_prior_only_without_nan():
+def test_no_sequence_measurements_produce_prior_only_without_nan():
     model = JointTracker(model_config()).train()
     batch = make_batch(1)
-    batch['point_valid'][:, -1] = False
+    batch['point_valid'].zero_()
     batch['extension_valid'].zero_()
     out = model(batch)
     torch.testing.assert_close(out.accepted_box, out.prior.box)

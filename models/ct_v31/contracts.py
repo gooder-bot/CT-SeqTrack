@@ -1,4 +1,4 @@
-"""v31 张量接口。框为 anchor 平移后的世界轴 XYZ + 绝对 yaw(rad)。
+"""v32 张量接口。公开框为 anchor 平移后的世界轴 XYZ + 绝对 yaw(rad)。
 
 box_size 始终为物体轴 length/width/height；历史按最旧到最新排列。
 raw ID 只在同一原始帧内有意义。padding 的 ID=-1、valid=False。
@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 
-SCHEMA = "ct_seqtrack.joint_identity.v31"
+SCHEMA = "ct_seqtrack.joint_identity.v32"
 
 
 @dataclass
@@ -39,6 +39,7 @@ class ObservationFeatures:
     foreground_probability: Tensor  # [B,4,N]
     quality: Tensor                 # [B,4] 当前/历史点量、熵和有效性摘要
     current_valid: Tensor           # [B] 当前 B0 至少一个真实唯一点
+    sequence_valid: Tensor          # [B] 四帧中至少一个真实唯一点，允许仅历史预测
 
 
 @dataclass

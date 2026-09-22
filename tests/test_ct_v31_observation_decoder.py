@@ -29,6 +29,7 @@ def _batch(batch_size=2, count=8):
                                     [0., 0., 0., .5]]).expand(batch_size, -1, -1).clone(),
         history_valid=torch.ones(batch_size, 3, dtype=torch.bool),
         history_times=torch.tensor([-1.5, -1., -.5]).expand(batch_size, -1).clone(),
+        anchor_box=torch.zeros(batch_size, 4),
         box_size=torch.tensor([4., 2., 1.5]).expand(batch_size, -1).clone())
 
 
@@ -43,7 +44,8 @@ def _decoder_inputs(batch_size=1):
         bc_prediction=torch.randn(batch_size, 4, 8, 9),
         foreground_probability=torch.rand(batch_size, 4, 8),
         quality=torch.rand(batch_size, 4),
-        current_valid=torch.ones(batch_size, dtype=torch.bool))
+        current_valid=torch.ones(batch_size, dtype=torch.bool),
+        sequence_valid=torch.ones(batch_size, dtype=torch.bool))
     z = torch.zeros(batch_size, 2)
     prior = PriorContext(feature=torch.randn(batch_size, 128), mean_xy=z.clone(),
         log_sigma=z.clone(), valid=torch.ones(batch_size, dtype=torch.bool),
@@ -70,7 +72,7 @@ def _assert_finite_gradients(model):
     assert all(torch.isfinite(g).all() for g in gradients)
 
 
-def test_observation_soft_foreground_trains_segmentation_without_scaling_xyz():
+def test_observation_soft_foreground_protects_logits_but_keeps_shared_learning():
     batch = _batch()
     model = B0Observation(token_count=4).eval()
     captured = []
@@ -85,8 +87,11 @@ def test_observation_soft_foreground_trains_segmentation_without_scaling_xyz():
     assert output.point_features.shape == (2, 4, 8, 64)
     assert output.bc_prediction.shape == (2, 4, 8, 9)
     assert torch.equal(captured[0][:, :3].transpose(1, 2), batch['points'][..., :3].reshape(2, 32, 3))
-    assert output.segmentation_logits.grad.abs().sum() > 0
-    assert model.seg_pointnet.fc.weight.grad[:2].abs().sum() > 0
+    assert output.segmentation_logits.grad is None
+    assert torch.count_nonzero(model.seg_pointnet.fc.weight.grad[:2]) == 0
+    assert model.seg_pointnet.fc.weight.grad[2:].abs().sum() > 0
+    assert model.seg_pointnet.seq_per_point[0][0].weight.grad.abs().sum() > 0
+    assert not output.quality.requires_grad
     _assert_finite_gradients(model)
 
 
@@ -219,10 +224,11 @@ def test_fixed_member_attention_prevents_other_modes_coordinate_and_feature_bypa
     assert not torch.allclose(before.decoder_features[:, 0], after.decoder_features[:, 0])
 
 
-def test_empty_base_can_recover_with_modes_but_empty_current_inputs_force_prior():
+def test_empty_base_can_recover_with_modes_but_empty_sequence_inputs_force_prior():
     observation, evidence, batch, prior = _decoder_inputs()
     observation.current_valid[:] = False
-    observation.source_valid[:, -1] = False
+    observation.sequence_valid[:] = False
+    observation.source_valid[:] = False
     model = SharedHypothesisDecoder().eval()
     with torch.no_grad():
         model.pose_head.bias[:3] = torch.tensor([.2, -.3, .4])
@@ -243,6 +249,7 @@ def test_all_masked_decoder_and_zero_sincos_residual_are_numerically_safe():
     batch['history_valid'][:] = False
     batch['history_boxes'][:] = float('nan')
     observation.current_valid[:] = False
+    observation.sequence_valid[:] = False
     observation.source_valid[:] = False
     observation.source_tokens[:] = float('nan')
     evidence.point_valid[:] = False

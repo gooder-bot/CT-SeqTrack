@@ -1,0 +1,5 @@
+# v32 mini 单 seed42 四组实验：Full-CfC，物理 GPU1。
+_base_: 32_formal_base.yaml
+experiment_name: ct32_full_cfc_mini_car_scratch
+v31_arm: full
+v31_temporal_backend: cfc

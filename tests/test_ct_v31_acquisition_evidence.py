@@ -185,7 +185,7 @@ def _evidence_inputs(empty=False):
     observation = ObservationFeatures(torch.zeros(1, 4), torch.randn(1, 4, count, 64, requires_grad=True),
         torch.randn(1, 4, 4, 128), torch.ones(1, 4, 4, dtype=torch.bool),
         torch.zeros(1, 4, count, 2), torch.zeros(1, 4, count, 9), torch.ones(1, 4, count),
-        torch.ones(1, 4), torch.tensor([not empty]))
+        torch.ones(1, 4), torch.tensor([not empty]), torch.tensor([not empty]))
     batch = dict(extension_points=torch.randn(1, 768, 5), extension_ids=torch.arange(768)[None],
         extension_valid=torch.zeros(1, 768, dtype=torch.bool), extension_partition=torch.zeros(1, 768, dtype=torch.long),
         memory_points=torch.randn(1, 36, 5), memory_valid=torch.full((1, 36), not empty),

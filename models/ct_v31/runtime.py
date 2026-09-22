@@ -11,7 +11,7 @@ from .contracts import SCHEMA
 from .config import config_identity
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 
-RESUME_SCHEMA = 'ct_seqtrack.v31.epoch_boundary.v1'
+RESUME_SCHEMA = 'ct_seqtrack.v32.epoch_boundary.v1'
 
 
 def capture_rng_state():
@@ -52,8 +52,11 @@ def validate_resume_payload(payload, config, *, training=True):
         raise ValueError('v31 only resumes complete epoch boundaries')
     if training:
         sampler = payload.get('sampler')
-        if not isinstance(sampler, dict) or sampler.get('schema') != 'ct_seqtrack.v31.ready_queue.v1':
-            raise ValueError('v31 resume requires a ready-queue manifest')
+        expected_sampler = ('seqtrack_reference.v32.teacher.v1'
+                            if config.get('net_model') == 'seqtrack_reference'
+                            else 'ct_seqtrack.v32.ready_queue.v2')
+        if not isinstance(sampler, dict) or sampler.get('schema') != expected_sampler:
+            raise ValueError('v32 resume requires the matching sampler manifest')
         content = {key: value for key, value in sampler.items() if key != 'manifest_sha256'}
         digest = hashlib.sha256(json.dumps(content, sort_keys=True,
                                           separators=(',', ':')).encode()).hexdigest()

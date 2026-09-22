@@ -1,10 +1,11 @@
-"""v31 共享七框 decoder：三历史 + q0/三个证据假设，共 56 个角点。
+"""v32 共享七框 decoder：局部几何 query，公开输出仍为世界轴框。
 
 B0 的四帧 source 仍由 SeqTrack 原 local/global encoder 编码。
 证据与记忆只接在 cross-attention 的 K/V；候选之间没有 self-attention。
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Mapping
 
 import torch
@@ -13,6 +14,7 @@ from torch import Tensor, nn
 from models.attn.Models import Encoder, Decoder
 from .contracts import DecoderOutput, EvidenceHypotheses, ObservationFeatures, PriorContext
 from .observation import box_corners_xyz
+from .geometry import anchor_yaw, rotate_xy, transform_boxes
 
 
 def _masked_source(value: Tensor, valid: Tensor, name: str) -> Tensor:
@@ -115,7 +117,7 @@ class SharedHypothesisDecoder(nn.Module):
         coarse = observation.coarse_box
         if coarse.shape != (batch, 4) or not bool(torch.isfinite(coarse).all()):
             raise ValueError("coarse_box must be finite [B,4]")
-        effective_coarse = torch.where(observation.current_valid[:, None].bool(), coarse, prior_box)
+        effective_coarse = torch.where(observation.sequence_valid[:, None].bool(), coarse, prior_box)
         centers = torch.where(mode_valid[..., None], centers, 0.)
         yaw = effective_coarse[:, None, 3:4].detach().expand(-1, 3, -1)
         mode_seeds = torch.cat((centers, yaw), dim=-1)
@@ -157,18 +159,28 @@ class SharedHypothesisDecoder(nn.Module):
             raise ValueError("decoder needs three history boxes and their validity")
         if size.shape != (batch_size, 3) or not bool(torch.isfinite(size).all()) or not bool((size > 0).all()):
             raise ValueError("box_size must be finite positive [B,3] L/W/H")
-        if observation.current_valid.shape != (batch_size,) or observation.quality.shape != (batch_size, 4):
-            raise ValueError("observation current_valid/quality shape mismatch")
+        if (observation.current_valid.shape != (batch_size,)
+                or observation.sequence_valid.shape != (batch_size,)
+                or observation.quality.shape != (batch_size, 4)):
+            raise ValueError("observation current_valid/sequence_valid/quality shape mismatch")
         if not bool(torch.isfinite(history_boxes[history_valid]).all()):
             raise ValueError("valid history boxes must be finite")
         times = self._frame_times(batch, reference)
         seeds, corner_seeds, query_valid, members, prior_box = self._seeds(
             observation, evidence, history_boxes, history_valid, prior)
-        corners = box_corners_xyz(corner_seeds, size[:, None])
+        # 只创建 decoder 的几何视图；B2 的输入、votes/covariance 和监督不换轴。
+        # 模式 query 在 _seeds 已 detach，输出 seed 的 live center 梯度仍保留。
+        yaw_anchor = anchor_yaw(batch, reference)
+        local_seeds = transform_boxes(seeds, yaw_anchor)
+        local_corners = transform_boxes(corner_seeds, yaw_anchor)
+        local_prior = replace(prior,
+            box=transform_boxes(prior.box.detach().to(reference), yaw_anchor),
+            direction_xy=rotate_xy(prior.direction_xy.detach().to(reference), yaw_anchor))
+        corners = box_corners_xyz(local_corners, size[:, None])
         query_times = torch.cat((times[:, :3], times[:, -1:].expand(-1, 4)), dim=1)
         corner_input = torch.cat((corners, query_times[:, :, None, None].expand(-1, -1, 8, -1)), dim=-1)
         queries = self.corner_projection(corner_input.reshape(batch_size, 56, 4))
-        prior_embedding = self._prior_embedding(observation, prior, seeds[:, 3], size, times)
+        prior_embedding = self._prior_embedding(observation, local_prior, local_seeds[:, 3], size, times)
         prior_by_query = torch.cat((torch.zeros_like(prior_embedding[:, None]).expand(-1, 3, -1),
                                     prior_embedding[:, None].expand(-1, 4, -1)), dim=1)
         queries = queries + prior_by_query.repeat_interleave(8, dim=1)
@@ -195,18 +207,20 @@ class SharedHypothesisDecoder(nn.Module):
         sine, cosine = residual[..., 3], residual[..., 4]
         nonzero = sine.square() + cosine.square() > 1e-12
         angle = torch.atan2(torch.where(nonzero, sine, 0.), torch.where(nonzero, cosine, 1.))
-        yaw = seeds[..., 3] + angle
+        yaw = local_seeds[..., 3] + angle
         yaw = torch.atan2(yaw.sin(), yaw.cos())
-        boxes = torch.cat((seeds[..., :3] + residual[..., :3], yaw[..., None]), dim=-1)
+        boxes = torch.cat((local_seeds[..., :3] + residual[..., :3], yaw[..., None]), dim=-1)
+        boxes = transform_boxes(boxes, yaw_anchor, to_world=True)
         boxes = torch.where(query_valid[..., None], boxes, 0.)
         current_boxes = boxes[:, 3:]
-        # 缺测只有明确的结构性分支，不把历史/初始化伪装成当前测量。
-        q0 = torch.where(observation.current_valid[:, None].bool(), current_boxes[:, 0], prior_box)
+        # 历史真实点可预测当前框，但不会变成当前测量/记忆写入资格。
+        # B0 全空而 extension 存在时维持原规则：q0=prior，模式仍可竞争。
+        q0 = torch.where(observation.sequence_valid[:, None].bool(), current_boxes[:, 0], prior_box)
         current_boxes = torch.cat((q0[:, None], current_boxes[:, 1:]), dim=1)
-        no_current_points = ~observation.current_valid.bool() & ~extension_valid.any(-1)
-        current_boxes = torch.where(no_current_points[:, None, None], prior_box[:, None], current_boxes)
+        no_sequence_points = ~observation.sequence_valid.bool() & ~extension_valid.any(-1)
+        current_boxes = torch.where(no_sequence_points[:, None, None], prior_box[:, None], current_boxes)
         current_valid = query_valid[:, 3:].clone()
-        current_valid[:, 1:] = current_valid[:, 1:] & ~no_current_points[:, None]
+        current_valid[:, 1:] = current_valid[:, 1:] & ~no_sequence_points[:, None]
         quality = self.quality_head(features[:, 3:]).squeeze(-1)
         quality = quality.masked_fill(~current_valid, -20.)
         return DecoderOutput(hypothesis_boxes=current_boxes, quality_logits=quality,

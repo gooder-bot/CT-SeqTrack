@@ -1,12 +1,13 @@
-"""v31 原始帧数据流：worker 不拥有预测状态，也不执行模型。
+"""v32 原始帧数据流：worker 不拥有预测状态，也不执行模型。
 
 每个训练端点恰好出现四次；窗口长度只决定 accepted 历史寿命，不增加
-前缀 forward。所有裁剪、状态读取和获取均在主进程完成。
+前缀 forward。连贯种子扰动与尾部预留具有显式身份；所有裁剪、状态
+读取和获取均在主进程完成。
 """
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -32,6 +33,7 @@ class EndpointRequest:
     window_start: int
     window_end: int
     frame: int
+    drain: bool = False
 
     @property
     def state_key(self):
@@ -52,20 +54,29 @@ class ReadyQueueBatchSampler(Sampler):
 固定 slot 完成一个窗口后从 ready queue 取下一个窗口。DataLoader 可预取
 未来 raw batch，主进程按序消费时前一帧已经提交，故无需 worker IPC 状态。
 """
-    SCHEMA = 'ct_seqtrack.v31.ready_queue.v1'
+    SCHEMA = 'ct_seqtrack.v32.ready_queue.v2'
+    RESERVE_POLICY = 'stratified_singleton_windows_then_fill_v1'
+    DRAIN_POLICY = 'running_b0_bn_from_first_reserve_or_partial_v1'
+    SEED_POLICY = 'shared_anchor_local_translation_world_yaw_v1'
 
     def __init__(self, lengths, batch_size=16, *, seed=42, training=True,
-                 short_window=3, long_window=8, curriculum_epochs=10, source_sha256=''):
+                 short_window=3, long_window=8, curriculum_epochs=10, source_sha256='',
+                 reserve_windows=112, seed_translation=.3, seed_yaw_degrees=1.5):
         self.lengths = tuple(int(n) for n in lengths)
         self.batch_size = int(batch_size)
         self.seed, self.training, self.epoch = int(seed), bool(training), 0
         self.short_window, self.long_window = int(short_window), int(long_window)
         self.curriculum_epochs = int(curriculum_epochs)
         self.source_sha256 = str(source_sha256)
+        self.reserve_windows = int(reserve_windows)
+        self.seed_translation = float(seed_translation)
+        self.seed_yaw_degrees = float(seed_yaw_degrees)
         if self.batch_size < 1 or min(self.short_window, self.long_window, self.curriculum_epochs) < 1:
             raise ValueError('v31 batch/window/curriculum sizes must be positive')
         if any(n < 0 for n in self.lengths):
             raise ValueError('negative tracklet length')
+        if self.reserve_windows < 0 or min(self.seed_translation, self.seed_yaw_degrees) < 0:
+            raise ValueError('v32 reserve and seed perturbation must be nonnegative')
         self._plan = None
 
     @property
@@ -109,14 +120,41 @@ class ReadyQueueBatchSampler(Sampler):
             np.random.default_rng(stable_seed(self.seed, self.epoch, 'windows')).shuffle(windows)
         return windows
 
+    def _queues(self):
+        windows = self._windows()
+        if not self.training or not self.reserve_windows:
+            return deque(windows), deque()
+        # 优先各 branch 28 个真正独立的单步窗口；小数据不足时从其他
+        # branch 补齐。只重排窗口，不截断递归、不重复端点、不重放前缀。
+        quotas = [self.reserve_windows // 4 + (branch < self.reserve_windows % 4)
+                  for branch in range(4)]
+        selected, counts = set(), [0] * 4
+        for index, (_, branch, start, end) in enumerate(windows):
+            if end - start == 1 and counts[branch] < quotas[branch]:
+                selected.add(index)
+                counts[branch] += 1
+        for index, (_, _, start, end) in enumerate(windows):
+            if len(selected) >= self.reserve_windows:
+                break
+            if end - start == 1:
+                selected.add(index)
+        return (deque(window for i, window in enumerate(windows) if i not in selected),
+                deque(window for i, window in enumerate(windows) if i in selected))
+
     def _batches(self):
-        pending = deque(self._windows())
+        pending, reserve = self._queues()
         active = []
-        while pending or active:
-            while pending and len(active) < self.batch_size:
-                tracklet, branch, start, end = pending.popleft()
+        drain = False
+        while pending or reserve or active:
+            while (pending or reserve) and len(active) < self.batch_size:
+                if pending:
+                    tracklet, branch, start, end = pending.popleft()
+                else:
+                    tracklet, branch, start, end = reserve.popleft()
+                    drain = True
                 active.append(EndpointRequest(self.epoch, tracklet, branch, start, end, start))
-            yield tuple(active)
+            # drain 属于整批统计策略，而不是某一条轨迹的模型状态。
+            yield tuple(replace(r, drain=drain) for r in active)
             active = [EndpointRequest(r.epoch, r.tracklet, r.branch, r.window_start,
                                       r.window_end, r.frame + 1)
                       for r in active if not r.ends_window]
@@ -133,11 +171,19 @@ class ReadyQueueBatchSampler(Sampler):
         return len(self._materialized())
 
     def state_dict(self):
+        digest = hashlib.sha256()
+        for batch in self._materialized():
+            digest.update(repr(tuple((r.tracklet, r.branch, r.window_start,
+                                      r.window_end, r.frame, r.drain) for r in batch)).encode())
         payload = dict(schema=self.SCHEMA, epoch=self.epoch, lengths=list(self.lengths),
                        batch_size=self.batch_size, seed=self.seed, training=self.training,
                        short_window=self.short_window, long_window=self.long_window,
                        curriculum_epochs=self.curriculum_epochs, rows=self.row_count,
-                       source_sha256=self.source_sha256)
+                       source_sha256=self.source_sha256, reserve_windows=self.reserve_windows,
+                       reserve_policy=self.RESERVE_POLICY, drain_policy=self.DRAIN_POLICY,
+                       seed_policy=self.SEED_POLICY, seed_translation=self.seed_translation,
+                       seed_yaw_degrees=self.seed_yaw_degrees, batches=len(self._materialized()),
+                       plan_sha256=digest.hexdigest())
         payload['manifest_sha256'] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         return payload
@@ -271,7 +317,10 @@ def build_loaders(config, roles=('train', 'val'), sources=None):
             short_window=int(option(config, 'v31_short_window', 3)),
             long_window=int(option(config, 'v31_long_window', 8)),
             curriculum_epochs=int(option(config, 'v31_curriculum_epochs', 10)),
-            source_sha256=raw.source_sha256)
+            source_sha256=raw.source_sha256,
+            reserve_windows=int(option(config, 'v32_reserve_windows', 112)),
+            seed_translation=float(option(config, 'v32_seed_translation', .3)),
+            seed_yaw_degrees=float(option(config, 'v32_seed_yaw_degrees', 1.5)))
         workers = int(option(config, 'workers', 4))
         kwargs = dict(num_workers=workers, collate_fn=raw_collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
@@ -295,6 +344,12 @@ class AcceptedState:
     last_strong_time: float
     last_supported_time: float
     previous_innovation: float
+    box_provenance: dict
+    seed_offset: np.ndarray
+
+
+# provenance 是输入参考框来源；GT 标签只用于监督，不参与 accepted 提交。
+MISSING_BOX, KNOWN_GT_BOX, PERTURBED_BOX, PREDICTED_BOX = range(4)
 
 
 class BatchBuilder:
@@ -315,6 +370,26 @@ class BatchBuilder:
         size = box_size(row['first_frame']['3d_bbox'], row['first_frame'])
         boxes = {i: box_array(frames[i]['3d_bbox']) for i in seed_ids}
         times = {i: float(frames[i]['timestamp']) for i in seed_ids}
+        seed_offset = np.zeros(4, dtype=np.float64)
+        provenance = KNOWN_GT_BOX
+        if r.branch in (1, 2, 3):
+            rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
+                row['tracklet_key'], r.state_key, 'window_seed'))
+            local_xy = rng.uniform(-float(option(self.config, 'v32_seed_translation', .3)),
+                                   float(option(self.config, 'v32_seed_translation', .3)), 2)
+            yaw = boxes[r.frame - 1][3]
+            c, s = np.cos(yaw), np.sin(yaw)
+            seed_offset[:2] = np.asarray([[c, -s], [s, c]]) @ local_xy
+            limit = np.deg2rad(float(option(self.config, 'v32_seed_yaw_degrees', 1.5)))
+            seed_offset[3] = rng.uniform(-limit, limit)
+            for box in boxes.values():
+                # 全历史共用平移及 yaw 偏差；不绕 anchor 旋转历史中心，
+                # 因此不会把人工扰动变成虚假的历史物理位移。
+                box[:3] += seed_offset[:3]
+                box[3] = np.arctan2(np.sin(box[3] + seed_offset[3]),
+                                    np.cos(box[3] + seed_offset[3]))
+            provenance = PERTURBED_BOX
+        box_provenance = {i: provenance for i in seed_ids}
         memory = RawIdentityMemory(size)
         first = row['first_frame']
         xyz, ids = point_arrays(first)
@@ -331,7 +406,7 @@ class BatchBuilder:
         last_time = times[r.frame - 1]
         return AcceptedState(boxes, times, r.frame, size, memory, trusted,
                              {i: True for i in seed_ids}, velocity, 1.,
-                             last_time, last_time, 0.)
+                             last_time, last_time, 0., box_provenance, seed_offset)
 
     def prepare(self, rows):
         if self._pending is not None:
@@ -368,6 +443,8 @@ class BatchBuilder:
         anchor = state.boxes[r.frame - 1].copy()
         history_valid = np.asarray([r.frame - 3 + i >= 0 for i in range(3)], dtype=bool)
         history = np.stack([state.boxes[i] for i in row['history_ids']])
+        history_provenance = np.asarray([state.box_provenance[i] if valid else MISSING_BOX
+            for i, valid in zip(row['history_ids'], history_valid)], dtype=np.int64)
         history_local = history.copy()
         history_local[:, :3] -= anchor[:3]
         physical_times = np.asarray([float(frames[i]['timestamp']) - now for i in row['history_ids']])
@@ -398,8 +475,11 @@ class BatchBuilder:
             point = np.zeros((n, 5), dtype=np.float32)
             point[:count, :3] = xyz[selected] - anchor[:3]
             point[:count, 3] = float(frame['timestamp']) - now
-            point[:count, 4] = (inside_box(xyz[selected], crop_box, state.size).astype(np.float32)
-                                if slot < 3 else .5)
+            if slot < 3:
+                hint = inside_box(xyz[selected], crop_box, state.size).astype(np.float32)
+                point[:count, 4] = hint if history_provenance[slot] == KNOWN_GT_BOX else .2 + .6 * hint
+            else:
+                point[:count, 4] = .5
             point_valid = np.arange(n) < count
             point_ids = np.full(n, -1, dtype=np.int64)
             point_ids[:count] = ids[selected]
@@ -424,6 +504,8 @@ class BatchBuilder:
         memory = state.memory.export(now)
         result = dict(points=np.stack(points), point_valid=np.stack(valid), point_ids=np.stack(raw_ids),
             history_boxes=history_local.astype(np.float32), history_valid=history_valid,
+            history_box_provenance=history_provenance,
+            window_seed_offset=state.seed_offset.astype(np.float32),
             history_pair_valid=pair_valid,
             history_times=effective_times.astype(np.float32), current_dt=np.float32(-effective_times[-1]),
             frame_times=np.r_[physical_times, 0.].astype(np.float32),
@@ -527,6 +609,7 @@ class BatchBuilder:
             if not np.isfinite(box).all():
                 raise FloatingPointError('non-finite accepted box')
             state.boxes[r.frame] = box
+            state.box_provenance[r.frame] = PREDICTED_BOX
             state.times[r.frame] = context['timestamp']
             state.next_frame += 1
             ids = point_ids[index, point_valid[index]]
@@ -568,6 +651,7 @@ class BatchBuilder:
                     state.boxes.pop(old)
                     state.times.pop(old)
                     state.transitions.pop(old, None)
+                    state.box_provenance.pop(old, None)
             if r.ends_window:
                 self.states.pop(r.state_key)
         self._pending = None

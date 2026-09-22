@@ -1,8 +1,8 @@
-"""v31 B0：真实测量上的粗定位与 SeqTrack PointNet 特征。
+"""v32 B0：anchor 局部测量上的粗定位与 SeqTrack PointNet 特征。
 
 三种 PointNet 保留 SeqTrack 的层宽与布局，
 只计算有效测量，不依赖 PointNet++ CUDA 扩展。
-前景概率只在 MiniPointNet 的 latent 聚合前使用；XYZ 从不乘概率。
+前景概率仅作为 detached 聚合权重；XYZ 从不乘概率。公开框还原世界轴。
 """
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from typing import Mapping
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from utils.masked_observation import mask_values, masked_max_pool, masked_sequence
 from .contracts import ObservationFeatures
+from .geometry import anchor_yaw, rotate_xyz, transform_boxes
 
 
 def unique_valid_mask(valid: Tensor, point_ids: Tensor | None = None) -> Tensor:
@@ -67,12 +67,34 @@ def _linear_block(in_channels: int, out_channels: int) -> nn.Sequential:
 
 
 def _pooled_tokens(value: Tensor, valid: Tensor, count: int):
-    # 正式 1024→128 完全整除。小型 CPU batch 仅补无效槽，不引入伪点。
-    missing = (-value.shape[-1]) % count
-    if missing:
-        value = F.pad(value, (0, missing))
-        valid = F.pad(valid, (0, missing), value=False)
-    return masked_max_pool(value, valid, count)
+    """真实点压紧后做不重叠 ragged max；稀疏帧一真实点对应一 token。
+
+    按原始有效槽顺序分桶，不复制点；floor 边界避免 AdaptiveMaxPool
+    在不整除时让同一点进入相邻两桶。固定 gather/max 保持 CUDA 确定性。
+    """
+    count = int(count)
+    if count < 1 or value.ndim != 3 or valid.shape != (value.shape[0], value.shape[-1]):
+        raise ValueError('ragged pooling requires [B,C,N], [B,N] and positive token count')
+    batch, channels, slots = value.shape
+    if slots < 1:
+        raise ValueError('ragged pooling requires positive point slots')
+    valid = valid.bool()
+    order = torch.argsort((~valid).long(), dim=-1, stable=True)
+    compact = value.gather(2, order[:, None].expand(-1, channels, -1))
+    measured = valid.sum(-1)
+    token_count = measured.clamp_max(count)
+    token = torch.arange(count, device=value.device)[None]
+    denominator = token_count.clamp_min(1)[:, None]
+    start = torch.div(token * measured[:, None], denominator, rounding_mode='floor')
+    stop = torch.div((token + 1) * measured[:, None], denominator, rounding_mode='floor')
+    width = (slots + count - 1) // count
+    positions = start[..., None] + torch.arange(width, device=value.device)
+    token_valid = token < token_count[:, None]
+    member_valid = token_valid[..., None] & (positions < stop[..., None])
+    indices = positions.clamp(0, slots - 1).reshape(batch, 1, -1).expand(-1, channels, -1)
+    grouped = compact.gather(2, indices).reshape(batch, channels, count, width)
+    pooled = grouped.masked_fill(~member_valid[:, None], -torch.inf).max(-1).values
+    return mask_values(pooled, token_valid), token_valid
 
 
 class SegPointNet(nn.Module):
@@ -114,7 +136,7 @@ class MiniPointNet(nn.Module):
         for layer in self.per_point:
             value, _ = masked_sequence(layer, value, valid)
         # value 已经过 ReLU；此处加权保持原始几何输入，不产生缩放后的伪坐标。
-        value = value * foreground[:, None]
+        value = value * foreground.detach()[:, None]
         value, _ = masked_max_pool(value, valid)
         value = value.squeeze(-1)
         row_valid = valid.any(-1)
@@ -160,9 +182,9 @@ class B0Observation(nn.Module):
         self.seg_pointnet = SegPointNet()
         self.mini_pointnet = MiniPointNet()
         self.feature_pointnet = FeaturePointNet(token_count)
-        # 四个可观测质量量是真实输入摘要；没有 moving 分类器或概率位姿乘法。
+        # 与 SeqTrack 相同的 256 维粗定位输入；质量摘要仅保留给后续接口。
         self.coarse_box_head = nn.Sequential(
-            nn.Linear(260, 128), nn.BatchNorm1d(128), nn.ReLU(),
+            nn.Linear(256, 128), nn.BatchNorm1d(128), nn.ReLU(),
             nn.Linear(128, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Linear(128, 5))
         # XYZ + sin/cos；初始化 yaw=0，消除零向量 atan2 和仅 sin 的角度歧义。
         with torch.no_grad():
@@ -198,8 +220,12 @@ class B0Observation(nn.Module):
         history_valid = batch['history_valid'].to(points.device).bool()
         if not bool(torch.isfinite(boxes[history_valid]).all()):
             raise ValueError("valid history boxes must be finite")
+        yaw_anchor = anchor_yaw(batch, points)
         boxes = torch.where(history_valid[..., None], boxes, 0.).detach()
+        boxes = transform_boxes(boxes, yaw_anchor)
+        boxes = torch.where(history_valid[..., None], boxes, 0.)
         clean = torch.where(valid[..., None], points, 0.)
+        clean = torch.cat((rotate_xyz(clean[..., :3], yaw_anchor), clean[..., 3:]), dim=-1)
         # BC 的前向先验仅来自输入历史框；当前未知框没有 GT BC 输入。
         corners = box_corners_xyz(boxes, size[:, None])
         landmarks = torch.cat((boxes[..., None, :3], corners), dim=-2)
@@ -221,19 +247,21 @@ class B0Observation(nn.Module):
         per_frame_count = valid.sum(-1).to(points.dtype)
         current_count = per_frame_count[:, -1]
         current_valid = current_count > 0
-        probability = foreground[:, -1].clamp(1e-6, 1. - 1e-6)
+        sequence_valid = flat_valid.any(-1)
+        probability = foreground[:, -1].detach().clamp(1e-6, 1. - 1e-6)
         entropy = -(probability * probability.log() + (1. - probability) * (1. - probability).log())
         entropy = (entropy * valid[:, -1]).sum(-1) / current_count.clamp_min(1.)
         quality = torch.stack((
             torch.log1p(current_count) / math.log1p(count),
             torch.log1p(per_frame_count[:, :3].sum(-1)) / math.log1p(3 * count),
-            entropy / math.log(2.), history_valid.to(points.dtype).mean(-1)), dim=-1)
-        coarse, _ = masked_sequence(self.coarse_box_head,
-            torch.cat((pooled, quality), dim=-1), flat_valid.any(-1))
+            entropy / math.log(2.), history_valid.to(points.dtype).mean(-1)), dim=-1).detach()
+        coarse, _ = masked_sequence(self.coarse_box_head, pooled, sequence_valid)
         nonzero = coarse[:, 3].square() + coarse[:, 4].square() > 1e-12
         yaw = torch.atan2(torch.where(nonzero, coarse[:, 3], 0.),
                           torch.where(nonzero, coarse[:, 4], 1.))
         coarse = torch.cat((coarse[:, :3], yaw[:, None]), dim=-1)
+        coarse = transform_boxes(coarse, yaw_anchor, to_world=True)
+        coarse = torch.where(sequence_valid[:, None], coarse, 0.)
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
             valid.reshape(batch_size * frames, count))
@@ -243,4 +271,5 @@ class B0Observation(nn.Module):
             source_tokens=source.transpose(1, 2).reshape(batch_size, frames, -1, 128),
             source_valid=source_valid.reshape(batch_size, frames, -1),
             segmentation_logits=logits, bc_prediction=bc,
-            foreground_probability=foreground, quality=quality, current_valid=current_valid)
+            foreground_probability=foreground, quality=quality, current_valid=current_valid,
+            sequence_valid=sequence_valid)
