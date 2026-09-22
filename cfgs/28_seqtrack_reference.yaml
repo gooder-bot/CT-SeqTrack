@@ -1,4 +1,0 @@
-_base_: ct_seqtrack/28_b0.yaml
-# 共享实现的 observation 架构参考；与 v28 B0 无网络/训练数学差异。
-experiment_name: ct28_seqtrack_reference_mini_car_scratch_seed42
-ct_reference_baseline: true

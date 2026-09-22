@@ -1,61 +1,35 @@
 import os
 import json
-import subprocess
 import copy
 from pathlib import Path
 
 import numpy as np
-import pickle
 import nuscenes
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.data_classes import LidarPointCloud, Box
-from nuscenes.utils.splits import create_splits_scenes
 
 from pyquaternion import Quaternion
 
-from datasets import points_utils, base_dataset
+from datasets import base_dataset
+from datasets.temporal_protocol import TemporalProtocolMixin
 from datasets.data_classes import PointCloud
 
-from datasets.misc_utils import get_history_frame_ids_and_masks
-from datasets.misc_utils import normalize_dynamics_time_mode
+from datasets.protocol_utils import normalize_dynamics_time_mode
 from datasets.protocol_utils import (
     canonical_sha256,
     file_sha256,
     payload_with_content_sha256,
     verify_content_sha256,
 )
-from utils.data_cache_v30 import (
+from datasets.cache import (
     DEFAULT_POINTCLOUD_CACHE_BYTES, load_pointcloud_arrays, shared_nuscenes_metadata,
 )
-from utils.dataset_protocol_v30 import (
+from datasets.protocol import (
     apply_frame_stride, validate_dataset_selection, validate_tracklet_timestamps,
 )
 
 # import vis_tool as vt
 
-general_to_tracking_class = {"animal": "void / ignore",
-                             "human.pedestrian.personal_mobility": "void / ignore",
-                             "human.pedestrian.stroller": "void / ignore",
-                             "human.pedestrian.wheelchair": "void / ignore",
-                             "movable_object.barrier": "void / ignore",
-                             "movable_object.debris": "void / ignore",
-                             "movable_object.pushable_pullable": "void / ignore",
-                             "movable_object.trafficcone": "void / ignore",
-                             "static_object.bicycle_rack": "void / ignore",
-                             "vehicle.emergency.ambulance": "void / ignore",
-                             "vehicle.emergency.police": "void / ignore",
-                             "vehicle.construction": "void / ignore",
-                             "vehicle.bicycle": "bicycle",
-                             "vehicle.bus.bendy": "bus",
-                             "vehicle.bus.rigid": "bus",
-                             "vehicle.car": "car",
-                             "vehicle.motorcycle": "motorcycle",
-                             "human.pedestrian.adult": "pedestrian",
-                             "human.pedestrian.child": "pedestrian",
-                             "human.pedestrian.construction_worker": "pedestrian",
-                             "human.pedestrian.police_officer": "pedestrian",
-                             "vehicle.trailer": "trailer",
-                             "vehicle.truck": "truck", }
 
 tracking_to_general_class = {
     'void / ignore': ['animal', 'human.pedestrian.personal_mobility', 'human.pedestrian.stroller',
@@ -72,22 +46,17 @@ tracking_to_general_class = {
     'truck': ['vehicle.truck']}
 
 
-class NuScenesMFDataset(base_dataset.BaseDataset):
+class NuScenesMFDataset(TemporalProtocolMixin, base_dataset.BaseDataset):
     def __init__(self, path, split, category_name="Car", version='v1.0-trainval', **kwargs):
         super().__init__(path, split, category_name, **kwargs)
-        self.ct_enable_v30 = bool(kwargs.get('ct_enable_v30', False))
+        self.ct_enable_v30 = True  # 保持历史数据身份字符串
         self.coordinate_mode = 'global'
         self.ct_frame_stride = int(kwargs.get('ct_frame_stride', 1))
         self.ct_pointcloud_cache_bytes = kwargs.get(
             'ct_pointcloud_cache_bytes', DEFAULT_POINTCLOUD_CACHE_BYTES)
-        if self.ct_enable_v30:
-            if kwargs.get('coordinate_mode', 'global') != 'global':
-                raise ValueError('v30 nuScenes requires global coordinates')
-            if self.preloading:
-                raise ValueError('v30 uses bounded point-cloud caching, not tracklet preloading')
-            self.nusc = shared_nuscenes_metadata(NuScenes, path, version)
-        else:
-            self.nusc = NuScenes(version=version, dataroot=path, verbose=False)
+        if kwargs.get('coordinate_mode', 'global') != 'global':
+            raise ValueError('v30 nuScenes requires global coordinates')
+        self.nusc = shared_nuscenes_metadata(NuScenes, path, version)
         self.version = version
         self.key_frame_only = kwargs.get('key_frame_only', False)
         self.min_points = kwargs.get('min_points', False)
@@ -122,6 +91,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         self.ct_scene_role = kwargs.get('ct_scene_role', self.protocol_role)
         if self.ct_enable_v30 and self.ct_scene_manifest is not None:
             validate_dataset_selection(self.ct_scene_manifest, self.ct_scene_role, self.ct_scene_names)
+        if self.virtual_rate_mode != 'none' or self.virtual_rate_manifest:
+            raise ValueError('v31 uses ct_frame_stride; nondefault virtual-rate controls are unsupported')
         self.virtual_rate_manifest_content_sha256 = ''
         self.virtual_rate_manifest_file_sha256 = ''
         if self.virtual_rate_mode == 'none' and self.virtual_rate_manifest:
@@ -150,18 +121,14 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
 
         self.track_instances = self.filter_instance(split, category_name.lower(), self.min_points)
         self.tracklet_anno_list, self.tracklet_len_list = self._build_tracklet_anno()
-        if self.ct_enable_v30:
-            apply_frame_stride(self, kwargs.get('ct_frame_stride', 1))
+        apply_frame_stride(self, kwargs.get('ct_frame_stride', 1))
         self.virtual_rate_meta = []
         self.virtual_rate_summary = self._build_virtual_rate_summary(
             original_lengths=self.tracklet_len_list,
             filtered_lengths=self.tracklet_len_list)
         self._apply_virtual_rate()
         self._prepare_dynamics_time()
-        if self.ct_enable_v30:
-            validate_tracklet_timestamps(self)
-        if self.preloading:
-            self.training_samples = self._load_data()
+        validate_tracklet_timestamps(self)
 
     def filter_instance(self, split, category_name=None, min_points=-1):
         """
@@ -205,7 +172,7 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
                     continue
                 track_anno.append({"sample_data_lidar": sample_data_lidar, "box_anno": ann_record})
 
-            list_of_tracklet_anno.append(track_anno) 
+            list_of_tracklet_anno.append(track_anno)
             list_of_tracklet_len.append(len(track_anno))
         return list_of_tracklet_anno, list_of_tracklet_len
 
@@ -229,91 +196,10 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         }
         return aliases.get(mode, mode)
 
-    @staticmethod
-    def _parse_bool(value):
-        if isinstance(value, str):
-            return value.strip().lower() not in ('0', 'false', 'no', 'off', '')
-        return bool(value)
-
-    @staticmethod
-    def _parse_int_list(value, default=None):
-        if value is None:
-            return list(default or [])
-        if isinstance(value, str):
-            cleaned = value.replace('[', '').replace(']', '').replace(',', ' ')
-            values = [item for item in cleaned.split() if item]
-        else:
-            values = list(value)
-        parsed = [int(item) for item in values]
-        return parsed if parsed else list(default or [])
-
-    @staticmethod
-    def _safe_tag(value):
-        allowed = []
-        for char in str(value):
-            if char.isalnum() or char in ('_', '-'):
-                allowed.append(char)
-            else:
-                allowed.append('_')
-        return ''.join(allowed).strip('_') or 'none'
-
-    def _pattern_tag(self):
-        return ''.join(str(gap) for gap in self.virtual_rate_gap_pattern)
 
     def _virtual_rate_cache_tag(self):
-        mode = self.virtual_rate_mode
-        if mode == 'none':
-            return ''
-        if self.virtual_rate_manifest:
-            manifest_name = os.path.splitext(os.path.basename(self.virtual_rate_manifest))[0]
-            digest = ''
-            if os.path.isfile(self.virtual_rate_manifest):
-                digest = f"_{file_sha256(self.virtual_rate_manifest)[:8]}"
-            return f"vr_manifest_{self._safe_tag(manifest_name)}{digest}"
-        if mode == 'gap_pattern':
-            return f"vr_gap{self._pattern_tag()}"
-        if mode == 'periodic_drop':
-            return f"vr_drop{self.virtual_rate_drop_every}"
-        if mode == 'burst_drop':
-            keep = ''.join(str(x) for x in self.virtual_rate_burst_keep_lengths)
-            skip = ''.join(str(x) for x in self.virtual_rate_burst_skip_lengths)
-            return f"vr_burst_k{keep}_s{skip}"
-        if mode == 'random_drop':
-            prob = int(round(self.virtual_rate_drop_prob * 100))
-            return f"vr_rand{prob}_seed{self.virtual_rate_seed}_max{self.virtual_rate_max_gap}"
-        if mode == 'stride':
-            return f"vr_stride{self.virtual_rate_stride}"
-        return f"vr_{self._safe_tag(mode)}"
+        return ''
 
-    @staticmethod
-    def _git_state():
-        root = Path(__file__).resolve().parents[1]
-        try:
-            commit = subprocess.check_output(
-                ['git', 'rev-parse', 'HEAD'], cwd=str(root), text=True
-            ).strip()
-            dirty = bool(subprocess.check_output(
-                ['git', 'status', '--porcelain', '--untracked-files=no'],
-                cwd=str(root), text=True).strip())
-        except (OSError, subprocess.CalledProcessError):
-            commit, dirty = 'unknown', True
-        return {'commit': commit, 'dirty_tracked': dirty}
-
-    def _virtual_rate_protocol(self):
-        return {
-            'mode': self.virtual_rate_mode,
-            'gap_pattern': list(self.virtual_rate_gap_pattern),
-            'stride': self.virtual_rate_stride,
-            'drop_every': self.virtual_rate_drop_every,
-            'drop_prob': self.virtual_rate_drop_prob,
-            'seed': self.virtual_rate_seed,
-            'max_gap': self.virtual_rate_max_gap,
-            'keep_first': self.virtual_rate_keep_first,
-            'keep_last': self.virtual_rate_keep_last,
-            'min_tracklet_len': self.virtual_rate_min_tracklet_len,
-            'burst_keep_lengths': list(self.virtual_rate_burst_keep_lengths),
-            'burst_skip_lengths': list(self.virtual_rate_burst_skip_lengths),
-        }
 
     def _tracklet_identity(self, source_idx, tracklet=None):
         instance = self.track_instances[int(source_idx)]
@@ -329,8 +215,7 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         tracklet_key = (
             f"nuscenes_mf/{self.version}/{self.split}/"
             f"{scene_token}/{instance_token}")
-        if getattr(self, 'ct_enable_v30', False):
-            tracklet_key += f'/v30/global/stride/{self.ct_frame_stride}'
+        tracklet_key += f'/v30/global/stride/{self.ct_frame_stride}'
         return {
             'tracklet_key': tracklet_key,
             'scene_token': scene_token,
@@ -378,261 +263,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
             "cache_tag": self._virtual_rate_cache_tag() or "none",
         }
 
-    def _load_manifest_keep_indices(self):
-        if not self.virtual_rate_manifest:
-            return None
-        if not os.path.isfile(self.virtual_rate_manifest):
-            if self.virtual_rate_manifest_allow_create:
-                return None
-            raise FileNotFoundError(
-                f"Frozen virtual-rate manifest does not exist: "
-                f"{self.virtual_rate_manifest}. Build it explicitly with "
-                "tools/build_virtual_rate_manifest.py.")
-        with open(self.virtual_rate_manifest, 'r', encoding='utf-8') as f:
-            manifest = json.load(f)
-        self.virtual_rate_manifest_file_sha256 = file_sha256(
-            self.virtual_rate_manifest)
-
-        schema_version = int(manifest.get('schema_version', 1)) if isinstance(manifest, dict) else 1
-        if schema_version >= 2:
-            if manifest.get('schema') != 'ct_seqtrack.virtual_rate_manifest':
-                raise ValueError('Unsupported virtual-rate manifest schema.')
-            self._validate_manifest_header(manifest, 'virtual-rate manifest')
-            self.virtual_rate_manifest_content_sha256 = manifest['content_sha256']
-
-            recorded_protocol = manifest.get('protocol', {})
-            expected_protocol = self._virtual_rate_protocol()
-            for key, expected in expected_protocol.items():
-                # ``mode: manifest`` is an explicit request to replay the file's
-                # recorded cadence; every other protocol field remains strict.
-                if key == 'mode' and expected == 'manifest':
-                    continue
-                if recorded_protocol.get(key) != expected:
-                    raise ValueError(
-                        f"virtual-rate manifest protocol.{key} mismatch: "
-                        f"expected={expected!r}, found={recorded_protocol.get(key)!r}")
-
-            entries = manifest.get('tracklets', [])
-            by_key = {}
-            for entry in entries:
-                key = str(entry.get('tracklet_key', ''))
-                if not key or key in by_key:
-                    raise ValueError(
-                        'virtual-rate manifest contains a missing or duplicate tracklet_key')
-                by_key[key] = entry
-            selection = [
-                {
-                    'tracklet_key': entry['tracklet_key'],
-                    'included': bool(entry.get('included', True)),
-                    'keep_indices': [int(idx) for idx in entry.get('keep_indices', [])],
-                }
-                for entry in entries
-            ]
-            if canonical_sha256(selection) != manifest.get('selection_sha256'):
-                raise ValueError(
-                    'virtual-rate manifest selection_sha256 mismatch')
-
-            expected_keys = {
-                self._tracklet_identity(idx, tracklet)['tracklet_key']
-                for idx, tracklet in enumerate(self.tracklet_anno_list)
-            }
-            found_keys = set(by_key)
-            if expected_keys != found_keys:
-                missing = sorted(expected_keys - found_keys)[:3]
-                extra = sorted(found_keys - expected_keys)[:3]
-                raise ValueError(
-                    'virtual-rate manifest tracklet set mismatch: '
-                    f'missing={missing}, extra={extra}')
-            print(
-                f"loaded virtual-rate manifest {self.virtual_rate_manifest} "
-                f"content_sha256={self.virtual_rate_manifest_content_sha256}")
-            return by_key
-
-        if self.virtual_rate_manifest_strict:
-            raise ValueError(
-                'Legacy index-keyed virtual-rate manifest rejected in strict mode. '
-                'Rebuild it with schema_version=2, or set '
-                'virtual_rate_manifest_strict=false only for legacy reproduction.')
-
-        entries = manifest.get('tracklets', manifest)
-        by_source = {}
-        for list_idx, entry in enumerate(entries):
-            if isinstance(entry, dict):
-                source_idx = int(entry.get('source_tracklet', list_idx))
-                keep_indices = entry.get('keep_indices', entry.get('keep', []))
-            else:
-                source_idx = list_idx
-                keep_indices = entry
-            by_source[source_idx] = [int(idx) for idx in keep_indices]
-        print(f'loaded virtual-rate manifest {self.virtual_rate_manifest}')
-        return by_source
-
-    def _save_virtual_rate_manifest(self, meta):
-        if not self.virtual_rate_manifest:
-            return
-        if os.path.isfile(self.virtual_rate_manifest):
-            return
-        parent = os.path.dirname(self.virtual_rate_manifest)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        frame_count = int(sum(
-            int(entry['kept_len']) for entry in meta if entry['included']))
-        endpoint_count = int(sum(
-            max(int(entry['kept_len']) - 1, 0)
-            for entry in meta if entry['included']))
-        selection = [
-            {
-                'tracklet_key': entry['tracklet_key'],
-                'included': entry['included'],
-                'keep_indices': entry['keep_indices'],
-            }
-            for entry in meta
-        ]
-        manifest = {
-            "schema": "ct_seqtrack.virtual_rate_manifest",
-            "schema_version": 2,
-            "dataset": "nuscenes_mf",
-            "version": self.version,
-            "split": self.split,
-            "category_name": self.category_name,
-            "protocol_role": self.protocol_role,
-            "protocol": self._virtual_rate_protocol(),
-            "tracklet_count_input": len(meta),
-            "tracklet_count_included": sum(bool(entry['included']) for entry in meta),
-            "frame_count": frame_count,
-            "endpoint_count": endpoint_count,
-            "selection_sha256": canonical_sha256(selection),
-            "code": self._git_state(),
-            "tracklets": meta,
-        }
-        manifest = payload_with_content_sha256(manifest)
-        with open(self.virtual_rate_manifest, 'w', encoding='utf-8') as f:
-            json.dump(manifest, f, indent=2, sort_keys=True)
-            f.write('\n')
-        self.virtual_rate_manifest_content_sha256 = manifest['content_sha256']
-        self.virtual_rate_manifest_file_sha256 = file_sha256(
-            self.virtual_rate_manifest)
-        print(
-            f"saved virtual-rate manifest {self.virtual_rate_manifest} "
-            f"content_sha256={self.virtual_rate_manifest_content_sha256}")
-
-    def _strict_manifest_keep_indices(self, entry, original_len, identity):
-        if int(entry.get('original_len', -1)) != int(original_len):
-            raise ValueError(
-                f"virtual-rate manifest length mismatch for {identity['tracklet_key']}: "
-                f"expected={original_len}, found={entry.get('original_len')}")
-        for key in ('scene_token', 'instance_token'):
-            if str(entry.get(key, '')) != identity[key]:
-                raise ValueError(
-                    f"virtual-rate manifest {key} mismatch for "
-                    f"{identity['tracklet_key']}")
-        raw = entry.get('keep_indices', [])
-        keep = [int(idx) for idx in raw]
-        if keep != sorted(set(keep)):
-            raise ValueError(
-                f"virtual-rate manifest keep_indices must be sorted and unique: "
-                f"{identity['tracklet_key']}")
-        if any(idx < 0 or idx >= original_len for idx in keep):
-            raise ValueError(
-                f"virtual-rate manifest keep_indices out of range: "
-                f"{identity['tracklet_key']}")
-        included = bool(entry.get('included', True))
-        if included != (len(keep) >= max(1, self.virtual_rate_min_tracklet_len)):
-            raise ValueError(
-                f"virtual-rate manifest included flag is inconsistent for "
-                f"{identity['tracklet_key']}")
-        if included and self._validate_keep_indices(keep, original_len) != keep:
-            raise ValueError(
-                f"virtual-rate manifest keep_indices violate the frozen protocol for "
-                f"{identity['tracklet_key']}")
-        return keep, included
-
-    def _validate_keep_indices(self, keep_indices, original_len):
-        keep = sorted(set(int(idx) for idx in keep_indices
-                          if 0 <= int(idx) < int(original_len)))
-        if original_len <= 0:
-            return []
-        if self.virtual_rate_keep_first and 0 not in keep:
-            keep.insert(0, 0)
-        if self.virtual_rate_keep_last and (original_len - 1) not in keep:
-            keep.append(original_len - 1)
-        keep = sorted(set(keep))
-        min_len = max(0, int(self.virtual_rate_min_tracklet_len))
-        if min_len > 0 and len(keep) < min_len:
-            filler = np.linspace(0, original_len - 1, min(original_len, min_len))
-            keep = sorted(set(keep + [int(round(idx)) for idx in filler]))
-        return keep
-
-    def _gap_pattern_keep_indices(self, original_len):
-        keep = [0]
-        current = 0
-        pattern = [max(1, int(gap)) for gap in self.virtual_rate_gap_pattern]
-        pattern_idx = 0
-        while pattern and current + pattern[pattern_idx % len(pattern)] < original_len:
-            current += pattern[pattern_idx % len(pattern)]
-            keep.append(current)
-            pattern_idx += 1
-        return keep
-
-    def _periodic_drop_keep_indices(self, original_len):
-        drop_every = max(2, int(self.virtual_rate_drop_every))
-        return [idx for idx in range(original_len) if (idx + 1) % drop_every != 0]
-
-    def _burst_drop_keep_indices(self, original_len):
-        keep = []
-        idx = 0
-        stage = 0
-        keep_lengths = [max(1, int(x)) for x in self.virtual_rate_burst_keep_lengths]
-        skip_lengths = [max(1, int(x)) for x in self.virtual_rate_burst_skip_lengths]
-        while idx < original_len:
-            keep_len = keep_lengths[stage % len(keep_lengths)]
-            for offset in range(keep_len):
-                if idx + offset < original_len:
-                    keep.append(idx + offset)
-            idx += keep_len
-            skip_len = skip_lengths[stage % len(skip_lengths)]
-            idx += skip_len
-            stage += 1
-        return keep
-
-    def _random_drop_keep_indices(self, original_len, source_tracklet):
-        rng = np.random.default_rng(self.virtual_rate_seed + int(source_tracklet) * 1009)
-        drop_prob = min(max(float(self.virtual_rate_drop_prob), 0.0), 0.95)
-        max_gap = max(1, int(self.virtual_rate_max_gap))
-        keep = [0]
-        last_kept = 0
-        for idx in range(1, max(original_len - 1, 1)):
-            must_keep = (idx - last_kept) >= max_gap
-            if must_keep or rng.random() >= drop_prob:
-                keep.append(idx)
-                last_kept = idx
-        if original_len > 1:
-            keep.append(original_len - 1)
-        return keep
-
-    def _stride_keep_indices(self, original_len):
-        stride = max(1, int(self.virtual_rate_stride))
-        return list(range(0, original_len, stride))
-
-    def _build_keep_indices(self, original_len, source_tracklet):
-        mode = self.virtual_rate_mode
-        if mode == 'gap_pattern':
-            keep = self._gap_pattern_keep_indices(original_len)
-        elif mode == 'periodic_drop':
-            keep = self._periodic_drop_keep_indices(original_len)
-        elif mode == 'burst_drop':
-            keep = self._burst_drop_keep_indices(original_len)
-        elif mode == 'random_drop':
-            keep = self._random_drop_keep_indices(original_len, source_tracklet)
-        elif mode == 'stride':
-            keep = self._stride_keep_indices(original_len)
-        else:
-            keep = list(range(original_len))
-        return self._validate_keep_indices(keep, original_len)
 
     def _apply_virtual_rate(self):
-        manifest_keep = self._load_manifest_keep_indices()
-
         original_lengths = list(self.tracklet_len_list)
         new_tracklets = []
         new_lengths = []
@@ -641,19 +273,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
 
         for source_idx, tracklet in enumerate(self.tracklet_anno_list):
             identity = self._tracklet_identity(source_idx, tracklet)
-            if manifest_keep is not None and identity['tracklet_key'] in manifest_keep:
-                entry = manifest_keep[identity['tracklet_key']]
-                keep_indices, included = self._strict_manifest_keep_indices(
-                    entry, len(tracklet), identity)
-            elif manifest_keep is not None and source_idx in manifest_keep:
-                keep_indices = self._validate_keep_indices(
-                    manifest_keep[source_idx], len(tracklet))
-                included = len(keep_indices) >= max(
-                    1, int(self.virtual_rate_min_tracklet_len))
-            else:
-                keep_indices = self._build_keep_indices(len(tracklet), source_idx)
-                included = len(keep_indices) >= max(
-                    1, int(self.virtual_rate_min_tracklet_len))
+            keep_indices = list(range(len(tracklet)))
+            included = len(keep_indices) >= 1
 
             record = {
                 **identity,
@@ -690,18 +311,6 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
             for entry in manifest_meta
         ]
         self.virtual_rate_selection_sha256 = canonical_sha256(selection)
-        self._save_virtual_rate_manifest(manifest_meta)
-
-        summary = self.virtual_rate_summary
-        if self.virtual_rate_mode != 'none' or self.virtual_rate_manifest:
-            print(
-                "virtual-rate "
-                f"mode={summary['mode']} "
-                f"tracklets={summary['tracklets_after']}/{summary['tracklets_before']} "
-                f"frames={summary['frames_after']}/{summary['frames_before']} "
-                f"drop={summary['dropped_frame_ratio']:.3f} "
-                f"tag={summary['cache_tag']}"
-            )
 
     @staticmethod
     def _anno_frame_token(anno):
@@ -711,14 +320,6 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
     def _anno_timestamp(anno):
         return float(anno['sample_data_lidar']['timestamp']) * 1e-6
 
-    def get_tracklet_key(self, tracklet_id):
-        return str(self.virtual_rate_meta[int(tracklet_id)]['tracklet_key'])
-
-    def get_endpoint_key(self, tracklet_id, frame_id):
-        tracklet_id = int(tracklet_id)
-        frame_id = int(frame_id)
-        anno = self.tracklet_anno_list[tracklet_id][frame_id]
-        return f"{self.get_tracklet_key(tracklet_id)}/frame/{self._anno_frame_token(anno)}"
 
     def _endpoint_records(self):
         records = []
@@ -744,19 +345,6 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
                 previous_timestamp = timestamp
         return records
 
-    @staticmethod
-    def _deranged_permutation(size, seed):
-        size = int(size)
-        if size <= 1:
-            return np.arange(size, dtype=np.int64)
-        rng = np.random.default_rng(int(seed))
-        base = np.arange(size, dtype=np.int64)
-        for _ in range(256):
-            permutation = rng.permutation(size)
-            if np.all(permutation != base):
-                return permutation
-        # Deterministic fallback that is a derangement for every size > 1.
-        return np.roll(base, 1)
 
     def build_dynamics_time_manifest(self, output_path, seed=42):
         records = self._endpoint_records()
@@ -940,51 +528,6 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
             key: float(entry['effective_timestamp']) for key, entry in by_endpoint.items()
         }
 
-    def _prepare_dynamics_time(self):
-        self.dynamics_time_permutation_sha256 = ''
-        if self.dynamics_time_mode == 'shuffled':
-            self._load_dynamics_time_manifest()
-        elif self.dynamics_time_manifest:
-            raise ValueError(
-                'dynamics_time_manifest is only valid when '
-                'dynamics_time_mode=shuffled; clear it for true/fixed controls.')
-        self.dynamics_time_summary = {
-            'mode': self.dynamics_time_mode,
-            'fixed_delta_t': self.dynamics_fixed_delta_t,
-            'manifest': self.dynamics_time_manifest,
-            'manifest_content_sha256': self.dynamics_time_manifest_content_sha256,
-            'manifest_file_sha256': self.dynamics_time_manifest_file_sha256,
-            'permutation_sha256': self.dynamics_time_permutation_sha256,
-        }
-
-    def _load_data(self):
-        print('preloading data into memory')
-        cache_suffix = self._virtual_rate_cache_tag()
-        if self.ct_scene_manifest is not None:
-            cache_suffix += ('_v27_ids_' + self.ct_scene_role + '_' +
-                             self.ct_scene_manifest['content_sha256'][:16])
-        if cache_suffix:
-            cache_suffix = f"_{cache_suffix}"
-        preload_data_path = os.path.join(
-            self.path,
-            f"preload_nuscenes_{self.category_name}_{self.split}_{self.version}_"
-            f"{self.preload_offset}_{self.min_points}{cache_suffix}.dat")
-        if os.path.isfile(preload_data_path):
-            print(f'loading from saved file {preload_data_path}.')
-            with open(preload_data_path, 'rb') as f:
-                training_samples = pickle.load(f)
-        else:
-            print('reading from annos')
-            training_samples = []
-            for i in range(len(self.tracklet_anno_list)):
-                frames = []
-                for anno in self.tracklet_anno_list[i]:
-                    frames.append(self._get_frame_from_anno_data(anno))
-                training_samples.append(frames)
-            with open(preload_data_path, 'wb') as f:
-                print(f'saving loaded data to {preload_data_path}')
-                pickle.dump(training_samples, f)
-        return training_samples
 
     def get_num_tracklets(self):
         return len(self.tracklet_anno_list)
@@ -996,11 +539,8 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         return self.tracklet_len_list[tracklet_id]
 
     def get_frames(self, seq_id, frame_ids):
-        if self.preloading:
-            frames = [self.training_samples[seq_id][f_id] for f_id in frame_ids]
-        else:
-            seq_annos = self.tracklet_anno_list[seq_id]
-            frames = [self._get_frame_from_anno_data(seq_annos[f_id]) for f_id in frame_ids]
+        seq_annos = self.tracklet_anno_list[seq_id]
+        frames = [self._get_frame_from_anno_data(seq_annos[f_id]) for f_id in frame_ids]
 
         return [self._enrich_frame_metadata(frame, seq_id, frame_id)
                 for frame, frame_id in zip(frames, frame_ids)]
@@ -1017,25 +557,24 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
         frame['_ct_endpoint_key'] = endpoint_key
         frame['_ct_dynamics_time_mode'] = self.dynamics_time_mode
         frame['_ct_effective_timestamp'] = float(effective_timestamp)
-        if getattr(self, 'ct_enable_v30', False):
-            anno = self.tracklet_anno_list[seq_id][frame_id]
-            sample = self.nusc.get('sample', anno['box_anno']['sample_token'])
-            scene = self.nusc.get('scene', sample['scene_token'])
-            lidar = anno['sample_data_lidar']
-            sensor = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
-            ego = self.nusc.get('ego_pose', lidar['ego_pose_token'])
-            sensor_to_ego = np.eye(4)
-            sensor_to_ego[:3, :3] = Quaternion(sensor['rotation']).rotation_matrix
-            sensor_to_ego[:3, 3] = sensor['translation']
-            ego_to_world = np.eye(4)
-            ego_to_world[:3, :3] = Quaternion(ego['rotation']).rotation_matrix
-            ego_to_world[:3, 3] = ego['translation']
-            frame.update(scene_id=str(scene['name']), sequence_id=str(sample['scene_token']),
-                         raw_frame_id=str(lidar['token']), raw_frame_token=str(lidar['token']),
-                         coordinate_mode='global', sensor_to_sequence_world=ego_to_world @ sensor_to_ego,
-                         dataset_manifest_sha256=(self.ct_scene_manifest or {}).get('content_sha256', ''))
-            # devkit tables are shared by observation/mechanism/evaluation datasets.
-            frame['meta'] = copy.deepcopy(frame['meta'])
+        anno = self.tracklet_anno_list[seq_id][frame_id]
+        sample = self.nusc.get('sample', anno['box_anno']['sample_token'])
+        scene = self.nusc.get('scene', sample['scene_token'])
+        lidar = anno['sample_data_lidar']
+        sensor = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
+        ego = self.nusc.get('ego_pose', lidar['ego_pose_token'])
+        sensor_to_ego = np.eye(4)
+        sensor_to_ego[:3, :3] = Quaternion(sensor['rotation']).rotation_matrix
+        sensor_to_ego[:3, 3] = sensor['translation']
+        ego_to_world = np.eye(4)
+        ego_to_world[:3, :3] = Quaternion(ego['rotation']).rotation_matrix
+        ego_to_world[:3, 3] = ego['translation']
+        frame.update(scene_id=str(scene['name']), sequence_id=str(sample['scene_token']),
+                     raw_frame_id=str(lidar['token']), raw_frame_token=str(lidar['token']),
+                     coordinate_mode='global', sensor_to_sequence_world=ego_to_world @ sensor_to_ego,
+                     dataset_manifest_sha256=(self.ct_scene_manifest or {}).get('content_sha256', ''))
+        # devkit tables are shared by observation/mechanism/evaluation datasets.
+        frame['meta'] = copy.deepcopy(frame['meta'])
         return frame
 
     def get_frame_metadata(self, seq_id, frame_id):
@@ -1063,15 +602,13 @@ class NuScenesMFDataset(base_dataset.BaseDataset):
     def _get_frame_from_anno_data(self, anno):
         sample_data_lidar = anno['sample_data_lidar']
         metadata = self._frame_metadata_from_anno(anno)
-        if getattr(self, 'ct_enable_v30', False):
-            key = ('nuscenes_mf', str(Path(self.path).expanduser().resolve()), self.version,
-                   'global', str(sample_data_lidar['token']))
-            def read():
-                cloud = self._load_world_pointcloud(sample_data_lidar)
-                return cloud.points, cloud.point_ids
-            points, ids = load_pointcloud_arrays(key, read, self.ct_pointcloud_cache_bytes)
-            return {'pc': PointCloud(points, point_ids=ids), **metadata}
-        return {'pc': self._load_world_pointcloud(sample_data_lidar), **metadata}
+        key = ('nuscenes_mf', str(Path(self.path).expanduser().resolve()), self.version,
+               'global', str(sample_data_lidar['token']))
+        def read():
+            cloud = self._load_world_pointcloud(sample_data_lidar)
+            return cloud.points, cloud.point_ids
+        points, ids = load_pointcloud_arrays(key, read, self.ct_pointcloud_cache_bytes)
+        return {'pc': PointCloud(points, point_ids=ids), **metadata}
 
     def _load_world_pointcloud(self, sample_data_lidar):
         pcl_path = os.path.join(self.path, sample_data_lidar['filename'])

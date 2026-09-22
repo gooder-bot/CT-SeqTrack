@@ -32,7 +32,7 @@ class SharedHypothesisDecoder(nn.Module):
         self.d_model = 64
         self.source_projection = nn.Linear(128, 64)
         self.corner_projection = nn.Linear(4, 64)
-        # 与原 Seq2SeqFormer 一致：每头 d_k=d_v=64，非 64/4。
+        # 保留 SeqTrack 注意力定义：每头 d_k=d_v=64，非 64/4。
         options = dict(d_word_vec=64, n_layers=3, n_head=4, d_k=64, d_v=64,
                        d_model=64, d_inner=512, pad_idx=1, dropout=float(dropout))
         self.encoder = Encoder(**options)

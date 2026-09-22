@@ -1,9 +1,0 @@
-_base_: 28_formal_base.yaml
-experiment_name: ct28_full_mini_car_scratch_seed42
-ct_variant: full
-ct_enable_b1: true
-ct_enable_b2: true
-ct_enable_b3: true
-ct_memory_mode: real
-ct_require_action_calibration: true
-proposal_inference_mode: selective

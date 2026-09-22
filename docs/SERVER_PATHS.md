@@ -1,66 +1,28 @@
-# CT-SeqTrack 服务器路径
+# CT-SeqTrack v31 服务器路径
 
-本文件记录 CT-SeqTrack v28/v29 使用的服务器路径。v29三臂完整数据使用下述完整nuScenes根路径，
-不预加载；新命令见[服务器运行说明](CTSEQTRACK_V29_SERVER_RUNS.md)。历史 KITTI/HTV/M2 路径已移出活动文档。
+服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。当前授权仅只读；不得自行同步文件、安装依赖、启动训练或停止进程。
 
-## nuScenes mini
+## 数据根
 
-数据根：
+| 数据 | 路径 | 配置 |
+|---|---|---|
+| nuScenes mini | `/home/lishengjie/data/nuscenes-mini` | `dataset: nuscenes_mf`、`version: v1.0-mini`、`ct_coordinate_mode: global` |
+| nuScenes full | `/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/` | `dataset: nuscenes_mf`、`version: v1.0-trainval`、`ct_coordinate_mode: global` |
+| KITTI | 由实际部署提供数据根，当前不填未经核验路径 | `dataset: kitti_mf`、`version: kitti_tracking`、`ct_coordinate_mode: sensor_relative` |
 
-```text
-/home/lishengjie/data/nuscenes-mini
-```
+通过 `--path` 指定数据根。nuScenes根应有相应版本metadata、`samples/` 与 `sweeps/`；full不能沿用mini数据。KITTI需要对应点云、标签、标定和图像尺寸信息，沿用当前数据接口。接口支持不代表full/KITTI实验已完成。
 
-运行时传入：
+## Python环境与SDK
 
-```bash
---path /home/lishengjie/data/nuscenes-mini
-```
+已核实正式v31运行使用 `/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`：Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2，GPU0/1为A40。记录来自既有实验，不宣称本次再次查询了服务器状态。当前v31网络使用PyTorch算子，不以旧PointNet++ CUDA扩展为前提。
 
-配置必须使用 `version: v1.0-mini`，并确认数据根包含 `v1.0-mini/`、
-`samples/` 和 `sweeps/`。
-
-## 完整 nuScenes
-
-当前用户指定的完整数据根为：
-
-```text
-/home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
-```
-
-它必须包含 `v1.0-trainval/` 与 `samples/LIDAR_TOP/`，并在服务器运行前
-通过 `tools/preflight_ct_v28.py` 的真实数据路径验证。通过 `--path` 显式覆盖配置。
-不得把 mini 路径用于 `28_*_nuscenes_full.yaml`；v28 full 配置固定为
-`version: v1.0-trainval`。
-
-单组Full/Car/seed42、60轮诊断的命令见 [v28完整数据启动](CTSEQTRACK_V28_FULL_DIAGNOSTIC.md)。
-首次省略`--preloading`，避免按轨迹重复缓存整幅点云造成过大的CPU内存占用。
-
-## Python 环境
-
-服务器现有 nuScenes Python 包源曾位于：
-
-```text
-/home/lishengjie/code/SparseFusion-main/nuscenes
-```
-
-该路径是 Python 包父目录，不是数据根，不能传给 `--path`。若环境未安装
-`nuscenes-devkit`，可使用：
+nuScenes Python包源曾位于 `/home/lishengjie/code/SparseFusion-main/nuscenes`。这是包父目录，**不是数据根，不能传给 `--path`**。环境缺少已安装SDK时，既有fallback为：
 
 ```bash
 export CTSEQ_NUSCENES_PYTHON_ROOT=/home/lishengjie/code/SparseFusion-main/nuscenes
 export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 ```
 
-## 正式启动前检查
+不使用旧 `--preloading`；当前原始云按需读取，每worker缓存256MiB。使用 `CUDA_VISIBLE_DEVICES` 选择物理卡，每进程仍为单卡；设置 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1`、`PYTORCH_CUDA_ALLOC_CONF=backend:native` 和 `CUBLAS_WORKSPACE_CONFIG=:4096:8`。
 
-```bash
-python tools/preflight_ct_v28.py --cfg cfgs/ct_seqtrack/28_full_nuscenes_full.yaml --path /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes --output artifacts/ct_checks/v28_full_preflight.json
-```
-
-不传`--manifest-only`才实际构造数据并检查索引；真实batch短检及正式启动按上述专页执行。
-独立100-step与完整epoch resume等价验收仍须单独记录，不能用本地CPU测试替代。
-工程checkpoint不得用于正式初始化，正式运行仍从epoch0开始。
-
-本地代码回归以pytest为主；`verify_ct_slimming.py verify`固定要求旧HEAD=`001951a`，
-当前后续提交会因历史基点限制失败，不能把它误当成新的full数据运行阻断。
+mini后台命令见 [运行说明](CTSEQTRACK_V31_MINI_LAUNCH.md)，当前协议与工程检查见 [工具面](FORMAL_TOOLING.md)。旧版本预检/启动命令只通过 [历史索引](HISTORY_EVIDENCE_INDEX.md) 使用，不进入v31流程。

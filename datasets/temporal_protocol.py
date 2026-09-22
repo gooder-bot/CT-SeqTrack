@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from datasets.misc_utils import normalize_dynamics_time_mode
+from datasets.protocol_utils import normalize_dynamics_time_mode
 from datasets.protocol_utils import (
     canonical_sha256,
     file_sha256,
@@ -78,6 +78,8 @@ class TemporalProtocolMixin:
         self.virtual_rate_manifest_require_commit_match = self._parse_bool(
             kwargs.get("virtual_rate_manifest_require_commit_match", False))
         self.protocol_role = str(kwargs.get("protocol_role", "eval"))
+        if self.virtual_rate_mode != 'none' or self.virtual_rate_manifest:
+            raise ValueError('v31 uses ct_frame_stride; nondefault virtual-rate controls are unsupported')
         self.virtual_rate_manifest_content_sha256 = ""
         self.virtual_rate_manifest_file_sha256 = ""
         if self.virtual_rate_mode == "none" and self.virtual_rate_manifest:
@@ -187,46 +189,10 @@ class TemporalProtocolMixin:
             raise ValueError(
                 "virtual_rate_burst_skip_lengths must contain positive values")
 
-    @staticmethod
-    def _safe_tag(value):
-        allowed = []
-        for char in str(value):
-            allowed.append(
-                char if char.isalnum() or char in ("_", "-") else "_")
-        return "".join(allowed).strip("_") or "none"
 
-    def _pattern_tag(self):
-        return "".join(str(gap) for gap in self.virtual_rate_gap_pattern)
 
     def _virtual_rate_cache_tag(self):
-        mode = self.virtual_rate_mode
-        if mode == "none":
-            return ""
-        if self.virtual_rate_manifest:
-            name = os.path.splitext(
-                os.path.basename(self.virtual_rate_manifest))[0]
-            digest = ""
-            if os.path.isfile(self.virtual_rate_manifest):
-                digest = f"_{file_sha256(self.virtual_rate_manifest)[:8]}"
-            return f"vr_manifest_{self._safe_tag(name)}{digest}"
-        if mode == "gap_pattern":
-            return f"vr_gap{self._pattern_tag()}"
-        if mode == "periodic_drop":
-            return f"vr_drop{self.virtual_rate_drop_every}"
-        if mode == "burst_drop":
-            keep = "".join(
-                str(x) for x in self.virtual_rate_burst_keep_lengths)
-            skip = "".join(
-                str(x) for x in self.virtual_rate_burst_skip_lengths)
-            return f"vr_burst_k{keep}_s{skip}"
-        if mode == "random_drop":
-            prob = int(round(self.virtual_rate_drop_prob * 100))
-            return (
-                f"vr_rand{prob}_seed{self.virtual_rate_seed}_"
-                f"max{self.virtual_rate_max_gap}")
-        if mode == "stride":
-            return f"vr_stride{self.virtual_rate_stride}"
-        return f"vr_{self._safe_tag(mode)}"
+        return ''
 
     @staticmethod
     def _git_state():
@@ -311,287 +277,17 @@ class TemporalProtocolMixin:
             "cache_tag": self._virtual_rate_cache_tag() or "none",
         }
 
-    def _load_manifest_keep_indices(self):
-        if not self.virtual_rate_manifest:
-            return None
-        if not os.path.isfile(self.virtual_rate_manifest):
-            if self.virtual_rate_manifest_allow_create:
-                return None
-            raise FileNotFoundError(
-                "Frozen virtual-rate manifest does not exist: "
-                f"{self.virtual_rate_manifest}. Build it explicitly with "
-                "tools/build_virtual_rate_manifest.py.")
-        with open(
-                self.virtual_rate_manifest, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        self.virtual_rate_manifest_file_sha256 = file_sha256(
-            self.virtual_rate_manifest)
 
-        schema_version = (
-            int(manifest.get("schema_version", 1))
-            if isinstance(manifest, dict) else 1)
-        if schema_version >= 2:
-            if manifest.get("schema") != "ct_seqtrack.virtual_rate_manifest":
-                raise ValueError("Unsupported virtual-rate manifest schema")
-            self._validate_manifest_header(
-                manifest,
-                "virtual-rate manifest",
-                require_commit_match=(
-                    self.virtual_rate_manifest_require_commit_match),
-            )
-            self.virtual_rate_manifest_content_sha256 = manifest[
-                "content_sha256"]
 
-            recorded_protocol = manifest.get("protocol", {})
-            expected_protocol = self._virtual_rate_protocol()
-            for key, expected in expected_protocol.items():
-                if key == "mode" and expected == "manifest":
-                    continue
-                if recorded_protocol.get(key) != expected:
-                    raise ValueError(
-                        f"virtual-rate manifest protocol.{key} mismatch: "
-                        f"expected={expected!r}, "
-                        f"found={recorded_protocol.get(key)!r}")
 
-            entries = manifest.get("tracklets", [])
-            by_key = {}
-            for entry in entries:
-                key = str(entry.get("tracklet_key", ""))
-                if not key or key in by_key:
-                    raise ValueError(
-                        "virtual-rate manifest contains a missing or "
-                        "duplicate tracklet_key")
-                by_key[key] = entry
-            selection = [
-                {
-                    "tracklet_key": entry["tracklet_key"],
-                    "included": bool(entry.get("included", True)),
-                    "keep_indices": [
-                        int(idx) for idx in entry.get("keep_indices", [])],
-                }
-                for entry in entries
-            ]
-            if canonical_sha256(selection) != manifest.get(
-                    "selection_sha256"):
-                raise ValueError(
-                    "virtual-rate manifest selection_sha256 mismatch")
 
-            expected_keys = {
-                self._tracklet_identity(idx, tracklet)["tracklet_key"]
-                for idx, tracklet in enumerate(self.tracklet_anno_list)
-            }
-            found_keys = set(by_key)
-            if expected_keys != found_keys:
-                missing = sorted(expected_keys - found_keys)[:3]
-                extra = sorted(found_keys - expected_keys)[:3]
-                raise ValueError(
-                    "virtual-rate manifest tracklet set mismatch: "
-                    f"missing={missing}, extra={extra}")
-            print(
-                f"loaded virtual-rate manifest {self.virtual_rate_manifest} "
-                f"content_sha256="
-                f"{self.virtual_rate_manifest_content_sha256}")
-            return by_key
 
-        if self.virtual_rate_manifest_strict:
-            raise ValueError(
-                "Legacy index-keyed virtual-rate manifest rejected in strict "
-                "mode. Rebuild it with schema_version=2, or set "
-                "virtual_rate_manifest_strict=false only for legacy "
-                "reproduction.")
-        entries = manifest.get("tracklets", manifest)
-        by_source = {}
-        for list_idx, entry in enumerate(entries):
-            if isinstance(entry, dict):
-                source_idx = int(entry.get("source_tracklet", list_idx))
-                keep_indices = entry.get(
-                    "keep_indices", entry.get("keep", []))
-            else:
-                source_idx = list_idx
-                keep_indices = entry
-            by_source[source_idx] = [int(idx) for idx in keep_indices]
-        print(f"loaded legacy virtual-rate manifest {self.virtual_rate_manifest}")
-        return by_source
 
-    def _save_virtual_rate_manifest(self, meta):
-        if not self.virtual_rate_manifest:
-            return
-        if os.path.isfile(self.virtual_rate_manifest):
-            return
-        parent = os.path.dirname(self.virtual_rate_manifest)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        frame_count = int(sum(
-            int(entry["kept_len"])
-            for entry in meta if entry["included"]))
-        endpoint_count = int(sum(
-            max(int(entry["kept_len"]) - 1, 0)
-            for entry in meta if entry["included"]))
-        selection = [
-            {
-                "tracklet_key": entry["tracklet_key"],
-                "included": entry["included"],
-                "keep_indices": entry["keep_indices"],
-            }
-            for entry in meta
-        ]
-        manifest = {
-            "schema": "ct_seqtrack.virtual_rate_manifest",
-            "schema_version": 2,
-            **self._manifest_header(),
-            "protocol": self._virtual_rate_protocol(),
-            "tracklet_count_input": len(meta),
-            "tracklet_count_included": sum(
-                bool(entry["included"]) for entry in meta),
-            "frame_count": frame_count,
-            "endpoint_count": endpoint_count,
-            "selection_sha256": canonical_sha256(selection),
-            "code": self._git_state(),
-            "tracklets": meta,
-        }
-        manifest = payload_with_content_sha256(manifest)
-        with open(
-                self.virtual_rate_manifest, "w", encoding="utf-8") as handle:
-            json.dump(manifest, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        self.virtual_rate_manifest_content_sha256 = manifest[
-            "content_sha256"]
-        self.virtual_rate_manifest_file_sha256 = file_sha256(
-            self.virtual_rate_manifest)
-        print(
-            f"saved virtual-rate manifest {self.virtual_rate_manifest} "
-            f"content_sha256={self.virtual_rate_manifest_content_sha256}")
 
-    def _strict_manifest_keep_indices(
-            self, entry, original_len, identity):
-        if int(entry.get("original_len", -1)) != int(original_len):
-            raise ValueError(
-                "virtual-rate manifest length mismatch for "
-                f"{identity['tracklet_key']}: expected={original_len}, "
-                f"found={entry.get('original_len')}")
-        for key, value in identity.items():
-            if key == "tracklet_key":
-                continue
-            if str(entry.get(key, "")) != str(value):
-                raise ValueError(
-                    f"virtual-rate manifest {key} mismatch for "
-                    f"{identity['tracklet_key']}")
-        keep = [int(idx) for idx in entry.get("keep_indices", [])]
-        if keep != sorted(set(keep)):
-            raise ValueError(
-                "virtual-rate manifest keep_indices must be sorted and "
-                f"unique: {identity['tracklet_key']}")
-        if any(idx < 0 or idx >= original_len for idx in keep):
-            raise ValueError(
-                "virtual-rate manifest keep_indices out of range: "
-                f"{identity['tracklet_key']}")
-        included = bool(entry.get("included", True))
-        expected_included = len(keep) >= max(
-            1, int(self.virtual_rate_min_tracklet_len))
-        if included != expected_included:
-            raise ValueError(
-                "virtual-rate manifest included flag is inconsistent for "
-                f"{identity['tracklet_key']}")
-        if included and self._validate_keep_indices(
-                keep, original_len) != keep:
-            raise ValueError(
-                "virtual-rate manifest keep_indices violate the frozen "
-                f"protocol for {identity['tracklet_key']}")
-        return keep, included
 
-    def _validate_keep_indices(self, keep_indices, original_len):
-        keep = sorted(set(
-            int(idx) for idx in keep_indices
-            if 0 <= int(idx) < int(original_len)))
-        if original_len <= 0:
-            return []
-        if self.virtual_rate_keep_first and 0 not in keep:
-            keep.insert(0, 0)
-        if (self.virtual_rate_keep_last
-                and original_len - 1 not in keep):
-            keep.append(original_len - 1)
-        keep = sorted(set(keep))
-        min_len = max(0, int(self.virtual_rate_min_tracklet_len))
-        if min_len > 0 and len(keep) < min_len:
-            filler = np.linspace(
-                0, original_len - 1, min(original_len, min_len))
-            keep = sorted(set(
-                keep + [int(round(idx)) for idx in filler]))
-        return keep
 
-    def _gap_pattern_keep_indices(self, original_len):
-        keep = [0]
-        current = 0
-        pattern_idx = 0
-        while self.virtual_rate_gap_pattern:
-            gap = self.virtual_rate_gap_pattern[
-                pattern_idx % len(self.virtual_rate_gap_pattern)]
-            if current + gap >= original_len:
-                break
-            current += gap
-            keep.append(current)
-            pattern_idx += 1
-        return keep
-
-    def _periodic_drop_keep_indices(self, original_len):
-        return [
-            idx for idx in range(original_len)
-            if (idx + 1) % self.virtual_rate_drop_every != 0
-        ]
-
-    def _burst_drop_keep_indices(self, original_len):
-        keep = []
-        idx = 0
-        stage = 0
-        while idx < original_len:
-            keep_len = self.virtual_rate_burst_keep_lengths[
-                stage % len(self.virtual_rate_burst_keep_lengths)]
-            for offset in range(keep_len):
-                if idx + offset < original_len:
-                    keep.append(idx + offset)
-            idx += keep_len
-            idx += self.virtual_rate_burst_skip_lengths[
-                stage % len(self.virtual_rate_burst_skip_lengths)]
-            stage += 1
-        return keep
-
-    def _random_drop_keep_indices(self, original_len, source_tracklet):
-        rng = np.random.default_rng(
-            self.virtual_rate_seed + int(source_tracklet) * 1009)
-        keep = [0]
-        last_kept = 0
-        for idx in range(1, max(original_len - 1, 1)):
-            must_keep = (
-                idx - last_kept) >= self.virtual_rate_max_gap
-            if must_keep or rng.random() >= self.virtual_rate_drop_prob:
-                keep.append(idx)
-                last_kept = idx
-        if original_len > 1:
-            keep.append(original_len - 1)
-        return keep
-
-    def _stride_keep_indices(self, original_len):
-        return list(range(0, original_len, self.virtual_rate_stride))
-
-    def _build_keep_indices(self, original_len, source_tracklet):
-        mode = self.virtual_rate_mode
-        if mode == "gap_pattern":
-            keep = self._gap_pattern_keep_indices(original_len)
-        elif mode == "periodic_drop":
-            keep = self._periodic_drop_keep_indices(original_len)
-        elif mode == "burst_drop":
-            keep = self._burst_drop_keep_indices(original_len)
-        elif mode == "random_drop":
-            keep = self._random_drop_keep_indices(
-                original_len, source_tracklet)
-        elif mode == "stride":
-            keep = self._stride_keep_indices(original_len)
-        else:
-            keep = list(range(original_len))
-        return self._validate_keep_indices(keep, original_len)
 
     def _apply_virtual_rate(self):
-        manifest_keep = self._load_manifest_keep_indices()
         original_lengths = list(self.tracklet_len_list)
         new_tracklets = []
         new_lengths = []
@@ -600,21 +296,8 @@ class TemporalProtocolMixin:
 
         for source_idx, tracklet in enumerate(self.tracklet_anno_list):
             identity = self._tracklet_identity(source_idx, tracklet)
-            if (manifest_keep is not None
-                    and identity["tracklet_key"] in manifest_keep):
-                entry = manifest_keep[identity["tracklet_key"]]
-                keep_indices, included = self._strict_manifest_keep_indices(
-                    entry, len(tracklet), identity)
-            elif manifest_keep is not None and source_idx in manifest_keep:
-                keep_indices = self._validate_keep_indices(
-                    manifest_keep[source_idx], len(tracklet))
-                included = len(keep_indices) >= max(
-                    1, self.virtual_rate_min_tracklet_len)
-            else:
-                keep_indices = self._build_keep_indices(
-                    len(tracklet), source_idx)
-                included = len(keep_indices) >= max(
-                    1, self.virtual_rate_min_tracklet_len)
+            keep_indices = list(range(len(tracklet)))
+            included = len(keep_indices) >= 1
 
             record = {
                 **identity,
@@ -652,20 +335,6 @@ class TemporalProtocolMixin:
             for entry in manifest_meta
         ]
         self.virtual_rate_selection_sha256 = canonical_sha256(selection)
-        self._save_virtual_rate_manifest(manifest_meta)
-
-        summary = self.virtual_rate_summary
-        if self.virtual_rate_mode != "none" or self.virtual_rate_manifest:
-            print(
-                "virtual-rate "
-                f"dataset={self.protocol_dataset_name} "
-                f"mode={summary['mode']} "
-                f"tracklets={summary['tracklets_after']}/"
-                f"{summary['tracklets_before']} "
-                f"frames={summary['frames_after']}/"
-                f"{summary['frames_before']} "
-                f"drop={summary['dropped_frame_ratio']:.3f} "
-                f"tag={summary['cache_tag']}")
 
     def get_tracklet_key(self, tracklet_id):
         return str(

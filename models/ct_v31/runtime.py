@@ -9,8 +9,7 @@ import torch
 
 from .contracts import SCHEMA
 from .config import config_identity
-from .data import build_loaders, option
-from utils.tracking_metrics_v27 import LocalYawBox, box_metrics, metric_contributions
+from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 
 RESUME_SCHEMA = 'ct_seqtrack.v31.epoch_boundary.v1'
 
@@ -183,10 +182,3 @@ class TrackingEvaluation:
                     success=100 * sum(row['success'] for row in self.rows) / max(count, 1),
                     precision=100 * sum(row['precision'] for row in self.rows) / max(count, 1),
                     diagnostics=diag)
-
-
-def __getattr__(name):
-    if name == 'CTSEQTRACKV31':
-        from models.ctseqtrackv31 import CTSEQTRACKV31
-        return CTSEQTRACKV31
-    raise AttributeError(name)

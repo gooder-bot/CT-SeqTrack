@@ -6,8 +6,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from models.ct_v2.cfc import FullGatedCfCCell
-from models.ct_v2.motion import motion_aligned_axes, motion_aligned_covariance
+from .cfc import FullGatedCfCCell
+from .motion import motion_aligned_axes, motion_aligned_covariance
 from .contracts import PriorContext
 
 

@@ -1,5 +1,0 @@
-_base_: 30_full_cfc_mini.yaml
-experiment_name: ct30_ablate_no_mode_quality_mini_car_scratch_seed42
-ct_v30_ablation: no_mode_quality
-# 仅关闭质量监督，保留质量头/输入结构。
-ct_mode_quality_weight: 0.0

@@ -1,6 +1,0 @@
-_base_: 30_formal_base.yaml
-version: v1.0-trainval
-path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
-train_split: train_track
-val_split: val
-test_split: val

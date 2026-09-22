@@ -1,7 +1,7 @@
 """v31 B0：真实测量上的粗定位与 SeqTrack PointNet 特征。
 
-三种 PointNet 从 ``models/backbone/pointnet.py`` 提取相同层宽与布局，
-仅保留有效测量路径，避免导入未使用的 PointNet++ CUDA 扩展。
+三种 PointNet 保留 SeqTrack 的层宽与布局，
+只计算有效测量，不依赖 PointNet++ CUDA 扩展。
 前景概率只在 MiniPointNet 的 latent 聚合前使用；XYZ 从不乘概率。
 """
 from __future__ import annotations
@@ -155,7 +155,7 @@ class FeaturePointNet(nn.Module):
 class B0Observation(nn.Module):
     """一次 B0 前向产生粗定位和两条后续分支需要的真实点特征。"""
 
-    def __init__(self, token_count: int = 128, *, masked_bn_recompute: bool = False):
+    def __init__(self, token_count: int = 128):
         super().__init__()
         self.seg_pointnet = SegPointNet()
         self.mini_pointnet = MiniPointNet()
@@ -168,9 +168,6 @@ class B0Observation(nn.Module):
         with torch.no_grad():
             self.coarse_box_head[-1].weight[3:].zero_()
             self.coarse_box_head[-1].bias[3:].copy_(torch.tensor([0., 1.]))
-        for layer in self.modules():
-            if isinstance(layer, nn.BatchNorm1d):
-                layer.ct_b0_masked_bn_recompute = bool(masked_bn_recompute)
 
     @staticmethod
     def measurement_mask(batch: Mapping[str, Tensor]) -> Tensor:

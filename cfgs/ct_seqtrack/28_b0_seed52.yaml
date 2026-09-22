@@ -1,6 +1,0 @@
-_base_: 28_b0.yaml
-
-# 2026-09-08：用户指定的第二组 B0 mini 从头复现实验。
-experiment_name: ct28_b0_mini_car_scratch_seed52
-seed: 52
-ct_v28_registered_seed: 52

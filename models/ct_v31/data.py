@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
-from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -254,15 +253,9 @@ def raw_collate(rows):
 
 
 def raw_dataset_factory(config, role):
-    """复用原始数据工厂；v30 仅为坐标/scene/raw-ID adapter，不进入模型。"""
-    from datasets import get_dataset
-    values = dict(config) if isinstance(config, dict) else dict(vars(config))
-    values.update(ct_enable_v30=True, hist_num=3, preloading=False, preload_offset=-1,
-                  key_frame_only=True, ct_protocol_role=role)
-    values.setdefault('val_split', 'mini_val')
-    values.setdefault('test_split', values['val_split'])
-    adapter = SimpleNamespace(**values)
-    return get_dataset(adapter, type='test', protocol_role=role).dataset
+    """只加载原始数据适配器，不构造历史 sampler。"""
+    from datasets import get_raw_dataset
+    return get_raw_dataset(config, role)
 
 
 def build_loaders(config, roles=('train', 'val'), sources=None):

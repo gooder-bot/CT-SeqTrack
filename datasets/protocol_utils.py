@@ -141,3 +141,20 @@ def file_sha256(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def normalize_dynamics_time_mode(mode):
+    mode = str(mode or "true").strip().lower().replace("-", "_")
+    aliases = {
+        "real": "true",
+        "true_dt": "true",
+        "fixed_dt": "fixed",
+        "constant": "fixed",
+        "shuffled_dt": "shuffled",
+        "shuffle": "shuffled",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in ("true", "fixed", "shuffled"):
+        raise ValueError(
+            "dynamics_time_mode must be one of: true, fixed, shuffled")
+    return mode

@@ -12,7 +12,7 @@ from models.ct_v31.losses import box_loss, oriented_iou_labels, quality_targets
 from models.ct_v31.model import JointTracker, select_hypothesis
 from models.ct_v31.observation import box_corners_xyz
 from models.ct_v31.prior import PhysicalTimePrior
-from models.ct_v2.cfc import FullGatedCfCCell
+from models.ct_v31.cfc import FullGatedCfCCell
 
 
 @pytest.fixture(autouse=True)

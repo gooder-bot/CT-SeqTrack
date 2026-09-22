@@ -1,6 +1,0 @@
-_base_: 19_b4_decoder_alignment.yaml
-
-experiment_name: b4_decoder_alignment_anticollapse
-
-decoder_tc_variance_weight: 1.0
-decoder_tc_covariance_weight: 0.04

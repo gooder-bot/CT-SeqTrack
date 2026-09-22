@@ -14,21 +14,6 @@ from .config import load_config, config_identity
 from .contracts import SCHEMA
 
 
-def is_v31_request(argv):
-    """在导入历史 SDK/CUDA host 前分流，旧命令保持原入口。"""
-    from utils.config import load_yaml_config
-    for index, value in enumerate(argv):
-        if value == '--cfg' and index + 1 < len(argv):
-            path = argv[index + 1]
-            break
-        if value.startswith('--cfg='):
-            path = value.split('=', 1)[1]
-            break
-    else:
-        return False
-    return load_yaml_config(path).get('net_model') == 'ctseqtrackv31'
-
-
 def batch_limit(value):
     return float(value) if any(char in value for char in '.eE') else int(value)
 

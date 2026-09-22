@@ -1,4 +1,4 @@
-""" 
+"""
 base_dataset.py
 Created by zenn at 2021/9/1 22:16
 """
@@ -9,7 +9,8 @@ class BaseDataset:
         self.path = path
         self.split = split
         self.category_name = category_name
-        self.preloading = kwargs.get('preloading', False)
+        if kwargs.get('preloading', False):
+            raise ValueError('v31 uses bounded raw point-cloud caching, not preloading')
 
 
     def get_num_tracklets(self):

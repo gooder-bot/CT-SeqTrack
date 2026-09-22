@@ -4,9 +4,31 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from models.ct_v2.motion import physical_motion_uncertainty_loss
-from models.ct_v2.observation_reference import seqtrack_segmentation_cross_entropy
-from utils.tracking_metrics_v27 import LocalYawBox, box_metrics
+from .motion import physical_motion_uncertainty_loss
+from utils.tracking_metrics import LocalYawBox, box_metrics
+
+
+def seqtrack_segmentation_cross_entropy(logits, labels, valid_mask=None):
+    """原整批加权 CE，避开 CUDA 空间 NLL 的非确定性 mean 归约。
+
+    保留 [B,2,N] 上的原 log_softmax 计算，只把所得 log-probability
+    转成普通 NLL 的 [B*N,2] 输入。分母仍为全 batch 的 sum(weight[label])，
+    不按 view、帧或点分别平均，也不修改全局 deterministic 设置。
+    """
+    if (logits.ndim != 3 or logits.shape[1] != 2
+            or labels.shape != (logits.shape[0], logits.shape[2])):
+        raise ValueError('SeqTrack segmentation requires logits [B,2,N] and labels [B,N]')
+    log_probabilities = F.log_softmax(logits, dim=1)
+    rows = log_probabilities.movedim(1, -1).reshape(-1, 2)
+    if valid_mask is not None:
+        valid = valid_mask.bool().reshape(-1)
+        target = labels.reshape(-1).masked_fill(~valid, 0)
+        weights = logits.new_tensor([.5, 2.])
+        loss = F.nll_loss(rows, target, weight=weights, reduction='none')
+        return torch.where(valid, loss, torch.zeros_like(loss)).sum() / (
+            weights[target] * valid).sum().clamp_min(1e-12)
+    return F.nll_loss(rows, labels.reshape(-1),
+                      weight=logits.new_tensor([.5, 2.]), reduction='mean')
 
 
 def masked_mean(value, valid):

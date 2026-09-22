@@ -1,9 +1,8 @@
-"""v30：真实测量 mask 的确定性 PointNet 归一化与固定分桶池化。"""
+"""真实测量 mask 的确定性 PointNet 归一化与固定分桶池化。"""
 
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.autograd.function import once_differentiable
 
 from utils.deterministic_pooling import DeterministicMaxPool1d
 
@@ -15,7 +14,7 @@ def mask_values(value, valid):
 
 
 def _training_bn_values(value, valid, weight, bias, count, eps):
-    """纯计算：与首次 v30 相同的布局、统计与运算顺序，不更新 BN 状态。"""
+    """保持布局、统计与运算顺序；状态由调用方更新一次。"""
     clean = mask_values(value, valid)
     rows = clean.movedim(1, -1).reshape(-1, clean.shape[1]) if clean.ndim == 3 else clean
     weights = valid.reshape(-1, 1).to(clean.dtype)
@@ -26,39 +25,6 @@ def _training_bn_values(value, valid, weight, bias, count, eps):
     if weight is not None:
         result = result * weight.reshape(shape) + bias.reshape(shape)
     return mask_values(result, valid), mean, variance
-
-
-class _RecomputedMaskedBatchNorm(torch.autograd.Function):
-    """仅保留输入；反向逐层重建原 BN 图，不让所有层同时持有大激活副本。
-
-    使用原运算的 autograd，而非另写近似/改归约顺序的 BN 梯度。
-    running statistics 在外层更新一次；这里重算不消耗 RNG、不修改 buffer。
-    正式 Adam 只需一阶导数。
-    """
-
-    @staticmethod
-    def forward(ctx, value, valid, weight, bias, count, eps):
-        ctx.save_for_backward(value, valid, weight, bias)
-        ctx.count, ctx.eps = count, eps
-        result, mean, variance = _training_bn_values(value, valid, weight, bias, count, eps)
-        ctx.mark_non_differentiable(mean, variance)
-        return result, mean, variance
-
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_result, _grad_mean, _grad_variance):
-        value, valid, weight, bias = ctx.saved_tensors
-        source = (value, weight, bias)
-        needs = (ctx.needs_input_grad[0], ctx.needs_input_grad[2], ctx.needs_input_grad[3])
-        recreated = tuple(item.detach().requires_grad_(need) if item is not None else None
-                          for item, need in zip(source, needs))
-        with torch.enable_grad():
-            result, _, _ = _training_bn_values(
-                recreated[0], valid, recreated[1], recreated[2], ctx.count, ctx.eps)
-            gradients = iter(torch.autograd.grad(
-                result, tuple(item for item, need in zip(recreated, needs) if need), grad_result))
-        dx, dw, db = (next(gradients) if need else None for need in needs)
-        return dx, None, dw, db, None, None
 
 
 def masked_batch_norm(value, valid, module):
@@ -72,10 +38,7 @@ def masked_batch_norm(value, valid, module):
         result = F.batch_norm(clean, module.running_mean, module.running_var,
                               module.weight, module.bias, False, 0., module.eps)
         return mask_values(result, valid)
-    # 用户允许适度增加显存：默认直接计算，省去反向重算；容量受限时显式开启。
-    compute = (_RecomputedMaskedBatchNorm.apply
-               if getattr(module, 'ct_b0_masked_bn_recompute', False) else _training_bn_values)
-    result, mean, variance = compute(
+    result, mean, variance = _training_bn_values(
         value, valid, module.weight, module.bias, count, module.eps)
     if module.track_running_stats:
         with torch.no_grad():
@@ -119,12 +82,3 @@ def masked_sequence(module, value, valid):
         else:
             value = mask_values(layer(value), valid)
     return value, valid
-
-
-def masked_mean(value, valid):
-    """按元素展开有效性，空项为保留计算图的零。"""
-    mask = valid.bool()
-    while mask.ndim < value.ndim:
-        mask = mask.unsqueeze(-1)
-    mask = mask.expand_as(value)
-    return torch.where(mask, value, torch.zeros_like(value)).sum() / mask.sum().clamp_min(1)

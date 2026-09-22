@@ -1,8 +1,0 @@
-_base_: 28_b1_cfc.yaml
-experiment_name: ct28_b1_cfc_nuscenes_full_scratch_seed42
-version: v1.0-trainval
-ct_v28_expected_mini_car_updates_per_epoch: null
-path: /home/lishengjie/code/SparseFusion-main/nuscenes/nuscenes/
-train_split: train_track
-val_split: val
-test_split: val

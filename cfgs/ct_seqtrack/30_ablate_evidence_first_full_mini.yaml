@@ -1,7 +1,0 @@
-_base_: 30_full_cfc_mini.yaml
-experiment_name: ct30_ablate_evidence_first_full_mini_car_scratch_seed42
-ct_v30_ablation: evidence_first_full
-ct_variant: full_minus_b3
-ct_enable_b3: false
-ct_require_action_calibration: false
-proposal_inference_mode: bounded_always
