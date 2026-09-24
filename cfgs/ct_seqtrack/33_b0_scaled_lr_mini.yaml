@@ -1,0 +1,5 @@
+# D：沿用 B 的调度与训练预算，全程学习率乘 1.5；物理 GPU 在启动环境指定。
+_base_: 33_b0_late_decay_mini.yaml
+experiment_name: ct33_b0_scaled_lr_x1p5_mini_car_scratch_seed42
+tag: b0_scaled_lr_x1p5_mini_car_seed42_60ep_bs16
+lr: 0.00015

@@ -1,5 +1,7 @@
 # v33 mini 四组单 seed：后台运行与日志
 
+2026-09-25新增的GPU0放大学习率D组单独见[追加运行说明](CTSEQTRACK_V33_SCALED_LR_GPU0.md)，本页保留原R/A/B/C安排。
+
 2026-09-24，按用户最新安排：重新训练 SeqTrack reference、综合 B0 A/B/C，物理 GPU 依次为 **0、0、1、1**。本轮助手只读检查服务器、修订本地文件；上传和正式启动由用户执行。四组正式实验尚未启动。
 
 实现与训练前验证已完成：此前服务器原环境完整测试 **314 passed、1 skipped**，一次真实 nuScenes-mini batch16 的 CUDA forward/backward/Adam/commit 通过。记录见 [v33 实现与验证](B0_V33_REPAIR.md)。不必再把大量预检作为本轮训练前置条件。

@@ -24,6 +24,8 @@
 
 已完成 v32 R 的训练与指标仍可作为复用依据；用户当前明确选择重新运行 R，最终四组比较使用本次 R。重跑 reference 使用 v33 host 身份和原 reference 网络/数据/loss，不加载 v32 checkpoint。
 
+2026-09-25追加学习率向上探索D：`33_b0_scaled_lr_mini.yaml`，相对B全程乘1.5，1–20轮1.5e-4、21–50轮1.5e-5、51–60轮1.5e-6，物理GPU0。其余模型、loss、数据、初始化与预算相同；原R/A/B/C安排保留。D与B固定final60和late-3比较，具体命令见[追加D运行说明](CTSEQTRACK_V33_SCALED_LR_GPU0.md)。
+
 ## B0 几何、监督与递推合同
 
 公开框中心是减去 anchor 中心后的世界轴 XYZ，yaw 是绝对世界 yaw，size 使用首帧固定尺寸。B0 几何在内部换到 anchor-local，不重复平移；B1/B2 原始物理量保留世界轴。GT 当前尺寸只用于相应监督和评分。

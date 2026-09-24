@@ -121,7 +121,8 @@ def normalize_config(config=None):
         recipe = (cfg.lr, cfg.lr_schedule, tuple(cfg.lr_milestones))
         registered = {(.0001, 'step', ())}
         if cfg.net_model == 'ctseqtrackv33' and cfg.v31_arm == 'b0':
-            registered.update({(.0001, 'multistep', (20, 50)), (.00005, 'multistep', (20, 50))})
+            registered.update({(.0001, 'multistep', (20, 50)), (.00005, 'multistep', (20, 50)),
+                               (.00015, 'multistep', (20, 50))})
         if recipe not in registered:
             raise ValueError('unregistered formal v33 learning-rate recipe')
     elif cfg.log_dir:

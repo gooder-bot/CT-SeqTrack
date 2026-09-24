@@ -1,4 +1,4 @@
-"""三份正式配方的实际 Adam/LR 序列和恢复身份。"""
+"""四份正式 B0 配方的实际 Adam/LR 序列和恢复身份。"""
 from copy import deepcopy
 
 import pytest
@@ -12,6 +12,7 @@ RECIPES = [
     ('b0', [1e-4] * 20 + [1e-5] * 20 + [1e-6] * 20),
     ('b0_late_decay', [1e-4] * 20 + [1e-5] * 30 + [1e-6] * 10),
     ('b0_half_lr', [5e-5] * 20 + [5e-6] * 30 + [5e-7] * 10),
+    ('b0_scaled_lr', [1.5e-4] * 20 + [1.5e-5] * 30 + [1.5e-6] * 10),
 ]
 
 
@@ -55,17 +56,33 @@ def test_only_registered_recipe_fields_differ_and_all_resume_identities_are_dist
     configs = [load_config(f'cfgs/ct_seqtrack/33_{name}_mini.yaml') for name, _ in RECIPES]
     recipe_fields = {'cfg', 'experiment_name', 'tag', 'lr', 'lr_schedule', 'lr_milestones'}
     common = [{key: value for key, value in cfg.items() if key not in recipe_fields} for cfg in configs]
-    assert common[0] == common[1] == common[2]
-    assert len({config_identity(cfg) for cfg in configs}) == 3
-    # 同种子模型初始化不读取配方，三组模型权重必须相同。
+    assert all(config == common[0] for config in common[1:])
+    assert len({config_identity(cfg) for cfg in configs}) == len(RECIPES)
+    # 同种子模型初始化不读取配方，各组模型权重必须相同。
     from models.ct_v31.model import JointTracker
     states = []
     for config in configs:
         torch.manual_seed(config.seed)
         states.append(JointTracker(config).state_dict())
     for key in states[0]:
-        assert torch.equal(states[0][key], states[1][key])
-        assert torch.equal(states[0][key], states[2][key])
+        assert all(torch.equal(states[0][key], state[key]) for state in states[1:])
+
+
+def test_scaled_recipe_changes_only_b_learning_rate_and_experiment_labels():
+    base = load_config('cfgs/ct_seqtrack/33_b0_late_decay_mini.yaml')
+    scaled = load_config('cfgs/ct_seqtrack/33_b0_scaled_lr_mini.yaml')
+    assert scaled.lr == pytest.approx(1.5 * base.lr)
+    labels_and_lr = {'cfg', 'experiment_name', 'tag', 'lr'}
+    assert {key: value for key, value in scaled.items() if key not in labels_and_lr} == {
+        key: value for key, value in base.items() if key not in labels_and_lr}
+    assert scaled.trainer_devices == 1
+
+
+@pytest.mark.parametrize('model,arm', [('seqtrack_reference', 'b0'), ('ctseqtrackv33', 'full')])
+def test_scaled_recipe_is_not_registered_for_reference_or_full(model, arm):
+    with pytest.raises(ValueError, match='unregistered formal v33 learning-rate recipe'):
+        normalize_config(dict(net_model=model, v31_arm=arm, lr=1.5e-4,
+                              lr_schedule='multistep', lr_milestones=[20, 50]))
 
 
 @pytest.mark.parametrize('change', [dict(lr=2e-4), dict(lr_schedule='multistep', lr_milestones=[25, 50]),
