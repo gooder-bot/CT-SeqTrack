@@ -1,0 +1,6 @@
+# E：B 配方学习率乘 3，前 2000 次 optimizer step 线性 warmup；GPU 在启动环境指定。
+_base_: 33_b0_late_decay_mini.yaml
+experiment_name: ct33_b0_x3_lr_warmup_mini_car_scratch_seed42
+tag: b0_x3_lr_warmup_mini_car_seed42_60ep_bs16
+lr: 0.0003
+lr_warmup_steps: 2000

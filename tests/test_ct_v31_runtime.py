@@ -392,7 +392,7 @@ class TinyJointTracker(torch.nn.Module):
         return {'loss_total': (output.accepted_box[:, :2] - batch['target_box'][:, :2]).square().mean()}
 
 
-@pytest.mark.parametrize('schedule', ['step', 'multistep'])
+@pytest.mark.parametrize('schedule', ['step', 'multistep', 'warmup'])
 def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedule):
     pl = pytest.importorskip('pytorch_lightning')
     from pytorch_lightning.callbacks import Callback
@@ -402,13 +402,24 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedul
         def on_train_epoch_end(self, trainer, module):
             if trainer.current_epoch == 0:
                 trainer.should_stop = True
+    class CaptureLR(Callback):
+        def __init__(self):
+            self.rows = []
+
+        def on_train_batch_start(self, trainer, module, batch, batch_idx):
+            self.rows.append((trainer.current_epoch, trainer.global_step,
+                              trainer.optimizers[0].param_groups[0]['lr']))
+
     config = cfg(epoch=3, lr_decay_step=1, v31_arm='b0', v31_curriculum_epochs=3,
-                 lr_schedule=schedule, lr_milestones=[1, 2] if schedule == 'multistep' else [])
+                 lr_schedule='multistep' if schedule == 'warmup' else schedule,
+                 lr_milestones=[2] if schedule == 'warmup' else [1, 2] if schedule == 'multistep' else [],
+                 lr_warmup_steps=8 if schedule == 'warmup' else 0,
+                 v32_reserve_windows=0 if schedule == 'warmup' else 112)
     def make(root, stop=False):
         sources = {'train': TinySource((5, 3))}
         loaders = build_loaders(config, roles=('train',), sources=sources)
         model = CTSEQTRACKV31(config, tracker=TinyJointTracker(), loaders=loaders)
-        callbacks = [FinalWindowCheckpoint(keep=3)] + ([StopAfterFirst()] if stop else [])
+        callbacks = [CaptureLR(), FinalWindowCheckpoint(keep=3)] + ([StopAfterFirst()] if stop else [])
         trainer = pl.Trainer(default_root_dir=str(root), accelerator='cpu', devices=1,
             max_epochs=3, logger=False, callbacks=callbacks, enable_progress_bar=False,
             enable_model_summary=False, num_sanity_val_steps=0, limit_val_batches=0,
@@ -426,7 +437,7 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedul
     state = torch.load(checkpoint, map_location='cpu')
     assert state['ct_v33_runtime']['epoch_complete'] is True
     assert state['ct_v33_runtime']['rows'] == 24
-    assert state['lr_schedulers'][0]['last_epoch'] == 1
+    assert state['lr_schedulers'][0]['last_epoch'] == (interrupted.global_step if schedule == 'warmup' else 1)
     resumed, continuation = make(tmp_path / 'resume')
     continuation.fit(resumed, ckpt_path=str(checkpoint))
     assert continuation.global_step == trainer.global_step
@@ -436,3 +447,11 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedul
         assert all(torch.equal(value, continuation.optimizers[0].state_dict()['state'][index][key])
                    for key, value in values.items())
     assert resumed.tracker.prior_calls == continuation.global_step - interrupted.global_step
+    reference_lrs = next(cb.rows for cb in trainer.callbacks if isinstance(cb, CaptureLR))
+    interrupted_lrs = next(cb.rows for cb in interrupted.callbacks if isinstance(cb, CaptureLR))
+    resumed_lrs = next(cb.rows for cb in continuation.callbacks if isinstance(cb, CaptureLR))
+    assert interrupted_lrs + resumed_lrs == reference_lrs
+    if schedule == 'warmup':
+        assert interrupted.global_step < 8
+        for epoch, completed, lr in reference_lrs:
+            assert lr == pytest.approx(1e-4 * min((completed + 1) / 8, 1.) * .1 ** (epoch >= 2))

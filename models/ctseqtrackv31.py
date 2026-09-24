@@ -16,6 +16,7 @@ except ModuleNotFoundError as error:
 
 from models.ct_v31.config import normalize_config
 from models.ct_v31.data import BatchBuilder, build_loaders, stable_seed
+from models.ct_v31.lr_schedule import WarmupMultiStepLR
 from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
 from utils.bn_policy import running_batch_norm
@@ -110,6 +111,10 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             raise RuntimeError('v31 optimizer requires unique trainable parameters')
         optimizer = torch.optim.Adam(parameters, lr=self.config.lr, weight_decay=self.config.wd,
                                      betas=(.5, .999), eps=1e-6, foreach=False, fused=False)
+        if self.config.lr_warmup_steps:
+            scheduler = WarmupMultiStepLR(optimizer, warmup_steps=self.config.lr_warmup_steps,
+                milestones=self.config.lr_milestones, gamma=self.config.lr_decay_rate)
+            return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='step'))
         if self.config.lr_schedule == 'multistep':
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=self.config.lr_milestones, gamma=self.config.lr_decay_rate)
@@ -117,6 +122,14 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             scheduler = torch.optim.lr_scheduler.StepLR(
                 optimizer, self.config.lr_decay_step, gamma=self.config.lr_decay_rate)
         return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='epoch'))
+
+    def lr_scheduler_step(self, scheduler, metric):
+        if isinstance(scheduler, WarmupMultiStepLR):
+            # PL 2.0 在 Adam 后、on_train_batch_end 前调用；当前 batch 尚未计入 _epoch_steps。
+            last_batch = (self.trainer.is_last_batch
+                          or self._epoch_steps + 1 >= self.trainer.num_training_batches)
+            scheduler.completed_epochs = int(self.current_epoch) + int(last_batch)
+        scheduler.step()
 
     def on_fit_start(self):
         self._require_lightning()

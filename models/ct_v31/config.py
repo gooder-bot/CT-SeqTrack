@@ -21,7 +21,7 @@ DEFAULTS = dict(
     v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
     batch_size=16, workers=4, seed=42, epoch=60, lr=.0001, wd=0.,
     lr_decay_step=20, lr_decay_rate=.1, check_val_every_n_epoch=5,
-    lr_schedule='step', lr_milestones=(),
+    lr_schedule='step', lr_milestones=(), lr_warmup_steps=0,
     trainer_devices=1, accelerator='auto', precision=32,
     dynamics_time_mode='true', dynamics_time_manifest=None,
     v31_evaluate_late3=True, ct_engineering_check=False,
@@ -92,10 +92,15 @@ def normalize_config(config=None):
             or int(cfg.v32_reserve_windows) != cfg.v32_reserve_windows
             or cfg.v32_reserve_windows < 0):
         raise ValueError('v32_reserve_windows must be a nonnegative integer')
+    if (isinstance(cfg.lr_warmup_steps, bool) or not isinstance(cfg.lr_warmup_steps, int)
+            or cfg.lr_warmup_steps < 0):
+        raise ValueError('lr_warmup_steps must be a nonnegative integer')
     import math
     if (cfg.lr_schedule not in ('step', 'multistep')
             or not isinstance(cfg.lr_milestones, (list, tuple))):
         raise ValueError('v33 requires step or multistep and a list of lr_milestones')
+    if cfg.lr_warmup_steps > 0 and cfg.lr_schedule != 'multistep':
+        raise ValueError('positive lr_warmup_steps requires lr_schedule=multistep')
     milestones = cfg.lr_milestones
     if (any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
             for value in milestones) or list(milestones) != sorted(set(milestones))):
@@ -118,11 +123,11 @@ def normalize_config(config=None):
                if cfg[key] != value or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
             raise ValueError('formal v33 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
-        recipe = (cfg.lr, cfg.lr_schedule, tuple(cfg.lr_milestones))
-        registered = {(.0001, 'step', ())}
+        recipe = (cfg.lr, cfg.lr_schedule, tuple(cfg.lr_milestones), cfg.lr_warmup_steps)
+        registered = {(.0001, 'step', (), 0)}
         if cfg.net_model == 'ctseqtrackv33' and cfg.v31_arm == 'b0':
-            registered.update({(.0001, 'multistep', (20, 50)), (.00005, 'multistep', (20, 50)),
-                               (.00015, 'multistep', (20, 50))})
+            registered.update({(.0001, 'multistep', (20, 50), 0), (.00005, 'multistep', (20, 50), 0),
+                               (.00015, 'multistep', (20, 50), 0), (.0003, 'multistep', (20, 50), 2000)})
         if recipe not in registered:
             raise ValueError('unregistered formal v33 learning-rate recipe')
     elif cfg.log_dir:
@@ -146,6 +151,9 @@ def config_identity(config):
     excluded = {'cfg', 'path', 'log_dir', 'tag', 'checkpoint', 'init_checkpoint',
                 'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3'}
     payload = {key: value for key, value in cfg.items() if key not in excluded}
+    # 未启用 warmup 的旧 R/A/B/C/D 保留原摘要；正数进入新配方身份。
+    if cfg.lr_warmup_steps == 0:
+        payload.pop('lr_warmup_steps')
     # manifest 文件内容决定 time control，而不是可迁移的绝对文件名。
     manifest = payload.pop('dynamics_time_manifest', None)
     if manifest:

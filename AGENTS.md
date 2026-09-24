@@ -7,6 +7,7 @@
 - 用户最新要求：服务器 `lishengjie@10.109.253.86` 本轮只读；允许本地修复，由用户自行上传和启动。不得自行上传、安装、启动训练、停止进程或改写服务器文件。旧部署授权不延续到本轮。
 - 本轮由用户从头运行四组 mini Car、seed42：R 独立 SeqTrack、A 综合 B0 原配方、B 综合 B0 延后第二次衰减、C 为 B 全程半学习率。物理 GPU 依次为 0/0/1/1，每组单卡。
 - 2026-09-25用户追加D：综合B0的B配方全程学习率×1.5，初始1.5e-4、milestones=[20,50]，物理GPU0；原A/B/C保留。只登记新增B0配方，不改变预算或参考模型配方，见`docs/CTSEQTRACK_V33_SCALED_LR_GPU0.md`。
+- 2026-09-25用户追加E：继承B，峰值LR=3e-4、前2000次更新线性warmup（从峰值/2000升至峰值），完成20/50轮后降至3e-5/3e-6，物理GPU1；warmup计入原71,700次更新。原R/A/B/C/D不改。E相对B同时改变LR与warmup，不能独立归因，见[追加E说明](docs/CTSEQTRACK_V33_X3_LR_GPU1.md)。本轮未访问或修改服务器，由用户上传并启动。
 - 已完成 v32 R 仍是可复用的历史证据；用户当前选择重跑 R。不得把“可复用”写成“本轮无需启动 R”。本轮不新增 Full 独立诊断。
 - 协议以 [EXPERIMENT_PROTOCOL.md](docs/EXPERIMENT_PROTOCOL.md) 为准；实现见 [B0_V33_REPAIR.md](docs/B0_V33_REPAIR.md)，用户启动说明见 [CTSEQTRACK_V33_MINI_LAUNCH.md](docs/CTSEQTRACK_V33_MINI_LAUNCH.md)，工具范围见 [FORMAL_TOOLING.md](docs/FORMAL_TOOLING.md)。
 

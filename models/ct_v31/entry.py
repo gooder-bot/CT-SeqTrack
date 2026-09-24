@@ -156,6 +156,11 @@ def run(config, *, loaders=None):
     print('[v33] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
     loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
     class ConsoleProgress(Callback):
+        def on_train_batch_start(self, trainer, module, batch, batch_idx):
+            if config.lr_warmup_steps and batch_idx % 50 == 0:
+                lr = trainer.optimizers[0].param_groups[0]['lr']
+                print(f'[v33 lr] update={trainer.global_step + 1} lr={lr:.9g}', flush=True)
+
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
             if batch_idx % 50 == 0:
                 loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
@@ -168,7 +173,8 @@ def run(config, *, loaders=None):
             print('[v33 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
                   json.dumps(module.evaluation_results, ensure_ascii=False), flush=True)
 
-    callbacks = [LearningRateMonitor(logging_interval='epoch'), ConsoleProgress()]
+    callbacks = [LearningRateMonitor(logging_interval='step' if config.lr_warmup_steps else 'epoch'),
+                 ConsoleProgress()]
     if not config.test:
         callbacks.append(FinalWindowCheckpoint(keep=3, every_n_epochs=2))
     trainer = pl.Trainer(default_root_dir=str(root), max_epochs=config.epoch,

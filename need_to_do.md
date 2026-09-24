@@ -1,6 +1,8 @@
-# CT-SeqTrack 当前状态（2026-09-24）
+# CT-SeqTrack 当前状态（2026-09-25）
 
 2026-09-25追加：用户希望适度放大学习率，已配置D为B配方全程×1.5（初始1.5e-4、20/50轮衰减），GPU0、其他参数不变。原R/A/B/C保留；新增正式配置与入口登记已通过20项相关本地测试，由用户上传启动，见[追加D说明](docs/CTSEQTRACK_V33_SCALED_LR_GPU0.md)。
+
+当前进度：原R/A/B/C/D已由用户启动，最近观察仍在运行；本轮未访问或修改服务器，不推断五组已完成。用户追加E为B的峰值学习率×3与2000步线性warmup联合配方，GPU1，预算仍71,700次更新；E与B的差异不能独立归因为LR或warmup。新配置、五个同步文件及命令见[追加E说明](docs/CTSEQTRACK_V33_X3_LR_GPU1.md)。
 
 ## v33 综合 B0（当前，覆盖下方历史安排）
 
@@ -10,7 +12,9 @@
 - [x] 本地首次契约测试285 passed、7 skipped；此前最终服务器原环境314 passed、1 skipped，真实CUDA batch16前向/反向/Adam/commit通过，见[v33说明](docs/B0_V33_REPAIR.md)。
 - [x] 最新本地配置文档与四条后台命令已统一为GPU0/0/1/1；修复中文编码损坏，保留历史报错修复。此次服务器仅只读检查。
 - [x] 修正SeqTrack缺失目标点诊断被汇总为0的问题，改为None并记录覆盖数；本地相关测试40 passed、2 skipped，训练与评分数学不变。
-- [ ] 用户上传当前本地源码、配置与文档后，启动R/A/B/C四份独立scratch60；[独立命令与tail](docs/CTSEQTRACK_V33_MINI_LAUNCH.md)。
+- [x] 用户已启动原R/A/B/C及追加D，最近观察仍在运行；原四组[独立命令与tail](docs/CTSEQTRACK_V33_MINI_LAUNCH.md)作为运行记录保留。
+- [x] E配置、按更新warmup与按epoch衰减、恢复与学习率日志已接入；本地343 passed、3 skipped，compileall/diff通过，原R/A/B/C/D配置SHA保持。
+- [ ] 用户同步E的五个运行文件后，从头启动GPU1独立scratch60；[启动与tail命令](docs/CTSEQTRACK_V33_X3_LR_GPU1.md)。
 - [ ] 四组完成后比较final60/late-3双指标、缺测/移动交叉分组、coarse→fine和失跟长度；目标B0四项均达到SeqTrack。
 - [ ] 综合结果明确后才安排必要单项消融与Full迁移；本轮不开展Full独立诊断。
 

@@ -2,7 +2,9 @@
 
 2026-09-25新增的GPU0放大学习率D组单独见[追加运行说明](CTSEQTRACK_V33_SCALED_LR_GPU0.md)，本页保留原R/A/B/C安排。
 
-2026-09-24，按用户最新安排：重新训练 SeqTrack reference、综合 B0 A/B/C，物理 GPU 依次为 **0、0、1、1**。本轮助手只读检查服务器、修订本地文件；上传和正式启动由用户执行。四组正式实验尚未启动。
+同日追加GPU1的E：B配置的峰值学习率×3（3e-4）加前2000次更新线性warmup，仍在20/50轮完成后降档，warmup计入原71,700次更新。E同时改变LR与warmup，不能独立归因；五个同步文件、独立nohup与新终端tail见[追加E运行说明](CTSEQTRACK_V33_X3_LR_GPU1.md)。原R/A/B/C/D不改，本轮未访问或修改服务器。
+
+2026-09-24登记的原始安排：重新训练 SeqTrack reference、综合 B0 A/B/C，物理 GPU 依次为 **0、0、1、1**，由用户上传和启动。2026-09-25当前进度记录为原R/A/B/C/D已启动，最近观察仍在运行，尚不登记正式完成；下方保留原四组启动方式，追加E使用专页命令。
 
 实现与训练前验证已完成：此前服务器原环境完整测试 **314 passed、1 skipped**，一次真实 nuScenes-mini batch16 的 CUDA forward/backward/Adam/commit 通过。记录见 [v33 实现与验证](B0_V33_REPAIR.md)。不必再把大量预检作为本轮训练前置条件。
 
