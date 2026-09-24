@@ -1,58 +1,67 @@
 # CT-SeqTrack
 
-CT-SeqTrack 研究真实时间先验条件下的目标证据获取、身份保持与递归定位，任务为 3D 点云单目标跟踪。当前工作树维护 **v32 B0 修正版与独立 SeqTrack 对照**，在原活动实现中演进，保留 `ct_v31` 物理模块路径；v31 及更早实验按对应 Git 版本复现。
+CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前活动版本为 **v33 综合 B0 修订**，代码保留 `models/ct_v31/` 的物理路径；v32 可通过 Git `ddcb1a1` 复现。
 
-## 当前方法
-
-| 模块 | 职责 |
+| 模块 | 作用 |
 |---|---|
-| B0 | 锚框局部坐标中的四帧唯一点观测；分割门控停止梯度、有效点 token、历史支持定位 |
-| B1 | CfC 或 GRU 物理时间先验、获取范围与可微时序 context |
-| B2 | B0 裁剪外新增点的 768→256 固定预算获取，原始身份记忆与三个投票模式 |
-| B3 | 主观测与三个模式共用定位/质量头，直接选择四个框假设之一 |
+| B0 | 从当前与历史真实点提取观测，生成 coarse query 并通过共享 decoder 定位 |
+| B1 | 使用 CfC/GRU 建模物理时间运动先验与 context |
+| B2 | 在 B0 原始裁剪之外获取 768 个点槽，选取 256 个证据点槽，结合原始身份记忆 |
+| B3 | 让 q0 与三个测量模式共享定位和质量头，选择最终输出 |
 
-每个训练 batch 执行一次联合前向和一次 Adam 更新；窗口内各端点仅提交一次 accepted 状态并继续递推，跨帧 detach。sigma、离散几何、标签与跨帧状态的梯度边界保留。Full 不依赖旧版策略标定，也不要求不同臂的 B0 参数逐位相同。
+v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被动评测诊断。当前先比较三种 B0 学习率配方与独立 SeqTrack；Full 接口保留，本轮不新增 Full 独立诊断。具体改动见 [v33 实现说明](docs/B0_V33_REPAIR.md)。
 
-实现入口为 [main.py](main.py) → [entry](models/ct_v31/entry.py) → [Lightning host](models/ctseqtrackv31.py) 与 [联合模型](models/ct_v31/model.py)。数据准备、先验、获取、证据、记忆、解码、损失与评测保留 `models/ct_v31/` 路径，独立对照在 `models/seqtrack_reference/`。当前网络使用 PyTorch 算子，不要求安装旧 PointNet++ CUDA 扩展。
+## 当前运行安排
 
-## 已完成的实验
+用户将在上传本地修订后，自行从头启动四组 nuScenes-mini Car、seed42 实验：
 
-2026-09-21 已核实代码版本 `64ad056` 的 mini Car/seed42 三臂完成 scratch60 与独立 58–60 评测；各 71,911 次 Adam、1,146,480 次端点曝光，官方 mini_val 为 106 轨迹/2,285 帧。
+| 组别 | 配置 | 物理 GPU | 学习率配方 |
+|---|---|---:|---|
+| R | `33_seqtrack_ref_mini.yaml` | 0 | 原 SeqTrack，Adam 1e-4，StepLR 每 20 轮乘 0.1 |
+| A | `33_b0_mini.yaml` | 0 | 综合 B0，Adam 1e-4，同 R 的衰减 |
+| B | `33_b0_late_decay_mini.yaml` | 1 | 综合 B0，Adam 1e-4，在 20/50 轮后乘 0.1 |
+| C | `33_b0_half_lr_mini.yaml` | 1 | 综合 B0，Adam 5e-5，同 B 的衰减 |
 
-| v31 | final60 Success / Precision | late-3 Success / Precision |
+四组均 scratch60、batch16、workers4、FP32，每组单卡。A/B/C 的模型、loss、数据、seed 和训练预算相同。R 使用独立原 SeqTrack 网络、teacher 数据处理与原 loss，不继承生产 B0 的修订。
+
+本轮服务器只读；由用户上传和启动，不由代理在服务器写入或运行训练。已有 v32 SeqTrack 成绩可复用，但用户当前选择重新训练 R。四组独立后台命令、日志与恢复方式见 [运行说明](docs/CTSEQTRACK_V33_MINI_LAUNCH.md)。
+
+## 已完成的历史结果
+
+v32 nuScenes-mini Car、seed42，全部 scratch60、71,700 次优化；评测 106 条轨迹、2,285 帧：
+
+| v32 模型 | final60 Success / Precision | late-3 Success / Precision |
 |---|---:|---:|
-| B0 | 23.959519 / 27.834792 | 23.812546 / 28.955142 |
-| Full-CfC | 22.491247 / 29.352297 | 24.213348 / 33.709701 |
-| Full-GRU | 22.839169 / 31.844639 | 25.303793 / 37.146243 |
+| SeqTrack reference | 51.823851 / 61.341356 | 51.884391 / 61.966448 |
+| B0 | 49.650985 / 59.803063 | 49.175420 / 59.365062 |
+| Full-GRU | 44.699125 / 55.191466 | 45.132385 / 55.249088 |
+| Full-CfC | 43.659738 / 53.991247 | 43.488330 / 53.970824 |
 
-工程训练与评测已跑通，**性能验收未通过**：两个 Full 的 final Success 均低于同版 B0，B0 也低于 v30 历史参照 40.473742/47.840262。不能用 Precision 单升、late-3 或中途最好轮次替代预定 final60 S/P 双升条件。
+证据见 [四组报告](artifacts/ct_checks/20260924_v32_four_arm_final/REPORT.md) 和 [训练审查](artifacts/ct_checks/20260924_v32_four_arm_final/training/TRAINING_REVIEW.md)。这些成绩不属于 v33，不能用于宣称本次修改已经有效。
 
-[完整结果与真实数据探针](artifacts/ct_checks/reports/20260921_v31_mini_three_arm/REPORT.md) 定位了当前帧近全前景、稀疏 token 压缩、尾批 BN、候选重复和记忆错写等问题。本轮只修 B0 与递推训练及必要连接，B1/B2/B3 的机制问题留待基线验收后处理；[v32 实现说明](docs/B0_V32_REPAIR.md) 记录改动与验证边界。v32 尚无正式训练成绩，不声称稳定涨分或时间/记忆因果收益。
+## 入口与评测
 
-## 运行
-
-从本仓库根目录执行：
+唯一入口为 `main.py`：
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --path DATA_ROOT --seed 42 --tag b0_seed42
-python main.py --cfg cfgs/ct_seqtrack/32_seqtrack_ref_mini.yaml --path DATA_ROOT --seed 42 --tag ref_seed42
-python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --checkpoint RUN/formal_checkpoints/epoch=060.ckpt --test --log_dir NEW_EVAL_DIR
+python main.py --cfg cfgs/ct_seqtrack/33_seqtrack_ref_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_late_decay_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_half_lr_mini.yaml --path DATA_ROOT
 ```
 
-新配置共用 `32_formal_base.yaml`。本轮按用户最新安排运行 **SeqTrack reference、B0、Full-GRU、Full-CfC，均为 seed42，物理 GPU 依次 0/0/1/1**。scratch60、batch16、workers4、FP32、每 5 轮验证；mini 每轮 19,108 行、1,195 次更新。训练结束自动评测 58/59/60，报告 final60 和 late-3。四份 `31_*` YAML 原样保留，只能在历史 Git 版本中使用，不在当前算法下解释。
+以上为入口示例；物理卡绑定与后台运行使用运行说明中的独立命令。默认每 5 轮验证，训练结束自动评测 58/59/60 并保存逐帧记录及 `results.json`。比较固定 final60 和 late-3，不挑选最佳轮次。不要传旧 `--preloading` 参数；当前按需读取原始点云，每 worker 缓存 256MiB。
 
-联合模型配置接口保留 `b0/b1/b1_b2/full`、CfC/GRU、nuScenes mini/full、KITTI 和 `true/fixed/shuffled` 时间控制。SeqTrack 对照保留原伪时间，不接受这些时间消融。原计划的 reference/B0 seed52 复验留待后续，本轮四组不能代替双 seed 验收。四条后台命令与日志查看见 [v32 mini 运行说明](docs/CTSEQTRACK_V32_MINI_LAUNCH.md)；配置和评价见 [协议](docs/EXPERIMENT_PROTOCOL.md)、[工具面](docs/FORMAL_TOOLING.md)，环境和数据根见 [服务器路径](docs/SERVER_PATHS.md)。
+## 验证与边界
 
-## 验证与保护范围
+此前服务器快照检查 **314 passed、1 skipped**，真实 CUDA batch 的 forward/backward/Adam/commit 已通过，未保存工程 checkpoint。日志与报告位于 [v33 检查目录](artifacts/ct_checks/20260924-190116_v33_implementation/)。后续被动汇总增量单独记录本地验证；这些历史记录不代表最新源码已逐文件完成服务器复验，也不代表四组正式训练已经完成。无需把同一检查反复作为启动步骤。
 
-v32最新本地检查 **249 passed、3 skipped**，包含四组模型在真实Lightning2.0.2下的合成数据训练、checkpoint重载、自动/独立评测与epoch恢复；compileall、diff检查通过。两个CUDA用例因CPU环境跳过，正式nuScenes训练尚未执行。完整说明见 [v32修复记录](docs/B0_V32_REPAIR.md)。
+本地修改后的验证命令：
 
 ```bash
 python -m pytest -q
-python -m compileall -q models/ datasets/ utils/ main.py
+python -m compileall -q models/ datasets/ utils/ tools/ main.py
 git diff --check
 ```
 
-2026-09-22 精简后，生产 Python 从 163 个文件、57,233 行缩为 39 个文件、6,153 行；配置从 106 份缩为 4 份。保留测试 **152 passed、2 skipped**；清理前后数值与训练恢复共 **95,713 项记录一致**，三臂既有 epoch60 checkpoint 严格加载通过。检查使用本地 CPU 和合成数据，未重跑真实数据或 CUDA。完整范围、对照与历史证据见 [精简报告](artifacts/ct_checks/20260922_v31_slimming/REPORT.md) 和 [验证记录](docs/CTSEQTRACK_V31_READINESS.md)。
-
-`output/` 和既有 `artifacts/` 是受保护实验结果、权重与诊断证据，不清理、不覆盖。其他兄弟项目为冻结参考，不修改。当前服务器授权仅只读；本地清理不包含上传、安装或启动/停止任务。更多约定见 [AGENTS.md](AGENTS.md) 与 [正式工具面](docs/FORMAL_TOOLING.md)。
+nuScenes full、KITTI、CfC/GRU 和时间控制接口保留；接口存在不等于已经完成相应实验。`output/` 与既有 `artifacts/` 受保护，不删除、不覆盖。详细约定见 [AGENTS.md](AGENTS.md)、[实验协议](docs/EXPERIMENT_PROTOCOL.md)、[工具范围](docs/FORMAL_TOOLING.md) 和 [服务器路径](docs/SERVER_PATHS.md)。

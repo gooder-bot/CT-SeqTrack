@@ -1,4 +1,4 @@
-"""v32 Lightning host；保留原模块路径，不继承历史隔离训练逻辑。"""
+"""v33 Lightning host；保留物理模块路径与一次 forward/Adam/commit 生命周期。"""
 from __future__ import annotations
 
 import json
@@ -110,8 +110,12 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             raise RuntimeError('v31 optimizer requires unique trainable parameters')
         optimizer = torch.optim.Adam(parameters, lr=self.config.lr, weight_decay=self.config.wd,
                                      betas=(.5, .999), eps=1e-6, foreach=False, fused=False)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, self.config.lr_decay_step,
-                                                   gamma=self.config.lr_decay_rate)
+        if self.config.lr_schedule == 'multistep':
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, milestones=self.config.lr_milestones, gamma=self.config.lr_decay_rate)
+        else:
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, self.config.lr_decay_step, gamma=self.config.lr_decay_rate)
         return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='epoch'))
 
     def on_fit_start(self):
@@ -181,7 +185,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         """按epoch记录真实预算及参考重采样；恢复不会覆盖不同的已有审计。"""
         if not self.config.log_dir:
             return
-        audit = dict(schema='ct_seqtrack.v32.training_audit.v1',
+        audit = dict(schema='ct_seqtrack.v33.training_audit.v1',
             completed_epoch=self._completed_epoch, epoch_complete=self._epoch_complete,
             rows=self._epoch_rows, optimizer_steps=self._epoch_steps, sampler=sampler.state_dict())
         if self.is_reference:
@@ -244,13 +248,13 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def on_save_checkpoint(self, checkpoint):
         sampler = self._loaders.get('train')
-        checkpoint['ct_v32_runtime'] = resume_payload(self.config,
+        checkpoint['ct_v33_runtime'] = resume_payload(self.config,
             completed_epoch=self._completed_epoch, complete=self._epoch_complete,
             rows=self._epoch_rows, steps=self._epoch_steps,
             sampler=sampler.batch_sampler.state_dict() if sampler is not None else None)
 
     def on_load_checkpoint(self, checkpoint):
-        payload = validate_resume_payload(checkpoint.get('ct_v32_runtime'), self.config,
+        payload = validate_resume_payload(checkpoint.get('ct_v33_runtime'), self.config,
                                           training=not self.config.test)
         self._completed_epoch = int(payload['completed_epoch'])
         if not self.config.test:

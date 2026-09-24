@@ -153,7 +153,7 @@ def test_no_sequence_measurements_produce_prior_only_without_nan():
     assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
 
 
-def test_bg_has_no_direct_mode_localization_or_bc_when_absent():
+def test_bg_has_no_direct_mode_localization_but_real_points_keep_bc_supervision():
     model = JointTracker(model_config()).eval()
     batch = make_batch(1)
     batch['extension_labels'].zero_()
@@ -162,7 +162,7 @@ def test_bg_has_no_direct_mode_localization_or_bc_when_absent():
     losses = model.compute_losses(batch, out)
     assert losses['loss_modes'] == 0
     assert losses['loss_vote'] == 0
-    assert losses['loss_bc'] == 0
+    assert losses['loss_bc'] > 0
     assert losses['loss_identity'] > 0 and losses['loss_quality'] > 0
 
 

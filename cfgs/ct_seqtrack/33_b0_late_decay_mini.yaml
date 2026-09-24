@@ -1,0 +1,5 @@
+_base_: 33_formal_base.yaml
+experiment_name: ct33_b0_late_decay_mini_car_scratch_seed42
+tag: b0_late_decay_mini_car_seed42_60ep_bs16
+lr_schedule: multistep
+lr_milestones: [20, 50]

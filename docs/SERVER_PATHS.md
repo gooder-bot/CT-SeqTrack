@@ -1,6 +1,6 @@
-# CT-SeqTrack v32 服务器路径
+# CT-SeqTrack v33 服务器路径
 
-服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。当前授权仅只读；不得自行同步文件、安装依赖、启动训练或停止进程。
+服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。2026-09-24 用户最新要求本轮服务器严格只读；助手只修订本地，由用户上传并启动SeqTrack与三组B0，GPU依次0/0/1/1。此前v33独立快照已通过原环境测试与真实batch检查，但正式训练未启动，服务器主目录仍是旧版。命令见 [v33运行说明](CTSEQTRACK_V33_MINI_LAUNCH.md)。
 
 ## 数据根
 
@@ -14,9 +14,9 @@
 
 ## Python环境与SDK
 
-已核实正式v31运行使用 `/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`：Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2，GPU0/1为A40。记录来自既有实验，不宣称本次再次查询了服务器状态。当前v32及独立参考网络使用PyTorch算子，不以旧PointNet++ CUDA扩展为前提。
+2026-09-22再次只读确认 `/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`：Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2，GPU0/1为A40，检查时两卡均为0MiB占用。当前v32及独立参考网络使用PyTorch算子，不以旧PointNet++ CUDA扩展为前提。
 
-nuScenes Python包源曾位于 `/home/lishengjie/code/SparseFusion-main/nuscenes`。这是包父目录，**不是数据根，不能传给 `--path`**。环境缺少已安装SDK时，既有fallback为：
+当前nuScenes SDK已安装在 `seqtrack3d/lib/python3.9/site-packages/nuscenes/`，本轮命令直接使用，无需PYTHONPATH fallback。以下只保留历史路径记录：nuScenes包源曾位于 `/home/lishengjie/code/SparseFusion-main/nuscenes`，此次未发现该路径下的 `nuscenes/__init__.py`，不要直接沿用。它也**不是数据根，不能传给 `--path`**。历史fallback写法（只有路径实际可用时才适用）：
 
 ```bash
 export CTSEQ_NUSCENES_PYTHON_ROOT=/home/lishengjie/code/SparseFusion-main/nuscenes
@@ -25,4 +25,4 @@ export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 不使用旧 `--preloading`；当前原始云按需读取，每worker缓存256MiB。使用 `CUDA_VISIBLE_DEVICES` 选择物理卡，每进程仍为单卡；设置 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1`、`PYTORCH_CUDA_ALLOC_CONF=backend:native` 和 `CUBLAS_WORKSPACE_CONFIG=:4096:8`。
 
-mini四组后台命令见 [v32运行说明](CTSEQTRACK_V32_MINI_LAUNCH.md)，当前协议与工程检查见 [工具面](FORMAL_TOOLING.md)。旧版本预检/启动命令只通过 [历史索引](HISTORY_EVIDENCE_INDEX.md) 使用，不进入v32流程。
+mini四组后台命令见 [v33运行说明](CTSEQTRACK_V33_MINI_LAUNCH.md)，当前协议与工程验证见 [工具面](FORMAL_TOOLING.md)。当前代码已经通过服务器原环境314项测试（1项不适用跳过）和一次真实CUDA batch，不需重装环境；旧版本命令只通过 [历史索引](HISTORY_EVIDENCE_INDEX.md) 使用。

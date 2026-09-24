@@ -166,7 +166,7 @@ def test_world_axis_corner_geometry_keeps_center_and_rotates_only_offsets():
     torch.testing.assert_close(corners.amax(-2), torch.tensor([[11., 22., 33.]]))
 
 
-def test_seven_query_boxes_share_one_pose_head_and_preserve_initial_seeds():
+def test_seven_query_boxes_share_one_pose_head_and_preserve_initial_output_references():
     observation, evidence, batch, prior = _decoder_inputs()
     model = SharedHypothesisDecoder().eval()
     counts = []
@@ -178,7 +178,8 @@ def test_seven_query_boxes_share_one_pose_head_and_preserve_initial_seeds():
     assert output.history_boxes.shape == (1, 3, 4)
     assert output.decoder_features.shape == (1, 4, 64)
     torch.testing.assert_close(output.history_boxes, batch['history_boxes'])
-    torch.testing.assert_close(output.hypothesis_boxes[:, 0], observation.coarse_box)
+    torch.testing.assert_close(output.hypothesis_boxes[:, 0, :3], torch.zeros_like(observation.coarse_box[:, :3]))
+    torch.testing.assert_close(output.hypothesis_boxes[:, 0, 3], observation.coarse_box[:, 3])
     torch.testing.assert_close(output.hypothesis_boxes[:, 1:, :3], evidence.centers_xyz)
     torch.testing.assert_close(output.hypothesis_boxes[:, 1:, 3], observation.coarse_box[:, 3:4].expand(-1, 3))
     assert output.hypothesis_valid.all()

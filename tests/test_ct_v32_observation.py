@@ -132,7 +132,7 @@ def test_decoder_rotates_geometry_and_residuals_without_touching_b2_features():
     hook.remove()
     torch.testing.assert_close(captured[0], evidence.point_features)
     expected_delta = torch.tensor([[0., 1., .2]])
-    torch.testing.assert_close(result.hypothesis_boxes[:, 0, :3], observation.coarse_box[:, :3] + expected_delta,
+    torch.testing.assert_close(result.hypothesis_boxes[:, 0, :3], expected_delta,
                                atol=1e-6, rtol=0)
     torch.testing.assert_close(result.hypothesis_boxes[:, 1, :3], evidence.centers_xyz[:, 0] + expected_delta,
                                atol=1e-6, rtol=0)
@@ -162,7 +162,7 @@ def test_history_only_predicts_and_learns_without_claiming_current_measurements(
     evidence = EvidenceHypotheses.empty(observation.coarse_box)
     decoded = decoder(observation, evidence, batch, prior)
     expected_delta = rotate_xyz(decoder.pose_head.bias[None, :3], anchor_yaw(batch, observation.coarse_box), to_world=True)
-    torch.testing.assert_close(decoded.hypothesis_boxes[:, 0, :3], observation.coarse_box[:, :3] + expected_delta)
+    torch.testing.assert_close(decoded.hypothesis_boxes[:, 0, :3], expected_delta)
     output = TrackOutput(decoded.hypothesis_boxes[:, 0], torch.zeros(1, dtype=torch.long),
                          decoded.quality_logits[:, 0].sigmoid(), prior, observation, evidence, decoded)
     losses = compute_losses(batch, output, enable_b1=False, enable_b2=False, enable_b3=False)
@@ -192,19 +192,20 @@ def test_segmentation_weights_frames_and_endpoints_not_dense_point_counts():
     torch.testing.assert_close(actual, per_frame[:, :3].mean())
 
 
-def test_bc_averages_frames_then_endpoints_and_excludes_no_foreground_frames():
+def test_bc_balances_current_history_groups_and_unique_point_counts():
     target = torch.zeros(2, 4, 12, 9)
     prediction = torch.tensor([[1., 2., 3., 4.], [4., 3., 2., 1.]])[..., None, None].expand_as(target).clone()
     prediction.requires_grad_()
     valid = torch.arange(12)[None, None] < torch.tensor([[1, 4, 12, 2], [12, 1, 3, 11]])[..., None]
-    labels = valid.long()
-    labels[1, 2:] = 0
-    value = observation_bc_loss(prediction, target, valid, labels)
+    value, current, history = observation_bc_loss(prediction, target, valid)
     per_frame = F.smooth_l1_loss(prediction[..., 0, 0], torch.zeros(2, 4), reduction='none')
-    expected = .5 * (per_frame[0].mean() + per_frame[1, :2].mean())
+    expected = .5 * (per_frame[:, -1] + per_frame[:, :3].mean(-1)).mean()
     torch.testing.assert_close(value, expected)
+    torch.testing.assert_close(current, per_frame[:, -1].mean())
+    torch.testing.assert_close(history, per_frame[:, :3].mean())
     value.backward()
-    assert torch.count_nonzero(prediction.grad[1, 2:]) == 0
+    assert torch.count_nonzero(prediction.grad[valid]) > 0
+    assert torch.count_nonzero(prediction.grad[~valid]) == 0
 
 
 def test_local_b0_loss_is_invariant_to_world_orientation_but_world_b2_objective_is_preserved():

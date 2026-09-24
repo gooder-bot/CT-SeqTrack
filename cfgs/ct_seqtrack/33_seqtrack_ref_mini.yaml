@@ -1,0 +1,5 @@
+# 本轮四组 mini 的独立 SeqTrack 对照；从头训练，原参考网络/teacher/loss不变。
+_base_: 33_formal_base.yaml
+net_model: seqtrack_reference
+experiment_name: ct33_seqtrack_ref_mini_car_scratch_seed42
+tag: seqtrack_ref_mini_car_seed42_60ep_bs16

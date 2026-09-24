@@ -1,42 +1,50 @@
-# CT-SeqTrack v32 工具面
+# CT-SeqTrack v33 工具范围
 
-唯一入口为main.py。以下命令供用户在同步当前 v32 源码和配置后执行；本次本地检查没有代为上传或启动。四条可直接复制的后台命令和新终端 tail 见 [v32 mini 运行说明](CTSEQTRACK_V32_MINI_LAUNCH.md)。
+唯一训练和闭环评测入口是 `main.py`。本轮由用户上传本地代码并启动 R/A/B/C 四组，物理 GPU 为 0/0/1/1；服务器操作对代理仅开放只读。运行命令见 [v33 运行说明](CTSEQTRACK_V33_MINI_LAUNCH.md)，实验不变量见 [协议](EXPERIMENT_PROTOCOL.md)。
 
-## 四次登记训练
-
-```bash
-python main.py --cfg cfgs/ct_seqtrack/32_seqtrack_ref_mini.yaml --path DATA_ROOT --seed 42 --tag ref_seed42
-python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --path DATA_ROOT --seed 42 --tag b0_seed42
-python main.py --cfg cfgs/ct_seqtrack/32_full_gru_mini.yaml --path DATA_ROOT --seed 42 --tag full_gru_seed42
-python main.py --cfg cfgs/ct_seqtrack/32_full_cfc_mini.yaml --path DATA_ROOT --seed 42 --tag full_cfc_seed42
-```
-
-随机初始化，结束自动评测58/59/60并保存results.json。同身份完整epoch恢复可加`--checkpoint RUN/formal_checkpoints/epoch=020.ckpt`；不使用init_checkpoint。环境和数据根见[SERVER_PATHS](SERVER_PATHS.md)。
-
-## 评测和工程检查
+## 正式入口
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --seed 42 --checkpoint RUN/formal_checkpoints/epoch=060.ckpt --test --log_dir NEW_EVAL_DIR
-python main.py --cfg cfgs/ct_seqtrack/32_b0_mini.yaml --ct_engineering_check --epoch 1 --workers 0 --limit_train_batches 2 --limit_val_batches 1 --no_late3 --log_dir artifacts/ct_checks/NEW_SMOKE
-python -m pytest -q
-python -m compileall -q models/ datasets/ utils/ main.py
-git diff --check
+python main.py --cfg cfgs/ct_seqtrack/33_seqtrack_ref_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_late_decay_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/33_b0_half_lr_mini.yaml --path DATA_ROOT
 ```
 
-limit_*整数为batch数、小数为比例。SeqTrack及Full可替换相应32_*配置。真实smoke需要SDK/数据；工程输出放入独立artifacts/ct_checks目录，权重不进入正式初始化。
+默认 scratch60、batch16、workers4、FP32、每 5 轮验证，结束后自动评测 58/59/60。不传 `--checkpoint` 或 `--init_checkpoint` 开始新正式实验；后者始终被禁止。
 
-## 身份与保护
+CLI 支持 `--cfg`、`--path`、`--tag`、`--log_dir`、`--checkpoint`、`--test`、`--seed`、`--batch_size`、`--epoch`、`--workers`、`--check_val_every_n_epoch`、`--trainer_devices`、`--accelerator`、时间控制及工程检查参数。正式预算由配置校验固定，能解析参数不代表允许改变正式预算。不要传旧 `--preloading`、`--proposal_mode`、`--gpus` 或 `--precision`；这些不是当前入口参数。物理 GPU 用环境变量 `CUDA_VISIBLE_DEVICES` 指定，每组 `trainer_devices=1`。
 
-本轮四组各自在 `results.json` 保存 final60 与 late-3；逐 checkpoint 的结果在 `evaluation/epoch=058|059|060/`。先比较 seed42 B0/reference 的 final60 S/P，再报告两个 Full 对 B0 的差异。
+`--no_late3` 会跳过训练后的全部自动评测，不只是改变汇总方式；本轮四组不要使用它。
 
-下列工具专用于**后续补齐 reference/B0 seed52 后的双 seed 验收**，不是本轮四臂汇总器。它只读固定 final60 差距并从四个基线 run 的全部12份逐帧记录重算指标：
+不指定 `--log_dir` 时，目录为 `output/YYYYMMDD-HHMMSS-33_ARM-TAG`，R 的 ARM 为 `seqtrack_ref`，其余为 `b0`。独立 `--test` 默认追加 `-test`。建议后台命令显式给每组不同的新目录，便于定位日志和 PID。
+
+## 恢复与独立评测
+
+同 run 恢复：保持原配置和原 `--log_dir`，仅添加该 run 完整 epoch 边界的 `--checkpoint RUN/formal_checkpoints/epoch=NNN.ckpt`。不得换学习率配方后复用 checkpoint。
 
 ```bash
-python tools/compare_v32_baselines.py --b0-42 B0_SEED42_RUN --ref-42 REF_SEED42_RUN --b0-52 B0_SEED52_RUN --ref-52 REF_SEED52_RUN
+python main.py --cfg cfgs/ct_seqtrack/33_b0_mini.yaml --path DATA_ROOT --checkpoint RUN/formal_checkpoints/epoch=060.ckpt --test --log_dir NEW_EVAL_DIR
 ```
 
-标准输出为JSON：退出码0达标、1未达标、2证据不完整或身份/预算不匹配。不会以late-3替换失败的final60，也不写入训练目录。
+独立评测要求新空目录，不能把原训练或 reference 目录作为评测输出目录。入口在写 metadata 前验证已有 manifest 与 checkpoint 身份；合法恢复保留首次 `resolved_config.yaml` 和 `run_manifest.json`。v32 checkpoint 不兼容 v33，旧模型必须使用其冻结源码评测。
 
-run保存resolved config、manifest、CSV/TensorBoard、checkpoint和逐帧结果；参考对照另保存真实重采样曝光。配置和采样身份参与恢复核验。旧31_*仅在Git b1d886e复现，更早版本见[历史索引](HISTORY_EVIDENCE_INDEX.md)。
+## 已有检查与可选工程工具
 
-output/与既有artifacts/受保护；评测使用新目录，不覆盖历史。当前实现和检查边界见[修复说明](B0_V32_REPAIR.md)。
+此前服务器快照留存 **314 passed、1 skipped** 和真实 CUDA batch 通过记录，证据目录为 `artifacts/ct_checks/20260924-190116_v33_implementation/`。后续被动汇总增量的本地验证单独记录，不将旧记录视为最新源码逐文件服务器复验；不要求用户在每次正式启动前重复同一检查。
+
+`tools/check_v33_batch.py` 仅用于代码或环境改变后的必要定位：执行一次真实 batch 的 forward/backward/Adam/commit，写独立报告，不保存 checkpoint，不进入正式初始化。
+
+`tools/launch_v33_b0.py` 当前只启动 A/B/C 三个 B0，并要求读取已有 reference 与旧 B0。它属于“复用 R”的三组启动路径，不能当作本次 R/A/B/C 四组独立命令的替代。
+
+## 结果比较
+
+```bash
+python tools/compare_v33_b0.py --reference R_RUN --old-b0 OLD_B0_RUN --a A_RUN --b B_RUN --c C_RUN
+```
+
+工具只读 JSON/JSONL，重新积分 final60 与 late-3；reference 可为已完成 v32 R 或本次重跑的 v33 R，本轮使用新 R。返回码 0 表示至少一组在 final60/late-3 的 Success/Precision 四项均不低于 reference，1 表示完整证据未达标，2 表示证据无效或不完整。
+
+诊断固定使用旧 B0 的帧键和裁剪分组，报告 raw/crop/sampled、移动与缺测交叉、同帧 coarse/fine、失跟与右删失；可缺失的旧诊断必须报告覆盖率，不能静默填零。该工具不训练、不推理、不替代正式实验。`compare_v32_baselines.py` 保留为 v32 结果审查工具。
+
+本地修改按需运行 pytest、compileall 和 `git diff --check`。保护 `output/` 与既有 `artifacts/`；新增结果或检查产物使用独立目录。旧 31/32 工具和协议按 Git 历史复现，不恢复到当前活跃入口。

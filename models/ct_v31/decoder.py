@@ -1,4 +1,4 @@
-"""v32 共享七框 decoder：局部几何 query，公开输出仍为世界轴框。
+"""v33 共享七框 decoder：显式局部输出参考中心，公开输出仍为世界轴框。
 
 B0 的四帧 source 仍由 SeqTrack 原 local/global encoder 编码。
 证据与记忆只接在 cross-attention 的 K/V；候选之间没有 self-attention。
@@ -33,7 +33,9 @@ class SharedHypothesisDecoder(nn.Module):
         self.prior_dim = int(prior_dim)
         self.d_model = 64
         self.source_projection = nn.Linear(128, 64)
-        self.corner_projection = nn.Linear(4, 64)
+        # XYZ/time + 输出参考中心：q0 以 anchor 为原点，history/mode 以 seed 为原点。
+        # 同角点、同 K/V 的 q0/mode 也能区分各自的中心回归目标，无需独立 head。
+        self.corner_projection = nn.Linear(7, 64)
         # 保留 SeqTrack 注意力定义：每头 d_k=d_v=64，非 64/4。
         options = dict(d_word_vec=64, n_layers=3, n_head=4, d_k=64, d_v=64,
                        d_model=64, d_inner=512, pad_idx=1, dropout=float(dropout))
@@ -173,13 +175,19 @@ class SharedHypothesisDecoder(nn.Module):
         yaw_anchor = anchor_yaw(batch, reference)
         local_seeds = transform_boxes(seeds, yaw_anchor)
         local_corners = transform_boxes(corner_seeds, yaw_anchor)
+        # q0 直接预测 anchor-local 最终中心；历史与测量模式仍输出 seed 残差。
+        # mode reference 在输出加法中保留 live 梯度，只在 query 中停止梯度。
+        output_reference = torch.cat((local_seeds[:, :3, :3],
+            torch.zeros_like(local_seeds[:, 3:4, :3]), local_seeds[:, 4:, :3]), dim=1)
         local_prior = replace(prior,
             box=transform_boxes(prior.box.detach().to(reference), yaw_anchor),
             direction_xy=rotate_xy(prior.direction_xy.detach().to(reference), yaw_anchor))
         corners = box_corners_xyz(local_corners, size[:, None])
         query_times = torch.cat((times[:, :3], times[:, -1:].expand(-1, 4)), dim=1)
-        corner_input = torch.cat((corners, query_times[:, :, None, None].expand(-1, -1, 8, -1)), dim=-1)
-        queries = self.corner_projection(corner_input.reshape(batch_size, 56, 4))
+        corner_input = torch.cat((corners,
+            query_times[:, :, None, None].expand(-1, -1, 8, -1),
+            output_reference.detach()[:, :, None].expand(-1, -1, 8, -1)), dim=-1)
+        queries = self.corner_projection(corner_input.reshape(batch_size, 56, 7))
         prior_embedding = self._prior_embedding(observation, local_prior, local_seeds[:, 3], size, times)
         prior_by_query = torch.cat((torch.zeros_like(prior_embedding[:, None]).expand(-1, 3, -1),
                                     prior_embedding[:, None].expand(-1, 4, -1)), dim=1)
@@ -209,7 +217,7 @@ class SharedHypothesisDecoder(nn.Module):
         angle = torch.atan2(torch.where(nonzero, sine, 0.), torch.where(nonzero, cosine, 1.))
         yaw = local_seeds[..., 3] + angle
         yaw = torch.atan2(yaw.sin(), yaw.cos())
-        boxes = torch.cat((local_seeds[..., :3] + residual[..., :3], yaw[..., None]), dim=-1)
+        boxes = torch.cat((output_reference + residual[..., :3], yaw[..., None]), dim=-1)
         boxes = transform_boxes(boxes, yaw_anchor, to_world=True)
         boxes = torch.where(query_valid[..., None], boxes, 0.)
         current_boxes = boxes[:, 3:]

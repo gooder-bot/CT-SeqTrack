@@ -26,7 +26,7 @@ def cpu_threads():
 
 
 def engineering_directory():
-    parent = Path(__file__).resolve().parents[1] / 'artifacts' / 'ct_checks' / 'v32_integration'
+    parent = Path(__file__).resolve().parents[1] / 'artifacts' / 'ct_checks' / 'v33_integration'
     parent.mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix='run_', dir=parent))
 
@@ -35,7 +35,7 @@ def engineering_directory():
 def test_entry_trains_checkpoints_and_evaluates_independent_model(name):
     reference = name == 'seqtrack_ref'
     root = engineering_directory()
-    config = normalize_config(dict(net_model='seqtrack_reference' if reference else 'ctseqtrackv32',
+    config = normalize_config(dict(net_model='seqtrack_reference' if reference else 'ctseqtrackv33',
         v31_arm='full' if name.startswith('full_') else 'b0',
         v31_temporal_backend='gru' if name == 'full_gru' else 'cfc',
         ct_engineering_check=True, epoch=1, workers=0, batch_size=2,
@@ -63,7 +63,7 @@ def test_entry_trains_checkpoints_and_evaluates_independent_model(name):
     assert manifest['temporal_backend'] == config.v31_temporal_backend
     assert manifest['enabled'] == dict.fromkeys(('B1', 'B2', 'B3'), name.startswith('full_'))
     state = torch.load(root / 'formal_checkpoints' / 'epoch=001.ckpt', map_location='cpu')
-    validate_resume_payload(state['ct_v32_runtime'], config, training=True)
+    validate_resume_payload(state['ct_v33_runtime'], config, training=True)
     assert config_identity(config) == manifest['config_sha256']
     audit = json.loads((root / 'training_audits' / 'epoch=001.json').read_text(encoding='utf-8'))
     if reference:

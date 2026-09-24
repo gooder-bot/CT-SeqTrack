@@ -1,4 +1,4 @@
-"""v32 与独立 SeqTrack 对照入口；保留既有物理模块路径。"""
+"""v33 综合 B0 与独立 SeqTrack 对照入口；保留既有物理模块路径。"""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,7 @@ def batch_limit(value):
 
 
 def parse_config(argv=None):
-    parser = argparse.ArgumentParser(description='CT-SeqTrack v32 joint / independent SeqTrack training and evaluation')
+    parser = argparse.ArgumentParser(description='CT-SeqTrack v33 joint / independent SeqTrack training and evaluation')
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)
@@ -60,11 +60,47 @@ def resolve_run_directory(config):
            'b0' if config.v31_arm == 'b0' else config.v31_arm + '_' + config.v31_temporal_backend)
     parent = Path('artifacts/ct_checks') if config.ct_engineering_check else Path('output')
     suffix = '-test' if config.test else ''
-    return (parent / f'{stamp}-32_{arm}-{config.tag}{suffix}').resolve()
+    return (parent / f'{stamp}-33_{arm}-{config.tag}{suffix}').resolve()
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def validate_run_destination(config, root):
+    """所有运行 metadata 写入前验证目录及 checkpoint；返回是否保留原 metadata。"""
+    root = Path(root)
+    if config.test and root.exists() and any(root.iterdir()):
+        raise FileExistsError('evaluation requires a new empty run directory: ' + str(root))
+    manifest_path, resolved_path = root / 'run_manifest.json', root / 'resolved_config.yaml'
+    existing = manifest_path.exists() or resolved_path.exists()
+    if existing:
+        if not manifest_path.exists() or not resolved_path.exists():
+            raise ValueError('existing run metadata is incomplete; refusing to overwrite: ' + str(root))
+        saved = json.loads(manifest_path.read_text(encoding='utf-8'))
+        expected = dict(schema=SCHEMA, config_sha256=config_identity(config), model=config.net_model)
+        for key, value in expected.items():
+            if saved.get(key) != value:
+                raise ValueError('existing run identity mismatch: ' + key)
+        if not config.checkpoint:
+            raise FileExistsError('this run already has metadata; use a new --log_dir or same-run --checkpoint')
+    if config.checkpoint:
+        import torch
+        from .runtime import validate_resume_payload
+        checkpoint = torch.load(config.checkpoint, map_location='cpu', weights_only=False)
+        validate_resume_payload(checkpoint.get('ct_v33_runtime'), config, training=not config.test)
+    return existing
+
+
+def write_run_metadata(config, root, manifest, *, preserve_existing):
+    """合法同 run 恢复保留首次配置和源码记录，当前环境仍输出到本次日志。"""
+    if preserve_existing:
+        return
+    import yaml
+    root = Path(root)
+    (root / 'resolved_config.yaml').write_text(yaml.safe_dump(dict(config), allow_unicode=True,
+                                                            sort_keys=True), encoding='utf-8')
+    write_json(root / 'run_manifest.json', manifest)
 
 
 def source_identity():
@@ -82,22 +118,18 @@ def source_identity():
 def run(config, *, loaders=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
     configure_numerics()
+    root = resolve_run_directory(config)
+    config.log_dir = str(root)
+    preserve_metadata = validate_run_destination(config, root)
     import torch
     import pytorch_lightning as pl
     from pytorch_lightning.callbacks import Callback, LearningRateMonitor
     from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
-    import yaml
     from models.ctseqtrackv31 import CTSEQTRACKV31
     from utils.lightning_runtime import FinalWindowCheckpoint
 
     pl.seed_everything(config.seed, workers=True)
-    root = resolve_run_directory(config)
     root.mkdir(parents=True, exist_ok=True)
-    config.log_dir = str(root)
-    if (root / 'resolved_config.yaml').exists() and not config.checkpoint:
-        raise FileExistsError('this run already has a resolved config; use a new --log_dir or same-run --checkpoint')
-    (root / 'resolved_config.yaml').write_text(yaml.safe_dump(dict(config), allow_unicode=True,
-                                                            sort_keys=True), encoding='utf-8')
     model = CTSEQTRACKV31(config, loaders=loaders)
     try:
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True,
@@ -117,23 +149,23 @@ def run(config, *, loaders=None):
     if config.net_model == 'seqtrack_reference':
         from models.seqtrack_reference.protocol import protocol_identity
         manifest['reference_protocol'] = protocol_identity()
-    write_json(root / 'run_manifest.json', manifest)
+    write_run_metadata(config, root, manifest, preserve_existing=preserve_metadata)
     console_manifest = {key: value for key, value in manifest.items()
                         if key not in ('source', 'reference_protocol')}
     console_manifest['source_sha256'] = manifest['source']['sha256']
-    print('[v32] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
+    print('[v33] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
     loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
     class ConsoleProgress(Callback):
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
             if batch_idx % 50 == 0:
                 loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
                 value = float(loss.detach()) if torch.is_tensor(loss) else loss
-                print(f'[v32 train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
+                print(f'[v33 train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
                       f'batch={batch_idx + 1}/{trainer.num_training_batches} '
                       f'step={trainer.global_step} loss={value}', flush=True)
 
         def on_validation_end(self, trainer, module):
-            print('[v32 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
+            print('[v33 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
                   json.dumps(module.evaluation_results, ensure_ascii=False), flush=True)
 
     callbacks = [LearningRateMonitor(logging_interval='epoch'), ConsoleProgress()]
@@ -185,14 +217,14 @@ def run(config, *, loaders=None):
         with (directory / 'frames.jsonl').open('w', encoding='utf-8') as stream:
             for row in model.evaluation.rows:
                 stream.write(json.dumps(row, ensure_ascii=False) + '\n')
-        print('[v32 evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
+        print('[v33 evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
     summary = dict(final=results[-1], late3={name: sum(row[name] for row in results) / len(results)
                    for name in ('success', 'precision')}, checkpoint_epochs=[row['checkpoint_epoch'] for row in results],
                    wall_seconds=time.perf_counter() - started)
     if torch.cuda.is_available():
         summary['peak_gpu_allocated_mib'] = torch.cuda.max_memory_allocated() / 2 ** 20
     write_json(root / 'results.json', summary)
-    print('[v32 complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
+    print('[v33 complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
     return root
 
 

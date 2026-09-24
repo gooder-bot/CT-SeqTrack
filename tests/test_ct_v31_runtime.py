@@ -392,7 +392,8 @@ class TinyJointTracker(torch.nn.Module):
         return {'loss_total': (output.accepted_box[:, :2] - batch['target_box'][:, :2]).square().mean()}
 
 
-def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path):
+@pytest.mark.parametrize('schedule', ['step', 'multistep'])
+def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedule):
     pl = pytest.importorskip('pytorch_lightning')
     from pytorch_lightning.callbacks import Callback
     from models.ctseqtrackv31 import CTSEQTRACKV31
@@ -401,7 +402,8 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path):
         def on_train_epoch_end(self, trainer, module):
             if trainer.current_epoch == 0:
                 trainer.should_stop = True
-    config = cfg(epoch=3, lr_decay_step=1, v31_arm='b0', v31_curriculum_epochs=3)
+    config = cfg(epoch=3, lr_decay_step=1, v31_arm='b0', v31_curriculum_epochs=3,
+                 lr_schedule=schedule, lr_milestones=[1, 2] if schedule == 'multistep' else [])
     def make(root, stop=False):
         sources = {'train': TinySource((5, 3))}
         loaders = build_loaders(config, roles=('train',), sources=sources)
@@ -422,8 +424,8 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path):
     interrupted.fit(first)
     checkpoint = tmp_path / 'resume' / 'formal_checkpoints' / 'epoch=001.ckpt'
     state = torch.load(checkpoint, map_location='cpu')
-    assert state['ct_v32_runtime']['epoch_complete'] is True
-    assert state['ct_v32_runtime']['rows'] == 24
+    assert state['ct_v33_runtime']['epoch_complete'] is True
+    assert state['ct_v33_runtime']['rows'] == 24
     assert state['lr_schedulers'][0]['last_epoch'] == 1
     resumed, continuation = make(tmp_path / 'resume')
     continuation.fit(resumed, ckpt_path=str(checkpoint))

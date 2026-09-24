@@ -1,4 +1,4 @@
-"""v32 观测局部监督；B1物理、B2投票和B3模式仍遵循原世界轴目标。"""
+"""v33 观测局部监督与端点归约；B1/B2/B3 的监督及系数保持。"""
 
 import numpy as np
 import torch
@@ -48,20 +48,35 @@ def balanced_mean(value, foreground, valid):
     return (masked_mean(value, positive) * p_exists + masked_mean(value, negative) * n_exists) / (p_exists + n_exists).clamp_min(1)
 
 
-def box_loss(predicted, target, valid, center_weight=2., angle_weight=10.):
+def _box_loss_terms(predicted, target, valid, center_weight=2., angle_weight=10.,
+                    *, endpoint_mean=False):
     xyz = F.smooth_l1_loss(predicted[..., :3], target[..., :3], reduction='none').mean(-1)
     yaw = 1. - torch.cos(predicted[..., 3] - target[..., 3])
-    return center_weight * masked_mean(xyz, valid) + angle_weight * masked_mean(yaw, valid)
+    reduce = frame_endpoint_mean if endpoint_mean else masked_mean
+    return center_weight * reduce(xyz, valid), angle_weight * reduce(yaw, valid)
 
 
-def local_observation_box_loss(predicted, target, valid, yaw_anchor,
-                               center_weight=2., angle_weight=10.):
+def box_loss(predicted, target, valid, center_weight=2., angle_weight=10.):
+    center, angle = _box_loss_terms(predicted, target, valid, center_weight, angle_weight)
+    return center + angle
+
+
+def local_observation_box_terms(predicted, target, valid, yaw_anchor,
+                                center_weight=2., angle_weight=10., *, endpoint_mean=False):
     """仅 B0 的 coarse/main/history 使用 anchor 局部定位目标。"""
     valid = valid.to(device=predicted.device).bool()
     predicted = torch.where(valid[..., None], predicted, 0.)
     target = torch.where(valid[..., None], target, 0.)
-    return box_loss(transform_boxes(predicted, yaw_anchor),
-                    transform_boxes(target, yaw_anchor), valid, center_weight, angle_weight)
+    return _box_loss_terms(transform_boxes(predicted, yaw_anchor),
+        transform_boxes(target, yaw_anchor), valid, center_weight, angle_weight,
+        endpoint_mean=endpoint_mean)
+
+
+def local_observation_box_loss(predicted, target, valid, yaw_anchor,
+                               center_weight=2., angle_weight=10., *, endpoint_mean=False):
+    center, angle = local_observation_box_terms(predicted, target, valid, yaw_anchor,
+        center_weight, angle_weight, endpoint_mean=endpoint_mean)
+    return center + angle
 
 
 def frame_endpoint_mean(frame_values, frame_valid):
@@ -69,6 +84,22 @@ def frame_endpoint_mean(frame_values, frame_valid):
     valid = frame_valid.bool()
     per_endpoint = torch.where(valid, frame_values, 0.).sum(-1) / valid.sum(-1).clamp_min(1)
     return masked_mean(per_endpoint, valid.any(-1))
+
+
+def _current_history_mean(frame_loss, frame_valid):
+    """current/history 各半；缺一组则另一组占满，空端点不进入分母。
+
+    后两项是各存在组的诊断均值；缺组时两者半和不等于首项聚合损失。
+    """
+    current, current_valid = frame_loss[:, -1], frame_valid[:, -1]
+    history_valid = frame_valid[:, :-1]
+    history = torch.where(history_valid, frame_loss[:, :-1], 0.).sum(-1)
+    history = history / history_valid.sum(-1).clamp_min(1)
+    history_exists = history_valid.any(-1)
+    groups = torch.stack((current, history), -1)
+    groups_valid = torch.stack((current_valid, history_exists), -1)
+    return (frame_endpoint_mean(groups, groups_valid),
+            masked_mean(current, current_valid), masked_mean(history, history_exists))
 
 
 def observation_segmentation_loss(logits, labels, valid):
@@ -84,27 +115,19 @@ def observation_segmentation_loss(logits, labels, valid):
     numerator = torch.where(valid, terms, 0.).sum(-1)
     denominator = (class_weights[target] * valid).sum(-1)
     frame_loss = numerator / denominator.clamp_min(1e-12)
-    frame_valid = valid.any(-1)
-    current, current_valid = frame_loss[:, -1], frame_valid[:, -1]
-    history_valid = frame_valid[:, :-1]
-    history = torch.where(history_valid, frame_loss[:, :-1], 0.).sum(-1)
-    history = history / history_valid.sum(-1).clamp_min(1)
-    history_exists = history_valid.any(-1)
-    groups = torch.stack((current, history), -1)
-    groups_valid = torch.stack((current_valid, history_exists), -1)
-    return (frame_endpoint_mean(groups, groups_valid),
-            masked_mean(current, current_valid), masked_mean(history, history_exists))
+    return _current_history_mean(frame_loss, valid.any(-1))
 
 
-def observation_bc_loss(predicted, target, point_valid, labels):
-    """无目标帧不回归 BC；点数与历史帧数不改变端点权重。"""
-    foreground_exists = ((labels > 0) & point_valid.bool()).any(-1)
-    valid = point_valid.bool() & foreground_exists[..., None]
+def observation_bc_loss(predicted, target, point_valid):
+    """所有真实点均监督 BC，含无 FG 帧；current/history 分组等权。"""
+    if predicted.shape != target.shape or predicted.shape[:-1] != point_valid.shape or predicted.shape[-1] != 9:
+        raise ValueError('observation BC expects matching [B,F,N,9] predictions/targets and [B,F,N] mask')
+    valid = point_valid.bool()
     clean_target = torch.where(valid[..., None], target, 0.)
     clean_predicted = torch.where(valid[..., None], predicted, 0.)
     per_point = F.smooth_l1_loss(clean_predicted, clean_target, reduction='none').mean(-1)
     frame_loss = torch.where(valid, per_point, 0.).sum(-1) / valid.sum(-1).clamp_min(1)
-    return frame_endpoint_mean(frame_loss, valid.any(-1))
+    return _current_history_mean(frame_loss, valid.any(-1))
 
 
 @torch.no_grad()
@@ -138,16 +161,22 @@ def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=T
     zero = observation.coarse_box.sum() * 0.
     losses = {}
     yaw_anchor = anchor_yaw(batch, target)
-    losses['loss_coarse'] = local_observation_box_loss(
-        observation.coarse_box, target, observation.sequence_valid, yaw_anchor)
-    losses['loss_main'] = local_observation_box_loss(
-        decoder.hypothesis_boxes[:, 0], target, observation.sequence_valid, yaw_anchor)
-    losses['loss_history'] = local_observation_box_loss(
-        decoder.history_boxes, batch['history_target_boxes'], batch['history_valid'].bool(),
-        yaw_anchor, .2, 1.)
+    for name, predicted, truth, valid, center_weight, angle_weight, endpoint_mean in (
+        ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10., False),
+        ('main', decoder.hypothesis_boxes[:, 0], target, observation.sequence_valid, 2., 10., False),
+        ('history', decoder.history_boxes, batch['history_target_boxes'],
+         batch['history_valid'].bool(), .2, 1., True)):
+        center, angle = local_observation_box_terms(predicted, truth, valid, yaw_anchor,
+            center_weight, angle_weight, endpoint_mean=endpoint_mean)
+        losses['loss_' + name] = center + angle
+        # 已加权分项仅供日志，不重复进入 loss_total。
+        losses['loss_' + name + '_center'] = center.detach()
+        losses['loss_' + name + '_angle'] = angle.detach()
     (losses['loss_seg'], losses['loss_seg_current'], losses['loss_seg_history']) = observation_segmentation_loss(
         observation.segmentation_logits, labels, point_valid)
-    losses['loss_bc'] = observation_bc_loss(observation.bc_prediction, batch['bc_targets'], point_valid, labels)
+    losses['loss_bc'], bc_current, bc_history = observation_bc_loss(
+        observation.bc_prediction, batch['bc_targets'], point_valid)
+    losses['loss_bc_current'], losses['loss_bc_history'] = bc_current.detach(), bc_history.detach()
 
     if enable_b1:
         physical_valid = batch['physical_valid'].bool() & prior.valid.bool()
@@ -190,8 +219,11 @@ def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=T
         losses.update(loss_identity=zero, loss_vote=zero, loss_reliability=zero)
         purity[:, 1:] = 0
 
-    losses['loss_modes'] = (box_loss(decoder.hypothesis_boxes[:, 1:], target[:, None].expand(-1, 3, -1),
-                                     mode_positive & decoder.hypothesis_valid[:, 1:]) if enable_b3 else zero)
+    mode_center, mode_angle = (_box_loss_terms(
+        decoder.hypothesis_boxes[:, 1:], target[:, None].expand(-1, 3, -1),
+        mode_positive & decoder.hypothesis_valid[:, 1:]) if enable_b3 else (zero, zero))
+    losses['loss_modes'] = mode_center + mode_angle
+    losses['loss_modes_center'], losses['loss_modes_angle'] = mode_center.detach(), mode_angle.detach()
     iou = oriented_iou_labels(decoder.hypothesis_boxes, target, size, batch.get('target_box_size'))
     quality_target = quality_targets(decoder.hypothesis_boxes, target, size, purity, iou)
     quality_error = F.binary_cross_entropy_with_logits(decoder.quality_logits, quality_target, reduction='none')
@@ -206,6 +238,8 @@ def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=T
         + .1 * losses['loss_physical'] + .05 * losses['loss_sigma'] + .05 * losses['loss_acquisition']
         + .2 * losses['loss_identity'] + losses['loss_vote'] + .1 * losses['loss_reliability']
         + .5 * losses['loss_quality'])
+    losses['loss_contribution_seg'] = (.1 * losses['loss_seg']).detach()
+    losses['loss_contribution_quality'] = (.5 * losses['loss_quality']).detach()
     losses['quality_target_mean'] = masked_mean(quality_target, decoder.hypothesis_valid).detach()
     losses['mode_positive_fraction'] = mode_positive.to(target).mean().detach()
     return losses

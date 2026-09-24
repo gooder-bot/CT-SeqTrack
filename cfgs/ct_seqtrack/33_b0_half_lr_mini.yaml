@@ -1,0 +1,6 @@
+_base_: 33_formal_base.yaml
+experiment_name: ct33_b0_half_lr_mini_car_scratch_seed42
+tag: b0_half_lr_mini_car_seed42_60ep_bs16
+lr: 0.00005
+lr_schedule: multistep
+lr_milestones: [20, 50]

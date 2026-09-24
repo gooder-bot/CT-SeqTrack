@@ -1,6 +1,8 @@
 # v32 mini 四组单 seed：后台运行与日志
 
-2026-09-22，按用户最新安排：SeqTrack、B0、Full-GRU、Full-CfC，全部 seed42，物理 GPU 依次 0、0、1、1。代码和配置已经在本地修订；**执行前需将当前工作树同步到服务器，包含新增的 `models/seqtrack_reference/`、32_* 配置和工具文件**，不能只同步 Git HEAD。本文命令未由助手代为执行。
+2026-09-22，按用户最新安排：SeqTrack、B0、Full-GRU、Full-CfC，全部 seed42，物理 GPU 依次 0、0、1、1。随后只读检查服务器：65份运行源码/配置/参考来源清单/本页内容与本地一致（统一换行后SHA256），四份配置解析成功，环境已安装nuScenes SDK、mini数据目录存在；检查时两张A40均为0MiB占用。实际工作树已同步，不能仅凭服务器旧Git HEAD判断部署内容。本文命令未由助手代为执行。
+
+**四组都从 `CT-SeqTrack/` 启动。** SeqTrack使用独立的 `models/seqtrack_reference/`，保留原网络、teacher处理和loss；共同适配训练预算、合法首帧尺寸、日志/评测和确定性算子，不套用修正B0。兄弟 `seqtrack/` 目录继续作为冻结参考。
 
 ## 固定设置与当前状态
 
@@ -15,7 +17,7 @@
 
 ## 四条独立启动命令
 
-在服务器终端执行；每段可单独复制。使用已确认的环境Python，无需另换环境；SDK父目录通过该进程的PYTHONPATH提供，数据根单独传入。输出沿用本地 `output/YYYYMMDD-HHMMSS-32_模块-mini_car_seed42_60ep_bs16/` 命名。
+在服务器终端执行；每段可单独复制。使用已确认的环境Python及其中已安装的SDK，无需另换环境或添加旧SDK fallback；数据根单独传入。输出沿用本地 `output/YYYYMMDD-HHMMSS-32_模块-mini_car_seed42_60ep_bs16/` 命名。
 
 ### 1. SeqTrack reference → GPU0
 
@@ -26,7 +28,6 @@ mkdir -p "$RUN"
 nohup env CUDA_VISIBLE_DEVICES=0 \
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   PYTORCH_CUDA_ALLOC_CONF=backend:native CUBLAS_WORKSPACE_CONFIG=:4096:8 \
-  PYTHONPATH="/home/lishengjie/code/SparseFusion-main/nuscenes${PYTHONPATH:+:$PYTHONPATH}" \
   /home/lishengjie/miniconda3/envs/seqtrack3d/bin/python -u main.py \
   --cfg cfgs/ct_seqtrack/32_seqtrack_ref_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -47,7 +48,6 @@ mkdir -p "$RUN"
 nohup env CUDA_VISIBLE_DEVICES=0 \
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   PYTORCH_CUDA_ALLOC_CONF=backend:native CUBLAS_WORKSPACE_CONFIG=:4096:8 \
-  PYTHONPATH="/home/lishengjie/code/SparseFusion-main/nuscenes${PYTHONPATH:+:$PYTHONPATH}" \
   /home/lishengjie/miniconda3/envs/seqtrack3d/bin/python -u main.py \
   --cfg cfgs/ct_seqtrack/32_b0_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -68,7 +68,6 @@ mkdir -p "$RUN"
 nohup env CUDA_VISIBLE_DEVICES=1 \
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   PYTORCH_CUDA_ALLOC_CONF=backend:native CUBLAS_WORKSPACE_CONFIG=:4096:8 \
-  PYTHONPATH="/home/lishengjie/code/SparseFusion-main/nuscenes${PYTHONPATH:+:$PYTHONPATH}" \
   /home/lishengjie/miniconda3/envs/seqtrack3d/bin/python -u main.py \
   --cfg cfgs/ct_seqtrack/32_full_gru_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -89,7 +88,6 @@ mkdir -p "$RUN"
 nohup env CUDA_VISIBLE_DEVICES=1 \
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   PYTORCH_CUDA_ALLOC_CONF=backend:native CUBLAS_WORKSPACE_CONFIG=:4096:8 \
-  PYTHONPATH="/home/lishengjie/code/SparseFusion-main/nuscenes${PYTHONPATH:+:$PYTHONPATH}" \
   /home/lishengjie/miniconda3/envs/seqtrack3d/bin/python -u main.py \
   --cfg cfgs/ct_seqtrack/32_full_cfc_mini.yaml \
   --path /home/lishengjie/data/nuscenes-mini \
@@ -141,7 +139,7 @@ tail -n 80 -f "$(ls -dt output/*-32_full_cfc-mini_car_seed42_60ep_bs16 | head -n
 - 空间NLL的strict deterministic异常：当前B0与参考均使用class-axis log_softmax + 二维NLL；参考pooling保留确定性max首索引梯度。
 - CUDA bool排序和浮点cumsum：当前稀疏token使用int64排序键，B2计数使用int64 cumsum；旧策略探索/AP分支不在活动链路。
 - PyTorch2.0.1 allocator环境：命令显式设置 `backend:native`，覆盖旧shell残留的 `max_split_size_mb:64` 或不受支持的allocator选项；保留严格确定性、CUBLAS workspace和FP32，不靠关闭检查绕过故障。
-- 旧配置和SDK路径错误：使用独立32参考配置，SDK包父目录只进入PYTHONPATH，mini数据目录只进入`--path`。
+- 旧配置和SDK路径错误：使用独立32参考配置和环境中已安装的SDK，mini数据目录只进入`--path`。
 - 独立`--test`的checkpoint轮次已改为读取已校验的checkpoint元数据，与自动评测一致。
 
 上述路径已在本地复核；尚无本版真实CUDA运行记录，不能承诺零报错或已经达到分数目标。

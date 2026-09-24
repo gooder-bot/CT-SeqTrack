@@ -1,50 +1,67 @@
-# CT-SeqTrack v32 实验协议
+# CT-SeqTrack v33 实验协议
 
-本协议定义 B0 修复后的新实验；v31 算法、配置与协议从 Git `b1d886e` 复现。四份 `31_*` YAML 原样保留，当前入口拒绝旧身份。物理模块路径保留，不代表沿用旧权重 schema。
+本版比较综合 B0 修订与独立 SeqTrack，保留已有 v32 结果用于历史对照。v32 冻结源码为 Git `ddcb1a1`，v31 为 `b1d886e`；旧 checkpoint 不进入 v33。
 
-## 登记实验与验收
+用户最新安排为：本地完成修订，由用户上传并启动四组 mini seed42；本轮代理对服务器仅做只读操作，不自行上传、安装、启动或停止任务。此前服务器工程检查已经完成，不作为反复追加的启动前置步骤。
 
-2026-09-22 用户更新本轮排程：四组 mini 单 seed42。除模型及指定物理卡外，其余正式设置保持原值。
+## 四组正式配置与预算
 
-| 模型 | 配置 | 种子 | 物理 GPU |
-|---|---|---|---|
-| 独立 SeqTrack | `32_seqtrack_ref_mini.yaml` | 42 | 0 |
-| 修复 B0 | `32_b0_mini.yaml` | 42 | 0 |
-| Full-GRU | `32_full_gru_mini.yaml` | 42 | 1 |
-| Full-CfC | `32_full_cfc_mini.yaml` | 42 | 1 |
+| 组 | 配置 | 物理 GPU | 第 1–20 轮 | 第 21–40 轮 | 第 41–50 轮 | 第 51–60 轮 |
+|---|---|---:|---:|---:|---:|---:|
+| R | `33_seqtrack_ref_mini.yaml` | 0 | 1e-4 | 1e-5 | 1e-6 | 1e-6 |
+| A | `33_b0_mini.yaml` | 0 | 1e-4 | 1e-5 | 1e-6 | 1e-6 |
+| B | `33_b0_late_decay_mini.yaml` | 1 | 1e-4 | 1e-5 | 1e-5 | 1e-6 |
+| C | `33_b0_half_lr_mini.yaml` | 1 | 5e-5 | 5e-6 | 5e-6 | 5e-7 |
 
-本轮在 seed42 的 final60 检查 B0 的 Success、Precision 是否分别不低于独立 SeqTrack 超过 2 个百分点；并报告两个 Full 相对 B0 的差异及全部四组的 58/59/60 late-3。不挑最佳轮次或种子，历史高分不视为本次可重复基线。这些实验检验整体修复包，不归因每项改动。
+- 数据为 nuScenes-mini Car，固定 8 场景训练、2 场景评测划分，partition seed42、frame stride1。mini 验证沿用固定评测划分，不根据验证结果挑选最佳轮次。
+- 四组均 seed42、scratch60、batch16、workers4、FP32；每组仅一个设备。使用 Adam，betas=(0.5,0.999)、eps=1e-6、weight_decay=0，每 batch 一次优化。
+- R/A 使用 StepLR(step_size=20,gamma=0.1)，B/C 使用 MultiStepLR(milestones=[20,50],gamma=0.1)。表中为各轮训练实际使用的学习率。
+- 每轮 19,108 个名义训练行、1,195 次优化，尾批 4 行；60 轮为 1,146,480 行、71,700 次优化。B0 每个合法预测端点覆盖四个分支；R 保留原 teacher4 和无效历史重采样，名义曝光不等于实际唯一端点曝光，实际替换记录写入训练审计。
+- A/B/C 的网络、初始化种子、loss、数据、分支和预算相同，仅修改注册的学习率配方。R 是独立原 SeqTrack 网络与原监督，不适用生产 B0 的 loss/递推合同。
+- 每 5 轮验证；每 2 轮以及最后 58/59/60 轮保存完整 epoch checkpoint。训练后自动评测 58/59/60，每个 checkpoint 重置相同 seed 与 test loader RNG，报告 final60 与 late-3。
+- 评测分母为 106 条轨迹、2,285 帧，其中初始化 106 帧、预测 2,179 帧，metric_mode=`benchmark_compat`。初始化帧每轨迹仅计一次。
+- 本轮四组是单 seed 证据，不得称为多 seed 稳健性验证。nuScenes full、KITTI、CfC/GRU 与时间控制接口保留，不代表本轮运行这些实验。
 
-原计划的 reference/B0 seed52 两次复验留待后续；只有两 seed 对照均齐全才可用 `compare_v32_baselines.py` 判定原双 seed 条件。当前四组不能替代它。B1/B2/B3 的机制、监督和写入规则保持，仅适配 B0/共享 decoder 内部局部几何；本轮允许先观察两个 Full 的整体结果。
+已完成 v32 R 的训练与指标仍可作为复用依据；用户当前明确选择重新运行 R，最终四组比较使用本次 R。重跑 reference 使用 v33 host 身份和原 reference 网络/数据/loss，不加载 v32 checkpoint。
 
-## 共同预算与合法输入
+## B0 几何、监督与递推合同
 
-- nuScenes mini Car，8 train / 2 val 场景；初帧尺寸为模型输入，当前 GT 尺寸只用于监督和评测。
-- scratch60、batch16、workers4、FP32、单卡；Adam lr=1e-4、betas=(.5,.999)、eps=1e-6、weight_decay=0；StepLR20轮乘.1。
-- 每5轮验证、每2轮保存完整epoch，58/59/60全部保存并自动评测。
-- 每轮19,108 nominal行、1,195次Adam（最后4行），共1,146,480行、71,700次更新。普通mean loss与标准Adam；日志按实际行数归约，不声称端点优化影响完全等权。
-- 评测完整连续递推，106轨迹/2,285帧，含2,179预测帧和106初始化帧，沿用benchmark_compat。
-- 每worker原始云缓存256MiB；无旧preloading。工程权重不用于正式初始化。
+公开框中心是减去 anchor 中心后的世界轴 XYZ，yaw 是绝对世界 yaw，size 使用首帧固定尺寸。B0 几何在内部换到 anchor-local，不重复平移；B1/B2 原始物理量保留世界轴。GT 当前尺寸只用于相应监督和评分。
 
-## B0递推与观测合同
+共享 decoder 的角点 query 为 `[corner_xyz, time, detached output_reference_xyz]`。q0 直接预测 anchor-local 最终中心；history/modes 输出 seed 残差，仍使用共享定位/质量头。q0 的 coarse 框用于角点 query；mode 输出中心保留 live 梯度，mode query 与输出参考中心输入 detach，历史框 detach。yaw 仍为 seed yaw 加角度残差，空序列回退维持既有规则。
 
-- 四分支课程最终1/3/3/8，10轮完成；每个非首帧端点每branch恰好一次。主进程唯一提交accepted状态，跨帧detach。
-- 非canonical仅初始化共同局部XY±.3m、yaw±1.5°；XY转世界平移加到全部种子框，不旋转轨迹中心。物理GT、点云与首帧记忆不变。扰动/预测hint=.2/.8，已知0/1，当前.5。
-- 预留112单步窗口（mini每branch28个）补齐尾部。首次消费reserve起及所有partial批，B0 BN使用running统计，affine/input仍有梯度；小工程数据按实际可用窗口预留。
-- B0/共享decoder内部anchor-local几何，公共框仍是相对anchor中心的世界轴XYZ及绝对yaw。B1/B2物理几何、B2/B3监督不变。
-- 前景soft gate停止梯度；coarse不读质量摘要。current/history CE各50%，缺组归一化；BC按帧/端点归约。质量头目标与梯度保留。
-- 每帧最多128有效点token，不复制稀疏点；sequence_valid允许历史支持q0，current_valid仍只表示当前测量。
+BC 监督所有唯一真实点，包括没有 GT 前景的背景帧；current/history 两组等权，缺失组重新归一化。padding 不参与损失。history 定位先在端点内对有效历史取均值，再在端点间取均值；不因历史数量多而放大某个端点权重。coarse/main 中心系数 2、yaw 系数 10；history 中心 0.2、yaw 1；seg 总系数 0.1、BC 1、quality 0.5。日志中的已加权分项仅用于观测，不再次进入 loss_total。
 
-## 独立SeqTrack
+唯一 raw ID、真实测量 mask、soft foreground detach、稀疏空槽不复制点等合同保持。四分支窗口 1/3/3/8，课程 10 轮；每轮 112 个预留单步窗口用于尾部安排。从首次 drain 或不足额 batch 起，B0 使用已有 running BN 统计，affine 与共享特征仍可学习。每端点仅一次 forward，不为窗口前缀增加推理或优化。
 
-网络、原loss、teacher4与预处理来自冻结SeqTrack最小依赖源，SHA与适配清单随包保存；不使用production B0或新loss。保留argmax前景、moving硬门、原fine/帧布局、重复1024点、scale1.25标签/hint、伪时间、newest-first及独立历史扰动。
+训练窗口 seed 使用共同平移与 yaw 偏差，不把人为扰动变成历史物理速度；合法历史不足通过 mask 表示，不复制不存在的历史。eval 递推只从首帧 GT 初始化，不用当前 GT 重置。接受输出后唯一状态所有者提交 detached pose，后继读取该状态；worker 不持有模型或递推状态。
 
-保留历史有效点不足时重采样，总行数与更新预算固定，保存nominal→actual曝光审计。合法非首帧预算、训练及推理网络bbox_size统一首帧尺寸、共同数据/评分、运行兼容和小尾批BN为显式适配；原teacher标签与目标尺寸保留。每个正式checkpoint评测前重置共同seed与test loader generator，保证自动评测与独立test同起点，仍使用原历史采样算法。两模型不声称逐端点或训练状态分布完全配对。
+当前修订不增加动静 hold 策略、GT 引导裁剪或低点数复制补齐。Full 共享接口保持，B1 历史运动边 `history_pair_valid` 的现有几何资格不改，不额外加入前后 supported gate。启用参数不得冻结，BN 统计隔离与 detach 不等于冻结参数。
 
-## 身份、恢复与状态
+## 可信状态与记忆
 
-模型schema为ct_seqtrack.joint_identity.v32，family为ct_seqtrack_v32。模型、seed、训练设置、扰动/调度与时间语义进入配置摘要；参考源码/原协议也进入对照身份。`--init_checkpoint`禁止；`--checkpoint`仅供同身份完整epoch恢复或评测，不跨版本/臂/工程身份。
+accepted 预测框内（scale=1、offset=0）至少 3 个唯一 predicted FG，且其前景概率均 >=0.5，定义为 strong；strong 再满足 selected_quality>=0.5，定义为 supported。strong 刷新最近强观测时刻；supported 更新可信位姿和最近支持时刻。两者不依赖 memory.update 的返回值。
 
-记录resolved config、源码、数据/采样manifest、RNG、训练覆盖与评测帧；恢复重建相同调度，不支持任意batch恢复。路径和日志位置不改变权重身份。联合模型保留full/KITTI、四模块臂、CfC/GRU和true/fixed/shuffled；SeqTrack保留伪时间，不套B1控制。
+框外高 FG 点不进入 memory，也不强制重标为 BG；原低 FG 背景点仍可按原记忆预算写入。每个新 supported anchor 仅能从相邻可信帧、且符合原 innovation 几何条件的速度对更新 trusted_velocity；换 anchor 而没有合格相邻对时，速度清零且 trusted_velocity_valid=False。没有新 supported 时保留原可信 anchor、速度和有效标志。
 
-v32尚无正式成绩，CPU/合成检查不替代真实nuScenes/CUDA和四次scratch60。实现见[修复说明](B0_V32_REPAIR.md)，命令见[工具面](FORMAL_TOOLING.md)。
+合法 GT 或共同偏移 seed 的 pose 与速度初始化保持：最后两框时间差有效即可建立初始速度，不额外要求两帧均有足够前景。seed 的 strong 则由各帧 raw 点与实际输入框决定；若没有 strong，时刻为 None，weak_age 从本窗口最后 seed 的初始化时刻算起。last_supported_time 对应合法 seed pose 初始化时刻，不把该约定解释成观测前景已充足。
+
+## 被动诊断与结果解释
+
+评测记录 raw/crop/sampled 目标点数及点云规模，区分空裁剪、纯背景裁剪与原始目标缺失；记录 coarse/fine 同帧几何、支持状态、速度有效性与重置原因。moving 定义为相邻 GT 的 XY 位移 >=0.15m，仅用于离线分组，不进入模型或 accepted 决策。
+
+失跟事件由 IoU<0.1 开始、IoU>=0.5 结束，恢复帧不计入失跟长度；中间 [0.1,0.5) 帧仍属于该段。未恢复段为右删失，不能作为已经恢复的样本计算恢复均值；分别报告已恢复长度、P90、未恢复数量及持续长度。
+
+固定按 tracklet/frame 键比较各组，raw 条件与旧 B0 裁剪条件分别呈现。裁剪是旧 B0 递推结果的内生条件，分组差异不等于随机化因果效应。不得让每个新模型按自己的裁剪筛不同样本来宣称机制收益。旧结果缺少诊断时报告覆盖率，可显式使用已留存补充证据，不静默补零或扩充真实覆盖。
+
+A−旧 B0 检验整个综合修订；B−A 检验第二次学习率衰减时机；C−B 检验步长尺度。达标要求至少一组在 final60 和 late-3 的 Success、Precision 四项均 >= 本次 SeqTrack R。若多组达标，先比较 final60 Success，再比较 Precision；完整保留三组结果，不用各自最佳 epoch 替换注册终点。未达标也必须如实汇报，不以个别探针或 oracle 替代训练结果。
+
+## 身份、恢复和证据保护
+
+schema=`ct_seqtrack.joint_identity.v33`，experiment family=`ct_seqtrack_v33`，checkpoint runtime key=`ct_v33_runtime`。网络、种子、预算、优化配方、时间语义等进入 config SHA；路径和日志位置可迁移。`--init_checkpoint` 禁止，正式任务不得使用工程权重；checkpoint 仅用于相同身份的完整 epoch 边界恢复或评测。
+
+入口在任何运行 metadata 写入前校验 checkpoint 与已有目录身份。合法同 run 恢复保留首次 resolved_config/run_manifest；独立 `--test` 使用新空目录，不覆盖原训练或 reference 证据。冻结 reference 的原网络、teacher、原始数据和评分实现有独立 source manifest；不能把修改生产 B0 说成 reference 算法发生变化。
+
+此前服务器快照检查为 **314 passed、1 skipped**，Python3.9.19、torch2.0.1+cu118、pytorch_lightning2.0.2；真实 CUDA batch 的 forward/backward/Adam/commit 已通过且未保存 checkpoint。证据保存在 `artifacts/ct_checks/20260924-190116_v33_implementation/`。后续被动汇总增量单独记录本地验证，不声称最新源码已逐文件完成服务器复验；不重复追加相同预检，也不把检查通过写成正式四组完成。
+
+本轮不增加 Full 独立诊断，不改写既有 output/artifacts。新工程证据使用 artifacts/ct_checks 下独立目录。当前未完成四组正式对照前，不宣称 v33 涨分、达到 SeqTrack、SOTA 或时间/记忆因果收益。实现说明见 [B0_V33_REPAIR.md](B0_V33_REPAIR.md)。

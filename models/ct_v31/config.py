@@ -1,4 +1,4 @@
-"""v32 配置与权重身份；保留物理模块路径，不允许旧实验静默换算法。"""
+"""v33 综合 B0 配置与权重身份；旧实验通过冻结版本复现。"""
 
 import hashlib
 import json
@@ -9,8 +9,8 @@ from .contracts import SCHEMA
 
 
 DEFAULTS = dict(
-    net_model='ctseqtrackv32', experiment_family='ct_seqtrack_v32',
-    experiment_name='ct32_full_cfc_mini_car_scratch_seed42', v31_arm='full',
+    net_model='ctseqtrackv33', experiment_family='ct_seqtrack_v33',
+    experiment_name='ct33_b0_original_mini_car_scratch_seed42', v31_arm='b0',
     v31_temporal_backend='cfc',
     dataset='nuscenes_mf', version='v1.0-mini', category_name='Car',
     path='/home/lishengjie/data/nuscenes-mini', ct_coordinate_mode='global',
@@ -21,11 +21,12 @@ DEFAULTS = dict(
     v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
     batch_size=16, workers=4, seed=42, epoch=60, lr=.0001, wd=0.,
     lr_decay_step=20, lr_decay_rate=.1, check_val_every_n_epoch=5,
+    lr_schedule='step', lr_milestones=(),
     trainer_devices=1, accelerator='auto', precision=32,
     dynamics_time_mode='true', dynamics_time_manifest=None,
     v31_evaluate_late3=True, ct_engineering_check=False,
     limit_train_batches=1., limit_val_batches=1.,
-    checkpoint=None, init_checkpoint=None, test=False, log_dir=None, tag='v32',
+    checkpoint=None, init_checkpoint=None, test=False, log_dir=None, tag='v33',
     cfg=None, eval_checkpoint_epoch=None,
 )
 
@@ -45,13 +46,14 @@ def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
     unknown = sorted(set(supplied) - set(DEFAULTS))
     if unknown:
-        raise ValueError('v32 unknown/inactive configuration keys: ' + ', '.join(unknown))
+        raise ValueError('v33 unknown/inactive configuration keys: ' + ', '.join(unknown))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
-    if (cfg.net_model not in ('ctseqtrackv32', 'seqtrack_reference')
-            or cfg.experiment_family != 'ct_seqtrack_v32'):
-        raise ValueError('v32 model and experiment identity must match; '
-                         'reproduce frozen v31 with Git b1d886e and its original configs')
+    if (cfg.net_model not in ('ctseqtrackv33', 'seqtrack_reference')
+            or cfg.experiment_family != 'ct_seqtrack_v33'):
+        raise ValueError('v33 model and experiment identity must match; '
+                         'reproduce frozen v32 with Git ddcb1a1, '
+                         'or reproduce frozen v31 with Git b1d886e and its original configs')
     if cfg.net_model == 'seqtrack_reference' and cfg.v31_arm != 'b0':
         raise ValueError('SeqTrack reference requires v31_arm=b0')
     if cfg.net_model == 'seqtrack_reference' and cfg.dynamics_time_mode != 'true':
@@ -91,11 +93,23 @@ def normalize_config(config=None):
             or cfg.v32_reserve_windows < 0):
         raise ValueError('v32_reserve_windows must be a nonnegative integer')
     import math
+    if (cfg.lr_schedule not in ('step', 'multistep')
+            or not isinstance(cfg.lr_milestones, (list, tuple))):
+        raise ValueError('v33 requires step or multistep and a list of lr_milestones')
+    milestones = cfg.lr_milestones
+    if (any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in milestones) or list(milestones) != sorted(set(milestones))):
+        raise ValueError('lr_milestones must be strictly increasing positive integers')
+    cfg.lr_milestones = list(milestones)
+    if (cfg.lr_schedule == 'step' and milestones) or (cfg.lr_schedule == 'multistep' and not milestones):
+        raise ValueError('step uses no lr_milestones; multistep requires lr_milestones')
+    if not math.isfinite(cfg.lr) or not math.isfinite(cfg.lr_decay_rate) or not 0 < cfg.lr_decay_rate < 1:
+        raise ValueError('learning rate must be finite and decay rate must be in (0,1)')
     if any(not math.isfinite(float(cfg[key])) or cfg[key] < 0
            for key in ('v32_seed_translation', 'v32_seed_yaw_degrees')):
         raise ValueError('v32 seed perturbation bounds must be finite and nonnegative')
     if not cfg.ct_engineering_check:
-        fixed = dict(epoch=60, batch_size=16, workers=4, lr=.0001, wd=0.,
+        fixed = dict(epoch=60, batch_size=16, workers=4, wd=0.,
                      lr_decay_step=20, lr_decay_rate=.1, point_sample_size=1024,
                      v31_short_window=3, v31_long_window=8, v31_curriculum_epochs=10,
                      v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
@@ -103,7 +117,13 @@ def normalize_config(config=None):
         bad = [key for key, value in fixed.items()
                if cfg[key] != value or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
-            raise ValueError('formal v32 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
+            raise ValueError('formal v33 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
+        recipe = (cfg.lr, cfg.lr_schedule, tuple(cfg.lr_milestones))
+        registered = {(.0001, 'step', ())}
+        if cfg.net_model == 'ctseqtrackv33' and cfg.v31_arm == 'b0':
+            registered.update({(.0001, 'multistep', (20, 50)), (.00005, 'multistep', (20, 50))})
+        if recipe not in registered:
+            raise ValueError('unregistered formal v33 learning-rate recipe')
     elif cfg.log_dir:
         root = Path(__file__).resolve().parents[2] / 'artifacts' / 'ct_checks'
         destination = Path(cfg.log_dir).resolve()

@@ -1,4 +1,4 @@
-"""v32 原始帧数据流：worker 不拥有预测状态，也不执行模型。
+"""v33 原始帧与可信状态数据流：worker 不拥有预测状态，也不执行模型。
 
 每个训练端点恰好出现四次；窗口长度只决定 accepted 历史寿命，不增加
 前缀 forward。连贯种子扰动与尾部预留具有显式身份；所有裁剪、状态
@@ -340,9 +340,11 @@ class AcceptedState:
     trusted: list
     transitions: dict
     trusted_velocity: np.ndarray
+    trusted_velocity_valid: bool
     previous_quality: float
-    last_strong_time: float
+    last_strong_time: float | None
     last_supported_time: float
+    initialization_time: float
     previous_innovation: float
     box_provenance: dict
     seed_offset: np.ndarray
@@ -404,9 +406,20 @@ class BatchBuilder:
                 raise ValueError('seed timestamps must strictly increase')
             velocity = (trusted[-1][0][:3] - trusted[-2][0][:3]) / gap
         last_time = times[r.frame - 1]
-        return AcceptedState(boxes, times, r.frame, size, memory, trusted,
-                             {i: True for i in seed_ids}, velocity, 1.,
-                             last_time, last_time, 0., box_provenance, seed_offset)
+        # 合法 seed 位姿仍可初始化运动；观测强弱则必须由真实点与输入框决定。
+        strong_times = [times[i] for i in seed_ids
+                        if int(inside_box(point_arrays(frames[i])[0], boxes[i], size).sum()) >= 3]
+        return AcceptedState(boxes=boxes, times=times, next_frame=r.frame, size=size,
+            memory=memory, trusted=trusted, transitions={i: True for i in seed_ids},
+            trusted_velocity=velocity, trusted_velocity_valid=len(trusted) == 2,
+            previous_quality=1., last_strong_time=max(strong_times) if strong_times else None,
+            last_supported_time=last_time, initialization_time=last_time,
+            previous_innovation=0., box_provenance=box_provenance, seed_offset=seed_offset)
+
+    @staticmethod
+    def _strong_age(state, timestamp):
+        since = state.initialization_time if state.last_strong_time is None else state.last_strong_time
+        return max(0., float(timestamp) - since)
 
     def prepare(self, rows):
         if self._pending is not None:
@@ -518,8 +531,9 @@ class BatchBuilder:
             physical_displacement=(current_gt[:2] - previous_gt[:2]).astype(np.float32),
             physical_valid=np.bool_(True), branch_id=np.int64(r.branch),
             trusted_velocity=state.trusted_velocity.astype(np.float32),
+            trusted_velocity_valid=np.bool_(state.trusted_velocity_valid),
             previous_quality=np.float32(state.previous_quality),
-            weak_age=np.float32(max(0., now - state.last_strong_time)),
+            weak_age=np.float32(self._strong_age(state, now)),
             supported_age=np.float32(max(0., now - state.last_supported_time)),
             previous_innovation=np.float32(state.previous_innovation),
             **memory)
@@ -579,6 +593,15 @@ class BatchBuilder:
                     reachable = 0
                 b0_target_count = int((np.isin(ids, context['b0_ids']) & target_mask).sum())
                 extra.update(diagnostic_target_count=np.int64(target_mask.sum()),
+                             diagnostic_raw_point_count=np.int64(len(ids)),
+                             diagnostic_crop_target_count=np.int64(b0_target_count),
+                             diagnostic_sampled_target_count=np.int64(
+                                 (batch['segmentation_labels'][i, -1] == 1).sum().item()),
+                             diagnostic_crop_point_count=np.int64(len(context['b0_ids'])),
+                             diagnostic_sampled_point_count=np.int64(
+                                 batch['point_valid'][i, -1].sum().item()),
+                             diagnostic_gt_xy_displacement=np.float32(
+                                 torch.linalg.vector_norm(batch['physical_displacement'][i]).item()),
                              diagnostic_novel_target_count=np.int64(target_mask.sum() - b0_target_count),
                              diagnostic_reachable_count=np.int64(reachable),
                              diagnostic_acquired_count=np.int64((labels[keep] == 1).sum()))
@@ -589,6 +612,7 @@ class BatchBuilder:
         return batch
 
     def commit(self, output, batch, *, diagnostics=False):
+        from .acquisition import _unique_mask
         if self._pending is None:
             raise RuntimeError('no pending v31 transaction (duplicate commit)')
         boxes = output.accepted_box.detach().cpu().numpy()
@@ -620,19 +644,35 @@ class BatchBuilder:
             cloud, cloud_ids = point_arrays(row['frames'][r.frame])
             id_to_index = {int(value): j for j, value in enumerate(cloud_ids)}
             xyz = cloud[[id_to_index[int(value)] for value in ids]]
-            updated = state.memory.update(xyz, ids, probs, box, context['timestamp'], float(quality[index]))
+            in_box = inside_box(xyz, box, state.size)
+            geometric_fg = _unique_mask(ids) & np.isfinite(probs) & (probs >= .5) & in_box
+            geometric_fg_count = int(geometric_fg.sum())
+            strong = geometric_fg_count >= 3
+            supported = strong and bool(np.isfinite(quality[index]) and quality[index] >= .5)
+            # 框外 high-FG 不写入记忆，也不改标为 BG；原有低分 BG 仍保留。
+            memory_keep = (probs < .5) | in_box
+            updated = state.memory.update(xyz[memory_keep], ids[memory_keep], probs[memory_keep],
+                                          box, context['timestamp'], float(quality[index]))
             innovation = float(np.linalg.norm(boxes[index, :2] - prior_boxes[index, :2]))
             pair_valid = innovation <= max(.5 * np.hypot(*state.size[:2]), 1e-3)
             state.transitions[r.frame] = pair_valid
             state.previous_innovation, state.previous_quality = innovation, float(quality[index])
-            if int(point_valid[index].sum()) >= 3:
+            if strong:
                 state.last_strong_time = context['timestamp']
-            if updated:
+            velocity_reset_reason = 'unsupported_retained'
+            if supported:
                 previous, previous_time = state.trusted[-1]
-                # 只接受相邻可信帧之间、未跨重定位的速度。旧可信速度可继续传播。
+                # 换可信 anchor 时，只允许相邻且未跨重定位的可信对提供速度。
                 if pair_valid and previous_time == state.times.get(r.frame - 1):
                     gap = context['timestamp'] - previous_time
                     state.trusted_velocity = (box[:3] - previous[:3]) / gap
+                    state.trusted_velocity_valid = True
+                    velocity_reset_reason = 'supported_adjacent'
+                else:
+                    state.trusted_velocity = np.zeros(3, dtype=np.float64)
+                    state.trusted_velocity_valid = False
+                    velocity_reset_reason = ('invalid_transition' if not pair_valid
+                                             else 'nonadjacent_supported')
                 state.trusted.append((box.copy(), context['timestamp']))
                 state.trusted[:] = state.trusted[-2:]
                 state.last_supported_time = context['timestamp']
@@ -645,7 +685,13 @@ class BatchBuilder:
                                      box_size(current['3d_bbox'], current))
                 records.append(dict(memory_write=bool(updated), memory_fg_count=int(len(correct)),
                                     memory_true_fg_count=int(correct.sum()),
-                                    memory_wrong_write=bool(updated and correct.mean() < .5)))
+                                    memory_wrong_write=bool(updated and correct.mean() < .5),
+                                    strong=bool(strong), supported=bool(supported),
+                                    geometric_fg_count=geometric_fg_count,
+                                    trusted_velocity_valid=bool(state.trusted_velocity_valid),
+                                    trusted_velocity_reset_reason=velocity_reset_reason,
+                                    weak_age=self._strong_age(state, context['timestamp']),
+                                    supported_age=max(0., context['timestamp'] - state.last_supported_time)))
             for old in list(state.boxes):
                 if old < r.frame - 2:
                     state.boxes.pop(old)
