@@ -1,0 +1,5 @@
+# S 正常学习率；仅 LR 与实验标签不同于已登记 S-half。
+_base_: 34_b0_context_mini.yaml
+experiment_name: ct34_b0_context_normal_lr_mini_car_scratch_seed42
+tag: b0_context_normal_lr_mini_car_seed42_60ep_bs16
+lr: 0.0001

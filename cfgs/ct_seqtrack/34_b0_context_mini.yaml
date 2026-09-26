@@ -1,0 +1,3 @@
+_base_: 34_formal_base.yaml
+experiment_name: ct34_b0_context_mini_car_scratch_seed42
+tag: b0_context_mini_car_seed42_60ep_bs16

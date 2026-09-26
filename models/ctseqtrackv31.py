@@ -1,4 +1,4 @@
-"""v33 Lightning host；保留物理模块路径与一次 forward/Adam/commit 生命周期。"""
+"""v33/v34 Lightning host；保留物理模块路径与一次 forward/Adam/commit 生命周期。"""
 from __future__ import annotations
 
 import json
@@ -14,9 +14,10 @@ except ModuleNotFoundError as error:
         raise
     pl = None
 
-from models.ct_v31.config import normalize_config
+from models.ct_v31.config import normalize_config, config_identity
 from models.ct_v31.data import BatchBuilder, build_loaders, stable_seed
 from models.ct_v31.lr_schedule import WarmupMultiStepLR
+from models.ct_v31.identity import model_schema, model_version, runtime_key, training_audit_schema
 from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
 from utils.bn_policy import running_batch_norm
@@ -42,7 +43,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         self._loaders = {} if loaders is None else loaders
         self.train_builder = builder_type(self.config)
         self.evaluation_builder = builder_type(self.config)
-        self.evaluation = TrackingEvaluation()
+        self.evaluation = TrackingEvaluation(self.config)
         self.evaluation_results = {}
         self._pending_train = None
         self._pending_rng = None
@@ -198,9 +199,11 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         """按epoch记录真实预算及参考重采样；恢复不会覆盖不同的已有审计。"""
         if not self.config.log_dir:
             return
-        audit = dict(schema='ct_seqtrack.v33.training_audit.v1',
+        audit = dict(schema=training_audit_schema(self.config),
             completed_epoch=self._completed_epoch, epoch_complete=self._epoch_complete,
             rows=self._epoch_rows, optimizer_steps=self._epoch_steps, sampler=sampler.state_dict())
+        if model_version(self.config) == 'v34':
+            audit.update(model_schema=model_schema(self.config), config_sha256=config_identity(self.config))
         if self.is_reference:
             audit['exposure'] = self.train_builder.exposure_summary()
             # 未替换行可由名义sampler重建；只单列替换及其拒绝轨迹，避免重复大日志。
@@ -218,7 +221,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def _evaluation_start(self, role):
         self.evaluation_builder.reset()
-        self.evaluation = TrackingEvaluation()
+        self.evaluation = TrackingEvaluation(self.config)
         if role in self._loaders:
             self.evaluation.add_singleton_tracks(self._loaders[role].dataset)
 
@@ -261,13 +264,13 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def on_save_checkpoint(self, checkpoint):
         sampler = self._loaders.get('train')
-        checkpoint['ct_v33_runtime'] = resume_payload(self.config,
+        checkpoint[runtime_key(self.config)] = resume_payload(self.config,
             completed_epoch=self._completed_epoch, complete=self._epoch_complete,
             rows=self._epoch_rows, steps=self._epoch_steps,
             sampler=sampler.batch_sampler.state_dict() if sampler is not None else None)
 
     def on_load_checkpoint(self, checkpoint):
-        payload = validate_resume_payload(checkpoint.get('ct_v33_runtime'), self.config,
+        payload = validate_resume_payload(checkpoint.get(runtime_key(self.config)), self.config,
                                           training=not self.config.test)
         self._completed_epoch = int(payload['completed_epoch'])
         if not self.config.test:

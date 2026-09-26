@@ -1,6 +1,10 @@
 # CT-SeqTrack
 
-CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前活动版本为 **v33 综合 B0 修订**，代码保留 `models/ct_v31/` 的物理路径；v32 可通过 Git `ddcb1a1` 复现。
+CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前新增 **v34 B0 显式上下文**，代码保留 `models/ct_v31/` 的物理路径；v33/reference 的原行为与权重身份继续兼容，v32 可通过 Git `ddcb1a1` 复现。
+
+v34 让 q0/modes 直接读取历史框几何、预测观测支持与 coarse pooled 语义，保持共享定位/质量头。用户最新扩展为**八组mini单seed**：SeqTrack正常/减半，S（1/3/3/8）与W（1/4/4/8）各1e-4、5e-5、2.5e-5；GPU0/1各四个独立进程。SeqTrack保留20/40衰减，S/W保留20/50，均无warmup、scratch60。旧R/C/旧B0作为固定证据；新八组尚未启动，不宣称涨分。见 [八组协议与LR依据](docs/B0_V34_LR_GRID.md)、[最新版上传/后台启动/tail说明](docs/CTSEQTRACK_V34_MINI_LAUNCH.md) 和 [结构说明](docs/B0_V34_CONTEXT.md)。
+
+下方 v33 六组数字和启动文字保留为历史记录，不代表 v34 已完成实验。
 
 | 模块 | 作用 |
 |---|---|
@@ -9,11 +13,26 @@ CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前活动版�
 | B2 | 在 B0 原始裁剪之外获取 768 个点槽，选取 256 个证据点槽，结合原始身份记忆 |
 | B3 | 让 q0 与三个测量模式共享定位和质量头，选择最终输出 |
 
-v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被动评测诊断。当前比较综合 B0 的学习率配方与独立 SeqTrack，原 A/B/C 之外追加 D/E；Full 接口保留，本轮不新增 Full 独立诊断。具体改动见 [v33 实现说明](docs/B0_V33_REPAIR.md)。
+v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被动评测诊断。R/A/B/C/D/E 六次 mini 运行已完成并拉回本地；Full 接口保留，本轮不新增 Full 独立诊断。具体改动见 [v33 实现说明](docs/B0_V33_REPAIR.md)。
 
-## 当前运行安排
+## 最新结果（2026-09-26）
 
-原 R/A/B/C 的 nuScenes-mini Car、seed42 安排如下；按当前进度记录，R/A/B/C/D 已由用户启动，最近观察仍在运行，尚不登记正式完成：
+六次运行是 1 组 SeqTrack + 5 组 B0，均 seed42、scratch60、71,700 次更新；已核验全部 58–60 轮正式逐帧结果。
+
+| 模型 | final60 Success / Precision | late-3 Success / Precision |
+|---|---:|---:|
+| R：SeqTrack | 51.8239 / 61.3414 | 51.8844 / 61.9664 |
+| A：原配方 | 49.1214 / 57.6499 | 47.4271 / 54.5514 |
+| B：延后降档 | 47.5525 / 55.9179 | 46.6116 / 53.9143 |
+| C：半学习率 | **50.4562 / 59.2560** | **49.3738 / 58.0744** |
+| D：1.5 倍 LR | 49.3993 / 57.6214 | 48.1601 / 55.8435 |
+| E：3 倍 LR + warmup | 44.5766 / 53.8600 | 44.0835 / 53.2586 |
+
+**C 是已测最佳 B0，仍未达到 SeqTrack。** 后续采用 C 的 5e-5、20/50 轮衰减、无 warmup；不继续扩大 LR。C 相对旧 v32 B0 的 Success 略升、Precision 下降，不能登记综合修订全面有效。主要剩余问题是缺测时历史利用、fine 无稳定定位增益，以及完整预测历史的训练覆盖；具体建议尚未实施。完整结果、曲线与代码依据见 [六组复盘](artifacts/ct_checks/20260926_v33_six_recipe_review/REPORT.md)。
+
+## 已完成运行的配置
+
+以下为已完成运行的配置与物理 GPU 安排，保留用于复现：
 
 | 组别 | 配置 | 物理 GPU | 学习率配方 |
 |---|---|---:|---|
@@ -58,7 +77,7 @@ python main.py --cfg cfgs/ct_seqtrack/33_b0_half_lr_mini.yaml --path DATA_ROOT
 
 ## 验证与边界
 
-此前服务器快照检查 **314 passed、1 skipped**，真实 CUDA batch 的 forward/backward/Adam/commit 已通过，未保存工程 checkpoint。日志与报告位于 [v33 检查目录](artifacts/ct_checks/20260924-190116_v33_implementation/)。后续被动汇总增量单独记录本地验证；这些历史记录不代表最新源码已逐文件完成服务器复验，也不代表四组正式训练已经完成。无需把同一检查反复作为启动步骤。
+此前服务器快照检查 **314 passed、1 skipped**，真实 CUDA batch 的 forward/backward/Adam/commit 已通过，未保存工程 checkpoint。日志与报告位于 [v33 检查目录](artifacts/ct_checks/20260924-190116_v33_implementation/)。后续被动汇总增量单独记录本地验证；这些历史检查不替代正式结果验收。六组完成状态以 2026-09-26 复盘为准，无需把同一工程检查反复作为启动步骤。
 
 本地修改后的验证命令：
 

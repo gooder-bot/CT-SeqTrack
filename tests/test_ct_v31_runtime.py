@@ -392,11 +392,18 @@ class TinyJointTracker(torch.nn.Module):
         return {'loss_total': (output.accepted_box[:, :2] - batch['target_box'][:, :2]).square().mean()}
 
 
-@pytest.mark.parametrize('schedule', ['step', 'multistep', 'warmup'])
-def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedule):
+@pytest.mark.parametrize('schedule,version,short_window', [
+    pytest.param('step', 33, 3, id='v33-step'),
+    pytest.param('multistep', 33, 3, id='v33-multistep'),
+    pytest.param('warmup', 33, 3, id='v33-warmup'),
+    pytest.param('multistep', 34, 3, id='v34-s-multistep'),
+    pytest.param('multistep', 34, 4, id='v34-w-multistep'),
+])
+def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedule, version, short_window):
     pl = pytest.importorskip('pytorch_lightning')
     from pytorch_lightning.callbacks import Callback
     from models.ctseqtrackv31 import CTSEQTRACKV31
+    from models.ct_v31.identity import runtime_key
     from utils.lightning_runtime import FinalWindowCheckpoint
     class StopAfterFirst(Callback):
         def on_train_epoch_end(self, trainer, module):
@@ -411,6 +418,8 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedul
                               trainer.optimizers[0].param_groups[0]['lr']))
 
     config = cfg(epoch=3, lr_decay_step=1, v31_arm='b0', v31_curriculum_epochs=3,
+                 net_model=f'ctseqtrackv{version}', experiment_family=f'ct_seqtrack_v{version}',
+                 v31_short_window=short_window,
                  lr_schedule='multistep' if schedule == 'warmup' else schedule,
                  lr_milestones=[2] if schedule == 'warmup' else [1, 2] if schedule == 'multistep' else [],
                  lr_warmup_steps=8 if schedule == 'warmup' else 0,
@@ -435,8 +444,8 @@ def test_lightning_epoch_boundary_resume_matches_uninterrupted(tmp_path, schedul
     interrupted.fit(first)
     checkpoint = tmp_path / 'resume' / 'formal_checkpoints' / 'epoch=001.ckpt'
     state = torch.load(checkpoint, map_location='cpu')
-    assert state['ct_v33_runtime']['epoch_complete'] is True
-    assert state['ct_v33_runtime']['rows'] == 24
+    assert state[runtime_key(config)]['epoch_complete'] is True
+    assert state[runtime_key(config)]['rows'] == 24
     assert state['lr_schedulers'][0]['last_epoch'] == (interrupted.global_step if schedule == 'warmup' else 1)
     resumed, continuation = make(tmp_path / 'resume')
     continuation.fit(resumed, ckpt_path=str(checkpoint))

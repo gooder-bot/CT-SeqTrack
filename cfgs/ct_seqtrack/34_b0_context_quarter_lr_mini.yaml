@@ -1,0 +1,5 @@
+# S 推荐探索档：在此前最优 5e-5 下方再减半；不是已验证的最优值。
+_base_: 34_b0_context_mini.yaml
+experiment_name: ct34_b0_context_quarter_lr_mini_car_scratch_seed42
+tag: b0_context_quarter_lr_mini_car_seed42_60ep_bs16
+lr: 0.000025

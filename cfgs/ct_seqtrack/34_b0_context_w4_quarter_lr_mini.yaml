@@ -1,0 +1,5 @@
+# W 推荐探索档；与 S-quarter 的唯一机制差异为短窗口课程。
+_base_: 34_b0_context_w4_mini.yaml
+experiment_name: ct34_b0_context_w4_quarter_lr_mini_car_scratch_seed42
+tag: b0_context_w4_quarter_lr_mini_car_seed42_60ep_bs16
+lr: 0.000025

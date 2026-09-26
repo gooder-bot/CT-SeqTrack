@@ -1,11 +1,11 @@
-"""v33 综合 B0 配置与权重身份；旧实验通过冻结版本复现。"""
+"""v33/v34 配置与权重身份；v33 已有配置和权重继续按原语义复现。"""
 
 import hashlib
 import json
 from pathlib import Path
 
 from utils.config import load_yaml_config
-from .contracts import SCHEMA
+from .identity import model_schema, model_version
 
 
 DEFAULTS = dict(
@@ -49,9 +49,10 @@ def normalize_config(config=None):
         raise ValueError('v33 unknown/inactive configuration keys: ' + ', '.join(unknown))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
-    if (cfg.net_model not in ('ctseqtrackv33', 'seqtrack_reference')
-            or cfg.experiment_family != 'ct_seqtrack_v33'):
-        raise ValueError('v33 model and experiment identity must match; '
+    families = {'ctseqtrackv33': 'ct_seqtrack_v33', 'seqtrack_reference': 'ct_seqtrack_v33',
+                'ctseqtrackv34': 'ct_seqtrack_v34'}
+    if cfg.net_model not in families or cfg.experiment_family != families[cfg.net_model]:
+        raise ValueError('v33/v34 model and experiment identity must match; '
                          'reproduce frozen v32 with Git ddcb1a1, '
                          'or reproduce frozen v31 with Git b1d886e and its original configs')
     if cfg.net_model == 'seqtrack_reference' and cfg.v31_arm != 'b0':
@@ -114,22 +115,36 @@ def normalize_config(config=None):
            for key in ('v32_seed_translation', 'v32_seed_yaw_degrees')):
         raise ValueError('v32 seed perturbation bounds must be finite and nonnegative')
     if not cfg.ct_engineering_check:
+        version = model_version(cfg)
         fixed = dict(epoch=60, batch_size=16, workers=4, wd=0.,
                      lr_decay_step=20, lr_decay_rate=.1, point_sample_size=1024,
                      v31_short_window=3, v31_long_window=8, v31_curriculum_epochs=10,
                      v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
                      limit_train_batches=1., limit_val_batches=1.)
+        if version == 'v34':
+            # v34 登记 S/W × 三档 LR；其他模块/数据能力保留给工程检查。
+            fixed.pop('v31_short_window')
+            fixed.update(v31_arm='b0', dataset='nuscenes_mf', version='v1.0-mini',
+                         category_name='Car')
         bad = [key for key, value in fixed.items()
                if cfg[key] != value or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
-            raise ValueError('formal v33 budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
+            raise ValueError('formal ' + version + ' budget mismatch; use ct_engineering_check for smoke: ' + ', '.join(bad))
+        if version == 'v34' and cfg.v31_short_window not in (3, 4):
+            raise ValueError('formal v34 short window must be 3 or 4')
         recipe = (cfg.lr, cfg.lr_schedule, tuple(cfg.lr_milestones), cfg.lr_warmup_steps)
         registered = {(.0001, 'step', (), 0)}
         if cfg.net_model == 'ctseqtrackv33' and cfg.v31_arm == 'b0':
             registered.update({(.0001, 'multistep', (20, 50), 0), (.00005, 'multistep', (20, 50), 0),
-                               (.00015, 'multistep', (20, 50), 0), (.0003, 'multistep', (20, 50), 2000)})
+                                (.00015, 'multistep', (20, 50), 0), (.0003, 'multistep', (20, 50), 2000)})
+        if (cfg.net_model == 'seqtrack_reference' and cfg.dataset == 'nuscenes_mf'
+                and cfg.version == 'v1.0-mini' and cfg.category_name == 'Car'):
+            # 用户追加的半 LR 参考；保留原 StepLR、teacher、模型和旧配置摘要。
+            registered.add((.00005, 'step', (), 0))
+        if version == 'v34':
+            registered = {(lr, 'multistep', (20, 50), 0) for lr in (.0001, .00005, .000025)}
         if recipe not in registered:
-            raise ValueError('unregistered formal v33 learning-rate recipe')
+            raise ValueError('unregistered formal ' + version + ' learning-rate recipe')
     elif cfg.log_dir:
         root = Path(__file__).resolve().parents[2] / 'artifacts' / 'ct_checks'
         destination = Path(cfg.log_dir).resolve()
@@ -158,7 +173,7 @@ def config_identity(config):
     manifest = payload.pop('dynamics_time_manifest', None)
     if manifest:
         payload['dynamics_time_manifest_sha256'] = hashlib.sha256(Path(manifest).read_bytes()).hexdigest()
-    payload['schema'] = SCHEMA
+    payload['schema'] = model_schema(cfg)
     payload['evaluation_rng_policy'] = 'per_checkpoint_seed_v1'
     if cfg.net_model == 'seqtrack_reference':
         from models.seqtrack_reference.protocol import protocol_identity

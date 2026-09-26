@@ -177,8 +177,9 @@ class FeaturePointNet(nn.Module):
 class B0Observation(nn.Module):
     """一次 B0 前向产生粗定位和两条后续分支需要的真实点特征。"""
 
-    def __init__(self, token_count: int = 128):
+    def __init__(self, token_count: int = 128, *, query_context: bool = False):
         super().__init__()
+        self.query_context = bool(query_context)
         self.seg_pointnet = SegPointNet()
         self.mini_pointnet = MiniPointNet()
         self.feature_pointnet = FeaturePointNet(token_count)
@@ -204,6 +205,35 @@ class B0Observation(nn.Module):
         exists = torch.cat((history_valid, torch.ones_like(history_valid[:, :1])), dim=1)
         return unique_valid_mask(valid.to(points.device).bool() & exists[..., None],
                                  batch.get('point_ids'))
+
+    @staticmethod
+    @torch.no_grad()
+    def observation_support(clean: Tensor, valid: Tensor, foreground: Tensor,
+                            history_boxes: Tensor, box_size: Tensor):
+        """当前参数重编码的预测支持；历史只计输入框内 FG，当前计全 crop。
+
+        所有输入已换到 anchor-local；valid 是逐帧 raw-ID 去重后的真实测量。
+        点量与 FG 量均以点槽容量归一化，无点熵为零，不读取 GT 标签。
+        """
+        probability = torch.where(valid, foreground.detach(), 0.)
+        count = valid.sum(-1).to(clean.dtype)
+        delta = clean[:, :3, :, :3] - history_boxes[:, :, None, :3]
+        yaw = history_boxes[..., 3, None]
+        sine, cosine = yaw.sin(), yaw.cos()
+        x, y = delta[..., 0], delta[..., 1]
+        local = torch.stack((cosine * x + sine * y, -sine * x + cosine * y,
+                             delta[..., 2]), dim=-1)
+        inside = (local.abs() <= box_size[:, None, None] * .5 + 1e-7).all(-1)
+        history_mass = (probability[:, :3] * inside).sum(-1)
+        current_mass = probability[:, -1].sum(-1, keepdim=True)
+        mass = torch.cat((history_mass, current_mass), dim=1)
+        bounded = probability.clamp(1e-6, 1. - 1e-6)
+        entropy = -(bounded * bounded.log() + (1. - bounded) * (1. - bounded).log())
+        entropy = (entropy * valid).sum(-1) / count.clamp_min(1.) / math.log(2.)
+        normalizer = math.log1p(clean.shape[2])
+        support = torch.stack((torch.log1p(count) / normalizer,
+                               torch.log1p(mass) / normalizer, entropy), dim=-1)
+        return support[:, :3], support[:, -1]
 
     def forward(self, batch: Mapping[str, Tensor]) -> ObservationFeatures:
         points = batch['points']
@@ -265,6 +295,8 @@ class B0Observation(nn.Module):
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
             valid.reshape(batch_size * frames, count))
+        history_support, current_support = (self.observation_support(clean, valid, foreground, boxes, size)
+            if self.query_context else (None, None))
         return ObservationFeatures(
             coarse_box=coarse,
             point_features=features.transpose(1, 2).reshape(batch_size, frames, count, 64),
@@ -272,4 +304,6 @@ class B0Observation(nn.Module):
             source_valid=source_valid.reshape(batch_size, frames, -1),
             segmentation_logits=logits, bc_prediction=bc,
             foreground_probability=foreground, quality=quality, current_valid=current_valid,
-            sequence_valid=sequence_valid)
+            sequence_valid=sequence_valid,
+            coarse_features=pooled if self.query_context else None,
+            history_support=history_support, current_support=current_support)

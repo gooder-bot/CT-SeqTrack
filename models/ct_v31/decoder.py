@@ -28,8 +28,13 @@ def _masked_source(value: Tensor, valid: Tensor, name: str) -> Tensor:
 class SharedHypothesisDecoder(nn.Module):
     """一个共享 fine pose head，不假设 source 帧数等于 query 框数。"""
 
-    def __init__(self, prior_dim: int = 128, dropout: float = .2):
+    def __init__(self, prior_dim: int = 128, dropout: float = .2, *,
+                 query_context: bool = False, time_scale: float = .5):
         super().__init__()
+        self.query_context = bool(query_context)
+        self.context_time_scale = float(time_scale)
+        if self.query_context and self.context_time_scale <= 0:
+            raise ValueError('v34 context time_scale must be positive')
         self.prior_dim = int(prior_dim)
         self.d_model = 64
         self.source_projection = nn.Linear(128, 64)
@@ -60,6 +65,55 @@ class SharedHypothesisDecoder(nn.Module):
             self.pose_head.bias.copy_(torch.tensor([0., 0., 0., 0., 1.]))
         nn.init.zeros_(self.quality_head.weight)
         nn.init.zeros_(self.quality_head.bias)
+        if self.query_context:
+            # 必须放在旧参数初始化之后；不消费后续 B1/B2 的公共 CPU RNG。
+            # v33 不构造这些层。新分支无 BN/dropout，零出口保持原初始函数。
+            with torch.random.fork_rng(devices=[]):
+                self.history_context = nn.Sequential(nn.Linear(30, 64), nn.LayerNorm(64), nn.GELU())
+                self.coarse_context = nn.Sequential(nn.Linear(259, 64), nn.LayerNorm(64), nn.GELU())
+                self.context_fusion = nn.Linear(128, 64)
+                for module in (self.history_context, self.coarse_context):
+                    nn.init.xavier_uniform_(module[0].weight)
+                    nn.init.zeros_(module[0].bias)
+                nn.init.zeros_(self.context_fusion.weight)
+                nn.init.zeros_(self.context_fusion.bias)
+
+    def _query_context(self, observation: ObservationFeatures, batch: Mapping[str, Tensor],
+                       local_history: Tensor, history_valid: Tensor, size: Tensor) -> Tensor:
+        """固定历史槽保留时间/几何配对；仅 pooled 语义允许同帧反传。"""
+        b = len(size)
+        pooled, support, current = (observation.coarse_features, observation.history_support,
+                                    observation.current_support)
+        if pooled is None or support is None or current is None:
+            raise ValueError('v34 query context requires coarse_features and observation support')
+        if pooled.shape != (b, 256) or support.shape != (b, 3, 3) or current.shape != (b, 3):
+            raise ValueError('v34 query context has invalid pooled/support shapes')
+        # frame_times 是真实物理时间；history_times 可被 B1 时间控制替换。
+        times = batch.get('frame_times')
+        if times is None or times.shape != (b, 4):
+            raise ValueError('v34 query context requires physical frame_times[B,4]')
+        times = times.detach().to(size)
+        age = times[:, -1:] - times[:, :3]
+        if not bool(torch.isfinite(times).all()) or bool((age[history_valid] <= 0).any()):
+            raise ValueError('v34 history ages must be finite and strictly positive')
+        history = local_history.detach()
+        angle = history[..., 3]
+        descriptor = torch.cat((history[..., :3] / size.detach()[:, None],
+            angle.sin()[..., None], angle.cos()[..., None],
+            torch.log1p(age.clamp_min(0.) / self.context_time_scale)[..., None], support.detach()), dim=-1)
+        descriptor = torch.where(history_valid[..., None], descriptor, 0.)
+        descriptor = torch.cat((descriptor, history_valid[..., None].to(descriptor)), dim=-1)
+        if not bool(torch.isfinite(descriptor).all()):
+            raise ValueError('v34 valid history context must be finite')
+        present = observation.sequence_valid.bool()
+        current_input = torch.cat((pooled, current.detach()), dim=-1)
+        current_input = torch.where(present[:, None], current_input, 0.)
+        if not bool(torch.isfinite(current_input).all()):
+            raise ValueError('v34 valid coarse context must be finite')
+        history_feature = self.history_context(descriptor.reshape(b, 30))
+        coarse_feature = self.coarse_context(current_input)
+        coarse_feature = torch.where(present[:, None], coarse_feature, 0.)
+        return self.context_fusion(torch.cat((history_feature, coarse_feature), dim=-1))
 
     @staticmethod
     def _frame_times(batch: Mapping[str, Tensor], reference: Tensor) -> Tensor:
@@ -192,6 +246,14 @@ class SharedHypothesisDecoder(nn.Module):
         prior_by_query = torch.cat((torch.zeros_like(prior_embedding[:, None]).expand(-1, 3, -1),
                                     prior_embedding[:, None].expand(-1, 4, -1)), dim=1)
         queries = queries + prior_by_query.repeat_interleave(8, dim=1)
+        context_norm = None
+        if self.query_context:
+            context = self._query_context(observation, batch, local_seeds[:, :3], history_valid, size)
+            # 三个历史重建 query 不读新增上下文；q0/modes 共用，不含 live vote 几何。
+            context_by_query = torch.cat((torch.zeros_like(context[:, None]).expand(-1, 3, -1),
+                                         context[:, None].expand(-1, 4, -1)), dim=1)
+            queries = queries + context_by_query.repeat_interleave(8, dim=1)
+            context_norm = context.detach().norm(dim=-1)
         source, source_valid = self.encode_sources(observation, history_valid)
         extension_valid, memory_valid = evidence.point_valid.bool(), evidence.memory_valid.bool()
         extension = self.extension_projection(_masked_source(evidence.point_features, extension_valid, 'extension'))
@@ -232,4 +294,5 @@ class SharedHypothesisDecoder(nn.Module):
         quality = self.quality_head(features[:, 3:]).squeeze(-1)
         quality = quality.masked_fill(~current_valid, -20.)
         return DecoderOutput(hypothesis_boxes=current_boxes, quality_logits=quality,
-            hypothesis_valid=current_valid, history_boxes=boxes[:, :3], decoder_features=features[:, 3:])
+            hypothesis_valid=current_valid, history_boxes=boxes[:, :3], decoder_features=features[:, 3:],
+            query_context_norm=context_norm)

@@ -9,6 +9,7 @@ import torch
 
 from .contracts import SCHEMA
 from .config import config_identity
+from .identity import model_schema, model_version, runtime_schema
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 
 RESUME_SCHEMA = 'ct_seqtrack.v33.epoch_boundary.v1'
@@ -35,16 +36,16 @@ def move_tensors(batch, device):
 
 
 def resume_payload(config, *, completed_epoch, complete, rows, steps, sampler=None):
-    return dict(schema=RESUME_SCHEMA, model_schema=SCHEMA,
+    return dict(schema=runtime_schema(config), model_schema=model_schema(config),
                 config_sha256=config_identity(config), completed_epoch=int(completed_epoch),
                 epoch_complete=bool(complete), rows=int(rows), optimizer_steps=int(steps),
                 sampler=sampler, rng=capture_rng_state())
 
 
 def validate_resume_payload(payload, config, *, training=True):
-    if not isinstance(payload, dict) or payload.get('schema') != RESUME_SCHEMA:
+    if not isinstance(payload, dict) or payload.get('schema') != runtime_schema(config):
         raise ValueError('v31 checkpoint lacks its runtime schema')
-    if payload.get('model_schema') != SCHEMA:
+    if payload.get('model_schema') != model_schema(config):
         raise ValueError('v31 model schema mismatch')
     if payload.get('config_sha256') != config_identity(config):
         raise ValueError('v31 resolved configuration identity mismatch')
@@ -134,7 +135,9 @@ def _box_diagnostics(prediction, target, size, target_size):
 
 class TrackingEvaluation:
     """保留原 benchmark_compat 的逐帧 S/P 积分及首帧初始化计数。"""
-    def __init__(self):
+    def __init__(self, config=None):
+        self.schema = model_schema(config)
+        self.version = model_version(config)
         self.rows = []
         self._initialized = set()
         self._last_frame = {}
@@ -192,6 +195,18 @@ class TrackingEvaluation:
             target_mode_counts = target_modes.detach().cpu().sum(-1).numpy()
         diagnostics = {key: value.detach().cpu().numpy() for key, value in batch.items()
                        if key.startswith('diagnostic_') and torch.is_tensor(value)}
+        if self.version == 'v34':
+            # 仅记录实际前向已产生的摘要；不读取 GT，不影响候选或 accepted 提交。
+            decoder = getattr(output, 'decoder', None)
+            for name, owner, field, shape in (
+                    ('diagnostic_history_support', observation, 'history_support', (len(raw_rows), 3, 3)),
+                    ('diagnostic_current_support', observation, 'current_support', (len(raw_rows), 3)),
+                    ('diagnostic_query_context_norm', decoder, 'query_context_norm', (len(raw_rows),))):
+                value = getattr(owner, field, None)
+                if value is not None:
+                    if tuple(value.shape) != shape or not bool(torch.isfinite(value).all()):
+                        raise ValueError('invalid v34 passive diagnostic: ' + field)
+                    diagnostics[name] = value.detach().cpu().numpy()
         for index, raw in enumerate(raw_rows):
             request = raw['request']
             if request.branch != 4:
@@ -283,7 +298,12 @@ class TrackingEvaluation:
                     loss_episode_total_frames=episodes['total_lost_frames'],
                     loss_episode_unrecovered_rate=episodes['unrecovered_rate'])
         diag['moving_threshold_m'] = .15
-        return dict(schema=SCHEMA, metric_mode='benchmark_compat', frames=count,
+        if self.version == 'v34':
+            context_norms = [row['diagnostic_query_context_norm'] for row in predictions
+                             if row.get('diagnostic_query_context_norm') is not None]
+            diag['query_context_recorded_frames'] = len(context_norms)
+            diag['query_context_norm_mean'] = float(np.mean(context_norms)) if context_norms else None
+        return dict(schema=self.schema, metric_mode='benchmark_compat', frames=count,
                     prediction_frames=count - len(self._initialized), tracklets=len(self._initialized),
                     success=100 * sum(row['success'] for row in self.rows) / max(count, 1),
                     precision=100 * sum(row['precision'] for row in self.rows) / max(count, 1),

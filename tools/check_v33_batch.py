@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import time
 import traceback
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK_ROOT = ROOT / 'artifacts' / 'ct_checks'
@@ -18,19 +19,19 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(ROOT))
 
 
-def parse_args(argv=None):
+def parse_args(argv=None, *, default_cfg=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cfg', type=Path, default=ROOT / 'cfgs/ct_seqtrack/33_b0_mini.yaml')
+    parser.add_argument('--cfg', type=Path, default=default_cfg or ROOT / 'cfgs/ct_seqtrack/33_b0_mini.yaml')
     parser.add_argument('--path', help='真实数据根；未提供时使用配置中的 path')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
     parser.add_argument('--output', type=Path, help='artifacts/ct_checks 下尚不存在的 JSON')
     return parser.parse_args(argv)
 
 
-def report_destination(output):
+def report_destination(output, *, version=33):
     if output is None:
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
-        output = CHECK_ROOT / f'v33_batch_{stamp}_{os.getpid()}' / 'report.json'
+        output = CHECK_ROOT / f'v{version}_batch_{stamp}_{os.getpid()}_{uuid.uuid4().hex[:12]}' / 'report.json'
     output = Path(output).resolve()
     if CHECK_ROOT.resolve() not in output.parents or output.suffix.lower() != '.json':
         raise ValueError('batch-check JSON must be under artifacts/ct_checks')
@@ -77,9 +78,9 @@ def run_one_batch(config, device, report, *, loaders=None):
     from models.ct_v31.data import build_loaders, stable_seed
     from models.ctseqtrackv31 import CTSEQTRACKV31
 
-    if (config.net_model != 'ctseqtrackv33' or config.v31_arm != 'b0'
+    if (config.net_model not in ('ctseqtrackv33', 'ctseqtrackv34') or config.v31_arm != 'b0'
             or config.batch_size != 16 or config.point_sample_size != 1024 or config.precision != 32):
-        raise ValueError('this check requires v33 B0, batch_size=16, point_sample_size=1024, FP32')
+        raise ValueError('this check requires v33/v34 B0, batch_size=16, point_sample_size=1024, FP32')
     if not config.ct_engineering_check or config.test or config.checkpoint or config.init_checkpoint:
         raise ValueError('one-batch check must use engineering scratch training with no checkpoint')
     if device == 'cuda':
@@ -135,6 +136,11 @@ def run_one_batch(config, device, report, *, loaders=None):
             extension_points=batch['extension_valid'].sum(-1).cpu().tolist(),
             memory_points=batch['memory_valid'].sum(-1).cpu().tolist(),
             sequence_valid=output.observation.sequence_valid.detach().cpu().tolist())
+        if config.net_model == 'ctseqtrackv34':
+            report['query_context'] = dict(
+                history_support=output.observation.history_support.detach().cpu().tolist(),
+                current_support=output.observation.current_support.detach().cpu().tolist(),
+                norm=output.decoder.query_context_norm.detach().cpu().tolist())
 
         # 不调用 training_step 的 Lightning 日志；复用同一个 pending/commit hook。
         model._pending_train = (output, batch, len(rows))
@@ -170,11 +176,13 @@ def run_one_batch(config, device, report, *, loaders=None):
         del iterator
 
 
-def main(argv=None):
-    args = parse_args(argv)
-    destination = report_destination(args.output)
+def main(argv=None, *, version=33):
+    default_cfg = ROOT / ('cfgs/ct_seqtrack/34_b0_context_mini.yaml'
+                         if version == 34 else 'cfgs/ct_seqtrack/33_b0_mini.yaml')
+    args = parse_args(argv, default_cfg=default_cfg)
+    destination = report_destination(args.output, version=version)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    report = dict(schema='ct_seqtrack.v33.batch_check.v1', status='failed', stage='load_config',
+    report = dict(schema=f'ct_seqtrack.v{version}.batch_check.v1', status='failed', stage='load_config',
         device=args.device, checkpoint_saved=False, formal_training_requires_new_scratch_process=True,
         started_utc=datetime.now(timezone.utc).isoformat(), cuda_visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
         tool_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
@@ -182,13 +190,14 @@ def main(argv=None):
     try:
         from models.ct_v31.config import load_config, config_identity
         from models.ct_v31.entry import configure_numerics, source_identity
-        from models.ct_v31.contracts import SCHEMA
         overrides = dict(ct_engineering_check=True, log_dir=str(destination.parent),
                          v31_evaluate_late3=False, accelerator='gpu' if args.device == 'cuda' else 'cpu')
         if args.path is not None:
             overrides['path'] = args.path
         config = load_config(args.cfg, overrides)
-        report.update(model_schema=SCHEMA, config=dict(config), config_sha256=config_identity(config),
+        if config.net_model != f'ctseqtrackv{version}':
+            raise ValueError(f'use the v{version} B0 configuration for this versioned batch tool')
+        report.update(model_schema=f'ct_seqtrack.joint_identity.v{version}', config=dict(config), config_sha256=config_identity(config),
                       source=source_identity())
         configure_numerics()
         import torch

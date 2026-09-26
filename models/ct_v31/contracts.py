@@ -40,6 +40,9 @@ class ObservationFeatures:
     quality: Tensor                 # [B,4] 当前/历史点量、熵和有效性摘要
     current_valid: Tensor           # [B] 当前 B0 至少一个真实唯一点
     sequence_valid: Tensor          # [B] 四帧中至少一个真实唯一点，允许仅历史预测
+    coarse_features: Optional[Tensor] = None  # v34 [B,256] live Mini pooled 语义
+    history_support: Optional[Tensor] = None  # v34 [B,3,3] detached 点量/框内软 FG 量/熵
+    current_support: Optional[Tensor] = None  # v34 [B,3] detached 点量/全 crop 软 FG 量/熵
 
 
 @dataclass
@@ -78,6 +81,7 @@ class DecoderOutput:
     hypothesis_valid: Tensor        # [B,4]
     history_boxes: Tensor           # [B,3,4]
     decoder_features: Tensor        # [B,4,64]
+    query_context_norm: Optional[Tensor] = None  # v34 [B] detached 共同 query context L2；v33 无记录
 
 
 @dataclass

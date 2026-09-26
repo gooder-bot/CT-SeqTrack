@@ -1,4 +1,4 @@
-"""v33 综合 B0 与独立 SeqTrack 对照入口；保留既有物理模块路径。"""
+"""v33/v34 B0 与独立 SeqTrack 对照入口；保留既有物理模块路径。"""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ import sys
 import time
 
 from .config import load_config, config_identity
-from .contracts import SCHEMA
+from .identity import model_schema, model_version, runtime_key
 
 
 def batch_limit(value):
@@ -20,7 +20,7 @@ def batch_limit(value):
 
 
 def parse_config(argv=None):
-    parser = argparse.ArgumentParser(description='CT-SeqTrack v33 joint / independent SeqTrack training and evaluation')
+    parser = argparse.ArgumentParser(description='CT-SeqTrack v33 joint / v34 joint / independent SeqTrack training and evaluation')
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)
@@ -60,7 +60,8 @@ def resolve_run_directory(config):
            'b0' if config.v31_arm == 'b0' else config.v31_arm + '_' + config.v31_temporal_backend)
     parent = Path('artifacts/ct_checks') if config.ct_engineering_check else Path('output')
     suffix = '-test' if config.test else ''
-    return (parent / f'{stamp}-33_{arm}-{config.tag}{suffix}').resolve()
+    version = model_version(config).removeprefix('v')
+    return (parent / f'{stamp}-{version}_{arm}-{config.tag}{suffix}').resolve()
 
 
 def write_json(path, value):
@@ -78,7 +79,7 @@ def validate_run_destination(config, root):
         if not manifest_path.exists() or not resolved_path.exists():
             raise ValueError('existing run metadata is incomplete; refusing to overwrite: ' + str(root))
         saved = json.loads(manifest_path.read_text(encoding='utf-8'))
-        expected = dict(schema=SCHEMA, config_sha256=config_identity(config), model=config.net_model)
+        expected = dict(schema=model_schema(config), config_sha256=config_identity(config), model=config.net_model)
         for key, value in expected.items():
             if saved.get(key) != value:
                 raise ValueError('existing run identity mismatch: ' + key)
@@ -88,7 +89,7 @@ def validate_run_destination(config, root):
         import torch
         from .runtime import validate_resume_payload
         checkpoint = torch.load(config.checkpoint, map_location='cpu', weights_only=False)
-        validate_resume_payload(checkpoint.get('ct_v33_runtime'), config, training=not config.test)
+        validate_resume_payload(checkpoint.get(runtime_key(config)), config, training=not config.test)
     return existing
 
 
@@ -118,6 +119,7 @@ def source_identity():
 def run(config, *, loaders=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
     configure_numerics()
+    version = model_version(config)
     root = resolve_run_directory(config)
     config.log_dir = str(root)
     preserve_metadata = validate_run_destination(config, root)
@@ -136,7 +138,7 @@ def run(config, *, loaders=None):
                                            stderr=subprocess.DEVNULL).strip()
     except (OSError, subprocess.CalledProcessError):
         revision = 'unavailable'
-    manifest = dict(schema=SCHEMA, config_sha256=config_identity(config), git_head=revision,
+    manifest = dict(schema=model_schema(config), config_sha256=config_identity(config), git_head=revision,
                     model=config.net_model, seed=config.seed,
                     arm=config.v31_arm, temporal_backend=config.v31_temporal_backend,
                     enabled=dict(B1=model.tracker.enable_b1, B2=model.tracker.enable_b2,
@@ -153,24 +155,24 @@ def run(config, *, loaders=None):
     console_manifest = {key: value for key, value in manifest.items()
                         if key not in ('source', 'reference_protocol')}
     console_manifest['source_sha256'] = manifest['source']['sha256']
-    print('[v33] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
+    print('[' + version + '] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
     loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
     class ConsoleProgress(Callback):
         def on_train_batch_start(self, trainer, module, batch, batch_idx):
             if config.lr_warmup_steps and batch_idx % 50 == 0:
                 lr = trainer.optimizers[0].param_groups[0]['lr']
-                print(f'[v33 lr] update={trainer.global_step + 1} lr={lr:.9g}', flush=True)
+                print(f'[{version} lr] update={trainer.global_step + 1} lr={lr:.9g}', flush=True)
 
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
             if batch_idx % 50 == 0:
                 loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
                 value = float(loss.detach()) if torch.is_tensor(loss) else loss
-                print(f'[v33 train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
+                print(f'[{version} train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
                       f'batch={batch_idx + 1}/{trainer.num_training_batches} '
                       f'step={trainer.global_step} loss={value}', flush=True)
 
         def on_validation_end(self, trainer, module):
-            print('[v33 validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
+            print('[' + version + ' validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
                   json.dumps(module.evaluation_results, ensure_ascii=False), flush=True)
 
     callbacks = [LearningRateMonitor(logging_interval='step' if config.lr_warmup_steps else 'epoch'),
@@ -191,7 +193,7 @@ def run(config, *, loaders=None):
     else:
         trainer.fit(model, ckpt_path=config.checkpoint)
         write_json(root / 'training_budget.json', dict(
-            schema=SCHEMA, completed_epoch=model._completed_epoch,
+            schema=model_schema(config), completed_epoch=model._completed_epoch,
             epoch_complete=model._epoch_complete, last_epoch_rows=model._epoch_rows,
             last_epoch_steps=model._epoch_steps, optimizer_steps=int(trainer.global_step),
             sampler=model._loaders['train'].batch_sampler.state_dict()))
@@ -223,14 +225,14 @@ def run(config, *, loaders=None):
         with (directory / 'frames.jsonl').open('w', encoding='utf-8') as stream:
             for row in model.evaluation.rows:
                 stream.write(json.dumps(row, ensure_ascii=False) + '\n')
-        print('[v33 evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
+        print('[' + version + ' evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
     summary = dict(final=results[-1], late3={name: sum(row[name] for row in results) / len(results)
                    for name in ('success', 'precision')}, checkpoint_epochs=[row['checkpoint_epoch'] for row in results],
                    wall_seconds=time.perf_counter() - started)
     if torch.cuda.is_available():
         summary['peak_gpu_allocated_mib'] = torch.cuda.max_memory_allocated() / 2 ** 20
     write_json(root / 'results.json', summary)
-    print('[v33 complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
+    print('[' + version + ' complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
     return root
 
 

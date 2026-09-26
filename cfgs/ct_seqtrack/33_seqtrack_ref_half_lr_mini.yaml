@@ -1,0 +1,5 @@
+# 八组 mini 中的独立 SeqTrack 半学习率；其余沿用原参考配置。
+_base_: 33_seqtrack_ref_mini.yaml
+experiment_name: ct33_seqtrack_ref_half_lr_mini_car_scratch_seed42
+tag: seqtrack_ref_half_lr_mini_car_seed42_60ep_bs16
+lr: 0.00005
