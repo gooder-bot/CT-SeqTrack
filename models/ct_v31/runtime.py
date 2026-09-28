@@ -58,6 +58,8 @@ def validate_resume_payload(payload, config, *, training=True):
                             else 'ct_seqtrack.v32.ready_queue.v2')
         if not isinstance(sampler, dict) or sampler.get('schema') != expected_sampler:
             raise ValueError('v32 resume requires the matching sampler manifest')
+        if config.get('net_model') == 'ctseqtrackv35' and sampler.get('initial_seed_policy') != config.get('v35_seed_policy'):
+            raise ValueError('v35 resume initial seed policy mismatch')
         content = {key: value for key, value in sampler.items() if key != 'manifest_sha256'}
         digest = hashlib.sha256(json.dumps(content, sort_keys=True,
                                           separators=(',', ':')).encode()).hexdigest()
@@ -195,7 +197,7 @@ class TrackingEvaluation:
             target_mode_counts = target_modes.detach().cpu().sum(-1).numpy()
         diagnostics = {key: value.detach().cpu().numpy() for key, value in batch.items()
                        if key.startswith('diagnostic_') and torch.is_tensor(value)}
-        if self.version == 'v34':
+        if self.version in ('v34', 'v35'):
             # 仅记录实际前向已产生的摘要；不读取 GT，不影响候选或 accepted 提交。
             decoder = getattr(output, 'decoder', None)
             for name, owner, field, shape in (
@@ -207,6 +209,27 @@ class TrackingEvaluation:
                     if tuple(value.shape) != shape or not bool(torch.isfinite(value).all()):
                         raise ValueError('invalid v34 passive diagnostic: ' + field)
                     diagnostics[name] = value.detach().cpu().numpy()
+        if self.version == 'v35':
+            # 记录有符号世界坐标与尺寸，允许离线分解 XYZ/yaw/IoU。
+            # 只作 detach 后的导出，不把 GT 几何送回 forward 或 commit。
+            anchors = batch['anchor_box'].detach().cpu().double().numpy()
+            for name, value in (('coarse', coarse), ('fine', fine),
+                                ('accepted', predictions), ('target', targets)):
+                if value is not None:
+                    world = value.astype(np.float64, copy=True)
+                    world[:, :3] += anchors[:, :3]
+                    diagnostics['diagnostic_' + name + '_box_world'] = world
+            diagnostics['diagnostic_anchor_box_world'] = anchors
+            diagnostics['diagnostic_first_frame_size_lwh'] = sizes
+            diagnostics['diagnostic_target_size_lwh'] = target_sizes
+            decoder = getattr(output, 'decoder', None)
+            for field in ('local_neighbor_count', 'local_selected_count',
+                          'local_mean_support', 'local_delta_norm'):
+                value = getattr(decoder, field, None)
+                if value is not None:
+                    if tuple(value.shape) != (len(raw_rows), 4, 8) or not bool(torch.isfinite(value).all()):
+                        raise ValueError('invalid v35 passive diagnostic: ' + field)
+                    diagnostics['diagnostic_' + field] = value.detach().cpu().numpy()
         for index, raw in enumerate(raw_rows):
             request = raw['request']
             if request.branch != 4:
@@ -298,7 +321,7 @@ class TrackingEvaluation:
                     loss_episode_total_frames=episodes['total_lost_frames'],
                     loss_episode_unrecovered_rate=episodes['unrecovered_rate'])
         diag['moving_threshold_m'] = .15
-        if self.version == 'v34':
+        if self.version in ('v34', 'v35'):
             context_norms = [row['diagnostic_query_context_norm'] for row in predictions
                              if row.get('diagnostic_query_context_norm') is not None]
             diag['query_context_recorded_frames'] = len(context_norms)

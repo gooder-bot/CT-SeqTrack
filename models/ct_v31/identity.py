@@ -5,14 +5,16 @@ from .contracts import SCHEMA
 
 def model_version(config=None):
     model = 'ctseqtrackv33' if config is None else config.get('net_model', 'ctseqtrackv33')
-    versions = {'ctseqtrackv33': 'v33', 'seqtrack_reference': 'v33', 'ctseqtrackv34': 'v34'}
+    versions = {'ctseqtrackv33': 'v33', 'seqtrack_reference': 'v33', 'ctseqtrackv34': 'v34',
+                'ctseqtrackv35': 'v35'}
     if model not in versions:
         raise ValueError('unsupported model identity: ' + str(model))
     return versions[model]
 
 
 def model_schema(config=None):
-    return SCHEMA if model_version(config) == 'v33' else 'ct_seqtrack.joint_identity.v34'
+    version = model_version(config)
+    return SCHEMA if version == 'v33' else 'ct_seqtrack.joint_identity.' + version
 
 
 def runtime_key(config=None):

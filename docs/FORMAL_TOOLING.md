@@ -1,6 +1,14 @@
 # CT-SeqTrack 工具范围
 
-## 当前 v34 工具
+## 当前 v35 工具
+
+- 唯一正式入口保持 `main.py`；`35_b0_w_{quarter,half,normal,scaled}_lr_mini.yaml` 四份seed42配置对应2.5e-5/5e-5/1e-4/1.5e-4，GPU0/0/1/1。当前仅运行这四组；对应seed52配置预备，达标后只运行胜出的一份并另加独立SeqTrack，保留原条件阶段后总上限相应为六次。
+- `tools/check_v35_batch.py`：用户上传后执行一次真实CUDA batch16的forward/backward/Adam/commit检查，不保存checkpoint，不重复按四档LR检查。
+- `tools/compare_v35_b0.py`：只读重算四档完整58/59/60逐帧结果，`--quarter --half --normal --scaled`均必填。以原逐帧SHA锁定R/C/旧B0/W-quarter，固定门槛、较低LR破完全并列；记录>5m/>10m、raw0–2和raw可见coarse/fine等解释性统计。可附加锁定LR的新版本seed52和原正常SeqTrack seed52，分别报告固定R/C及同seed差值，并核对原reference协议。
+- 比较默认stdout JSON；`--output`只允许ct_checks下的新文件。返回0表示原硬门有通过者，1表示完整证据未达标，2表示证据无效；漂移风险和第二seed稳定性另行报告，不能把返回0直接写成Full可启动。
+- 结构与完整CLI见 [v35说明](B0_V35_INTEGRATED.md) 和 [v35操作页](CTSEQTRACK_V35_MINI_LAUNCH.md)。旧工具和配置继续用于重现，禁止覆盖旧实验。
+
+## v34 历史工具
 
 - 唯一训练/评测入口仍为 `main.py`，两份配置为 `34_b0_context_mini.yaml`、`34_b0_context_w4_mini.yaml`；用户GPU0/1单卡从头启动。
 - `tools/check_v34_batch.py`：一次真实batch16的forward/backward/Adam/commit，不保存checkpoint；按v34记录身份。只在本次结构修改后由用户检查一次。

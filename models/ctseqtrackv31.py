@@ -52,6 +52,10 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         self._epoch_rows = 0
         self._epoch_steps = 0
         self._resume_sampler = None
+        self.training_diagnostics = None
+        if self.config.net_model == 'ctseqtrackv35' and self.config.get('v35_train_diagnostics', True):
+            from models.ct_v31.training_diagnostics import TrainingDiagnostics
+            self.training_diagnostics = TrainingDiagnostics(self.config.seed)
         if pl is not None:
             self.save_hyperparameters(dict(config=dict(self.config)))
 
@@ -141,6 +145,8 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def on_train_epoch_start(self):
         self.train_builder.reset()
+        if self.training_diagnostics is not None:
+            self.training_diagnostics.reset(int(self.current_epoch))
         self._pending_train = None
         self._epoch_rows = self._epoch_steps = 0
         self._epoch_complete = False
@@ -153,6 +159,8 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             identity_keys += (['resampling', 'nominal_endpoint_exposures'] if self.is_reference else
                 ['short_window', 'long_window', 'curriculum_epochs', 'reserve_windows',
                  'reserve_policy', 'drain_policy', 'seed_policy', 'seed_translation', 'seed_yaw_degrees'])
+            if self.config.net_model == 'ctseqtrackv35':
+                identity_keys.append('initial_seed_policy')
             for key in identity_keys:
                 if current[key] != self._resume_sampler[key]:
                     raise ValueError('v31 resume dataset/window manifest mismatch: ' + key)
@@ -162,10 +170,16 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         if self._pending_train is not None:
             raise RuntimeError('previous training output was not committed')
         batch, output = self._forward_raw(rows, self.train_builder, training=True)
+        if self.training_diagnostics is not None:
+            # 瞬时 detached 统计容器；loss 内复用已经算出的 quality 标签，
+            # 不改变返回字典，也不为分桶重新计算全量几何 IoU。
+            output.loss_statistics = {}
         losses = self.tracker.compute_losses(batch, output)
         total = losses['loss_total']
         if total.ndim != 0 or not bool(torch.isfinite(total)):
             raise FloatingPointError('v31 loss_total must be a finite scalar')
+        if self.training_diagnostics is not None:
+            self.training_diagnostics.add_batch(rows, batch, output, losses)
         self._pending_train = (output, batch, len(rows))
         for name, value in losses.items():
             if torch.is_tensor(value) and value.ndim == 0:
@@ -192,6 +206,9 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             raise RuntimeError('v31 completed epoch retains unfinished windows')
         self._completed_epoch = int(self.current_epoch) + 1
         self._write_epoch_audit(sampler)
+        if self.training_diagnostics is not None:
+            self.training_diagnostics.write_epoch(self.config.log_dir,
+                completed_epoch=self._completed_epoch, complete=self._epoch_complete)
         self.log('train/endpoint_rows', float(self._epoch_rows), on_step=False, on_epoch=True)
         self.log('train/adam_steps', float(self._epoch_steps), on_step=False, on_epoch=True)
 
@@ -202,7 +219,7 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         audit = dict(schema=training_audit_schema(self.config),
             completed_epoch=self._completed_epoch, epoch_complete=self._epoch_complete,
             rows=self._epoch_rows, optimizer_steps=self._epoch_steps, sampler=sampler.state_dict())
-        if model_version(self.config) == 'v34':
+        if model_version(self.config) in ('v34', 'v35'):
             audit.update(model_schema=model_schema(self.config), config_sha256=config_identity(self.config))
         if self.is_reference:
             audit['exposure'] = self.train_builder.exposure_summary()

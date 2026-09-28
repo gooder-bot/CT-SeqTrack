@@ -1,10 +1,12 @@
 # CT-SeqTrack
 
-CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前新增 **v34 B0 显式上下文**，代码保留 `models/ct_v31/` 的物理路径；v33/reference 的原行为与权重身份继续兼容，v32 可通过 Git `ddcb1a1` 复现。
+CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前新增 **v35 B0 综合优化**：在 v34 W=1/4/4/8 的基础上，对齐真实首测初始化、为 coarse 提供显式合法历史条件、为 fine 提供候选局部真实点证据。活动代码仍在 `models/ct_v31/`；v33/v34/reference 原行为与权重身份继续兼容。
 
-v34 让 q0/modes 直接读取历史框几何、预测观测支持与 coarse pooled 语义，保持共享定位/质量头。用户最新扩展为**八组mini单seed**：SeqTrack正常/减半，S（1/3/3/8）与W（1/4/4/8）各1e-4、5e-5、2.5e-5；GPU0/1各四个独立进程。SeqTrack保留20/40衰减，S/W保留20/50，均无warmup、scratch60。旧R/C/旧B0作为固定证据；新八组尚未启动，不宣称涨分。见 [八组协议与LR依据](docs/B0_V34_LR_GRID.md)、[最新版上传/后台启动/tail说明](docs/CTSEQTRACK_V34_MINI_LAUNCH.md) 和 [结构说明](docs/B0_V34_CONTEXT.md)。
+v35按用户最新要求比较四档LR（2.5e-5/5e-5/1e-4/1.5e-4），GPU依次0/0/1/1，均seed42、scratch60、20/50衰减、无warmup，结构及其他单组参数不变。当前只启动四次训练；原条件第二seed复验保留，达标后再补胜出配方与独立SeqTrack各一次，合计上限相应为六次，不自动执行。保留固定R/C门槛和旧W-quarter对照，不读取旧权重初始化。结构、诊断和边界见 [v35说明](docs/B0_V35_INTEGRATED.md)，四段独立后台命令和新终端tail见 [操作说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)。正式CUDA检查和新训练由用户执行，代理服务器只读。
 
-下方 v33 六组数字和启动文字保留为历史记录，不代表 v34 已完成实验。
+**截至2026-09-28，v34八组已全部完成。** W-quarter final60 S/P=51.4650/62.8435，late-3=51.2527/62.6765；Precision高于R，Success及移动守底未全通过，不能晋级Full。[八组正式复盘](artifacts/ct_checks/20260928_v34_eight_run_review/REPORT.md)。v35尚无正式成绩。下方v33数字和启动文字为历史记录，不覆盖本段当前状态。
+
+**本轮明确优化严重漂移与持续失跟。** 方案1只表示保留原总体/移动硬门、单列漂移风险，不新增漂移数值硬门，不表示仅记录或推迟修复。综合改法及其成因对应见[v35结构说明](docs/B0_V35_INTEGRATED.md)；>10m计数增加时暂停Full待复核，小幅孤立波动不自动否决方案，明显持续退化必须处理。原硬门结果与风险结论分开报告，统一口径见[实验协议](docs/EXPERIMENT_PROTOCOL.md)。
 
 | 模块 | 作用 |
 |---|---|
@@ -15,7 +17,7 @@ v34 让 q0/modes 直接读取历史框几何、预测观测支持与 coarse pool
 
 v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被动评测诊断。R/A/B/C/D/E 六次 mini 运行已完成并拉回本地；Full 接口保留，本轮不新增 Full 独立诊断。具体改动见 [v33 实现说明](docs/B0_V33_REPAIR.md)。
 
-## 最新结果（2026-09-26）
+## v33 历史结果（2026-09-26）
 
 六次运行是 1 组 SeqTrack + 5 组 B0，均 seed42、scratch60、71,700 次更新；已核验全部 58–60 轮正式逐帧结果。
 
@@ -67,15 +69,17 @@ v32 nuScenes-mini Car、seed42，全部 scratch60、71,700 次优化；评测 10
 唯一入口为 `main.py`：
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/33_seqtrack_ref_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/33_b0_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/33_b0_late_decay_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/33_b0_half_lr_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/35_b0_w_quarter_lr_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/35_b0_w_half_lr_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/35_b0_w_normal_lr_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/35_b0_w_scaled_lr_mini.yaml --path DATA_ROOT
 ```
 
-以上为入口示例；物理卡绑定与后台运行使用运行说明中的独立命令。默认每 5 轮验证，训练结束自动评测 58/59/60 并保存逐帧记录及 `results.json`。比较固定 final60 和 late-3，不挑选最佳轮次。不要传旧 `--preloading` 参数；当前按需读取原始点云，每 worker 缓存 256MiB。
+以上为当前四组入口示例；物理卡绑定与独立输出目录使用[v35运行说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)中的命令。第二seed须等第一阶段通过后再运行，seed42独立SeqTrack参考直接复用。默认每 5 轮验证，训练结束自动评测 58/59/60 并保存逐帧记录及 `results.json`。比较固定 final60 和 late-3，不挑选最佳轮次。不要传旧 `--preloading` 参数；当前按需读取原始点云，每 worker 缓存 256MiB。
 
 ## 验证与边界
+
+v35本地实现、旧版本兼容、诊断无干预、真实Lightning入口和epoch恢复已验证；最新四组版本完整pytest为515 passed、3 skipped，compileall与diff检查通过，详见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。两项跳过需要真实CUDA，另一项只测试缺失Lightning的环境；本地已安装Lightning时不适用。新增参数36,608（约0.99%）。真实CUDA成本与正式成绩仍待用户上传后验证；此前三组实现过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)。
 
 此前服务器快照检查 **314 passed、1 skipped**，真实 CUDA batch 的 forward/backward/Adam/commit 已通过，未保存工程 checkpoint。日志与报告位于 [v33 检查目录](artifacts/ct_checks/20260924-190116_v33_implementation/)。后续被动汇总增量单独记录本地验证；这些历史检查不替代正式结果验收。六组完成状态以 2026-09-26 复盘为准，无需把同一工程检查反复作为启动步骤。
 

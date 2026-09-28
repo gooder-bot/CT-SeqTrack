@@ -1,0 +1,5 @@
+# v35 正式登记：固定配方，从零训练；参考模型保持原 v33 身份。
+_base_: 33_seqtrack_ref_mini.yaml
+experiment_name: ct33_seqtrack_ref_mini_car_scratch_seed52
+tag: seqtrack_ref_mini_car_seed52_60ep_bs16
+seed: 52

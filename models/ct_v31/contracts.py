@@ -82,6 +82,10 @@ class DecoderOutput:
     history_boxes: Tensor           # [B,3,4]
     decoder_features: Tensor        # [B,4,64]
     query_context_norm: Optional[Tensor] = None  # v34 [B] detached 共同 query context L2；v33 无记录
+    local_neighbor_count: Optional[Tensor] = None  # v35 [B,4,8] 半径内、截断前唯一点数
+    local_selected_count: Optional[Tensor] = None  # v35 [B,4,8] 实际编码点数，最多16
+    local_mean_support: Optional[Tensor] = None  # v35 [B,4,8] 截断前邻域平均预测支持
+    local_delta_norm: Optional[Tensor] = None  # v35 [B,4,8] 局部query特征增量L2；均detach
 
 
 @dataclass

@@ -60,10 +60,13 @@ class JointTracker(nn.Module):
         self.enable_b2 = arm in ('b1_b2', 'full')
         self.enable_b3 = arm == 'full'
         # 公共模块首先构造，启用 B1/B2 不消耗公共初始化之前的 RNG。
-        query_context = self.config.net_model == 'ctseqtrackv34'
-        self.observation = B0Observation(token_count=128, query_context=query_context)
+        v35 = self.config.net_model == 'ctseqtrackv35'
+        query_context = self.config.net_model in ('ctseqtrackv34', 'ctseqtrackv35')
+        self.observation = B0Observation(token_count=128, query_context=query_context,
+            coarse_condition=v35, time_scale=self.config.time_scale)
         self.decoder = SharedHypothesisDecoder(prior_dim=128, dropout=.2,
-            query_context=query_context, time_scale=self.config.time_scale)
+            query_context=query_context, time_scale=self.config.time_scale,
+            initial_context=v35, local_observation=v35)
         self.prior = (PhysicalTimePrior(self.config.time_scale, self.config.v31_temporal_backend)
                       if self.enable_b1 else None)
         self.evidence = B2IdentityEvidence() if self.enable_b2 else None

@@ -152,6 +152,69 @@ def quality_targets(boxes, target, size, purity, iou):
     return purity * (.5 + .5 * iou) / (1. + distance / scale[:, None])
 
 
+@torch.no_grad()
+def observation_loss_statistics(batch, output):
+    """被动逐端点观测损失；不改变训练损失，也不额外计算全量 IoU。
+
+    numerator/denominator 是端点值与有效端点数；batch_contribution 使用
+    原 batch 的有效端点分母，求和精确对应该 batch 的实际加权分项。
+    主 quality 的统计另在 compute_losses 内复用实际标签；本函数不重算
+    全量 IoU，Full 附加任务仅记录真实 batch 标量，不伪造端点归因。
+    """
+    from .observation import B0Observation
+    valid = B0Observation.measurement_mask(batch)
+    target = batch['target_box'].detach()
+    yaw_anchor = anchor_yaw(batch, target)
+    observation, decoder = output.observation, output.decoder
+    result = {}
+
+    def record(name, value, exists, weight=1.):
+        denominator = exists.to(value)
+        numerator = torch.where(exists, value * weight, 0.)
+        result[name] = dict(numerator=numerator, denominator=denominator,
+                           batch_contribution=numerator / denominator.sum().clamp_min(1.))
+
+    for name, predicted, truth, exists, cw, aw in (
+            ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10.),
+            ('main', decoder.hypothesis_boxes[:, 0], target, observation.sequence_valid, 2., 10.),
+            ('history', decoder.history_boxes, batch['history_target_boxes'], batch['history_valid'], .2, 1.)):
+        exists = exists.bool()
+        predicted = transform_boxes(torch.where(exists[..., None], predicted.detach(), 0.), yaw_anchor)
+        truth = transform_boxes(torch.where(exists[..., None], truth.detach(), 0.), yaw_anchor)
+        center = F.smooth_l1_loss(predicted[..., :3], truth[..., :3], reduction='none').mean(-1) * cw
+        angle = (1. - torch.cos(predicted[..., 3] - truth[..., 3])) * aw
+        if name == 'history':
+            count = exists.sum(-1).clamp_min(1)
+            center = torch.where(exists, center, 0.).sum(-1) / count
+            angle = torch.where(exists, angle, 0.).sum(-1) / count
+            exists = exists.any(-1)
+        record('loss_' + name + '_center', center, exists)
+        record('loss_' + name + '_angle', angle, exists)
+        record('loss_' + name, center + angle, exists)
+
+    labels = batch['segmentation_labels'].detach().long().masked_fill(~valid, 0)
+    logits = observation.segmentation_logits.detach()
+    weights = logits.new_tensor([.5, 2.])
+    ce = F.nll_loss(F.log_softmax(logits, dim=-1).reshape(-1, 2), labels.reshape(-1),
+                   weight=weights, reduction='none').reshape_as(labels)
+    seg = torch.where(valid, ce, 0.).sum(-1) / (weights[labels] * valid).sum(-1).clamp_min(1e-12)
+    bc = F.smooth_l1_loss(torch.where(valid[..., None], observation.bc_prediction.detach(), 0.),
+                         torch.where(valid[..., None], batch['bc_targets'].detach(), 0.),
+                         reduction='none').mean(-1)
+    bc = torch.where(valid, bc, 0.).sum(-1) / valid.sum(-1).clamp_min(1)
+    frame_exists = valid.any(-1)
+    # 与 _current_history_mean 相同：先历史有效帧均值，再两组等权。
+    for name, frames, weight in (('loss_seg', seg, .1), ('loss_bc', bc, 1.)):
+        history_exists = frame_exists[:, :-1].any(-1)
+        history = torch.where(frame_exists[:, :-1], frames[:, :-1], 0.).sum(-1)
+        history = history / frame_exists[:, :-1].sum(-1).clamp_min(1)
+        group_exists = torch.stack((frame_exists[:, -1], history_exists), -1)
+        groups = torch.stack((frames[:, -1], history), -1)
+        endpoint = torch.where(group_exists, groups, 0.).sum(-1) / group_exists.sum(-1).clamp_min(1)
+        record(name, endpoint, group_exists.any(-1), weight)
+    return result
+
+
 def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=True):
     target = batch['target_box']
     size = batch['box_size'].to(target).clamp_min(1e-3)
@@ -229,6 +292,13 @@ def compute_losses(batch, output, *, enable_b1=True, enable_b2=True, enable_b3=T
     quality_error = F.binary_cross_entropy_with_logits(decoder.quality_logits, quality_target, reduction='none')
     # q0 与测量模式分别归一化，纯背景模式仍必须学习低质量。
     main_quality = masked_mean(quality_error[:, 0], decoder.hypothesis_valid[:, 0])
+    diagnostic_sink = getattr(output, 'loss_statistics', None)
+    if diagnostic_sink is not None:
+        quality_valid = decoder.hypothesis_valid[:, 0].detach().bool()
+        denominator = quality_valid.to(quality_error)
+        numerator = torch.where(quality_valid, .5 * quality_error[:, 0].detach(), 0.)
+        diagnostic_sink['loss_main_quality'] = dict(numerator=numerator, denominator=denominator,
+            batch_contribution=numerator / denominator.sum().clamp_min(1.))
     mode_quality = balanced_mean(quality_error[:, 1:], purity[:, 1:] > 0,
                                  decoder.hypothesis_valid[:, 1:]) if enable_b3 else zero
     losses['loss_quality'] = main_quality + mode_quality

@@ -1,0 +1,5 @@
+# 第二阶段预备配方，仅第四档胜出且满足既定条件时运行。
+_base_: 35_b0_w_scaled_lr_mini.yaml
+experiment_name: ct35_b0_w_scaled_lr_mini_car_scratch_seed52
+tag: b0_w_scaled_lr_mini_car_seed52_60ep_bs16
+seed: 52

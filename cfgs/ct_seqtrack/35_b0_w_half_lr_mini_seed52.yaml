@@ -1,0 +1,5 @@
+# v35 正式登记：固定配方，从零训练；参考模型保持原 v33 身份。
+_base_: 35_b0_w_half_lr_mini.yaml
+experiment_name: ct35_b0_w_half_lr_mini_car_scratch_seed52
+tag: b0_w_half_lr_mini_car_seed52_60ep_bs16
+seed: 52

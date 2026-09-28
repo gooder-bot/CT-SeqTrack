@@ -1,6 +1,21 @@
-# CT-SeqTrack 当前状态（2026-09-26）
+# CT-SeqTrack 当前状态（2026-09-28）
 
-## 当前八组安排（覆盖下方原两组及历史启动状态）
+## v35 综合实现与四组mini单seed（当前）
+
+- [x] v34八组已完成并复盘；W-quarter最接近总体目标，但未通过总体/移动双门槛，见 [八组报告](artifacts/ct_checks/20260928_v34_eight_run_review/REPORT.md)。下方旧待启动条目均为历史。
+- [x] 用户已批准统一v35：首测对齐、coarse合法历史条件、fine候选局部真实点；保留W课程、loss、采样和共享头。详见 [结构说明](docs/B0_V35_INTEGRATED.md)。
+- [x] 明确漂移方案1：严重漂移与持续失跟属于本轮优化范围，不能仅统计或留到Full处理；保留原总体/移动硬门，不新增漂移数值硬门。规则见[实验协议](docs/EXPERIMENT_PROTOCOL.md)。
+- [x] 结构说明已对应首次缺测、历史参照不足、fine错误细化及后续crop偏移给出综合改法；没有把漂移留到Full再处理或额外堆模块。
+- [ ] 正式结果产生后核对上述机制的实际效果与剩余问题；实现完成不等于已解决漂移。
+- [x] 完成本地实现、旧版本兼容、诊断不干预、完整epoch恢复与pytest/compileall/diff检查。最新四组版本全套515 passed、3 skipped（两项需要真实CUDA，一项缺失Lightning分支在已安装环境不适用），无失败；见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。此前CLI/测试路径问题的修复过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)，操作见[运行说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)。
+- [ ] 用户上传后执行一次v35真实CUDA batch；代理不上传、不启动任务。
+- [x] 按用户最新要求登记四档LR=2.5e-5/5e-5/1e-4/1.5e-4，GPU0/0/1/1；新增第四档配置和四组完整比较入口，其他单组参数保持。最新命令与新终端tail见[启动页](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)，本次新包与核验见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。旧三组报告/上传包保留为历史。
+- [ ] 用户启动四组seed42，各scratch60，共286,800更新；固定R/C原门槛，报告final60/late-3的>5m、>10m与未恢复失跟，区分原硬门结果和风险复核结论。
+- [ ] >10m计数增加时暂停Full待复核，结合轨迹、持续时长及逐轮表现判断；小幅孤立波动不自动判失败，明显持续退化须处理并讨论，不为某个漂移计数自动增加训练。
+- [ ] 仅通过后锁定胜出配方补seed52和独立SeqTrack seed52；保留原两次条件复验后总上限相应为六次、430,200更新，当前只启动四组，不自动执行后续。
+- [ ] 新版尚无正式成绩；通过及稳定性证据充分后再讨论Full。
+
+## 历史：v34 八组安排（已于9月28日完成，以本页顶部状态为准）
 
 - [x] 新增SeqTrack半LR与S/W正常、quarter档；保留原R、S-half/W-half配置身份，其他参数不变。第三档2.5e-5依据见 [八组协议](docs/B0_V34_LR_GRID.md)。
 - [x] 最新启动页已给GPU0 R正常＋S三档、GPU1 R半LR＋W三档，独立nohup、带日期目录和新终端tail；比较工具支持全部八组，固定旧R/C晋级门。
@@ -9,7 +24,7 @@
 - [ ] 上传后仅执行一次v34真实CUDA batch，再按 [最新启动说明](docs/CTSEQTRACK_V34_MINI_LAUNCH.md) 启动八组；代理不写服务器、不启动训练。
 - [ ] 八组固定final60/late-3比较，保留弱观测和移动守底；原结构主对照仍为S-half−旧C，同LR内W−S评估课程。
 
-## v34 实施（覆盖下方“下一版尚未实施”的历史状态）
+## 历史：v34 实施记录
 
 - [x] 用户批准共同 query context：历史局部几何/存在性/预测支持，与 live coarse pooled256＋当前支持分别编码，只供 q0/modes 使用；共享头、loss、Full梯度边界保持。
 - [x] 登记 S=1/3/3/8、W=1/4/4/8，均 C 配方5e-5、20/50降档、无warmup，seed42 scratch60；复用现有 R/C/旧B0。版本身份与旧 v33 分离。

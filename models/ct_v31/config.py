@@ -30,6 +30,11 @@ DEFAULTS = dict(
     cfg=None, eval_checkpoint_epoch=None,
 )
 
+# 仅新版注入；不得改变旧配置解析内容及 SHA。
+V35_DEFAULTS = dict(v35_seed_policy='initial_exact_other_perturbed_v1',
+    v35_history_descriptor_dim=33, v35_local_neighbors=16, v35_local_radius=1.0,
+    v35_local_input_dim=69, v35_train_diagnostics=True)
+
 
 class V31Config(dict):
     def __getattr__(self, name):
@@ -44,13 +49,15 @@ class V31Config(dict):
 
 def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
-    unknown = sorted(set(supplied) - set(DEFAULTS))
+    is_v35 = supplied.get('net_model') == 'ctseqtrackv35'
+    defaults = dict(DEFAULTS, **V35_DEFAULTS) if is_v35 else DEFAULTS
+    unknown = sorted(set(supplied) - set(defaults))
     if unknown:
         raise ValueError('v33 unknown/inactive configuration keys: ' + ', '.join(unknown))
-    cfg = V31Config(DEFAULTS)
+    cfg = V31Config(defaults)
     cfg.update(supplied)
     families = {'ctseqtrackv33': 'ct_seqtrack_v33', 'seqtrack_reference': 'ct_seqtrack_v33',
-                'ctseqtrackv34': 'ct_seqtrack_v34'}
+                'ctseqtrackv34': 'ct_seqtrack_v34', 'ctseqtrackv35': 'ct_seqtrack_v35'}
     if cfg.net_model not in families or cfg.experiment_family != families[cfg.net_model]:
         raise ValueError('v33/v34 model and experiment identity must match; '
                          'reproduce frozen v32 with Git ddcb1a1, '
@@ -114,6 +121,13 @@ def normalize_config(config=None):
     if any(not math.isfinite(float(cfg[key])) or cfg[key] < 0
            for key in ('v32_seed_translation', 'v32_seed_yaw_degrees')):
         raise ValueError('v32 seed perturbation bounds must be finite and nonnegative')
+    if is_v35:
+        for key, value in V35_DEFAULTS.items():
+            if key == 'v35_train_diagnostics':
+                if type(cfg[key]) is not bool:
+                    raise ValueError('v35_train_diagnostics must be bool')
+            elif isinstance(cfg[key], bool) or cfg[key] != value:
+                raise ValueError('v35 fixed architecture identity mismatch: ' + key)
     if not cfg.ct_engineering_check:
         version = model_version(cfg)
         fixed = dict(epoch=60, batch_size=16, workers=4, wd=0.,
@@ -121,11 +135,17 @@ def normalize_config(config=None):
                      v31_short_window=3, v31_long_window=8, v31_curriculum_epochs=10,
                      v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
                      limit_train_batches=1., limit_val_batches=1.)
-        if version == 'v34':
+        if version in ('v34', 'v35'):
             # v34 登记 S/W × 三档 LR；其他模块/数据能力保留给工程检查。
             fixed.pop('v31_short_window')
             fixed.update(v31_arm='b0', dataset='nuscenes_mf', version='v1.0-mini',
                          category_name='Car')
+        if version == 'v35':
+            fixed.update(v31_short_window=4, ct_partition_seed=42,
+                         v35_train_diagnostics=True, dynamics_time_mode='true',
+                         v31_evaluate_late3=True)
+            if isinstance(cfg.seed, bool) or cfg.seed not in (42, 52):
+                raise ValueError('formal v35 seed must be 42 or 52')
         bad = [key for key, value in fixed.items()
                if cfg[key] != value or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
@@ -141,8 +161,11 @@ def normalize_config(config=None):
                 and cfg.version == 'v1.0-mini' and cfg.category_name == 'Car'):
             # 用户追加的半 LR 参考；保留原 StepLR、teacher、模型和旧配置摘要。
             registered.add((.00005, 'step', (), 0))
-        if version == 'v34':
+        if version in ('v34', 'v35'):
             registered = {(lr, 'multistep', (20, 50), 0) for lr in (.0001, .00005, .000025)}
+        if version == 'v35':
+            # 用户追加第四档；不扩大旧v34三档的正式配置范围。
+            registered.add((.00015, 'multistep', (20, 50), 0))
         if recipe not in registered:
             raise ValueError('unregistered formal ' + version + ' learning-rate recipe')
     elif cfg.log_dir:

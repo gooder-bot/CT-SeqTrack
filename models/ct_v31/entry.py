@@ -20,7 +20,7 @@ def batch_limit(value):
 
 
 def parse_config(argv=None):
-    parser = argparse.ArgumentParser(description='CT-SeqTrack v33 joint / v34 joint / independent SeqTrack training and evaluation')
+    parser = argparse.ArgumentParser(description='CT-SeqTrack v33 joint / v34/v35 integrated B0 / independent SeqTrack training and evaluation')
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)

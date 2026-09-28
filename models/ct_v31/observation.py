@@ -15,6 +15,7 @@ from torch import Tensor, nn
 from utils.masked_observation import mask_values, masked_max_pool, masked_sequence
 from .contracts import ObservationFeatures
 from .geometry import anchor_yaw, rotate_xyz, transform_boxes
+from .history_context import history_descriptor
 
 
 def unique_valid_mask(valid: Tensor, point_ids: Tensor | None = None) -> Tensor:
@@ -177,9 +178,14 @@ class FeaturePointNet(nn.Module):
 class B0Observation(nn.Module):
     """一次 B0 前向产生粗定位和两条后续分支需要的真实点特征。"""
 
-    def __init__(self, token_count: int = 128, *, query_context: bool = False):
+    def __init__(self, token_count: int = 128, *, query_context: bool = False,
+                 coarse_condition: bool = False, time_scale: float = .5):
         super().__init__()
         self.query_context = bool(query_context)
+        self.coarse_condition = bool(coarse_condition)
+        self.context_time_scale = float(time_scale)
+        if self.coarse_condition and (not self.query_context or self.context_time_scale <= 0):
+            raise ValueError('v35 coarse conditioning requires query context and positive time_scale')
         self.seg_pointnet = SegPointNet()
         self.mini_pointnet = MiniPointNet()
         self.feature_pointnet = FeaturePointNet(token_count)
@@ -191,6 +197,15 @@ class B0Observation(nn.Module):
         with torch.no_grad():
             self.coarse_box_head[-1].weight[3:].zero_()
             self.coarse_box_head[-1].bias[3:].copy_(torch.tensor([0., 1.]))
+        if self.coarse_condition:
+            # 新条件分支不消耗旧公共模块或后续B1/B2的初始化RNG。
+            with torch.random.fork_rng(devices=[]):
+                self.coarse_history_condition = nn.Sequential(
+                    nn.Linear(36, 64), nn.LayerNorm(64), nn.GELU(), nn.Linear(64, 256))
+                nn.init.xavier_uniform_(self.coarse_history_condition[0].weight)
+                nn.init.zeros_(self.coarse_history_condition[0].bias)
+                nn.init.zeros_(self.coarse_history_condition[-1].weight)
+                nn.init.zeros_(self.coarse_history_condition[-1].bias)
 
     @staticmethod
     def measurement_mask(batch: Mapping[str, Tensor]) -> Tensor:
@@ -285,7 +300,15 @@ class B0Observation(nn.Module):
             torch.log1p(current_count) / math.log1p(count),
             torch.log1p(per_frame_count[:, :3].sum(-1)) / math.log1p(3 * count),
             entropy / math.log(2.), history_valid.to(points.dtype).mean(-1)), dim=-1).detach()
-        coarse, _ = masked_sequence(self.coarse_box_head, pooled, sequence_valid)
+        history_support, current_support = None, None
+        coarse_input = pooled
+        if self.coarse_condition:
+            history_support, current_support = self.observation_support(clean, valid, foreground, boxes, size)
+            descriptor = history_descriptor(batch, boxes, history_valid, size, history_support,
+                                            self.context_time_scale, include_initial=True)
+            condition = self.coarse_history_condition(torch.cat((descriptor, current_support.detach()), dim=-1))
+            coarse_input = pooled + condition
+        coarse, _ = masked_sequence(self.coarse_box_head, coarse_input, sequence_valid)
         nonzero = coarse[:, 3].square() + coarse[:, 4].square() > 1e-12
         yaw = torch.atan2(torch.where(nonzero, coarse[:, 3], 0.),
                           torch.where(nonzero, coarse[:, 4], 1.))
@@ -295,8 +318,8 @@ class B0Observation(nn.Module):
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
             valid.reshape(batch_size * frames, count))
-        history_support, current_support = (self.observation_support(clean, valid, foreground, boxes, size)
-            if self.query_context else (None, None))
+        if self.query_context and not self.coarse_condition:
+            history_support, current_support = self.observation_support(clean, valid, foreground, boxes, size)
         return ObservationFeatures(
             coarse_box=coarse,
             point_features=features.transpose(1, 2).reshape(batch_size, frames, count, 64),

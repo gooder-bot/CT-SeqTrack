@@ -58,10 +58,12 @@ class ReadyQueueBatchSampler(Sampler):
     RESERVE_POLICY = 'stratified_singleton_windows_then_fill_v1'
     DRAIN_POLICY = 'running_b0_bn_from_first_reserve_or_partial_v1'
     SEED_POLICY = 'shared_anchor_local_translation_world_yaw_v1'
+    INITIAL_SEED_POLICY = 'initial_exact_other_perturbed_v1'
 
     def __init__(self, lengths, batch_size=16, *, seed=42, training=True,
                  short_window=3, long_window=8, curriculum_epochs=10, source_sha256='',
-                 reserve_windows=112, seed_translation=.3, seed_yaw_degrees=1.5):
+                 reserve_windows=112, seed_translation=.3, seed_yaw_degrees=1.5,
+                 initial_seed_policy=None):
         self.lengths = tuple(int(n) for n in lengths)
         self.batch_size = int(batch_size)
         self.seed, self.training, self.epoch = int(seed), bool(training), 0
@@ -71,6 +73,9 @@ class ReadyQueueBatchSampler(Sampler):
         self.reserve_windows = int(reserve_windows)
         self.seed_translation = float(seed_translation)
         self.seed_yaw_degrees = float(seed_yaw_degrees)
+        if initial_seed_policy not in (None, self.INITIAL_SEED_POLICY):
+            raise ValueError('unknown initial seed policy')
+        self.initial_seed_policy = initial_seed_policy
         if self.batch_size < 1 or min(self.short_window, self.long_window, self.curriculum_epochs) < 1:
             raise ValueError('v31 batch/window/curriculum sizes must be positive')
         if any(n < 0 for n in self.lengths):
@@ -184,6 +189,9 @@ class ReadyQueueBatchSampler(Sampler):
                        seed_policy=self.SEED_POLICY, seed_translation=self.seed_translation,
                        seed_yaw_degrees=self.seed_yaw_degrees, batches=len(self._materialized()),
                        plan_sha256=digest.hexdigest())
+        # 旧版本不增加键，保持已有 manifest SHA；v35 只增加首测语义身份。
+        if self.initial_seed_policy is not None:
+            payload['initial_seed_policy'] = self.initial_seed_policy
         payload['manifest_sha256'] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         return payload
@@ -320,7 +328,9 @@ def build_loaders(config, roles=('train', 'val'), sources=None):
             source_sha256=raw.source_sha256,
             reserve_windows=int(option(config, 'v32_reserve_windows', 112)),
             seed_translation=float(option(config, 'v32_seed_translation', .3)),
-            seed_yaw_degrees=float(option(config, 'v32_seed_yaw_degrees', 1.5)))
+            seed_yaw_degrees=float(option(config, 'v32_seed_yaw_degrees', 1.5)),
+            initial_seed_policy=(option(config, 'v35_seed_policy', ReadyQueueBatchSampler.INITIAL_SEED_POLICY)
+                if option(config, 'net_model') == 'ctseqtrackv35' else None))
         workers = int(option(config, 'workers', 4))
         kwargs = dict(num_workers=workers, collate_fn=raw_collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
@@ -358,6 +368,8 @@ class BatchBuilder:
     """主进程唯一状态所有者；prepare -> acquire -> commit 是一次事务。"""
     def __init__(self, config):
         self.config = config
+        self.is_v35 = option(config, 'net_model') == 'ctseqtrackv35'
+        self.train_diagnostics = self.is_v35 and bool(option(config, 'v35_train_diagnostics', True))
         self.states = {}
         self._pending = None
 
@@ -374,7 +386,7 @@ class BatchBuilder:
         times = {i: float(frames[i]['timestamp']) for i in seed_ids}
         seed_offset = np.zeros(4, dtype=np.float64)
         provenance = KNOWN_GT_BOX
-        if r.branch in (1, 2, 3):
+        if r.branch in (1, 2, 3) and not (self.is_v35 and r.frame == 1):
             rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
                 row['tracklet_key'], r.state_key, 'window_seed'))
             local_xy = rng.uniform(-float(option(self.config, 'v32_seed_translation', .3)),
@@ -469,6 +481,8 @@ class BatchBuilder:
         n = int(option(self.config, 'point_sample_size', 1024))
         scale, offset = float(option(self.config, 'bb_scale', 1.25)), float(option(self.config, 'bb_offset', 2.))
         points, valid, raw_ids, seg, bc, truth_boxes = [], [], [], [], [], []
+        record_training = self.train_diagnostics and r.branch != 4
+        history_raw_counts, history_crop_counts = [], []
         b0_ids, b0_xyz = None, None
         for slot, frame_id in enumerate(row['history_ids'] + (r.frame,)):
             frame = frames[frame_id]
@@ -498,6 +512,11 @@ class BatchBuilder:
             point_ids[:count] = ids[selected]
             target = box_array(frame['3d_bbox'])
             target_size = box_size(frame['3d_bbox'], frame)
+            if record_training and slot < 3:
+                # 仅被动日志；不存在的历史不借用复制槽的 GT 计数。
+                full_target = inside_box(xyz, target, target_size)
+                history_raw_counts.append(int(full_target.sum()) if history_valid[slot] else 0)
+                history_crop_counts.append(int((full_target & mask).sum()) if history_valid[slot] else 0)
             label = np.full(n, -1, dtype=np.int64)
             label[:count] = inside_box(xyz[selected], target, target_size).astype(np.int64)
             distances = np.zeros((n, 9), dtype=np.float32)
@@ -537,6 +556,12 @@ class BatchBuilder:
             supported_age=np.float32(max(0., now - state.last_supported_time)),
             previous_innovation=np.float32(state.previous_innovation),
             **memory)
+        if self.is_v35:
+            result['history_is_initial'] = (history_valid
+                & (np.asarray(row['history_ids']) == 0) & (history_provenance == KNOWN_GT_BOX))
+        if record_training:
+            result.update(diagnostic_history_raw_target_count=np.asarray(history_raw_counts, dtype=np.int64),
+                          diagnostic_history_crop_target_count=np.asarray(history_crop_counts, dtype=np.int64))
         context = dict(row=row, state=state, anchor=anchor, timestamp=now, recovery=recovery,
                        b0_ids=b0_ids, b0_xyz=b0_xyz, current_gt=current_gt)
         return result, context
@@ -582,7 +607,7 @@ class BatchBuilder:
                          acquisition_target=np.asarray(targets['acquisition_target'], dtype=np.float32),
                          acquisition_valid=np.bool_(targets['acquisition_valid']),
                          acquisition_demand=np.bool_(targets['acquisition_demand']))
-            if not training:
+            if not training or self.train_diagnostics:
                 # 只用于离线诊断的 GT 计数；不改变实际 support、采样、候选或状态。
                 if enable_extension:
                     maximum = build_dual_support(u=np.ones(2), **{
