@@ -116,6 +116,30 @@ def source_identity():
     return dict(sha256=digest, files=hashes)
 
 
+def record_v35_resume(config, root, manifest, *, preserve_existing):
+    """保留首次manifest；只允许已登记的分段调度增量跨源码恢复。"""
+    if not (preserve_existing and config.checkpoint and model_version(config) == 'v35'):
+        return
+    root = Path(root)
+    original = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
+    previous, current = original.get('source'), manifest['source']
+    if previous != current:
+        registration_path = Path(__file__).resolve().parents[2] / 'cfgs/ct_seqtrack/35_piecewise_source_registration.json'
+        registration = json.loads(registration_path.read_text(encoding='utf-8'))
+        if previous != registration['before'] or current != registration['after']:
+            raise ValueError('v35 resume source differs outside the registered piecewise scheduling revision')
+    event = dict(schema='ct_seqtrack.v35.resume_source.v1',
+        original_source_sha256=previous['sha256'], source=current,
+        config_sha256=manifest['config_sha256'], checkpoint=str(Path(config.checkpoint).resolve()),
+        event='validated_epoch_resume_start', created=datetime.now().isoformat())
+    directory = root / 'resume_manifests'
+    directory.mkdir(exist_ok=True)
+    path = directory / (datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '-' + str(os.getpid()) + '.json')
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump(event, stream, ensure_ascii=False, indent=2)
+        stream.write('\n')
+
+
 def run(config, *, loaders=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
     configure_numerics()
@@ -151,6 +175,7 @@ def run(config, *, loaders=None):
     if config.net_model == 'seqtrack_reference':
         from models.seqtrack_reference.protocol import protocol_identity
         manifest['reference_protocol'] = protocol_identity()
+    record_v35_resume(config, root, manifest, preserve_existing=preserve_metadata)
     write_run_metadata(config, root, manifest, preserve_existing=preserve_metadata)
     console_manifest = {key: value for key, value in manifest.items()
                         if key not in ('source', 'reference_protocol')}

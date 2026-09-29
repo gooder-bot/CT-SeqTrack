@@ -1,10 +1,14 @@
 # CT-SeqTrack
 
+2026-09-29本次piecewise调度与恢复增量已完成本地验证：**554 passed、3 skipped**，25份旧配置文件及身份SHA不变。由用户提交GitHub、服务器拉取后按[最新五组命令](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)恢复原四组并启动新组；[验证报告](artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/REPORT.md)。
+
 CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前新增 **v35 B0 综合优化**：在 v34 W=1/4/4/8 的基础上，对齐真实首测初始化、为 coarse 提供显式合法历史条件、为 fine 提供候选局部真实点证据。活动代码仍在 `models/ct_v31/`；v33/v34/reference 原行为与权重身份继续兼容。
 
-v35按用户最新要求比较四档LR（2.5e-5/5e-5/1e-4/1.5e-4），GPU依次0/0/1/1，均seed42、scratch60、20/50衰减、无warmup，结构及其他单组参数不变。当前只启动四次训练；原条件第二seed复验保留，达标后再补胜出配方与独立SeqTrack各一次，合计上限相应为六次，不自动执行。保留固定R/C门槛和旧W-quarter对照，不读取旧权重初始化。结构、诊断和边界见 [v35说明](docs/B0_V35_INTEGRATED.md)，四段独立后台命令和新终端tail见 [操作说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)。正式CUDA检查和新训练由用户执行，代理服务器只读。
+**2026-09-29追加第5组piecewise，覆盖此前四组总数。** 原四组LR=2.5e-5/5e-5/1e-4/1.5e-4已完成36轮；13:33只读复查确认用户已暂停四组，各自完整checkpoint均为`epoch=036.ckpt`。共同最新validation35，尚无正式final60/late-3。本次仅新增一组：第1–20轮5e-5、第21–50轮1e-5、第51–60轮5e-6；仍seed42、scratch60、W=1/4/4/8、无warmup，网络、loss、数据及其他单组参数不变。五组合计300epoch、358,500更新；仅达标后补胜出完整配方seed52与独立SeqTrack seed52，条件上限七次、420epoch、501,900更新，不自动启动。
 
-**截至2026-09-28，v34八组已全部完成。** W-quarter final60 S/P=51.4650/62.8435，late-3=51.2527/62.6765；Precision高于R，Success及移动守底未全通过，不能晋级Full。[八组正式复盘](artifacts/ct_checks/20260928_v34_eight_run_review/REPORT.md)。v35尚无正式成绩。下方v33数字和启动文字为历史记录，不覆盖本段当前状态。
+保留固定R/C门槛和旧W-quarter风险对照。用户暂停已完成，接下来更新同一活动项目，从各自原036 checkpoint恢复四组、第37轮继续，GPU仍0/0/1/1；然后在GPU1从头启动piecewise并使用新输出目录。原四组恢复保持各自配置与运行目录，保留最初manifest，另记`resume_manifests/`；仅接受固定before/after源码关系，旧训练日志追加写入，不覆盖旧output/artifacts。新组不读取旧权重初始化。新增配置、调度解释及精确操作顺序见 [piecewise操作说明](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)，结构见 [v35说明](docs/B0_V35_INTEGRATED.md)。[原四组操作页](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)继续用于查询已有运行；不要重新执行四组scratch命令。此次只改调度，不重复要求CUDA batch检查，代理服务器权限仍为只读。
+
+**截至2026-09-28，v34八组已全部完成。** W-quarter final60 S/P=51.4650/62.8435，late-3=51.2527/62.6765；Precision高于R，Success及移动守底未全通过，不能晋级Full。[八组正式复盘](artifacts/ct_checks/20260928_v34_eight_run_review/REPORT.md)。v35阶段状态见[9月29日只读快照](artifacts/ct_checks/20260929-130405_v35_four_run_status/server_snapshot.json)，同轮次历史对照见[逐项证据](artifacts/ct_checks/20260929-130405_v35_four_run_status/historical_comparison.json)；中途validation不替代正式验收。下方v33数字和启动文字为历史记录，不覆盖本段当前状态。
 
 **本轮明确优化严重漂移与持续失跟。** 方案1只表示保留原总体/移动硬门、单列漂移风险，不新增漂移数值硬门，不表示仅记录或推迟修复。综合改法及其成因对应见[v35结构说明](docs/B0_V35_INTEGRATED.md)；>10m计数增加时暂停Full待复核，小幅孤立波动不自动否决方案，明显持续退化必须处理。原硬门结果与风险结论分开报告，统一口径见[实验协议](docs/EXPERIMENT_PROTOCOL.md)。
 
@@ -66,20 +70,17 @@ v32 nuScenes-mini Car、seed42，全部 scratch60、71,700 次优化；评测 10
 
 ## 入口与评测
 
-唯一入口为 `main.py`：
+唯一入口为`main.py`；本次唯一新增scratch配方的入口示例：
 
 ```bash
-python main.py --cfg cfgs/ct_seqtrack/35_b0_w_quarter_lr_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/35_b0_w_half_lr_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/35_b0_w_normal_lr_mini.yaml --path DATA_ROOT
-python main.py --cfg cfgs/ct_seqtrack/35_b0_w_scaled_lr_mini.yaml --path DATA_ROOT
+python main.py --cfg cfgs/ct_seqtrack/35_b0_w_piecewise_lr_mini.yaml --path DATA_ROOT
 ```
 
-以上为当前四组入口示例；物理卡绑定与独立输出目录使用[v35运行说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)中的命令。第二seed须等第一阶段通过后再运行，seed42独立SeqTrack参考直接复用。默认每 5 轮验证，训练结束自动评测 58/59/60 并保存逐帧记录及 `results.json`。比较固定 final60 和 late-3，不挑选最佳轮次。不要传旧 `--preloading` 参数；当前按需读取原始点云，每 worker 缓存 256MiB。
+原四组须使用各自checkpoint和原log_dir恢复，仅piecewise从头运行，完整命令见[新增第5组说明](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)。五组完整后用`tools/compare_v35_piecewise_b0.py`比较，保留旧四组工具用于原四组复核。第二seed须等第一阶段通过后再运行，seed42独立SeqTrack参考直接复用。默认每5轮验证，训练结束自动评测58/59/60并保存逐帧记录及`results.json`。比较固定final60和late-3，不挑选最佳轮次。不要传旧`--preloading`参数；当前按需读取原始点云，每worker缓存256MiB。
 
 ## 验证与边界
 
-v35本地实现、旧版本兼容、诊断无干预、真实Lightning入口和epoch恢复已验证；最新四组版本完整pytest为515 passed、3 skipped，compileall与diff检查通过，详见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。两项跳过需要真实CUDA，另一项只测试缺失Lightning的环境；本地已安装Lightning时不适用。新增参数36,608（约0.99%）。真实CUDA成本与正式成绩仍待用户上传后验证；此前三组实现过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)。
+v35原四组版本的本地实现、旧版本兼容、诊断无干预、真实Lightning入口和epoch恢复已验证；该版本完整pytest为515 passed、3 skipped，compileall与diff检查通过，详见[9月28日就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。两项跳过需要真实CUDA，另一项只测试缺失Lightning的环境；本地已安装Lightning时不适用。新增参数36,608（约0.99%）。第5组仅新增调度，实施与验证证据单列在`artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/`，不把旧测试结果冒充本次验证。此前三组实现过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)。
 
 此前服务器快照检查 **314 passed、1 skipped**，真实 CUDA batch 的 forward/backward/Adam/commit 已通过，未保存工程 checkpoint。日志与报告位于 [v33 检查目录](artifacts/ct_checks/20260924-190116_v33_implementation/)。后续被动汇总增量单独记录本地验证；这些历史检查不替代正式结果验收。六组完成状态以 2026-09-26 复盘为准，无需把同一工程检查反复作为启动步骤。
 

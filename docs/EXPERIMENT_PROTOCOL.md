@@ -1,16 +1,18 @@
 # CT-SeqTrack 实验协议
 
-## 当前 v35：W基础上的综合结构，四档LR与条件第二seed
+## 当前 v35：四组恢复与新增piecewise，共五组及条件第二seed
 
-2026-09-28用户确认 [v35综合方案](B0_V35_INTEGRATED.md)。首测精确初框、合法历史条件与候选局部真实点读取作为统一版本；保留现有loss、全局pooling、W=1/4/4/8、十轮课程及112 reserve。所有正式模型scratch60、batch16、FP32、每轮19,108行/1,195更新，60轮71,700更新。
+2026-09-29更新，覆盖此前四组总数。用户确认的 [v35综合方案](B0_V35_INTEGRATED.md) 保持：首测精确初框、合法历史条件与候选局部真实点读取作为统一版本；保留现有loss、全局pooling、W=1/4/4/8、十轮课程及112 reserve。所有正式模型从epoch0随机初始化建立运行，batch16、FP32、每轮19,108行/1,195更新，完整60轮71,700更新；相同运行的完整epoch恢复不构成新实验。
 
-用户本次明确将首阶段追加为seed42四档LR=2.5e-5/5e-5/1e-4/1.5e-4，物理GPU依次0/0/1/1，每卡两个独立单卡进程；其余参数保持。四组均20/50衰减、无warmup，合计240epoch、286,800更新。此请求覆盖此前三档/最多五次安排，1.5e-4是用户预先登记的新探索档，不是因某次结果未过线而自动扩搜索。
+原seed42四组quarter/half/normal/scaled（初始LR=2.5e-5/5e-5/1e-4/1.5e-4，20/50轮后各乘0.1，无warmup）已完成36轮。9月29日13:33只读确认用户已暂停四组，各自完整checkpoint均为036。用户将更新同一活动项目，保持各自配置和log_dir，从036恢复、由第37轮继续，物理GPU仍0/0/1/1；原manifest和旧产物不得改写。
 
-仅原硬门通过后，锁定胜出配方补seed52，并运行独立SeqTrack正常1e-4、20/40衰减的seed52；数据划分始终seed42。保留这两次条件复验后，合计上限相应为六次、360epoch、430,200更新；当前只启动四组seed42，不自动执行后续训练。四档均失败则停止，不增加其他窗口、LR或warmup对照。已有R/C/W-quarter复用，不使用任何旧checkpoint初始化。
+用户明确只追加第5组piecewise，在GPU1从epoch0随机初始化：第1–20轮5e-5、第21–50轮1e-5、第51–60轮5e-6；`lr_schedule=piecewise`、`lr_stage_values=[5e-5,1e-5,5e-6]`、`lr_milestones=[20,50]`、warmup0。完成20/50轮后的调度分别作用于第21/51轮首次更新，其他单组参数不变。原half前20轮相同，后两阶段分别为5e-6和5e-7，因此piecewise分别为其2倍和10倍。这比较的是完整调度，不能归因为单一固定LR变化，也不能从half checkpoint转换配方续训。
 
-硬门仍为总体final60/late-3四项≥固定R、固定31条曾移动轨迹全程657预测帧四项≥旧C。通过者按final60 Success、Precision降序，完全相同时按LR升序。第二seed对照不替换固定R/C门槛。原始帧重算，初始化按原口径计入总体。严重漂移采用下述方案1：原硬门结果与漂移风险复核分开记录，不要求其他切片全胜。
+首阶段共五次、300epoch、358,500更新。仅原硬门通过后，锁定胜出完整配方补seed52，并运行独立SeqTrack正常1e-4、20/40衰减的seed52；数据划分始终seed42。保留这两次条件复验后，合计上限七次、420epoch、501,900更新；不自动执行后续训练。五组均失败则停止，不增加其他窗口、LR或warmup对照。已有R/C/W-quarter复用，piecewise不使用任何旧checkpoint初始化。
 
-v35身份为ctseqtrackv35/ct_seqtrack_v35，schema=ct_seqtrack.joint_identity.v35，checkpoint runtime=ct_v35_runtime；跨版本、LR、seed恢复禁止。正式诊断开启且不得改变学习。新结构只登记mini B0正式配置，Full保留工程合同。服务器由用户上传和启动，代理只读。具体文件和命令见 [v35启动说明](CTSEQTRACK_V35_MINI_LAUNCH.md)。
+硬门仍为总体final60/late-3四项≥固定R、固定31条曾移动轨迹全程657预测帧四项≥旧C。五组完整后，通过者按final60 Success、Precision降序，完全相同时按初始LR升序；初始LR也同为5e-5时，预登记原half优先piecewise。旧四组工具`compare_v35_b0.py`保留；新增`compare_v35_piecewise_b0.py`要求原四组参数及`--piecewise`均完整，才作五组评选。第二seed锁定完整调度，其同seed对照不替换固定R/C门槛。原始帧重算，初始化按原口径计入总体。严重漂移采用下述方案1：原硬门结果与漂移风险复核分开记录，不要求其他切片全胜。
+
+v35身份为ctseqtrackv35/ct_seqtrack_v35，schema=ct_seqtrack.joint_identity.v35，checkpoint runtime=ct_v35_runtime；跨版本、配方、seed恢复禁止。此次原四组迁移仅接受登记的精确before/after源码关系，旧配方计算不变；保留最初`run_manifest.json`并在`resume_manifests/`追加恢复来源，不通过改写旧manifest或关闭源码检查放行。正式诊断开启且不得改变学习。新结构只登记mini B0正式配置，Full保留工程合同。此次只新增调度，不把重复CUDA batch作为前置；服务器由用户上传、恢复和启动，代理只读。具体文件和命令见 [piecewise与四组恢复说明](CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)。
 
 ### 严重漂移方案1：本轮要优化，验收不新增数值硬门
 

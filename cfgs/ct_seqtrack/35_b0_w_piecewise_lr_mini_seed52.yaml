@@ -1,0 +1,5 @@
+# v35 第五档seed52预备配置；仅在首阶段胜出并获准复验后运行。
+_base_: 35_b0_w_piecewise_lr_mini.yaml
+experiment_name: ct35_b0_w_piecewise_lr_mini_car_scratch_seed52
+tag: b0_w_piecewise_lr_mini_car_seed52_60ep_bs16
+seed: 52

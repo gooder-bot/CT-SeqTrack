@@ -16,7 +16,7 @@ except ModuleNotFoundError as error:
 
 from models.ct_v31.config import normalize_config, config_identity
 from models.ct_v31.data import BatchBuilder, build_loaders, stable_seed
-from models.ct_v31.lr_schedule import WarmupMultiStepLR
+from models.ct_v31.lr_schedule import AbsolutePiecewiseLR, WarmupMultiStepLR
 from models.ct_v31.identity import model_schema, model_version, runtime_key, training_audit_schema
 from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
@@ -120,6 +120,10 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
             scheduler = WarmupMultiStepLR(optimizer, warmup_steps=self.config.lr_warmup_steps,
                 milestones=self.config.lr_milestones, gamma=self.config.lr_decay_rate)
             return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='step'))
+        if self.config.lr_schedule == 'piecewise':
+            scheduler = AbsolutePiecewiseLR(optimizer, milestones=self.config.lr_milestones,
+                stage_values=self.config.lr_stage_values)
+            return dict(optimizer=optimizer, lr_scheduler=dict(scheduler=scheduler, interval='epoch'))
         if self.config.lr_schedule == 'multistep':
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=self.config.lr_milestones, gamma=self.config.lr_decay_rate)

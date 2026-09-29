@@ -1,12 +1,15 @@
 # CT-SeqTrack 工具范围
 
-## 当前 v35 工具
+## 当前 v35 工具（2026-09-29：四组恢复与新增piecewise）
 
-- 唯一正式入口保持 `main.py`；`35_b0_w_{quarter,half,normal,scaled}_lr_mini.yaml` 四份seed42配置对应2.5e-5/5e-5/1e-4/1.5e-4，GPU0/0/1/1。当前仅运行这四组；对应seed52配置预备，达标后只运行胜出的一份并另加独立SeqTrack，保留原条件阶段后总上限相应为六次。
-- `tools/check_v35_batch.py`：用户上传后执行一次真实CUDA batch16的forward/backward/Adam/commit检查，不保存checkpoint，不重复按四档LR检查。
-- `tools/compare_v35_b0.py`：只读重算四档完整58/59/60逐帧结果，`--quarter --half --normal --scaled`均必填。以原逐帧SHA锁定R/C/旧B0/W-quarter，固定门槛、较低LR破完全并列；记录>5m/>10m、raw0–2和raw可见coarse/fine等解释性统计。可附加锁定LR的新版本seed52和原正常SeqTrack seed52，分别报告固定R/C及同seed差值，并核对原reference协议。
+- 唯一正式入口保持`main.py`。原`35_b0_w_{quarter,half,normal,scaled}_lr_mini.yaml`四组已由用户暂停，各自完整checkpoint均为036；更新同一活动项目后使用原cfg、原log_dir和各自036 checkpoint恢复，GPU0/0/1/1，第37轮继续。原`run_manifest.json`保持，`resume_manifests/`追加迁移来源，旧日志使用追加写入。
+- 新增`35_b0_w_piecewise_lr_mini.yaml`在GPU1 scratch60：1–20轮5e-5、21–50轮1e-5、51–60轮5e-6；seed42、无warmup、W及其他单组参数不变。`35_b0_w_piecewise_lr_mini_seed52.yaml`仅作预备。首阶段五次、358,500更新；达标后只补胜出完整配方seed52及独立SeqTrack seed52，条件上限七次、501,900更新，不自动启动。
+- `tools/check_v35_batch.py`仍保留一次真实CUDA batch16的forward/backward/Adam/commit工程检查能力，不保存checkpoint；本次只改调度，不把重复运行它设为恢复四组或启动第5组的前置。
+- `tools/compare_v35_b0.py`独立保留，用于原四组完整58/59/60结果比较，`--quarter --half --normal --scaled`均必填；不将piecewise混入旧四组入口。
+- 新增`tools/compare_v35_piecewise_b0.py`：保留旧入口的固定对照参数，再要求`--quarter --half --normal --scaled --piecewise`五组完整。以原逐帧SHA锁定R/C/旧B0/W-quarter，原硬门与漂移风险分离；排序为final60 S/P、较低初始LR，仍同分同初始LR时原half优先piecewise。旧四组和新配方的源码差异仅接受本次登记的精确before/after文件SHA；按原manifest和追加resume来源核验，不能泛化取消源码检查。
+- 两个比较入口均重算原始帧，保留>5m/>10m、raw0–2和raw可见coarse/fine等解释性统计。可附加锁定完整配方的新版seed52及原正常SeqTrack seed52，分别报告固定R/C与同seed差值，并核对原reference协议；不得重新选择学习率调度。
 - 比较默认stdout JSON；`--output`只允许ct_checks下的新文件。返回0表示原硬门有通过者，1表示完整证据未达标，2表示证据无效；漂移风险和第二seed稳定性另行报告，不能把返回0直接写成Full可启动。
-- 结构与完整CLI见 [v35说明](B0_V35_INTEGRATED.md) 和 [v35操作页](CTSEQTRACK_V35_MINI_LAUNCH.md)。旧工具和配置继续用于重现，禁止覆盖旧实验。
+- 结构与完整CLI见 [v35说明](B0_V35_INTEGRATED.md) 和 [piecewise与恢复操作页](CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)。本次实施及验证证据位于`artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/`。旧工具和配置继续用于重现，禁止覆盖旧实验。
 
 ## v34 历史工具
 

@@ -51,6 +51,9 @@ def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
     is_v35 = supplied.get('net_model') == 'ctseqtrackv35'
     defaults = dict(DEFAULTS, **V35_DEFAULTS) if is_v35 else DEFAULTS
+    if is_v35 and supplied.get('lr_schedule') == 'piecewise':
+        # 仅新配方包含该字段；旧配置内容和身份摘要完全保持。
+        defaults = dict(defaults, lr_stage_values=())
     unknown = sorted(set(supplied) - set(defaults))
     if unknown:
         raise ValueError('v33 unknown/inactive configuration keys: ' + ', '.join(unknown))
@@ -104,9 +107,11 @@ def normalize_config(config=None):
             or cfg.lr_warmup_steps < 0):
         raise ValueError('lr_warmup_steps must be a nonnegative integer')
     import math
-    if (cfg.lr_schedule not in ('step', 'multistep')
+    if (cfg.lr_schedule not in ('step', 'multistep', 'piecewise')
             or not isinstance(cfg.lr_milestones, (list, tuple))):
-        raise ValueError('v33 requires step or multistep and a list of lr_milestones')
+        raise ValueError('requires step, multistep or v35 piecewise and a list of lr_milestones')
+    if cfg.lr_schedule == 'piecewise' and not is_v35:
+        raise ValueError('piecewise learning-rate schedule is registered only for v35')
     if cfg.lr_warmup_steps > 0 and cfg.lr_schedule != 'multistep':
         raise ValueError('positive lr_warmup_steps requires lr_schedule=multistep')
     milestones = cfg.lr_milestones
@@ -114,10 +119,19 @@ def normalize_config(config=None):
             for value in milestones) or list(milestones) != sorted(set(milestones))):
         raise ValueError('lr_milestones must be strictly increasing positive integers')
     cfg.lr_milestones = list(milestones)
-    if (cfg.lr_schedule == 'step' and milestones) or (cfg.lr_schedule == 'multistep' and not milestones):
-        raise ValueError('step uses no lr_milestones; multistep requires lr_milestones')
+    if (cfg.lr_schedule == 'step' and milestones) or (cfg.lr_schedule in ('multistep', 'piecewise') and not milestones):
+        raise ValueError('step uses no lr_milestones; multistep/piecewise requires lr_milestones')
     if not math.isfinite(cfg.lr) or not math.isfinite(cfg.lr_decay_rate) or not 0 < cfg.lr_decay_rate < 1:
         raise ValueError('learning rate must be finite and decay rate must be in (0,1)')
+    if cfg.lr_schedule == 'piecewise':
+        values = cfg.lr_stage_values
+        if (not isinstance(values, (list, tuple)) or len(values) != len(milestones) + 1
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       or not math.isfinite(v) or v <= 0 for v in values)):
+            raise ValueError('piecewise requires one positive finite lr_stage_values entry per stage')
+        if values[0] != cfg.lr:
+            raise ValueError('piecewise lr must equal the first lr_stage_values entry')
+        cfg.lr_stage_values = list(values)
     if any(not math.isfinite(float(cfg[key])) or cfg[key] < 0
            for key in ('v32_seed_translation', 'v32_seed_yaw_degrees')):
         raise ValueError('v32 seed perturbation bounds must be finite and nonnegative')
@@ -166,6 +180,9 @@ def normalize_config(config=None):
         if version == 'v35':
             # 用户追加第四档；不扩大旧v34三档的正式配置范围。
             registered.add((.00015, 'multistep', (20, 50), 0))
+            # 第五档是明确登记的绝对三段值，不扩大其他piecewise配方。
+            if cfg.lr_schedule == 'piecewise' and cfg.lr_stage_values == [.00005, .00001, .000005]:
+                registered.add((.00005, 'piecewise', (20, 50), 0))
         if recipe not in registered:
             raise ValueError('unregistered formal ' + version + ' learning-rate recipe')
     elif cfg.log_dir:

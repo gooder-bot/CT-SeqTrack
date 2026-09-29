@@ -84,8 +84,10 @@ def _sampler(value, config, epoch, label):
     return _sha256(value.get('source_sha256'), label + '.source_sha256')
 
 
-def read_run(directory, label, *, expected_lr=None, expected_seed=42):
+def read_run(directory, label, *, expected_lr=None, expected_seed=42, expected_schedule='multistep'):
     require(label in LABELS, '未登记的比较角色: ' + str(label))
+    require(expected_schedule == 'multistep' or (label == 'v35' and expected_schedule == 'piecewise'),
+            '未登记的调度比较角色')
     allowed_lrs = (tuple(RECIPES.values()) if label == 'v35' else
                   (CONTEXT_LRS if label in ('S', 'W') else
                    ((1e-4, 5e-5) if label == 'reference' else
@@ -112,7 +114,9 @@ def read_run(directory, label, *, expected_lr=None, expected_seed=42):
                     v31_short_window=4 if label in ('W', 'v35') else 3)
     expected['lr'] = expected_lr
     if label in ('baseline', 'S', 'W', 'v35'):
-        expected.update(lr_schedule='multistep', lr_milestones=[20, 50])
+        expected.update(lr_schedule=expected_schedule, lr_milestones=[20, 50])
+    if expected_schedule == 'piecewise':
+        expected.update(lr=5e-5, lr_stage_values=[5e-5, 1e-5, 5e-6])
     equal_fields(config, expected, label + '.config')
     if label == 'v35':
         for key, value in V35_DEFAULTS.items():

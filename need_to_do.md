@@ -1,6 +1,8 @@
-# CT-SeqTrack 当前状态（2026-09-28）
+# CT-SeqTrack 当前状态（2026-09-29）
 
-## v35 综合实现与四组mini单seed（当前）
+## v35 原四组暂停恢复与新增第5组piecewise（当前）
+
+本节覆盖此前首阶段四次/条件最多六次安排。用户已暂停原四组，接下来更新同一活动项目，再从各自完整`epoch=036.ckpt`恢复四组（GPU0/0/1/1）并从第37轮继续，在GPU1从头启动piecewise；代理只读服务器，不执行停止、上传或启动。首阶段五次、300epoch、358,500更新；仅通过后保留两次条件seed52复验，总上限七次、420epoch、501,900更新，不自动追加。
 
 - [x] v34八组已完成并复盘；W-quarter最接近总体目标，但未通过总体/移动双门槛，见 [八组报告](artifacts/ct_checks/20260928_v34_eight_run_review/REPORT.md)。下方旧待启动条目均为历史。
 - [x] 用户已批准统一v35：首测对齐、coarse合法历史条件、fine候选局部真实点；保留W课程、loss、采样和共享头。详见 [结构说明](docs/B0_V35_INTEGRATED.md)。
@@ -8,11 +10,14 @@
 - [x] 结构说明已对应首次缺测、历史参照不足、fine错误细化及后续crop偏移给出综合改法；没有把漂移留到Full再处理或额外堆模块。
 - [ ] 正式结果产生后核对上述机制的实际效果与剩余问题；实现完成不等于已解决漂移。
 - [x] 完成本地实现、旧版本兼容、诊断不干预、完整epoch恢复与pytest/compileall/diff检查。最新四组版本全套515 passed、3 skipped（两项需要真实CUDA，一项缺失Lightning分支在已安装环境不适用），无失败；见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。此前CLI/测试路径问题的修复过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)，操作见[运行说明](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)。
-- [ ] 用户上传后执行一次v35真实CUDA batch；代理不上传、不启动任务。
-- [x] 按用户最新要求登记四档LR=2.5e-5/5e-5/1e-4/1.5e-4，GPU0/0/1/1；新增第四档配置和四组完整比较入口，其他单组参数保持。最新命令与新终端tail见[启动页](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)，本次新包与核验见[就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。旧三组报告/上传包保留为历史。
-- [ ] 用户启动四组seed42，各scratch60，共286,800更新；固定R/C原门槛，报告final60/late-3的>5m、>10m与未恢复失跟，区分原硬门结果和风险复核结论。
+- [x] 原四组seed42已在GPU0/0/1/1运行，9月29日只读状态为第36/37轮、共同最新validation35；[服务器快照](artifacts/ct_checks/20260929-130405_v35_four_run_status/server_snapshot.json)与[同轮历史对照](artifacts/ct_checks/20260929-130405_v35_four_run_status/historical_comparison.json)已留存。尚无正式final60/late-3，中途分数不作验收。
+- [x] 用户明确追加piecewise：第1–20轮5e-5、第21–50轮1e-5、第51–60轮5e-6，其他单组参数保持。相对原half前20轮相同，之后为2倍和10倍；这是完整调度对照，不是一个固定LR倍数。新配置为`35_b0_w_piecewise_lr_mini.yaml`及seed52预备配置。
+- [x] 完成本次调度、旧四组精确源码迁移恢复及五组比较验证：全仓554 passed、3 skipped，compileall、diff及五条Bash命令检查通过；25份旧配置文件及身份SHA不变。证据见[本次报告](artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/REPORT.md)。本地更新由用户提交GitHub，服务器拉取后恢复；原四组工具和配置身份保留，此次不重复要求真实CUDA batch检查。
+- [x] 9月29日13:33只读确认用户已停四组，原PID均不存在、日志有SIGTERM，各自完整checkpoint均为036；停止后的证据见`artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/process_snapshot_2.json`。
+- [ ] 用户上传本次源码后保持原配置、原log_dir及各自036 checkpoint恢复，从第37轮继续；最初`run_manifest.json`保留，新增`resume_manifests/`记录迁移来源，旧日志仅追加。随后仅新增piecewise scratch60，物理GPU1。操作见[第5组与恢复说明](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)，不重新执行[旧四组scratch命令](docs/CTSEQTRACK_V35_MINI_LAUNCH.md)。
+- [ ] 五组全部完成后使用`tools/compare_v35_piecewise_b0.py`与固定R/C原门槛比较；报告final60/late-3的>5m、>10m与未恢复失跟，区分原硬门结果和风险复核结论。排序依次为final60 S/P、较低初始LR；仍同分同初始LR时原half优先piecewise。
 - [ ] >10m计数增加时暂停Full待复核，结合轨迹、持续时长及逐轮表现判断；小幅孤立波动不自动判失败，明显持续退化须处理并讨论，不为某个漂移计数自动增加训练。
-- [ ] 仅通过后锁定胜出配方补seed52和独立SeqTrack seed52；保留原两次条件复验后总上限相应为六次、430,200更新，当前只启动四组，不自动执行后续。
+- [ ] 仅通过后锁定胜出完整配方补seed52和独立SeqTrack seed52；保留两次条件复验后总上限七次、420epoch、501,900更新，当前仅登记五组seed42，不自动执行后续。
 - [ ] 新版尚无正式成绩；通过及稳定性证据充分后再讨论Full。
 
 ## 历史：v34 八组安排（已于9月28日完成，以本页顶部状态为准）

@@ -1,0 +1,10 @@
+# v35 第五档绝对分段学习率，seed42，从零训练；其余单组协议保持。
+_base_: 35_formal_base.yaml
+experiment_name: ct35_b0_w_piecewise_lr_mini_car_scratch_seed42
+tag: b0_w_piecewise_lr_mini_car_seed42_60ep_bs16
+seed: 42
+lr: 0.00005
+lr_schedule: piecewise
+lr_milestones: [20, 50]
+lr_stage_values: [0.00005, 0.00001, 0.000005]
+lr_warmup_steps: 0
