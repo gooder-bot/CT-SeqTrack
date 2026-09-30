@@ -1,0 +1,6 @@
+# v35 W六组：2e-4探索档，seed42，从零训练；其余参数保持。
+_base_: 35_formal_base.yaml
+experiment_name: ct35_b0_w_double_lr_mini_car_scratch_seed42
+tag: b0_w_double_lr_mini_car_seed42_60ep_bs16
+seed: 42
+lr: 0.00020000

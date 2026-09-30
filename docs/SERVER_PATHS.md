@@ -1,6 +1,6 @@
 # CT-SeqTrack 当前服务器路径
 
-服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。2026-09-28 18:59只读核验：原环境/mini数据有效、未发现CT-SeqTrack训练进程、服务器尚无v35配置。用户本次选择四组seed42，GPU0/0/1/1；由用户上传、执行一次真实CUDA检查并启动，条件满足后才保留两次seed52复验。代理不上传、不安装、不启动或停止进程。最新命令见 [v35运行说明](CTSEQTRACK_V35_MINI_LAUNCH.md)。
+服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。2026-09-30当前安排是[六组新训练](CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，旧五组seed42已完成；由用户上传和启动，代理不上传、不安装、不启动或停止进程。本次仅追加配置及LR登记，不重复要求真实CUDA batch。下方环境和空闲量来自9月28日历史只读快照，本次未查询服务器当前资源。
 
 ## 数据根
 
@@ -25,4 +25,4 @@ export PYTHONPATH="${CTSEQ_NUSCENES_PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 不使用旧 `--preloading`；当前原始云按需读取，每worker缓存256MiB。使用 `CUDA_VISIBLE_DEVICES` 选择物理卡，每进程仍为单卡；设置 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1`、`PYTORCH_CUDA_ALLOC_CONF=backend:native` 和 `CUBLAS_WORKSPACE_CONFIG=:4096:8`。
 
-本轮命令见 [v35运行说明](CTSEQTRACK_V35_MINI_LAUNCH.md)，当前协议与工具见 [工具面](FORMAL_TOOLING.md)。旧版本的服务器测试与真实CUDA batch证据不替代v35的真实批次验证。用户上传后执行一次新的v35批次检查；本轮不迁移原环境。旧版本命令仅供 [历史索引](HISTORY_EVIDENCE_INDEX.md) 复现。
+本轮命令见 [v35 W六组说明](CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，当前协议与工具见 [工具面](FORMAL_TOOLING.md)。此前v35五次完整正式运行是现有计算路径的运行证据；本次不改计算路径、不迁移环境、不重复增加CUDA批次前置。旧版本命令仅供 [历史索引](HISTORY_EVIDENCE_INDEX.md) 复现。

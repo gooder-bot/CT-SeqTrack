@@ -180,6 +180,8 @@ def normalize_config(config=None):
         if version == 'v35':
             # 用户追加第四档；不扩大旧v34三档的正式配置范围。
             registered.add((.00015, 'multistep', (20, 50), 0))
+            # 9/30 W六组追加2e-4；仅登记配方，沿用现有20/50调度计算。
+            registered.add((.0002, 'multistep', (20, 50), 0))
             # 第五档是明确登记的绝对三段值，不扩大其他piecewise配方。
             if cfg.lr_schedule == 'piecewise' and cfg.lr_stage_values == [.00005, .00001, .000005]:
                 registered.add((.00005, 'piecewise', (20, 50), 0))

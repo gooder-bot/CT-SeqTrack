@@ -1,6 +1,19 @@
-# CT-SeqTrack 当前状态（2026-09-29）
+# CT-SeqTrack 当前状态（2026-09-30）
 
-## v35 原四组暂停恢复与新增第5组piecewise（当前）
+## v35五组完成与正式复盘（当前）
+
+- [x] 五组seed42均完成60轮，完整训练预算和恢复记录已核对，已在本地output从原帧重算final60及late-3。见[正式复盘](artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。
+- [x] 唯一通过原总体及移动门槛的是scaled（初始LR1.5e-4、20/50后各乘0.1）：final60 S/P=52.3162/62.0230，late-3=53.7629/64.6080；相对固定R四项均正。piecewise仅末轮最高，未通过late-3，不替换胜出者。
+- [x] 已检查首测、可见coarse/fine、移动、>5m/>10m、持续失跟、训练覆盖及quality状态职责。移动和可见fine改善；首测raw0仍弱，持续失跟尚未解决。>10m相对旧W-quarter未恶化，末轮仍高于R；不改写原硬门。
+- [x] 用户确认下一轮六组：scaled52、piecewise52、独立SeqTrack正常52、W double42（2e-4）、half52、quarter52。五组B0均v35 W；新增double配置及一条正式配方登记，其余五份seed52配置原样复用，不改模型/训练计算。配置清单及操作见[六组启动说明](docs/CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)。
+- [x] 六组本地就绪验证：554 passed、3 skipped；27份旧YAML及配置身份不变，60轮实际LR、13块Bash语法、六组CLI参数、compileall和diff检查通过。[交付记录](artifacts/ct_checks/20260930-190740_v35_w_six_run_configs/REPORT.md)。
+- [ ] 用户上传后启动六次scratch60，数据划分仍seed42，总计360epoch、430,200更新；GPU0为scaled/half/quarter，GPU1为piecewise/double/独立参考。当前尚未启动，代理未访问或修改服务器。
+- [ ] 六组完成后结合已有seed42结果，报告final60/late-3、固定R/C及同seed参考差值、移动与漂移风险；四配方各两seed，高LR2e-4仅seed42探索。不自动追加训练，不由本轮推断W优于S。
+- [ ] 结果支持并完成风险复核后再登记v35的B1/B1+B2/Full正式臂；当前只有mini B0正式配置。用户选择不再新增v34实验，既有结果仅作历史证据；各结构独立收益尚未完成归因。
+
+当前已得结论仍限于mini、seed42。上述明确六组授权覆盖此前只补两次及“不继续加LR”的建议；固定final60/late-3、原门槛及停止自动搜索原则保持。下方9月29日及更早未勾选的启动/完成项均为历史状态，不覆盖本节。
+
+## v35 原四组暂停恢复与新增第5组piecewise（9月29日历史）
 
 本节覆盖此前首阶段四次/条件最多六次安排。用户已暂停原四组，接下来更新同一活动项目，再从各自完整`epoch=036.ckpt`恢复四组（GPU0/0/1/1）并从第37轮继续，在GPU1从头启动piecewise；代理只读服务器，不执行停止、上传或启动。首阶段五次、300epoch、358,500更新；仅通过后保留两次条件seed52复验，总上限七次、420epoch、501,900更新，不自动追加。
 

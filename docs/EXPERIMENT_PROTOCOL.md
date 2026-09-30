@@ -1,6 +1,20 @@
 # CT-SeqTrack 实验协议
 
-## 当前 v35：四组恢复与新增piecewise，共五组及条件第二seed
+2026-09-30进度更新：五组v35 seed42已完成，按本协议原帧比较仅scaled（初始1.5e-4）通过总体与移动原门槛，且>10m相对旧W-quarter未恶化；[正式复盘](../artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。用户在复盘后明确批准下面六次新训练，覆盖此前仅补两次及七次总上限的建议；旧五组结论和门槛不改写，服务器仍只读。
+
+## 当前 v35 W：六次新训练（2026-09-30）
+
+新增六组为：scaled seed52、piecewise seed52、独立SeqTrack正常seed52、double seed42、half seed52、quarter seed52。五组B0均v35 W=1/4/4/8；不新增S或v34训练。配置、完整LR阶段与命令见[六组启动说明](CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，精确配置身份和本次仅登记新LR的源码变化保存在`cfgs/ct_seqtrack/35_w_six_run_registration.json`。
+
+scaled/half/quarter/double分别以1.5e-4/5e-5/2.5e-5/2e-4起步，完成20/50轮后各乘0.1。piecewise第1–20/21–50/51–60轮分别为5e-5/1e-5/5e-6。独立SeqTrack保持原1e-4和StepLR20/40，不改成B0的W或20/50调度。六组均无warmup、mini Car、scratch60、batch16、workers4、FP32；分区seed42不随训练seed改变。每次71,700更新，新增预算360epoch、430,200更新，已有五组358,500更新只计一次；v35两轮连同新参考合计11次660epoch、788,700更新（不含更早基线）。
+
+本次只在v35正式允许列表追加2e-4，并新增对应YAML；其他五份配置原样复用，网络、loss、采样、优化器和scheduler计算、GT边界、递推提交及Full合同保持。配置中的旧“仅胜出后运行”注释是原条件登记，本次明确授权取代该条件。六组全部从头训练，无跨源码checkpoint迁移；新运行可在相同源码和配置身份下正常epoch恢复，旧四组的历史源码迁移登记不改写。
+
+分析固定final60与late-3，保留总体四项≥固定R、固定31条移动四项≥旧C以及下方严重漂移风险规则；另报告seed52相对独立seed52参考的差值。scaled、piecewise、half、quarter各与已有相同配方seed42组成两seed对照，用于判断配方的复现情况和排序变化；新double仅seed42探索，不能称跨seed稳定。各seed的final60/late-3和两seed均值一起列出，不以各实验最佳epoch或较好seed替换固定比较。允许报告完整训练配方中最高final60，但它不替代原双窗口验收。选择W是本轮研究方向，未完成匹配S/W对照前不声称W优于S。
+
+六组完成后复盘并决定固定B0或针对主要证据修改，不自动扩大LR、窗口或时长。旧`compare_v35_b0.py`及`compare_v35_piecewise_b0.py`仅服务旧四/五组协议，其源码严格相等检查不能直接用于此次跨登记版本的seed52或double比较；六组汇总应依据新的静态登记核对来源后重算原帧，不能关闭检查或改写旧manifest。本次不新增比较逻辑，不要求重复CUDA batch，上传和训练由用户执行。
+
+## 历史 v35：四组恢复与新增piecewise，共五组及条件第二seed
 
 2026-09-29更新，覆盖此前四组总数。用户确认的 [v35综合方案](B0_V35_INTEGRATED.md) 保持：首测精确初框、合法历史条件与候选局部真实点读取作为统一版本；保留现有loss、全局pooling、W=1/4/4/8、十轮课程及112 reserve。所有正式模型从epoch0随机初始化建立运行，batch16、FP32、每轮19,108行/1,195更新，完整60轮71,700更新；相同运行的完整epoch恢复不构成新实验。
 

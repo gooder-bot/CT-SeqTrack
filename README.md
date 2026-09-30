@@ -1,6 +1,12 @@
 # CT-SeqTrack
 
-2026-09-29本次piecewise调度与恢复增量已完成本地验证：**554 passed、3 skipped**，25份旧配置文件及身份SHA不变。由用户提交GitHub、服务器拉取后按[最新五组命令](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)恢复原四组并启动新组；[验证报告](artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/REPORT.md)。
+**2026-09-30当前结果：v35五组seed42均完成60轮并已拉回本地。** 原帧固定口径重算确认，**scaled（初始LR=1.5e-4）是唯一通过总体四项≥R及固定移动四项≥C的配方**：final60 S/P=52.3162/62.0230，late-3=53.7629/64.6080。相对旧W-quarter的>10m计数未增加；首次缺测和持续失跟仍有短板。piecewise虽末轮最高，late-3未达标，不替换胜出者。详见[五组正式复盘](artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。
+
+**当前下一轮为用户确认的六组，尚未启动。** scaled / piecewise / half / quarter各补seed52，加独立SeqTrack正常seed52，再以W seed42探索2e-4；五组B0均为v35 W，不新增S或v34训练。新增`35_b0_w_double_lr_mini.yaml`，其余五份现有配置原样复用；只增加新学习率的正式登记，模型、loss、采样和优化/调度计算不变。共360epoch、430,200更新；[六组配置、后台启动及tail命令](docs/CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，[正式协议](docs/EXPERIMENT_PROTOCOL.md)。该明确请求覆盖此前仅补两次建议，不宣称跨seed稳定或Full收益。下方9月29日启动文字均为历史操作记录；服务器仍由用户操作。
+
+本次六组配置核验完成：**554 passed、3 skipped**，27份旧YAML及配置身份不变，六组实际60轮LR、命令解析、Bash语法、compileall及diff检查通过。见[本次交付记录](artifacts/ct_checks/20260930-190740_v35_w_six_run_configs/REPORT.md)。本次未访问服务器，上传后由用户启动。
+
+2026-09-29历史piecewise调度与恢复增量已完成本地验证：**554 passed、3 skipped**，25份旧配置文件及身份SHA不变。[旧五组命令](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)及[验证报告](artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/REPORT.md)仅保留用于复现，不用于启动本次六组。
 
 CT-SeqTrack 是面向 3D 点云单目标跟踪的研究项目。当前新增 **v35 B0 综合优化**：在 v34 W=1/4/4/8 的基础上，对齐真实首测初始化、为 coarse 提供显式合法历史条件、为 fine 提供候选局部真实点证据。活动代码仍在 `models/ct_v31/`；v33/v34/reference 原行为与权重身份继续兼容。
 
