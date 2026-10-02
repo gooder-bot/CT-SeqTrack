@@ -150,7 +150,7 @@ def normalize_config(config=None):
                      v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
                      limit_train_batches=1., limit_val_batches=1.)
         if version in ('v34', 'v35'):
-            # v34 登记 S/W × 三档 LR；其他模块/数据能力保留给工程检查。
+            # v34 的其他模块仅供工程检查；v35 按下方新登记开放完整链。
             fixed.pop('v31_short_window')
             fixed.update(v31_arm='b0', dataset='nuscenes_mf', version='v1.0-mini',
                          category_name='Car')
@@ -158,6 +158,11 @@ def normalize_config(config=None):
             fixed.update(v31_short_window=4, ct_partition_seed=42,
                          v35_train_diagnostics=True, dynamics_time_mode='true',
                          v31_evaluate_late3=True)
+            if cfg.v31_arm != 'b0':
+                # 10/02 仅登记 B1 / B1+B2 / Full × 两档 LR，训练 seed42。
+                # 不注入新默认键，不改变旧 B0 的配置摘要与配方范围。
+                fixed.pop('v31_arm')
+                fixed.update(seed=42, v31_temporal_backend='cfc')
             if isinstance(cfg.seed, bool) or cfg.seed not in (42, 52):
                 raise ValueError('formal v35 seed must be 42 or 52')
         bad = [key for key, value in fixed.items()
@@ -185,6 +190,9 @@ def normalize_config(config=None):
             # 第五档是明确登记的绝对三段值，不扩大其他piecewise配方。
             if cfg.lr_schedule == 'piecewise' and cfg.lr_stage_values == [.00005, .00001, .000005]:
                 registered.add((.00005, 'piecewise', (20, 50), 0))
+            if cfg.v31_arm != 'b0':
+                registered = {(lr, 'multistep', (20, 50), 0)
+                              for lr in (.0001, .00015)}
         if recipe not in registered:
             raise ValueError('unregistered formal ' + version + ' learning-rate recipe')
     elif cfg.log_dir:

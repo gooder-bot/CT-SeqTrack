@@ -1,0 +1,7 @@
+# v35 完整链六组：B0+B1，W，seed42，1.5倍学习率；从零训练。
+_base_: 35_formal_base.yaml
+experiment_name: ct35_b1_w_scaled_lr_mini_car_scratch_seed42
+tag: b1_w_scaled_lr_mini_car_seed42_60ep_bs16
+v31_arm: b1
+seed: 42
+lr: 0.00015000

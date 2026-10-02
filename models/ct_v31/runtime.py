@@ -140,6 +140,9 @@ class TrackingEvaluation:
     def __init__(self, config=None):
         self.schema = model_schema(config)
         self.version = model_version(config)
+        # 只扩展本轮完整链评测台账；旧 B0/reference 的逐帧 schema 与计算保持。
+        self.record_candidates = (self.version == 'v35' and config is not None
+                                  and config.get('v31_arm') in ('b1', 'b1_b2', 'full'))
         self.rows = []
         self._initialized = set()
         self._last_frame = {}
@@ -168,6 +171,10 @@ class TrackingEvaluation:
                                         timestamp=float(first['timestamp']))
 
     def add_batch(self, raw_rows, batch, output, commit_results=None):
+        candidate_rows = None
+        if self.record_candidates:
+            from .candidate_records import candidate_records
+            candidate_rows = candidate_records(batch, output)
         predictions = output.accepted_box.detach().cpu().numpy()
         targets = batch['target_box'].detach().cpu().numpy()
         sizes = batch['box_size'].detach().cpu().numpy()
@@ -276,6 +283,8 @@ class TrackingEvaluation:
             diagnostic['mode_count'] = int(mode_counts[index])
             diagnostic['target_mode_count'] = int(target_mode_counts[index])
             diagnostic['recovery_seconds'] = recovered
+            if candidate_rows is not None:
+                diagnostic['diagnostic_candidates'] = candidate_rows[index]
             if commit_results is not None:
                 diagnostic.update(commit_results[index])
             self.rows.append(dict(tracklet=key, frame=int(request.frame), success=float(success),

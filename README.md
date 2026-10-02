@@ -1,5 +1,13 @@
 # CT-SeqTrack
 
+**2026-10-02当前：准备v35完整链六组seed42实验。** 已完成的七组新运行及重复参考见[七组复盘](artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。工作B0固定为v35 W scaled；本轮B1/B1+B2/Full各比较1.5e-4与1e-4，复用对应已有B0，全部scratch60，合计360epoch、430,200更新。GPU0三组scaled、GPU1三组normal。
+
+六份正式配置、完整候选台账、一次Full真实batch工具及只读比较入口已加入；网络、loss、采样、训练与状态计算保持。最新[配置/后台启动/tail/恢复说明](docs/CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)、[候选字段](docs/CTSEQTRACK_V35_FULL_CANDIDATES.md)、[协议](docs/EXPERIMENT_PROTOCOL.md)。用户上传后执行一次Full CUDA检查，再确认每卡三组的显存；代理服务器只读，尚未启动本轮正式训练。旧B0配置和产物保留，不能将旧checkpoint作为新Full初始化。
+
+本轮全仓测试644 passed、3 skipped，最终工具增量另行复核通过；37份旧YAML及28个旧配置身份保持，Full实际CPU batch16与完整epoch恢复通过，compileall/命令语法检查通过。见[本次交付与限制](artifacts/ct_checks/20261002-211032_v35_full_readiness/REPORT.md)，不将其称作服务器CUDA已通过。
+
+下方9月30日及以前文字为历史记录，其“下一轮”“尚未启动”不代表当前状态。
+
 **2026-09-30当前结果：v35五组seed42均完成60轮并已拉回本地。** 原帧固定口径重算确认，**scaled（初始LR=1.5e-4）是唯一通过总体四项≥R及固定移动四项≥C的配方**：final60 S/P=52.3162/62.0230，late-3=53.7629/64.6080。相对旧W-quarter的>10m计数未增加；首次缺测和持续失跟仍有短板。piecewise虽末轮最高，late-3未达标，不替换胜出者。详见[五组正式复盘](artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。
 
 **当前下一轮为用户确认的六组，尚未启动。** scaled / piecewise / half / quarter各补seed52，加独立SeqTrack正常seed52，再以W seed42探索2e-4；五组B0均为v35 W，不新增S或v34训练。新增`35_b0_w_double_lr_mini.yaml`，其余五份现有配置原样复用；只增加新学习率的正式登记，模型、loss、采样和优化/调度计算不变。共360epoch、430,200更新；[六组配置、后台启动及tail命令](docs/CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，[正式协议](docs/EXPERIMENT_PROTOCOL.md)。该明确请求覆盖此前仅补两次建议，不宣称跨seed稳定或Full收益。下方9月29日启动文字均为历史操作记录；服务器仍由用户操作。

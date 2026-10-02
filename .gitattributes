@@ -1,3 +1,8 @@
 *.sh text eol=lf
 # 固定参考包的字节来源与运行身份，避免跨平台 checkout 改写换行后 SHA 漂移。
 models/seqtrack_reference/** text eol=lf
+# 本轮登记的执行源码保持跨 Windows/Linux 字节一致。
+models/ct_v31/config.py text eol=lf
+models/ct_v31/runtime.py text eol=lf
+models/ct_v31/candidate_records.py text eol=lf
+models/ct_v31/data.py text eol=lf

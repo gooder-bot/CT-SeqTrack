@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-02当前安排为[完整链六组seed42](CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)，旧六组和重复参考已完成。本次只读确认：服务器HEAD=`89f5ba2b7b89e115385d3a8a07961a53ae880e37`；现有Python3.9.19及mini metadata/samples存在；两张A40总显存各46,068MiB，空闲各45,415MiB，没有计算进程，/home空闲约2.8TiB。快照会变化，不代表新Full显存已实测。
+
+用户选择GPU0并发三组scaled、GPU1并发三组normal。上传后用`check_v35_full_batch.py`做一次真实Full CUDA检查再确认并发；代理不写服务器、不安装、不启动/停止任务。以下9月30日与9月28日说明是历史信息，其“无需CUDA检查”不适用于此次首次正式Full路径。
+
 服务器为 `lishengjie@10.109.253.86`，项目根为 `/home/lishengjie/study/lcyu/CT-SeqTrack`。2026-09-30当前安排是[六组新训练](CTSEQTRACK_V35_W_SIX_RUN_LAUNCH.md)，旧五组seed42已完成；由用户上传和启动，代理不上传、不安装、不启动或停止进程。本次仅追加配置及LR登记，不重复要求真实CUDA batch。下方环境和空闲量来自9月28日历史只读快照，本次未查询服务器当前资源。
 
 ## 数据根

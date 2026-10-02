@@ -1,6 +1,20 @@
 # CT-SeqTrack 实验协议
 
-2026-09-30进度更新：五组v35 seed42已完成，按本协议原帧比较仅scaled（初始1.5e-4）通过总体与移动原门槛，且>10m相对旧W-quarter未恶化；[正式复盘](../artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。用户在复盘后明确批准下面六次新训练，覆盖此前仅补两次及七次总上限的建议；旧五组结论和门槛不改写，服务器仍只读。
+## 当前 v35 完整链：seed42 × 两档学习率（2026-10-02）
+
+用户已完成下方9月30日六组及一次SeqTrack seed52重复，见[七组复盘](../artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。经模块链路与风险复核，用户批准本轮B1、B1+B2、Full各跑1e-4与1.5e-4，全部seed42；不再追加B0结构/LR搜索。scaled52原固定门槛差0.0609及漂移风险记录保持，不因推进Full而改成通过。
+
+六份`35_{b1,b1_b2,full}_w_{normal,scaled}_lr_mini.yaml`全部scratch60；mini Car、划分seed42、W=1/4/4/8、10轮课程、112reserve、batch16、workers4、FP32、CfC真实时间、20/50各乘0.1、无warmup、原loss固定。每次71,700更新，新增360epoch/430,200更新。GPU0三组scaled、GPU1三组normal；一次Full CUDA检查后由用户确认显存并并发启动。代理只读服务器。
+
+复用已有normal42与scaled42 B0和固定R/C/旧W。主分析在同LR内比较B0→B1→B1+B2→Full；另列两档中的完整配方比较，不能把各臂最优LR拼成单模块因果消融。公共初始化相同不代表各臂全程随机流相同。所有启用模块共同训练，B0参数不冻结、不从旧权重初始化。
+
+本轮只增加正式臂登记、评测四候选与实际搜索覆盖被动记录，不改网络/loss/采样/优化器/状态数学。B3实际为共享quality竞争并开放mode监督，无外部校准artifact。GT只监督/诊断；新增记录不影响前向、RNG、梯度或accepted。旧B0配置及行为保持；源码/配置身份见`cfgs/ct_seqtrack/35_full_seed42_registration.json`，不授权旧checkpoint跨源码迁移。
+
+固定final60/late-3与原总体四项≥R、固定31移动轨迹四项≥C；保留下方漂移风险规则，不新增所有切片获胜要求。Full合格者按final60 Success、Precision、较低LR排序，完整展示late-3。仅超过normal而低于现有scaled不能称整体超过最强B0。两档均无收益时依据获取→候选→选择→递推记录修订主瓶颈，不自动扩LR/seed/窗口/时长。单seed结果不支持跨seed稳定、W优于S或连续时间/记忆独立因果结论。
+
+最新[启动/恢复命令](CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)、[候选格式](CTSEQTRACK_V35_FULL_CANDIDATES.md)。新Full检查权重不保存；旧B0工程检查不能替代本次Full CUDA生命周期核验。以下9月30日及以前均为历史协议。
+
+2026-09-30历史进度：五组v35 seed42已完成，按本协议原帧比较仅scaled（初始1.5e-4）通过总体与移动原门槛，且>10m相对旧W-quarter未恶化；[正式复盘](../artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。用户在复盘后明确批准下面六次新训练，覆盖此前仅补两次及七次总上限的建议；旧五组结论和门槛不改写，服务器仍只读。
 
 ## 当前 v35 W：六次新训练（2026-09-30）
 

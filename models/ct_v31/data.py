@@ -614,6 +614,19 @@ class BatchBuilder:
                         k: v for k, v in geometry.items() if k != 'b0_raw_ids'})
                     members = support_membership(xyz, maximum, context['b0_ids'], ids)
                     reachable = int(((members[0] | members[1]) & target_mask).sum())
+                    if self.is_v35 and not training:
+                        # 实际 u 支持域先于 768 池采样；与最大 u 的 reachable 分开，
+                        # 用于离线区分覆盖失败和池采样损失，不进入任何获取决策。
+                        actual = build_dual_support(u=fractions[i], **{
+                            k: v for k, v in geometry.items() if k != 'b0_raw_ids'})
+                        actual_members = support_membership(xyz, actual, context['b0_ids'], ids)
+                        counts = np.asarray([member.sum() for member in actual_members], dtype=np.int64)
+                        target_counts = np.asarray([(member & target_mask).sum()
+                                                    for member in actual_members], dtype=np.int64)
+                        extra.update(diagnostic_search_point_count=np.int64(counts.sum()),
+                                     diagnostic_search_target_count=np.int64(target_counts.sum()),
+                                     diagnostic_search_point_count_by_partition=counts,
+                                     diagnostic_search_target_count_by_partition=target_counts)
                 else:
                     reachable = 0
                 b0_target_count = int((np.isin(ids, context['b0_ids']) & target_mask).sum())

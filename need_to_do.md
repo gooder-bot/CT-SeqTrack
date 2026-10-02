@@ -1,4 +1,16 @@
-# CT-SeqTrack 当前状态（2026-09-30）
+# CT-SeqTrack 当前状态（2026-10-02）
+
+## 当前：v35 完整链六组seed42
+
+- [x] 已完成旧六组与一次SeqTrack seed52重复的七组复盘；scaled42过原门，scaled52 late Success缺固定R 0.0609及late >10m较旧W多1帧/轮的记录保留，不改成全部通过。见[复盘](artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。
+- [x] 用户批准转入mini完整链：B1/B1+B2/Full×1e-4/1.5e-4，全部seed42；保留W和公共训练参数，360epoch/430,200更新。GPU0三组scaled、GPU1三组normal，用户选择显存确认后各卡并发三组。
+- [x] 六份独立正式配置、来源登记、完整候选及实际搜索覆盖被动记录、本地启动脚本、Full单批检查与只读比较工具已加入；旧配置/权重/产物保留。
+- [x] 全仓644 passed、3 skipped；最终工具针对复核通过，37份旧YAML/28个旧身份不变，真实Full CPU batch16及完整epoch恢复通过。见[就绪报告](artifacts/ct_checks/20261002-211032_v35_full_readiness/REPORT.md)。
+- [ ] 用户提交推送并在服务器拉取，执行一次新Full真实CUDA batch；工程权重不保存为正式初始化。
+- [ ] 按[当前六组命令](docs/CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)逐组启动，记录真实显存/耗时；代理不启动或修改服务器。
+- [ ] 完成后固定final60/late-3，同LR逐级比较，再选Full配方；保留固定R/C、移动和漂移风险。依据候选链定位主瓶颈，不自动扩大LR或重跑seed。
+
+下方所有待启动、暂停/恢复及“仅B0正式”条目为历史状态，以本节为准。
 
 ## v35五组完成与正式复盘（当前）
 

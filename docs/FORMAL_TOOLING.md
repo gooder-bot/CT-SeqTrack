@@ -1,5 +1,14 @@
 # CT-SeqTrack 工具范围
 
+## 当前 v35 完整链六组（2026-10-02）
+
+- 正式入口仍是`main.py`。六配置为`35_{b1,b1_b2,full}_w_{normal,scaled}_lr_mini.yaml`，全部seed42/scratch60；`tools/launch_v35_full_seed42.sh LABEL GPU`每次只启动对应一组，日期新目录、nohup、独立log/pid。当前[完整命令](CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)取代旧B0六组启动安排。
+- `tools/check_v35_full_batch.py`：一次真实Full batch16前向/反向/Adam/commit、完整候选JSON、显存/耗时；输出独立ct_checks报告，不保存权重。服务器由用户执行一次，本地不能伪称CUDA已通过。
+- `tools/compare_v35_full.py`：六组完整58/59/60及60轮预算验证、精确登记source/config、旧B0同LR复用来源、固定R/C/W帧SHA；原帧重算，分别报告同LR链式增量、最强scaled比较、候选选择与恢复诊断、原门槛和漂移风险。
+- 比较默认stdout JSON，`--output`只允许ct_checks新文件；0=至少一个Full通过原门，1=完整证据无Full通过，2=证据无效。风险及相对最强B0增量另列，返回0不等于所有研究结论已成立。
+- 候选记录只在v35非B0评测扩展，字段见[格式](CTSEQTRACK_V35_FULL_CANDIDATES.md)。源码登记`35_full_seed42_registration.json`不授权旧checkpoint迁移；当前各组正常epoch恢复保留自身身份和source。
+- 旧比较/检查工具继续保留服务旧实验，不将新Full塞入旧B0比较器。下面工具面为历史记录。
+
 ## 当前 v35 工具（2026-09-29：四组恢复与新增piecewise）
 
 - 唯一正式入口保持`main.py`。原`35_b0_w_{quarter,half,normal,scaled}_lr_mini.yaml`四组已由用户暂停，各自完整checkpoint均为036；更新同一活动项目后使用原cfg、原log_dir和各自036 checkpoint恢复，GPU0/0/1/1，第37轮继续。原`run_manifest.json`保持，`resume_manifests/`追加迁移来源，旧日志使用追加写入。

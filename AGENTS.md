@@ -1,5 +1,14 @@
 # CT-SeqTrack 工作约定（v35 B0 综合优化）
 
+## 2026-10-02 当前安排：v35 完整链、seed42、两档LR
+
+- 用户已完成9月30日六组及一次独立SeqTrack seed52重复，共七次新运行；以[七组复盘](artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)为准。scaled B0为工作基线；seed52原固定门槛及漂移风险记录不改写。下方“尚未启动”均属历史。
+- 用户现批准六次新scratch：B1/B1+B2/Full分别用1.5e-4和1e-4，全部seed42，mini Car、W、60轮、20/50衰减、无warmup。新增360epoch、430,200更新，旧同LR B0及参考结果复用；不加载旧B0权重、不冻结参数、不自动追加seed/LR。GPU0为三组scaled、GPU1为三组normal；由用户在一次Full CUDA检查及显存确认后各卡并发三组。
+- 当前操作页为[完整链六组启动说明](docs/CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)，身份见`cfgs/ct_seqtrack/35_full_seed42_registration.json`。正式v35非B0限定上述seed/CfC/LR；旧B0/v34/reference配置及身份保持，旧checkpoint不新增跨源码迁移。
+- 本轮仅正式臂登记和被动候选/搜索覆盖记录，不改网络、loss、采样、优化器或状态数学。当前B3是共享quality候选竞争，无外部校准artifact；Full同时开放mode监督。四帧B0全空时q0=prior的现有合同保留。
+- 每预测帧完整台账见[候选记录格式](docs/CTSEQTRACK_V35_FULL_CANDIDATES.md)；GT仅监督/日志，不能进入选框、采样或accepted。新工具`check_v35_full_batch.py`只做一次工程生命周期、不保存权重；`compare_v35_full.py`只读重算六组与固定参考。
+- 服务器仍严格只读；代理不上传、安装、启动或停止。用户本地提交、服务器拉取后执行命令。旧output和artifacts保护规则保持。
+
 ## 2026-09-30 当前进展（覆盖下方历史运行状态，不改实验门槛）
 
 - 五组v35 seed42均完成60轮并下载至本地；原帧正式比较确认scaled（初始LR1.5e-4）唯一通过总体四项≥固定R、移动四项≥旧C。final60 S/P=52.3162/62.0230，late-3=53.7629/64.6080。证据见[五组复盘](artifacts/ct_checks/20260930-175409_v35_five_run_review/REPORT.md)。
@@ -32,7 +41,7 @@
 ## 当前范围与授权
 
 - 唯一活动项目为本仓库，所有命令从本仓库根目录执行。兄弟基线只读，不修改；不读取 TrajTrack。
-- 下方为 v33 实验历史约定；当前 v35 范围以顶部9月30日六组安排为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
+- 下方为 v33 实验历史约定；当前 v35 范围以顶部10月2日完整链六组安排为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
 - 用户最新要求：服务器 `lishengjie@10.109.253.86` 本轮只读；允许本地修复，由用户自行上传和启动。不得自行上传、安装、启动训练、停止进程或改写服务器文件。旧部署授权不延续到本轮。
 - 本轮由用户从头运行四组 mini Car、seed42：R 独立 SeqTrack、A 综合 B0 原配方、B 综合 B0 延后第二次衰减、C 为 B 全程半学习率。物理 GPU 依次为 0/0/1/1，每组单卡。
 - 2026-09-25用户追加D：综合B0的B配方全程学习率×1.5，初始1.5e-4、milestones=[20,50]，物理GPU0；原A/B/C保留。只登记新增B0配方，不改变预算或参考模型配方，见`docs/CTSEQTRACK_V33_SCALED_LR_GPU0.md`。
