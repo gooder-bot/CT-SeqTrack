@@ -1,6 +1,18 @@
-# CT-SeqTrack 当前状态（2026-10-02）
+# CT-SeqTrack 当前状态（2026-10-04）
 
-## 当前：v35 完整链六组seed42
+## 当前：v36 测量事件闭环五组
+
+- [x] 综合源码、独立A/C/D/E/F配置与登记、必要合同测试、候选/测量/恢复诊断和比较工具已完成；见 [实施记录](artifacts/ct_checks/20261004-194559_v36_implementation/REPORT.md)。当前结构与全部loss见 [v36设计](docs/CTSEQTRACK_V36_DESIGN.md)。
+- [x] 本地全仓728 passed、12 skipped，CPU Full batch16与合成恢复、compileall/diff/身份检查通过；跳过项为缺Lightning或CUDA，不冒充真实CUDA已通过。
+- [x] 上传前再核对旧报错路径、五组配置身份和服务器既有依赖；操作页已改为五段独立日期目录/nohup与新终端tail命令。服务器只读，没有代为启动。
+- [x] 复用本地封存Lightning2.0.2，补充两项真实CPU Trainer测试，完整入口/保存/自动与独立评测以及epoch10→11逐位恢复均通过；新增非有限loss失败报告三项测试通过。见 [上传就绪复核](artifacts/ct_checks/20261004-200727_v36_upload_readiness/REPORT.md)。
+- [ ] 用户上传全部新增v36源码、六份YAML（含共享base）、登记JSON与工具，执行一次新Full CUDA检查；工程权重不保存为正式初始化。
+- [ ] 按 [v36最新命令](docs/CTSEQTRACK_V36_LAUNCH.md) 启动五次scratch60，其他训练参数不变，总预算300epoch/358,500更新。按实测显存安排并发，不自动扩充实验。
+- [ ] 完成后固定final60/late-3及原总体/移动门槛、漂移风险，另外报告最高验证分的同轮配对指标及强B0/B1差值。对照不支持机制时收窄主张，不加LR/seed/完整训练。
+
+下方v35及更早“当前/下一轮/尚未启动”的条目均为历史状态；本轮只以本节和v36协议为准。
+
+## 历史：v35 完整链六组seed42（10月2日登记）
 
 - [x] 已完成旧六组与一次SeqTrack seed52重复的七组复盘；scaled42过原门，scaled52 late Success缺固定R 0.0609及late >10m较旧W多1帧/轮的记录保留，不改成全部通过。见[复盘](artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。
 - [x] 用户批准转入mini完整链：B1/B1+B2/Full×1e-4/1.5e-4，全部seed42；保留W和公共训练参数，360epoch/430,200更新。GPU0三组scaled、GPU1三组normal，用户选择显存确认后各卡并发三组。

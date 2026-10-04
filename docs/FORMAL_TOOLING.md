@@ -1,5 +1,15 @@
 # CT-SeqTrack 工具范围
 
+## 当前 v36 五组（2026-10-04）
+
+- `main.py --cfg cfgs/ct_seqtrack/36_*_mini.yaml` 分派独立 v36 入口，A/C/D/E/F 五组；旧入口保留。准确命令见 [v36 启动/恢复](CTSEQTRACK_V36_LAUNCH.md)。
+- `tools/launch_v36.sh ARM GPU` 每次启动用户指定的一组；新目录、独立 log/pid，不循环扩充实验。代理不在服务器执行。
+- `tools/check_v36_full_batch.py` 仅一次 A 真实 batch16×1024 FP32 forward/backward/Adam/commit，含核验记录、模块梯度与显存；报告写 `artifacts/ct_checks/` 新文件，不保存工程权重。CPU 合成验证不能替代该 CUDA 检查。
+- `tools/compare_v36.py` 只读核对五臂、强 scaled B0/B1 与原 R/C/W 来源，固定 final60/late-3、预算、门槛、漂移及机制诊断；最高验证分另外报告。登记见 `36_registration.json`，不存在未完成实验的正式收益结论。
+- 新比较输出仍限 `artifacts/ct_checks/` 新文件；退出码 0 表示 A 通过原硬门、1 表示有效完整证据下 A 未通过、2 表示证据无效。对照得分和漂移风险另列，不能将返回 0 解释为各模块贡献均成立。
+- 以下旧工具只服务对应历史版本，不能关闭旧身份检查用于新 v36。
+
+
 ## 当前 v35 完整链六组（2026-10-02）
 
 - 正式入口仍是`main.py`。六配置为`35_{b1,b1_b2,full}_w_{normal,scaled}_lr_mini.yaml`，全部seed42/scratch60；`tools/launch_v35_full_seed42.sh LABEL GPU`每次只启动对应一组，日期新目录、nohup、独立log/pid。当前[完整命令](CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)取代旧B0六组启动安排。

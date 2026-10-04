@@ -1,4 +1,13 @@
-# CT-SeqTrack 工作约定（v35 B0 综合优化）
+# CT-SeqTrack 工作约定
+
+## 2026-10-04 当前：v36 测量事件闭环，五组固定预算
+
+- 用户已授权独立 v36 实施；当前设计与逐项 loss 见 [v36 结构](docs/CTSEQTRACK_V36_DESIGN.md)，操作见 [启动/恢复](docs/CTSEQTRACK_V36_LAUNCH.md)。下方 v35 启动安排为历史，不代表当前实验计划。
+- 活动入口仍为 `main.py`；v36 源码在 `models/ct_v36/` 与 `models/ctseqtrackv36.py`。accepted、测量事件与身份 memory 分开，由 host 在 Adam 后提交 detached 状态；GT 只进入监督及被动审计。
+- 五臂 A/C/D/E/F 均 mini Car、seed42、scratch60、batch16、FP32、LR=1.5e-4、20/50 衰减，无 warmup。每臂 71,700 更新，总计 300 epoch/358,500 更新；不追加完整训练、LR 或 seed 搜索。
+- 比较固定 final60/late-3 与原总体/移动门槛，另外报告最高验证分及同轮配对指标；强 B0/B1 为只读复用。整体改进不能拆成各部件因果收益。
+- 新 schema/runtime/config/source 身份独立登记；旧 checkpoint 使用其登记源码，不关闭恢复检查。`output/` 与旧 artifacts 保持不变。服务器只读，真实 CUDA batch 检查由用户上传后执行。
+
 
 ## 2026-10-02 当前安排：v35 完整链、seed42、两档LR
 
@@ -41,7 +50,7 @@
 ## 当前范围与授权
 
 - 唯一活动项目为本仓库，所有命令从本仓库根目录执行。兄弟基线只读，不修改；不读取 TrajTrack。
-- 下方为 v33 实验历史约定；当前 v35 范围以顶部10月2日完整链六组安排为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
+- 下方为 v33–v35 实验历史约定；当前范围以顶部10月4日v36五组及其设计/协议为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
 - 用户最新要求：服务器 `lishengjie@10.109.253.86` 本轮只读；允许本地修复，由用户自行上传和启动。不得自行上传、安装、启动训练、停止进程或改写服务器文件。旧部署授权不延续到本轮。
 - 本轮由用户从头运行四组 mini Car、seed42：R 独立 SeqTrack、A 综合 B0 原配方、B 综合 B0 延后第二次衰减、C 为 B 全程半学习率。物理 GPU 依次为 0/0/1/1，每组单卡。
 - 2026-09-25用户追加D：综合B0的B配方全程学习率×1.5，初始1.5e-4、milestones=[20,50]，物理GPU0；原A/B/C保留。只登记新增B0配方，不改变预算或参考模型配方，见`docs/CTSEQTRACK_V33_SCALED_LR_GPU0.md`。
@@ -49,7 +58,7 @@
 - 已完成 v32 R 仍是可复用的历史证据；用户当前选择重跑 R。不得把“可复用”写成“本轮无需启动 R”。本轮不新增 Full 独立诊断。
 - 协议以 [EXPERIMENT_PROTOCOL.md](docs/EXPERIMENT_PROTOCOL.md) 为准；实现见 [B0_V33_REPAIR.md](docs/B0_V33_REPAIR.md)，用户启动说明见 [CTSEQTRACK_V33_MINI_LAUNCH.md](docs/CTSEQTRACK_V33_MINI_LAUNCH.md)，工具范围见 [FORMAL_TOOLING.md](docs/FORMAL_TOOLING.md)。
 
-## 实验与实现不变量
+## 历史 v33–v35 实验与实现不变量（v36差异以当前设计为准）
 
 - scratch-only：所有正式运行从 epoch0 随机初始化。`--init_checkpoint` 禁止；`--checkpoint` 仅用于相同配置身份的完整 epoch 边界恢复或评测。工程检查权重不得作为正式初始化。
 - 启用参数不冻结；detach 和 BN 统计隔离是耦合合同，不是参数冻结。每 batch 一次 forward/backward/Adam，随后提交 detached accepted 状态。

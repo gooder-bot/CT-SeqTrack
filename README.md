@@ -1,5 +1,14 @@
 # CT-SeqTrack
 
+**2026-10-04 当前：v36 测量事件驱动闭环已实施，正式结果待验证。** accepted 输出、合格测量事件和身份记忆分离；事件 B1、位置范围、prior 优先双域获取、几何独立投票、最终框核验与连续长分支共同构成新版本。见 [结构/接口/监督](docs/CTSEQTRACK_V36_DESIGN.md) 与 [五组启动/恢复/比较](docs/CTSEQTRACK_V36_LAUNCH.md)。
+
+五组 A/C/D/E/F 保持 mini Car、seed42、scratch60、batch16、FP32，总计 **300 epoch、358,500 更新**。本地合成与合同验证不替代真实 CUDA batch 检查；由用户上传后执行一次检查及正式训练。代理不写入服务器、不启动任务。旧配置、权重与产物保留；以下 v35“当前/下一轮”表述为历史记录。
+
+本轮本地验证 **728 passed、12 skipped**；CPU Full batch16×1024、epoch10→11 合成恢复、compileall、diff 与登记身份通过。跳过项为缺 Lightning 或真实 CUDA；见 [实施与验证记录](artifacts/ct_checks/20261004-194559_v36_implementation/REPORT.md)。
+
+上传前已使用本地封存Lightning2.0.2补充真实CPU Trainer的完整入口/评测与epoch10→11恢复，两项通过；更新了五组完整nohup和新终端tail命令，保留训练源码及配置身份。[最新就绪复核](artifacts/ct_checks/20261004-200727_v36_upload_readiness/REPORT.md)只剩用户上传后的一次真实CUDA batch检查，代理服务器只读。
+
+
 **2026-10-02当前：准备v35完整链六组seed42实验。** 已完成的七组新运行及重复参考见[七组复盘](artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。工作B0固定为v35 W scaled；本轮B1/B1+B2/Full各比较1.5e-4与1e-4，复用对应已有B0，全部scratch60，合计360epoch、430,200更新。GPU0三组scaled、GPU1三组normal。
 
 六份正式配置、完整候选台账、一次Full真实batch工具及只读比较入口已加入；网络、loss、采样、训练与状态计算保持。最新[配置/后台启动/tail/恢复说明](docs/CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)、[候选字段](docs/CTSEQTRACK_V35_FULL_CANDIDATES.md)、[协议](docs/EXPERIMENT_PROTOCOL.md)。用户上传后执行一次Full CUDA检查，再确认每卡三组的显存；代理服务器只读，尚未启动本轮正式训练。旧B0配置和产物保留，不能将旧checkpoint作为新Full初始化。

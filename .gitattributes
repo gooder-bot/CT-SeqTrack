@@ -6,3 +6,7 @@ models/ct_v31/config.py text eol=lf
 models/ct_v31/runtime.py text eol=lf
 models/ct_v31/candidate_records.py text eol=lf
 models/ct_v31/data.py text eol=lf
+# v36 source registration must survive Windows/Linux checkout without byte changes.
+main.py text eol=lf
+models/ct_v36/** text eol=lf
+models/ctseqtrackv36.py text eol=lf

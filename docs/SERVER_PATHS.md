@@ -1,5 +1,11 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-04 当前为 [v36 五组](CTSEQTRACK_V36_LAUNCH.md)：A/C/D/E/F，seed42、scratch60，共300epoch/358,500更新。代理此次只读核验，未上传、安装、启动或停止任务。服务器尚无36配置；上传后由用户执行一次 `tools/check_v36_full_batch.py` 的真实CUDA检查，再启动五组。
+
+20:04只读快照：HEAD=`188f587585a3c2e23a928f6e147bc9accebb1b1d`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini的metadata/samples/sweeps均存在，/home约2.7TiB可用。两张A40各46,068MiB；GPU0有其他用户的两个任务，空闲16,016MiB，GPU1空闲45,413MiB。资源会变化；首次新Full检查使用GPU1，后续并发以新检查峰值和实际空闲量安排，不停止其他任务。
+
+下方“当前六组”“无需CUDA检查”及其显存数均为历史记录，不作为本轮操作命令。当前环境绝对路径和native allocator保持，不升级环境、不使用旧预处理或设备参数。
+
 2026-10-02当前安排为[完整链六组seed42](CTSEQTRACK_V35_FULL_SEED42_LAUNCH.md)，旧六组和重复参考已完成。本次只读确认：服务器HEAD=`89f5ba2b7b89e115385d3a8a07961a53ae880e37`；现有Python3.9.19及mini metadata/samples存在；两张A40总显存各46,068MiB，空闲各45,415MiB，没有计算进程，/home空闲约2.8TiB。快照会变化，不代表新Full显存已实测。
 
 用户选择GPU0并发三组scaled、GPU1并发三组normal。上传后用`check_v35_full_batch.py`做一次真实Full CUDA检查再确认并发；代理不写服务器、不安装、不启动/停止任务。以下9月30日与9月28日说明是历史信息，其“无需CUDA检查”不适用于此次首次正式Full路径。

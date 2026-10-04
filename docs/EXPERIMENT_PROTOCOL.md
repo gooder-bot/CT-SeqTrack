@@ -1,5 +1,20 @@
 # CT-SeqTrack 实验协议
 
+## 当前 v36：测量事件闭环，五组固定预算（2026-10-04）
+
+本节覆盖下方历史启动安排；旧结果、数值门槛及风险口径不改写。新结构与所有 loss 归约见 [v36 设计](CTSEQTRACK_V36_DESIGN.md)，命令及限制见 [启动/恢复](CTSEQTRACK_V36_LAUNCH.md)，精确身份见 `cfgs/ct_seqtrack/36_registration.json`。
+
+五组为 A 完整闭环、C 移除 B2/extension/memory、D 事件 CV 均值、E 适配旧 accepted-history B1、F 新结构配长分支八步重置。五组均 mini Car、seed42、scratch60、batch16、FP32、初始 LR=1.5e-4、20/50 各乘 0.1、无 warmup；Adam betas=(0.5,0.999)、eps=1e-6、weight_decay=0。每轮 19,108 行/1,195 更新，每组 71,700 更新，总计 **300 epoch、358,500 更新**。不新增 LR/seed/逐项完整训练。真 CUDA batch 工程检查不保存权重，不计作正式实验。
+
+第十一轮起 A/C/D/E 的 branch3 从合法 frame0 连续递推整轨迹，F 每八步重置；四分支端点曝光各四分之一，112 尾部预留来自短分支。保留 16 lane、每步 detach、同一端点采样键及公共模块初始化。E 是旧 B1 的整体适配，不是 v35 完整复现；其含查询时间的 context 不承诺 range 非收缩。
+
+正式比较固定 final60 和 late-3（58/59/60），原总体四项≥R、固定 31 条移动轨迹/657 预测帧四项≥C 保持；沿用 >5m/>10m、未恢复失跟及原漂移风险复核。强 scaled B0/B1 差值与最高验证分的同轮 S/P 另外报告，不能替代固定门槛。A 是主实验，C/D/E/F 用于限制机制主张，不以对照中的最高分改选主模型。
+
+输出与测量独立；正确测量按最终框 `geometry_exact` 资格标签统计，恢复沿用 benchmark IoU<0.1 开始、≥0.5 结束。提交影响从下一帧计，后续测量替代、同帧恢复及右删失分开；这些是时序关联，不作反事实因果结论。若 D/C/E/F 不弱于 A，分别收窄学习动力学、扩展/记忆、B1 整体改法或连续训练主张，不自动增加训练预算。
+
+模型从 epoch0 随机初始化，所有启用参数可训练，无跨版本 warm start。仅同一运行完整 epoch 恢复，核对 source/config/arm/seed、数据与注释身份、RNG、排程及 run_id；旧 checkpoint 使用其原登记源码。服务器对代理只读；实验尚未完成，不宣称涨分、SOTA、概率已校准或各组成部分独立因果收益。
+
+
 ## 当前 v35 完整链：seed42 × 两档学习率（2026-10-02）
 
 用户已完成下方9月30日六组及一次SeqTrack seed52重复，见[七组复盘](../artifacts/ct_checks/20261002-193819_v35_seven_run_review/REPORT.md)。经模块链路与风险复核，用户批准本轮B1、B1+B2、Full各跑1e-4与1.5e-4，全部seed42；不再追加B0结构/LR搜索。scaled52原固定门槛差0.0609及漂移风险记录保持，不因推进Full而改成通过。
