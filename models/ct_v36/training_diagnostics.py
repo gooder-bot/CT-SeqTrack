@@ -1,11 +1,13 @@
 """训练端点的被动聚合；不重跑网络或改变 loss/状态。"""
 import json
 from pathlib import Path
+from utils.diagnostic_transfer import tensors_to_numpy
 
 
 class TrainingDiagnostics:
-    def __init__(self, seed=42):
+    def __init__(self, seed=42, *, optimized=False):
         self.seed = int(seed)
+        self.optimized = bool(optimized)
         self.reset(0)
 
     def reset(self, epoch):
@@ -20,15 +22,17 @@ class TrainingDiagnostics:
         for row in rows:
             key = str(row['request'].branch)
             self.branches[key] = self.branches.get(key, 0) + 1
-        for key, value in losses.items():
-            self.loss_sums[key] = self.loss_sums.get(key, 0.) + float(value.detach())
+        scalar_losses = tensors_to_numpy(losses, optimized=self.optimized)
+        for key, value in scalar_losses.items():
+            self.loss_sums[key] = self.loss_sums.get(key, 0.) + float(value)
         measurement = output.decision.measurement_index.detach()
-        self.measurements += int((measurement >= 0).sum())
-        self.disagreements += int(((measurement >= 0) & (measurement != output.selected_index)).sum())
-        self.memory_eligible += int(output.decision.memory_eligible.sum())
-        self.motion_valid += int(output.prior.motion_valid.sum())
         bound = output.prior.range_xy.new_tensor([12., 8.])
-        self.range_clipped += int((output.prior.range_xy > bound).any(-1).sum())
+        counts = tensors_to_numpy(dict(measurements=(measurement >= 0).sum(),
+            disagreements=((measurement >= 0) & (measurement != output.selected_index)).sum(),
+            memory_eligible=output.decision.memory_eligible.sum(), motion_valid=output.prior.motion_valid.sum(),
+            range_clipped=(output.prior.range_xy > bound).any(-1).sum()), optimized=self.optimized)
+        for key, value in counts.items():
+            setattr(self, key, getattr(self, key) + int(value))
 
     def summary(self, complete=True):
         return dict(schema='ct_seqtrack.v36.training_diagnostics.v1', epoch=self.epoch,

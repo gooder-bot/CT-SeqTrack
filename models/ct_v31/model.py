@@ -4,6 +4,8 @@ from dataclasses import replace
 
 import torch
 from torch import nn
+from utils.batch_materialization import materialization_cache
+from utils.execution_profile import effective_execution_profile
 
 from .config import normalize_config
 from .contracts import EvidenceHypotheses, TrackOutput
@@ -20,19 +22,34 @@ def canonicalize_batch(batch):
     points = batch['points']
     if points.ndim != 4 or points.shape[1] != 4 or points.shape[-1] != 5:
         raise ValueError('v31 points must be [B,4,N,5]')
+    cache = materialization_cache(batch)
+    cached = None if cache is None else cache.canonical_values(batch)
     # 历史不存在时其点槽也不存在；先合并存在性再去重，使 B0/B1/损失
     # 使用同一真实测量集合，而非仅由 observation 在内部额外过滤。
-    valid = B0Observation.measurement_mask(batch)
-    if valid.shape != points.shape[:-1]:
-        raise ValueError('point_valid must align with points')
-    if not bool(torch.isfinite(points.masked_select(valid[..., None].expand_as(points))).all()):
-        raise ValueError('real v31 point observations must be finite')
-    result['point_valid'] = valid
-    result['points'] = points.masked_fill(~valid[..., None], 0.)
+    if cached is None:
+        valid = B0Observation.measurement_mask(batch)
+        if valid.shape != points.shape[:-1]:
+            raise ValueError('point_valid must align with points')
+        if not bool(torch.isfinite(points.masked_select(valid[..., None].expand_as(points))).all()):
+            raise ValueError('real v31 point observations must be finite')
+        result['point_valid'] = valid
+        result['points'] = points.masked_fill(~valid[..., None], 0.)
+        if cache is not None:
+            cache.remember_canonical(batch, result)
+    else:
+        result['point_valid'] = cached['point_valid']
+        result['points'] = cached['points']
     if 'extension_valid' in batch:
-        ext_valid = unique_valid_mask(batch['extension_valid'], batch.get('extension_ids'))
-        result['extension_valid'] = ext_valid
-        result['extension_points'] = batch['extension_points'].masked_fill(~ext_valid[..., None], 0.)
+        cached = None if cache is None else cache.canonical_values(batch, extension=True)
+        if cached is None:
+            ext_valid = unique_valid_mask(batch['extension_valid'], batch.get('extension_ids'))
+            result['extension_valid'] = ext_valid
+            result['extension_points'] = batch['extension_points'].masked_fill(~ext_valid[..., None], 0.)
+            if cache is not None:
+                cache.remember_canonical(batch, result, extension=True)
+        else:
+            result['extension_valid'] = cached['extension_valid']
+            result['extension_points'] = cached['extension_points']
     return result
 
 
@@ -67,6 +84,7 @@ class JointTracker(nn.Module):
         self.decoder = SharedHypothesisDecoder(prior_dim=128, dropout=.2,
             query_context=query_context, time_scale=self.config.time_scale,
             initial_context=v35, local_observation=v35)
+        self.observation.execution_profile = self.decoder.execution_profile = effective_execution_profile(self.config)
         self.prior = (PhysicalTimePrior(self.config.time_scale, self.config.v31_temporal_backend)
                       if self.enable_b1 else None)
         self.evidence = B2IdentityEvidence() if self.enable_b2 else None

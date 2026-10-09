@@ -15,6 +15,9 @@ import math
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
+from utils.diagnostic_transfer import tensors_to_numpy
+from utils.execution_profile import optimized_execution
+from utils.raw_frame_memo import RawFrameMemo, raw_transaction
 
 
 def option(config, name, default=None):
@@ -372,10 +375,27 @@ class BatchBuilder:
         self.train_diagnostics = self.is_v35 and bool(option(config, 'v35_train_diagnostics', True))
         self.states = {}
         self._pending = None
+        self._raw_memo = None
+
+    def _start_materialization_cache(self):
+        self._raw_memo = (RawFrameMemo(point_arrays, box_array, box_size, box_corners, inside_box)
+                          if optimized_execution(self.config) else None)
+
+    def clear_materialization_cache(self):
+        self._raw_memo = None
+
+    def _points(self, frame):
+        return self._raw_memo.points(frame) if self._raw_memo is not None else point_arrays(frame)
+
+    def _raw_index(self, frame):
+        if self._raw_memo is not None:
+            return self._raw_memo.index(frame)
+        return {int(value): j for j, value in enumerate(point_arrays(frame)[1])}
 
     def reset(self):
         self.states.clear()
         self._pending = None
+        self.clear_materialization_cache()
 
     def _new_state(self, row):
         from .memory import RawIdentityMemory
@@ -406,7 +426,7 @@ class BatchBuilder:
         box_provenance = {i: provenance for i in seed_ids}
         memory = RawIdentityMemory(size)
         first = row['first_frame']
-        xyz, ids = point_arrays(first)
+        xyz, ids = self._points(first)
         first_box = box_array(first['3d_bbox'])
         memory.initialize(xyz, ids, inside_box(xyz, first_box, size), first_box,
                           float(first['timestamp']))
@@ -420,7 +440,7 @@ class BatchBuilder:
         last_time = times[r.frame - 1]
         # 合法 seed 位姿仍可初始化运动；观测强弱则必须由真实点与输入框决定。
         strong_times = [times[i] for i in seed_ids
-                        if int(inside_box(point_arrays(frames[i])[0], boxes[i], size).sum()) >= 3]
+                        if int(inside_box(self._points(frames[i])[0], boxes[i], size).sum()) >= 3]
         return AcceptedState(boxes=boxes, times=times, next_frame=r.frame, size=size,
             memory=memory, trusted=trusted, transitions={i: True for i in seed_ids},
             trusted_velocity=velocity, trusted_velocity_valid=len(trusted) == 2,
@@ -433,6 +453,7 @@ class BatchBuilder:
         since = state.initialization_time if state.last_strong_time is None else state.last_strong_time
         return max(0., float(timestamp) - since)
 
+    @raw_transaction
     def prepare(self, rows):
         if self._pending is not None:
             raise RuntimeError('previous v31 transaction has not been committed')
@@ -486,7 +507,7 @@ class BatchBuilder:
         b0_ids, b0_xyz = None, None
         for slot, frame_id in enumerate(row['history_ids'] + (r.frame,)):
             frame = frames[frame_id]
-            xyz, ids = point_arrays(frame)
+            xyz, ids = self._points(frame)
             crop_box = history[slot] if slot < 3 else anchor
             mask = inside_box(xyz, crop_box, state.size, scale=scale, offset=offset)
             selected = np.flatnonzero(mask)
@@ -510,17 +531,24 @@ class BatchBuilder:
             point_valid = np.arange(n) < count
             point_ids = np.full(n, -1, dtype=np.int64)
             point_ids[:count] = ids[selected]
-            target = box_array(frame['3d_bbox'])
-            target_size = box_size(frame['3d_bbox'], frame)
+            if self._raw_memo is None:
+                target = box_array(frame['3d_bbox'])
+                target_size = box_size(frame['3d_bbox'], frame)
+                centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
+                full_target = None
+            else:
+                target, target_size, centers_corners = self._raw_memo.geometry(frame)
+                full_target = None
             if record_training and slot < 3:
                 # 仅被动日志；不存在的历史不借用复制槽的 GT 计数。
-                full_target = inside_box(xyz, target, target_size)
+                if full_target is None:
+                    full_target = (inside_box(xyz, target, target_size) if self._raw_memo is None
+                                   else self._raw_memo.target_mask(frame))
                 history_raw_counts.append(int(full_target.sum()) if history_valid[slot] else 0)
                 history_crop_counts.append(int((full_target & mask).sum()) if history_valid[slot] else 0)
             label = np.full(n, -1, dtype=np.int64)
             label[:count] = inside_box(xyz[selected], target, target_size).astype(np.int64)
             distances = np.zeros((n, 9), dtype=np.float32)
-            centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
             distances[:count] = np.linalg.norm(xyz[selected, None] - centers_corners[None], axis=-1)
             target[:3] -= anchor[:3]
             points.append(point); valid.append(point_valid); raw_ids.append(point_ids)
@@ -566,20 +594,30 @@ class BatchBuilder:
                        b0_ids=b0_ids, b0_xyz=b0_xyz, current_gt=current_gt)
         return result, context
 
+    @raw_transaction
     def acquire(self, batch, prior, *, training=True):
         from .acquisition import (acquire_extension, band_grid_target, build_dual_support,
                                   support_membership)
         if self._pending is None:
             raise RuntimeError('acquisition requires prepared raw rows')
-        boxes = prior.box.detach().cpu().numpy()
-        fractions = prior.acquisition_fraction.detach().cpu().numpy()
-        directions = prior.direction_xy.detach().cpu().numpy()
+        optimized = optimized_execution(self.config)
+        transferred = tensors_to_numpy(dict(boxes=prior.box, fractions=prior.acquisition_fraction,
+            directions=prior.direction_xy), optimized=optimized)
+        boxes, fractions, directions = (transferred[key] for key in ('boxes', 'fractions', 'directions'))
+        row_diagnostics = {}
+        if optimized and (not training or self.train_diagnostics):
+            for i in range(len(self._pending)):
+                row_diagnostics[i, 'targets'] = (batch['segmentation_labels'][i, -1] == 1).sum()
+                row_diagnostics[i, 'points'] = batch['point_valid'][i, -1].sum()
+                row_diagnostics[i, 'displacement'] = torch.linalg.vector_norm(batch['physical_displacement'][i])
+            row_diagnostics = tensors_to_numpy(row_diagnostics, optimized=True)
         values = []
         for i, context in enumerate(self._pending):
             row, state, anchor = context['row'], context['state'], context['anchor']
             current = row['frames'][row['request'].frame]
-            xyz, ids = point_arrays(current)
-            target_mask = inside_box(xyz, context['current_gt'], box_size(current['3d_bbox'], current))
+            xyz, ids = self._points(current)
+            target_mask = (inside_box(xyz, context['current_gt'], box_size(current['3d_bbox'], current))
+                           if self._raw_memo is None else self._raw_memo.target_mask(current))
             geometry = dict(b0_raw_ids=context['b0_ids'], b0_box=anchor, box_size=state.size,
                 prior_center=boxes[i, :3] + anchor[:3], recovery_center=context['recovery'][:3],
                 support_yaw=float(np.arctan2(directions[i, 1], directions[i, 0])),
@@ -595,10 +633,12 @@ class BatchBuilder:
                              extension_ids=np.full(768, -1, np.int64),
                              extension_valid=np.zeros(768, bool),
                              extension_partition=np.full(768, -1, np.int64))
-            lookup = {int(raw_id): bool(label) for raw_id, label in zip(ids, target_mask)}
+            lookup = ({int(raw_id): bool(label) for raw_id, label in zip(ids, target_mask)}
+                      if self._raw_memo is None else self._raw_index(current))
             labels = np.full(768, -1, dtype=np.int64)
             keep = extra['extension_valid']
-            labels[keep] = [lookup[int(raw_id)] for raw_id in extra['extension_ids'][keep]]
+            labels[keep] = [(lookup[int(raw_id)] if self._raw_memo is None
+                             else target_mask[lookup[int(raw_id)]]) for raw_id in extra['extension_ids'][keep]]
             targets = (band_grid_target(xyz, ids, target_mask=target_mask, **geometry)
                        if training and option(self.config, 'v31_arm', 'full') != 'b0'
                        else dict(acquisition_target=np.zeros(2, np.float32), acquisition_valid=False,
@@ -634,11 +674,14 @@ class BatchBuilder:
                              diagnostic_raw_point_count=np.int64(len(ids)),
                              diagnostic_crop_target_count=np.int64(b0_target_count),
                              diagnostic_sampled_target_count=np.int64(
+                                 row_diagnostics[i, 'targets'] if optimized else
                                  (batch['segmentation_labels'][i, -1] == 1).sum().item()),
                              diagnostic_crop_point_count=np.int64(len(context['b0_ids'])),
                              diagnostic_sampled_point_count=np.int64(
+                                 row_diagnostics[i, 'points'] if optimized else
                                  batch['point_valid'][i, -1].sum().item()),
                              diagnostic_gt_xy_displacement=np.float32(
+                                 row_diagnostics[i, 'displacement'] if optimized else
                                  torch.linalg.vector_norm(batch['physical_displacement'][i]).item()),
                              diagnostic_novel_target_count=np.int64(target_mask.sum() - b0_target_count),
                              diagnostic_reachable_count=np.int64(reachable),
@@ -649,19 +692,18 @@ class BatchBuilder:
             batch[key] = torch.from_numpy(np.stack([x[key] for x in values])).to(device)
         return batch
 
+    @raw_transaction
     def commit(self, output, batch, *, diagnostics=False):
         from .acquisition import _unique_mask
         if self._pending is None:
             raise RuntimeError('no pending v31 transaction (duplicate commit)')
-        boxes = output.accepted_box.detach().cpu().numpy()
-        quality = output.selected_quality.detach().cpu().numpy()
-        probabilities = output.observation.foreground_probability[:, -1].detach().cpu().numpy()
-        point_ids = batch['point_ids'][:, -1].detach().cpu().numpy()
-        point_valid = batch['point_valid'][:, -1].detach().cpu().numpy()
-        prior_boxes = output.prior.box.detach().cpu().numpy()
-        extension_ids = batch['extension_ids'].detach().cpu().numpy()
-        extension_valid = batch['extension_valid'].detach().cpu().numpy()
-        extension_probabilities = output.evidence.identity_logits.detach().sigmoid().cpu().numpy()
+        transferred = tensors_to_numpy(dict(boxes=output.accepted_box, quality=output.selected_quality,
+            probabilities=output.observation.foreground_probability[:, -1], point_ids=batch['point_ids'][:, -1],
+            point_valid=batch['point_valid'][:, -1], prior_boxes=output.prior.box, extension_ids=batch['extension_ids'],
+            extension_valid=batch['extension_valid'], extension_probabilities=output.evidence.identity_logits.detach().sigmoid()),
+            optimized=optimized_execution(self.config))
+        (boxes, quality, probabilities, point_ids, point_valid, prior_boxes, extension_ids,
+         extension_valid, extension_probabilities) = transferred.values()
         records = []
         for index, context in enumerate(self._pending):
             row, state = context['row'], context['state']
@@ -679,8 +721,9 @@ class BatchBuilder:
             if option(self.config, 'v31_arm', 'full') in ('b1_b2', 'full'):
                 ids = np.r_[ids, extension_ids[index, extension_valid[index]]]
                 probs = np.r_[probs, extension_probabilities[index, extension_valid[index]]]
-            cloud, cloud_ids = point_arrays(row['frames'][r.frame])
-            id_to_index = {int(value): j for j, value in enumerate(cloud_ids)}
+            cloud, cloud_ids = self._points(row['frames'][r.frame])
+            id_to_index = (self._raw_index(row['frames'][r.frame]) if self._raw_memo is not None
+                           else {int(value): j for j, value in enumerate(cloud_ids)})
             xyz = cloud[[id_to_index[int(value)] for value in ids]]
             in_box = inside_box(xyz, box, state.size)
             geometric_fg = _unique_mask(ids) & np.isfinite(probs) & (probs >= .5) & in_box

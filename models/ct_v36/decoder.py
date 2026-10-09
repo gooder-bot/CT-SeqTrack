@@ -9,6 +9,7 @@ from models.ct_v31.geometry import anchor_yaw, transform_boxes
 from models.ct_v31.observation import box_corners_xyz
 from .contracts import CandidateSet
 from .verification import LocalBoxReader, build_current_pool, candidate_authorization, projected_xy_size
+from utils.feature_precision import feature_autocast, feature_fp32
 
 
 class SharedHypothesisDecoder(LegacyDecoder):
@@ -106,8 +107,11 @@ class SharedHypothesisDecoder(LegacyDecoder):
                                   members),1)
         allowed = torch.cat((source_valid[:,None].expand(-1,6,-1),ext_allowed),-1)
         allowed = (allowed & query_valid[...,None]).repeat_interleave(8,dim=1)
-        decoded,_ = self.decoder(queries,None,kv,allowed,
-            query_valid=query_valid.repeat_interleave(8,dim=1)[...,None],zero_invalid_rows=True)
+        bf16 = self.execution_profile == 'optimized_bf16'
+        with feature_autocast(queries, enabled=bf16):
+            decoded,_ = self.decoder(queries,None,kv,allowed,
+                query_valid=query_valid.repeat_interleave(8,dim=1)[...,None],zero_invalid_rows=True)
+        decoded = feature_fp32(decoded, enabled=bf16)
         features = self.box_projection(decoded.reshape(b,6,512))
         features = torch.where(query_valid[...,None],features,0.)
         mode_residual = (self.mode_pose_head(features[:,4:]) if self.enable_modes

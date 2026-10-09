@@ -17,6 +17,7 @@ from .observation import box_corners_xyz
 from .geometry import anchor_yaw, rotate_xy, transform_boxes
 from .history_context import history_descriptor
 from .local_observation import LocalObservationReader
+from utils.feature_precision import feature_autocast, feature_fp32
 
 
 def _masked_source(value: Tensor, valid: Tensor, name: str) -> Tensor:
@@ -34,6 +35,7 @@ class SharedHypothesisDecoder(nn.Module):
                  query_context: bool = False, time_scale: float = .5,
                  initial_context: bool = False, local_observation: bool = False):
         super().__init__()
+        self.execution_profile = 'legacy'
         self.query_context = bool(query_context)
         self.initial_context = bool(initial_context)
         self.local_observation = bool(local_observation)
@@ -135,16 +137,20 @@ class SharedHypothesisDecoder(nn.Module):
             raise ValueError("source_valid must match positive B0 token slots")
         exists = torch.cat((history_valid, torch.ones_like(history_valid[:, :1])), dim=1)
         valid = valid & exists[..., None]
-        source = self.source_projection(_masked_source(source, valid, 'B0'))
-        source = torch.where(valid[..., None], source, 0.)
-        local_valid = valid.reshape(batch * frames, tokens)
-        local, = self.encoder(source.reshape(batch * frames, tokens, 64),
-            src_mask=local_valid[:, :, None] & local_valid[:, None, :],
-            query_valid=local_valid[..., None], zero_invalid_rows=True)
-        flat_valid = valid.reshape(batch, frames * tokens)
-        global_source, = self.encoder_global(source.reshape(batch, frames * tokens, 64),
-            src_mask=flat_valid[:, :, None] & flat_valid[:, None, :],
-            query_valid=flat_valid[..., None], zero_invalid_rows=True, global_feature=True)
+        bf16 = self.execution_profile == 'optimized_bf16'
+        with feature_autocast(source, enabled=bf16):
+            source = self.source_projection(_masked_source(source, valid, 'B0'))
+            source = torch.where(valid[..., None], source, 0.)
+            local_valid = valid.reshape(batch * frames, tokens)
+            local, = self.encoder(source.reshape(batch * frames, tokens, 64),
+                src_mask=local_valid[:, :, None] & local_valid[:, None, :],
+                query_valid=local_valid[..., None], zero_invalid_rows=True)
+            flat_valid = valid.reshape(batch, frames * tokens)
+            global_source, = self.encoder_global(source.reshape(batch, frames * tokens, 64),
+                src_mask=flat_valid[:, :, None] & flat_valid[:, None, :],
+                query_valid=flat_valid[..., None], zero_invalid_rows=True, global_feature=True)
+        local = feature_fp32(local, enabled=bf16)
+        global_source = feature_fp32(global_source, enabled=bf16)
         return (torch.cat((local.reshape(batch, frames * tokens, 64), global_source), dim=1),
                 torch.cat((flat_valid, flat_valid), dim=1))
 
@@ -270,8 +276,11 @@ class SharedHypothesisDecoder(nn.Module):
                              memory_valid[:, None].expand(-1, 7, -1)), dim=-1)
         allowed = (allowed & query_valid[:, :, None]).repeat_interleave(8, dim=1)
         corner_valid = query_valid.repeat_interleave(8, dim=1)
-        decoded, _ = self.decoder(queries, None, kv, allowed,
-            query_valid=corner_valid[..., None], zero_invalid_rows=True)
+        bf16 = self.execution_profile == 'optimized_bf16'
+        with feature_autocast(queries, enabled=bf16):
+            decoded, _ = self.decoder(queries, None, kv, allowed,
+                query_valid=corner_valid[..., None], zero_invalid_rows=True)
+        decoded = feature_fp32(decoded, enabled=bf16)
         features = self.box_projection(decoded.reshape(batch_size, 7, 8 * 64))
         features = torch.where(query_valid[..., None], features, 0.)
         residual = self.pose_head(features)

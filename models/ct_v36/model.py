@@ -6,6 +6,7 @@ from models.ct_v31.observation import B0Observation
 from .config import normalize_config
 from .contracts import CommitDecision, EvidenceHypotheses, TrackOutput
 from .randomness import component_rng
+from utils.execution_profile import effective_execution_profile
 
 
 def select_candidates(candidates, verification, *, memory_enabled=True):
@@ -53,6 +54,10 @@ class JointTracker(nn.Module):
             self.evidence = B2IdentityEvidence() if self.enable_b2 else None
         with component_rng(seed, 'verification'):
             self.verifier = FinalBoxVerifier(time_scale=self.config.time_scale)
+        # 执行方式不是网络状态；不新增参数或消耗初始化 RNG。
+        self.execution_profile = effective_execution_profile(self.config)
+        self.observation.execution_profile = self.execution_profile
+        self.decoder.execution_profile = self.execution_profile
 
     def plan_prior(self, batch):
         return self.prior(canonicalize_batch(batch))

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from utils.config import load_yaml_config
+from utils.execution_profile import validate_execution_profile
 from .identity import model_schema, model_version
 
 
@@ -54,11 +55,13 @@ def normalize_config(config=None):
     if is_v35 and supplied.get('lr_schedule') == 'piecewise':
         # 仅新配方包含该字段；旧配置内容和身份摘要完全保持。
         defaults = dict(defaults, lr_stage_values=())
-    unknown = sorted(set(supplied) - set(defaults))
+    optional = {'execution_profile'} if is_v35 else set()
+    unknown = sorted(set(supplied) - set(defaults) - optional)
     if unknown:
         raise ValueError('v33 unknown/inactive configuration keys: ' + ', '.join(unknown))
     cfg = V31Config(defaults)
     cfg.update(supplied)
+    validate_execution_profile(cfg)
     families = {'ctseqtrackv33': 'ct_seqtrack_v33', 'seqtrack_reference': 'ct_seqtrack_v33',
                 'ctseqtrackv34': 'ct_seqtrack_v34', 'ctseqtrackv35': 'ct_seqtrack_v35'}
     if cfg.net_model not in families or cfg.experiment_family != families[cfg.net_model]:
@@ -216,6 +219,9 @@ def config_identity(config):
     excluded = {'cfg', 'path', 'log_dir', 'tag', 'checkpoint', 'init_checkpoint',
                 'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3'}
     payload = {key: value for key, value in cfg.items() if key not in excluded}
+    # 新源码缺省等价优化；显式默认值与旧无开关配置保持相同摘要。
+    if payload.get('execution_profile') == 'optimized_fp32':
+        payload.pop('execution_profile')
     # 未启用 warmup 的旧 R/A/B/C/D 保留原摘要；正数进入新配方身份。
     if cfg.lr_warmup_steps == 0:
         payload.pop('lr_warmup_steps')

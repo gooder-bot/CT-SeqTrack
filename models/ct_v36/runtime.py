@@ -12,19 +12,25 @@ from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contribution
 
 def resume_payload(config, *, completed_epoch, complete, rows, steps, sampler=None, run_id=None):
     from models.ct_v31.entry import source_identity
+    from utils.execution_profile import execution_identity
+    source = source_identity()
     return dict(schema=runtime_schema(config), model_schema=SCHEMA,
         config_sha256=config_identity(config), completed_epoch=int(completed_epoch),
         epoch_complete=bool(complete), rows=int(rows), optimizer_steps=int(steps),
-        sampler=sampler, rng=capture_rng_state(), source=source_identity(), run_id=run_id)
+        sampler=sampler, rng=capture_rng_state(), source=source, run_id=run_id,
+        execution_identity=execution_identity(config, source))
 
 
 def validate_resume_payload(payload, config, *, training=True):
     from models.ct_v31.entry import source_identity
+    from utils.execution_profile import validate_execution_identity
     if not isinstance(payload, dict) or payload.get('schema') != runtime_schema(config):
         raise ValueError('v36 checkpoint runtime schema mismatch')
     if payload.get('model_schema') != SCHEMA or payload.get('config_sha256') != config_identity(config):
         raise ValueError('v36 checkpoint model/config/arm/seed identity mismatch')
-    if payload.get('source') != source_identity():
+    source = source_identity()
+    validate_execution_identity(payload.get('execution_identity'), config, source)
+    if payload.get('source') != source:
         raise ValueError('v36 checkpoint source identity mismatch; use its original source')
     if payload.get('epoch_complete') is not True or payload.get('completed_epoch', 0) < 1:
         raise ValueError('v36 requires complete epoch boundaries')

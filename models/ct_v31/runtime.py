@@ -36,10 +36,14 @@ def move_tensors(batch, device):
 
 
 def resume_payload(config, *, completed_epoch, complete, rows, steps, sampler=None):
-    return dict(schema=runtime_schema(config), model_schema=model_schema(config),
+    payload = dict(schema=runtime_schema(config), model_schema=model_schema(config),
                 config_sha256=config_identity(config), completed_epoch=int(completed_epoch),
                 epoch_complete=bool(complete), rows=int(rows), optimizer_steps=int(steps),
                 sampler=sampler, rng=capture_rng_state())
+    if model_version(config) == 'v35':
+        from utils.execution_profile import execution_identity
+        payload['execution_identity'] = execution_identity(config)
+    return payload
 
 
 def validate_resume_payload(payload, config, *, training=True):
@@ -49,6 +53,9 @@ def validate_resume_payload(payload, config, *, training=True):
         raise ValueError('v31 model schema mismatch')
     if payload.get('config_sha256') != config_identity(config):
         raise ValueError('v31 resolved configuration identity mismatch')
+    if model_version(config) == 'v35':
+        from utils.execution_profile import validate_execution_identity
+        validate_execution_identity(payload.get('execution_identity'), config)
     if training and (payload.get('epoch_complete') is not True or payload.get('completed_epoch', 0) < 1):
         raise ValueError('v31 only resumes complete epoch boundaries')
     if training:

@@ -1,5 +1,13 @@
 # CT-SeqTrack
 
+**2026-10-09 当前：v37 基于强 v35 B0/B1 与现有工程提速实施。** 新版隔离扩展证据与主定位，重建两个恢复候选，分别学习最终框定位效用和提交质量。B1+B2 与 Full 训练同一候选及核验系统，仅执行选择与更新政策不同。结构与监督见 [v37 设计](docs/CTSEQTRACK_V37_DESIGN.md)，五组启动、恢复和比较见 [v37 操作页](docs/CTSEQTRACK_V37_LAUNCH.md)。以下 v36/v35 的“当前”均为历史记录。
+
+五组固定 B0、B1、B1+B2、Full FP32、Full 局部 BF16，全部 mini Car、seed42、scratch60、batch16、LR=1.5e-4、20/50 衰减及原 W 课程，共 **300 epoch、358,500 更新**。FP32 Full 是研究主结果；单 seed mini 不足以证明论文结论。真实 CUDA 生命周期和两精度实测由用户在服务器执行，本地实现不代表已涨分或已获得加速。
+
+本地已通过新增 75 项合同检查、PL2.0.2 专项 8 项及 CPU Full batch16×1024 生命周期；B0/B1 两步 Adam 与旧版逐位相同，完整 epoch10→11 恢复通过。全仓旧测试的一次历史时间戳碰撞、复核结果及服务器验证边界见 [v37 实施报告](artifacts/ct_checks/20261009-153604_v37_implementation/REPORT.md)。
+
+上传前复核补齐 v37 恢复事件唯一文件名、跨平台 LF 源码登记及精度边界测试；五份配置和训练参数保持不变。服务器只读确认环境与数据可用，尚未上传新版或执行 CUDA 检查。最新证据见 [上传就绪报告](artifacts/ct_checks/20261009-161150_v37_upload_readiness/REPORT.md)；[操作页](docs/CTSEQTRACK_V37_LAUNCH.md)已列出五组独立、带日期的完整 nohup 与新终端 tail 命令。
+
 **2026-10-04 当前：v36 测量事件驱动闭环已实施，正式结果待验证。** accepted 输出、合格测量事件和身份记忆分离；事件 B1、位置范围、prior 优先双域获取、几何独立投票、最终框核验与连续长分支共同构成新版本。见 [结构/接口/监督](docs/CTSEQTRACK_V36_DESIGN.md) 与 [五组启动/恢复/比较](docs/CTSEQTRACK_V36_LAUNCH.md)。
 
 五组 A/C/D/E/F 保持 mini Car、seed42、scratch60、batch16、FP32，总计 **300 epoch、358,500 更新**。本地合成与合同验证不替代真实 CUDA batch 检查；由用户上传后执行一次检查及正式训练。代理不写入服务器、不启动任务。旧配置、权重与产物保留；以下 v35“当前/下一轮”表述为历史记录。

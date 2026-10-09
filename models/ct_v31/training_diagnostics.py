@@ -14,6 +14,7 @@ import torch
 from .data import stable_seed
 from .losses import observation_loss_statistics
 from utils.tracking_metrics import LocalYawBox, box_metrics
+from utils.diagnostic_transfer import tensors_to_numpy
 
 
 LOCAL_FIELDS = ('local_neighbor_count', 'local_selected_count',
@@ -23,8 +24,9 @@ LOCAL_FIELDS = ('local_neighbor_count', 'local_selected_count',
 class TrainingDiagnostics:
     SCHEMA = 'ct_seqtrack.v35.training_diagnostics.v1'
 
-    def __init__(self, seed=42):
+    def __init__(self, seed=42, *, optimized=False):
         self.seed = int(seed)
+        self.optimized = bool(optimized)
         self.reset(0)
 
     def reset(self, epoch):
@@ -61,70 +63,51 @@ class TrainingDiagnostics:
         observation, decoder = output.observation, output.decoder
         target = batch['target_box'].detach()
         boxes = dict(coarse=observation.coarse_box.detach(), fine=decoder.hypothesis_boxes[:, 0].detach())
-        arrays = {key: self._cpu(value) for key, value in batch.items()
+        arrays = {key: value for key, value in batch.items()
                   if key.startswith('diagnostic_') and torch.is_tensor(value)}
         valid = batch['point_valid'].bool()
         labels = batch['segmentation_labels']
-        arrays.update(point_count=self._cpu(valid.sum(-1)),
-                      sampled_target_count=self._cpu(((labels == 1) & valid).sum(-1)),
-                      history_exists=self._cpu(batch['history_valid']),
-                      history_is_initial=self._cpu(batch['history_is_initial']))
-        sampled_targets, real_points = arrays['sampled_target_count'], arrays['point_count']
-        sequence_empty = real_points.sum(-1) == 0
-        arrays.update(sequence_empty=sequence_empty,
-            all_sampled_four_frames_background=(~sequence_empty & (sampled_targets.sum(-1) == 0)),
-            current_sampled_missing_history_has_target=((sampled_targets[:, -1] == 0)
-                & (sampled_targets[:, :-1].sum(-1) > 0)))
-        if 'diagnostic_target_count' in arrays and 'diagnostic_crop_target_count' in arrays:
-            raw_missing = arrays['diagnostic_target_count'] == 0
-            arrays.update(current_raw_missing=raw_missing,
-                raw_present_but_crop_miss=(~raw_missing & (arrays['diagnostic_crop_target_count'] == 0)))
+        arrays.update(point_count=valid.sum(-1),
+                      sampled_target_count=((labels == 1) & valid).sum(-1),
+                      history_exists=batch['history_valid'],
+                      history_is_initial=batch['history_is_initial'])
+        # 派生 CPU 标志仍在原位置插入，保持后续逐字段累计顺序。
+        derived_position = len(arrays)
         for name in ('history_support', 'current_support'):
             value = getattr(observation, name, None)
             if value is not None:
-                arrays[name] = self._cpu(value)
+                arrays[name] = value
         for name in LOCAL_FIELDS + ('query_context_norm',):
             value = getattr(decoder, name, None)
             if value is not None:
-                arrays[name] = self._cpu(value)
-        active = self._cpu(observation.sequence_valid.bool())
+                arrays[name] = value
         for name, box in boxes.items():
             error = box[:, :3] - target[:, :3]
-            arrays[name + '_center_error_xyz_m'] = self._cpu(error)
-            arrays[name + '_center_error_m'] = self._cpu(error.norm(dim=-1))
-            arrays[name + '_center_xy_error_m'] = self._cpu(error[:, :2].norm(dim=-1))
-            arrays[name + '_absolute_z_error_m'] = self._cpu(error[:, 2].abs())
+            arrays[name + '_center_error_xyz_m'] = error
+            arrays[name + '_center_error_m'] = error.norm(dim=-1)
+            arrays[name + '_center_xy_error_m'] = error[:, :2].norm(dim=-1)
+            arrays[name + '_absolute_z_error_m'] = error[:, 2].abs()
             angle = box[:, 3] - target[:, 3]
-            arrays[name + '_yaw_error_rad'] = self._cpu(torch.atan2(angle.sin(), angle.cos()).abs())
-        provenance = self._cpu(batch['history_box_provenance']).astype(np.int64)
+            arrays[name + '_yaw_error_rad'] = torch.atan2(angle.sin(), angle.cos()).abs()
         detached_losses = observation_loss_statistics(batch, output)
         detached_losses.update(getattr(output, 'loss_statistics', {}))
-        endpoint_losses = {name: {key: self._cpu(value) for key, value in terms.items()}
-                           for name, terms in detached_losses.items()}
-        # 真实 batch 标量按行数归约，与训练日志的 batch_size 权重相同；
-        # 不把 Full 任务的 batch 均值错误分派给某一 provenance 桶。
-        for name, value in losses.items():
-            if name.startswith('loss_') and torch.is_tensor(value) and value.ndim == 0:
-                item = self.batch_losses.setdefault(name, dict(row_weighted_sum=0., rows=0, batch_sum=0.))
-                scalar = float(value.detach().cpu())
-                item['row_weighted_sum'] += scalar * count
-                item['rows'] += count
-                item['batch_sum'] += scalar
+        scalar_losses = {name: value for name, value in losses.items()
+                         if name.startswith('loss_') and torch.is_tensor(value) and value.ndim == 0}
         quality_valid = decoder.hypothesis_valid.detach().bool()
-        valid_counts = dict(main_quality=int(quality_valid[:, 0].sum()),
-            mode_quality=int(quality_valid[:, 1:].sum()),
-            coarse_and_main_endpoints=int(observation.sequence_valid.sum()),
-            history_box_frames=int(batch['history_valid'].sum()),
-            current_real_points=int(valid[:, -1].sum()), history_real_points=int(valid[:, :-1].sum()),
-            current_observed_frames=int(valid[:, -1].any(-1).sum()),
-            history_observed_frames=int(valid[:, :-1].any(-1).sum()))
+        valid_counts = dict(main_quality=quality_valid[:, 0].sum(),
+            mode_quality=quality_valid[:, 1:].sum(),
+            coarse_and_main_endpoints=observation.sequence_valid.sum(),
+            history_box_frames=batch['history_valid'].sum(),
+            current_real_points=valid[:, -1].sum(), history_real_points=valid[:, :-1].sum(),
+            current_observed_frames=valid[:, -1].any(-1).sum(),
+            history_observed_frames=valid[:, :-1].any(-1).sum())
         if 'physical_valid' in batch:
-            valid_counts['physical_and_sigma_endpoints'] = int((batch['physical_valid'].bool() & output.prior.valid).sum())
+            valid_counts['physical_and_sigma_endpoints'] = (batch['physical_valid'].bool() & output.prior.valid).sum()
         if 'acquisition_valid' in batch:
             acquisition = batch['acquisition_valid'].bool()
             demand = batch.get('acquisition_demand', acquisition).bool()
-            valid_counts.update(acquisition_demand_endpoints=int((acquisition & demand).sum()),
-                                acquisition_no_demand_endpoints=int((acquisition & ~demand).sum()))
+            valid_counts.update(acquisition_demand_endpoints=(acquisition & demand).sum(),
+                                acquisition_no_demand_endpoints=(acquisition & ~demand).sum())
         if 'extension_labels' in batch:
             extension = batch['extension_valid'].bool()
             foreground = batch['extension_labels'] > .5
@@ -133,12 +116,44 @@ class TrainingDiagnostics:
             member_valid = evidence.members.bool() & evidence.point_valid[:, None]
             member_fg = (member_valid & selected_fg[:, None]).sum(-1)
             positive = (member_fg > 0) & (member_fg >= .5 * member_valid.sum(-1)) & evidence.mode_valid
-            valid_counts.update(identity_foreground_points=int((extension & foreground).sum()),
-                identity_background_points=int((extension & ~foreground).sum()),
-                vote_foreground_points=int(selected_fg.sum()),
-                reliability_foreground_points=int(selected_fg.sum()),
-                reliability_background_points=int((evidence.point_valid & ~selected_fg).sum()),
-                positive_mode_boxes=int((positive & quality_valid[:, 1:]).sum()))
+            valid_counts.update(identity_foreground_points=(extension & foreground).sum(),
+                identity_background_points=(extension & ~foreground).sum(),
+                vote_foreground_points=selected_fg.sum(),
+                reliability_foreground_points=selected_fg.sum(),
+                reliability_background_points=(evidence.point_valid & ~selected_fg).sum(),
+                positive_mode_boxes=(positive & quality_valid[:, 1:]).sum())
+        packet = {('array', name): value for name, value in arrays.items()}
+        packet.update({('active',): observation.sequence_valid.bool(),
+                       ('provenance',): batch['history_box_provenance']})
+        packet.update({('endpoint', name, key): value for name, terms in detached_losses.items()
+                       for key, value in terms.items()})
+        packet.update({('scalar', name): value for name, value in scalar_losses.items()})
+        packet.update({('count', name): value for name, value in valid_counts.items()})
+        copied = tensors_to_numpy(packet, optimized=self.optimized)
+        arrays = {name: copied['array', name] for name in arrays}
+        active, provenance = copied['active',], copied['provenance',].astype(np.int64)
+        endpoint_losses = {name: {key: copied['endpoint', name, key] for key in terms}
+                           for name, terms in detached_losses.items()}
+        sampled_targets, real_points = arrays['sampled_target_count'], arrays['point_count']
+        sequence_empty = real_points.sum(-1) == 0
+        derived = dict(sequence_empty=sequence_empty,
+            all_sampled_four_frames_background=(~sequence_empty & (sampled_targets.sum(-1) == 0)),
+            current_sampled_missing_history_has_target=((sampled_targets[:, -1] == 0)
+                & (sampled_targets[:, :-1].sum(-1) > 0)))
+        if 'diagnostic_target_count' in arrays and 'diagnostic_crop_target_count' in arrays:
+            raw_missing = arrays['diagnostic_target_count'] == 0
+            derived.update(current_raw_missing=raw_missing,
+                raw_present_but_crop_miss=(~raw_missing & (arrays['diagnostic_crop_target_count'] == 0)))
+        items = list(arrays.items())
+        arrays = dict(items[:derived_position] + list(derived.items()) + items[derived_position:])
+        # 同原实现逐 batch、逐 loss 用 Python float 累加，不在 GPU 跨批归约。
+        for name in scalar_losses:
+            item = self.batch_losses.setdefault(name, dict(row_weighted_sum=0., rows=0, batch_sum=0.))
+            scalar = float(copied['scalar', name])
+            item['row_weighted_sum'] += scalar * count
+            item['rows'] += count
+            item['batch_sum'] += scalar
+        valid_counts = {name: int(copied['count', name]) for name in valid_counts}
         for name, value in valid_counts.items():
             self.batch_loss_valid_counts[name] = self.batch_loss_valid_counts.get(name, 0) + value
         sampled = []
@@ -170,10 +185,13 @@ class TrainingDiagnostics:
         if sampled:
             # 只有固定 1/16 样本传输框并执行 CPU 旋转几何；不另跑网络。
             indices = torch.tensor([i for i, _, _ in sampled], device=target.device)
-            truth = self._cpu(target.index_select(0, indices))
-            sizes = self._cpu(batch['box_size'].index_select(0, indices))
-            target_sizes = self._cpu(batch['target_box_size'].index_select(0, indices))
-            predicted = {name: self._cpu(value.index_select(0, indices)) for name, value in boxes.items()}
+            sample_values = dict(truth=target.index_select(0, indices),
+                sizes=batch['box_size'].index_select(0, indices),
+                target_sizes=batch['target_box_size'].index_select(0, indices))
+            sample_values.update({name: value.index_select(0, indices) for name, value in boxes.items()})
+            copied = tensors_to_numpy(sample_values, optimized=self.optimized)
+            truth, sizes, target_sizes = (copied[name] for name in ('truth', 'sizes', 'target_sizes'))
+            predicted = {name: copied[name] for name in boxes}
             for j, (i, row, key) in enumerate(sampled):
                 request = row['request']
                 record = dict(tracklet=row['tracklet_key'], frame=int(request.frame),

@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from models.ct_v31.config import DEFAULTS as OLD_DEFAULTS, V31Config
 from utils.config import load_yaml_config
+from utils.execution_profile import validate_execution_profile
 from .contracts import SCHEMA
 
 DEFAULTS = dict(OLD_DEFAULTS, net_model='ctseqtrackv36', experiment_family='ct_seqtrack_v36',
@@ -18,11 +19,12 @@ DEFAULTS = dict(OLD_DEFAULTS, net_model='ctseqtrackv36', experiment_family='ct_s
 
 def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
-    unknown = set(supplied) - set(DEFAULTS)
+    unknown = set(supplied) - set(DEFAULTS) - {'execution_profile'}
     if unknown:
         raise ValueError('v36 unknown/inactive keys: ' + ', '.join(sorted(unknown)))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
+    validate_execution_profile(cfg)
     if cfg.net_model != 'ctseqtrackv36' or cfg.experiment_family != 'ct_seqtrack_v36':
         raise ValueError('v36 model/family identity mismatch')
     if cfg.v36_arm not in ('A', 'C', 'D', 'E', 'F') or cfg.v31_arm != 'full':
@@ -99,6 +101,8 @@ def config_identity(config):
     excluded = {'cfg', 'path', 'log_dir', 'tag', 'checkpoint', 'init_checkpoint', 'test',
                 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3'}
     payload = {k: v for k, v in cfg.items() if k not in excluded}
+    if payload.get('execution_profile') == 'optimized_fp32':
+        payload.pop('execution_profile')
     manifest = payload.pop('dynamics_time_manifest', None)
     if manifest:
         payload['dynamics_time_manifest_sha256'] = hashlib.sha256(Path(manifest).read_bytes()).hexdigest()

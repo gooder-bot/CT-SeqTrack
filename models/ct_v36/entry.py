@@ -13,6 +13,8 @@ import time
 
 from .config import load_config, config_identity
 from .identity import model_schema, model_version, runtime_key
+from utils.execution_profile import (EXECUTION_PROFILES, execution_identity,
+                                     validate_execution_identity)
 
 
 def batch_limit(value):
@@ -28,6 +30,7 @@ def parse_config(argv=None):
         parser.add_argument('--' + key, type=int)
     parser.add_argument('--accelerator', choices=('auto', 'cpu', 'gpu'))
     parser.add_argument('--dynamics_time_mode', choices=('true', 'fixed', 'shuffled'))
+    parser.add_argument('--execution_profile', choices=EXECUTION_PROFILES)
     for key in ('test', 'ct_engineering_check'):
         parser.add_argument('--' + key, action='store_true', default=None)
     for key in ('limit_train_batches', 'limit_val_batches'):
@@ -82,6 +85,7 @@ def validate_run_destination(config, root):
         for key, value in expected.items():
             if saved.get(key) != value:
                 raise ValueError('existing run identity mismatch: ' + key)
+        validate_execution_identity(saved.get('execution_identity'), config, source_identity())
         if not config.checkpoint:
             raise FileExistsError('this run already has metadata; use a new --log_dir or same-run --checkpoint')
     if (root.exists() and not existing
@@ -152,6 +156,7 @@ def run(config, *, loaders=None):
                     cuda_visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
                     calibration_required=False, source=source_identity(),
                     evaluation_rng_policy='endpoint_eval0_v1')
+    manifest['execution_identity'] = execution_identity(config, manifest['source'])
     import uuid
     existing_manifest = (json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
                          if preserve_metadata else None)
@@ -174,6 +179,9 @@ def run(config, *, loaders=None):
     print('[' + version + '] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
     loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
     class ConsoleProgress(Callback):
+        def on_exception(self, trainer, module, exception):
+            module.clear_pending_materialization()
+
         def on_train_batch_start(self, trainer, module, batch, batch_idx):
             if config.lr_warmup_steps and batch_idx % 50 == 0:
                 lr = trainer.optimizers[0].param_groups[0]['lr']

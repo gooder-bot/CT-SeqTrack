@@ -1,5 +1,11 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-09 当前为 [v37 五组](CTSEQTRACK_V37_LAUNCH.md)：B0、B1、B1+B2、Full FP32、Full 局部 BF16，seed42、scratch60，共300epoch/358,500更新。代理仅通过 SSH 只读查看，未上传、安装、运行检查、启动或停止任务。服务器尚无本地新增 v37 与工程提速工具；由用户上传完整最新代码，执行一次 Full CUDA 生命周期及短 BF16 数值检查后启动正式实验。
+
+本次快照：HEAD=`aec7fd6fa41b08fd8d2bdfe7061da176b023f31f`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全，磁盘约1909GiB可用。两张A40各46,068MiB，CUDA与BF16支持均已确认；GPU0/1分别空闲41,852/42,219MiB，仍有其他计算任务。以实际Full峰值安排并发，不保证五组同时放得下，不停止其他任务。服务器原有工作树内容保持。完整快照及本地复核见 [上传就绪报告](../artifacts/ct_checks/20261009-161150_v37_upload_readiness/REPORT.md)。
+
+以下10月4日及更早的“当前”、空闲量和检查要求均为历史记录。本轮命令以 v37 操作页为准；环境绝对路径与 native allocator 保持，无需升级环境。
+
 2026-10-04 当前为 [v36 五组](CTSEQTRACK_V36_LAUNCH.md)：A/C/D/E/F，seed42、scratch60，共300epoch/358,500更新。代理此次只读核验，未上传、安装、启动或停止任务。服务器尚无36配置；上传后由用户执行一次 `tools/check_v36_full_batch.py` 的真实CUDA检查，再启动五组。
 
 20:04只读快照：HEAD=`188f587585a3c2e23a928f6e147bc9accebb1b1d`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini的metadata/samples/sweeps均存在，/home约2.7TiB可用。两张A40各46,068MiB；GPU0有其他用户的两个任务，空闲16,016MiB，GPU1空闲45,413MiB。资源会变化；首次新Full检查使用GPU1，后续并发以新检查峰值和实际空闲量安排，不停止其他任务。

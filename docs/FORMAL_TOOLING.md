@@ -1,5 +1,12 @@
 # CT-SeqTrack 工具范围
 
+## 当前 v37 五组（2026-10-09）
+
+- `main.py --cfg cfgs/ct_seqtrack/37_*_mini.yaml` 分派独立 v37；`tools/launch_v37.sh` 每次只启动指定的一组。五组配方与恢复命令见 [v37 操作页](CTSEQTRACK_V37_LAUNCH.md)，登记见 `37_registration.json`。
+- `tools/check_v37_full_batch.py` 提供真实 Full 生命周期检查；`tools/check_execution_performance.py --mode all --candidate_profile optimized_bf16 --baseline_profile optimized_fp32 --inference` 检查两精度差异并配对测训练/闭环推理吞吐。20 步预热、100 步计时、3 次轮换顺序重复；保留真实 Trainer 日志和诊断。工程权重不用于正式初始化。
+- `tools/compare_v37.py` 只读验证五组身份、完整预算和 final60/late-3 原帧；比较当前 B1 与旧强 B0/B1，原 R/C 门槛和漂移风险保留。FP32 Full 为预登记主结果，BF16 为配方比较。
+- 工具报告仅写 `artifacts/ct_checks/` 新位置；不覆盖历史、关闭身份检查或自动追加训练。服务器命令由用户执行。以下工具仍仅服务其历史版本。
+
 ## 当前 v36 五组（2026-10-04）
 
 - `main.py --cfg cfgs/ct_seqtrack/36_*_mini.yaml` 分派独立 v36 入口，A/C/D/E/F 五组；旧入口保留。准确命令见 [v36 启动/恢复](CTSEQTRACK_V36_LAUNCH.md)。

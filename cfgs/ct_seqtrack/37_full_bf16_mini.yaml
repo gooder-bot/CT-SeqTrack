@@ -1,0 +1,4 @@
+_base_: 37_full_mini.yaml
+experiment_name: ct37_full_bf16_mini_car_scratch_seed42
+tag: v37_full_bf16_mini_car_seed42
+execution_profile: optimized_bf16

@@ -1,0 +1,5 @@
+_base_: 37_formal_base.yaml
+experiment_name: ct37_b1_b2_mini_car_scratch_seed42
+tag: v37_b1_b2_mini_car_seed42
+v37_arm: b1_b2
+v31_arm: b1_b2

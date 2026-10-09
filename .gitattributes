@@ -10,3 +10,20 @@ models/ct_v31/data.py text eol=lf
 main.py text eol=lf
 models/ct_v36/** text eol=lf
 models/ctseqtrackv36.py text eol=lf
+# v37 and its execution helpers are registered by content hash across platforms.
+models/ct_v37/** text eol=lf
+models/ctseqtrackv37.py text eol=lf
+models/ct_v31/** text eol=lf
+models/ctseqtrackv31.py text eol=lf
+utils/batch_materialization.py text eol=lf
+utils/diagnostic_transfer.py text eol=lf
+utils/execution_profile.py text eol=lf
+utils/feature_precision.py text eol=lf
+utils/raw_frame_memo.py text eol=lf
+utils/masked_observation.py text eol=lf
+# Frozen legacy blobs contain mixed/CRLF endings; retain their registered bytes.
+datasets/data_classes.py -text
+models/attn/Layers.py -text
+models/attn/Modules.py -text
+models/attn/SubLayers.py -text
+utils/__init__.py -text

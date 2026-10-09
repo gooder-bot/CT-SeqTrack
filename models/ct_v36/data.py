@@ -8,6 +8,9 @@ import json
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from utils.diagnostic_transfer import tensors_to_numpy
+from utils.execution_profile import optimized_execution
+from utils.raw_frame_memo import RawFrameMemo, raw_transaction
 
 from models.ct_v31.data import (box_array, box_size, box_corners, inside_box,
                                point_arrays, option, metadata, raw_dataset_factory)
@@ -144,13 +147,30 @@ class BatchBuilder:
         self.config = config
         self.memory_enabled = option(config, 'v36_arm', 'A') != 'C'
         self.states, self._pending = {}, None
+        self._raw_memo = None
+
+    def _start_materialization_cache(self):
+        self._raw_memo = (RawFrameMemo(point_arrays, box_array, box_size, box_corners, inside_box)
+                          if optimized_execution(self.config) else None)
+
+    def clear_materialization_cache(self):
+        self._raw_memo = None
+
+    def _points(self, frame):
+        return self._raw_memo.points(frame) if self._raw_memo is not None else point_arrays(frame)
+
+    def _raw_index(self, frame):
+        if self._raw_memo is not None:
+            return self._raw_memo.index(frame)
+        return {int(value): j for j, value in enumerate(point_arrays(frame)[1])}
 
     def reset(self):
         self.states.clear()
         self._pending = None
+        self.clear_materialization_cache()
 
     def _crop_indices(self, frame, box, size, row):
-        xyz, ids = point_arrays(frame)
+        xyz, ids = self._points(frame)
         selected = np.flatnonzero(inside_box(xyz, box, size,
             scale=float(option(self.config, 'bb_scale', 1.25)), offset=float(option(self.config, 'bb_offset', 2.))))
         n = int(option(self.config, 'point_sample_size', 1024))
@@ -194,7 +214,7 @@ class BatchBuilder:
         if self.memory_enabled:
             memory = RawIdentityMemory(size)
             first = row['first_frame']
-            xyz, ids = point_arrays(first)
+            xyz, ids = self._points(first)
             first_box = box_array(first['3d_bbox'])
             memory.initialize(xyz, ids, inside_box(xyz, first_box, size), first_box,
                               float(annotations['effective_times'][0]))
@@ -208,6 +228,7 @@ class BatchBuilder:
             state.velocity_valid, state.velocity_time = True, events[-1].effective_time
         return state
 
+    @raw_transaction
     def prepare(self, rows):
         if self._pending is not None:
             raise RuntimeError('previous v36 transaction has not been committed')
@@ -268,10 +289,15 @@ class BatchBuilder:
                 point[:count, 4] = .5
             mask = np.arange(n) < count
             point_ids = np.full(n, -1, np.int64); point_ids[:count] = ids[selected]
-            target = box_array(frame['3d_bbox']); target_size = box_size(frame['3d_bbox'], frame)
-            label = np.full(n, -1, np.int64); label[:count] = inside_box(xyz[selected], target, target_size)
+            if self._raw_memo is None:
+                target = box_array(frame['3d_bbox']); target_size = box_size(frame['3d_bbox'], frame)
+                centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
+                target_mask = inside_box(xyz[selected], target, target_size)
+            else:
+                target, target_size, centers_corners = self._raw_memo.geometry(frame)
+                target_mask = inside_box(xyz[selected], target, target_size)
+            label = np.full(n, -1, np.int64); label[:count] = target_mask
             distances = np.zeros((n, 9), np.float32)
-            centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
             if count:
                 distances[:count] = np.linalg.norm(xyz[selected,None,:]-centers_corners[None,:,:], axis=-1)
             target[:3] -= anchor[:3]
@@ -321,16 +347,25 @@ class BatchBuilder:
                        b0_ids=b0_ids,b0_xyz=b0_xyz,current_gt=current_gt,recovery=fallback)
         return result, context
 
+    @raw_transaction
     def acquire(self, batch, prior, *, training=True):
         from .acquisition import acquire_extension, build_dual_support, support_membership
         if self._pending is None:
             raise RuntimeError('acquisition requires a pending prepare')
-        boxes=prior.world_box.detach().cpu().numpy(); ranges=prior.range_xy.detach().cpu().numpy()
-        axes=prior.axes.detach().cpu().numpy(); origins=prior.origin_frame.detach().cpu().numpy()
+        optimized = optimized_execution(self.config)
+        transferred = tensors_to_numpy(dict(boxes=prior.world_box, ranges=prior.range_xy,
+            axes=prior.axes, origins=prior.origin_frame), optimized=optimized)
+        boxes, ranges, axes, origins = (transferred[key] for key in ('boxes', 'ranges', 'axes', 'origins'))
+        row_diagnostics = {}
+        if optimized:
+            for index in range(len(self._pending)):
+                row_diagnostics[index, 'targets'] = (batch['segmentation_labels'][index, -1] == 1).sum()
+                row_diagnostics[index, 'points'] = batch['point_valid'][index, -1].sum()
+            row_diagnostics = tensors_to_numpy(row_diagnostics, optimized=True)
         values=[]
         for index,context in enumerate(self._pending):
             row,state=context['row'],context['state']; r=row['request']; current=row['frames'][r.frame]
-            xyz,ids=point_arrays(current)
+            xyz,ids=self._points(current)
             geometry=dict(b0_box=context['anchor'],box_size=state.size,prior_box=boxes[index],
                 range_xy=ranges[index],axes=axes[index],crop_scale=float(option(self.config,'bb_scale',1.25)),
                 crop_offset=float(option(self.config,'bb_offset',2.)))
@@ -342,7 +377,8 @@ class BatchBuilder:
                     extension_valid=np.zeros(768,bool),extension_partition=np.full(768,-1,np.int64),
                     extension_membership=np.zeros((768,2),bool))
             # 原帧标签和覆盖在完成真实获取之后生成，不改变采样。
-            truth=inside_box(xyz,context['current_gt'],box_size(current['3d_bbox'],current))
+            truth=(inside_box(xyz,context['current_gt'],box_size(current['3d_bbox'],current))
+                   if self._raw_memo is None else self._raw_memo.target_mask(current))
             if self.memory_enabled:
                 actual_support=build_dual_support(**geometry)
                 actual_members=support_membership(xyz,actual_support,context['b0_ids'],ids)
@@ -353,9 +389,11 @@ class BatchBuilder:
             else:
                 actual_members=(np.zeros(len(ids),bool),np.zeros(len(ids),bool))
                 actual_union=maximum_union=np.zeros(len(ids),bool)
-            lookup={int(raw_id):bool(label) for raw_id,label in zip(ids,truth)}
+            lookup=({int(raw_id):bool(label) for raw_id,label in zip(ids,truth)}
+                    if self._raw_memo is None else self._raw_index(current))
             labels=np.full(768,-1,np.int64); mask=extra['extension_valid']
-            labels[mask]=[lookup[int(i)] for i in extra['extension_ids'][mask]]
+            labels[mask]=[(lookup[int(i)] if self._raw_memo is None else truth[lookup[int(i)]])
+                          for i in extra['extension_ids'][mask]]
             origin=int(origins[index])
             if origin < 0 or origin >= r.frame:
                 raise ValueError('range origin must reference an earlier annotation')
@@ -371,9 +409,11 @@ class BatchBuilder:
                 diagnostic_search_target_count_by_partition=np.asarray([(truth&m).sum() for m in actual_members],np.int64),
                 diagnostic_range_clipped=np.asarray(ranges[index]>[12.,8.],bool),
                 diagnostic_acquired_count=np.int64((labels[mask]==1).sum()),
-                diagnostic_sampled_target_count=np.int64((batch['segmentation_labels'][index,-1]==1).sum().item()),
+                diagnostic_sampled_target_count=np.int64(row_diagnostics[index, 'targets'] if optimized
+                    else (batch['segmentation_labels'][index,-1]==1).sum().item()),
                 diagnostic_crop_point_count=np.int64(len(context['b0_ids'])),
-                diagnostic_sampled_point_count=np.int64(batch['point_valid'][index,-1].sum().item()),
+                diagnostic_sampled_point_count=np.int64(row_diagnostics[index, 'points'] if optimized
+                    else batch['point_valid'][index,-1].sum().item()),
                 diagnostic_gt_xy_displacement=np.float32(np.linalg.norm(context['current_gt'][:2]-row['annotations']['boxes'][r.frame-1,:2])))
             values.append(extra)
         device=batch['points'].device
@@ -409,20 +449,20 @@ class BatchBuilder:
         state.events.append(event);state.events[:]=state.events[-3:]
         return edge
 
+    @raw_transaction
     def commit(self,output,batch,*,diagnostics=False):
         if self._pending is None:
             raise RuntimeError('no pending v36 transaction (duplicate commit)')
-        def cpu(value):
-            return value.detach().cpu().numpy()
-        boxes=cpu(output.accepted_box);candidate_boxes=cpu(output.candidates.boxes)
-        selected=cpu(output.decision.output_index); measured=cpu(output.decision.measurement_index)
-        utilities=cpu(output.verification.utility);scores=cpu(output.verification.measurement_score)
-        authorized=cpu(output.verification.authorized);support=cpu(output.verification.support_mask)
-        ids=cpu(output.verification.support_ids);local_xyz=cpu(output.verification.support_xyz)
-        probabilities=cpu(output.verification.support_probabilities)
-        candidate_valid=cpu(output.candidates.valid); prior_world=cpu(output.prior.world_box)
-        range_xy=cpu(output.prior.range_xy);axes=cpu(output.prior.axes)
-        declared_memory=cpu(output.decision.memory_eligible)
+        transferred = tensors_to_numpy(dict(boxes=output.accepted_box, candidate_boxes=output.candidates.boxes,
+            selected=output.decision.output_index, measured=output.decision.measurement_index,
+            utilities=output.verification.utility, scores=output.verification.measurement_score,
+            authorized=output.verification.authorized, support=output.verification.support_mask,
+            ids=output.verification.support_ids, local_xyz=output.verification.support_xyz,
+            probabilities=output.verification.support_probabilities, candidate_valid=output.candidates.valid,
+            prior_world=output.prior.world_box, range_xy=output.prior.range_xy, axes=output.prior.axes,
+            declared_memory=output.decision.memory_eligible), optimized=optimized_execution(self.config))
+        (boxes, candidate_boxes, selected, measured, utilities, scores, authorized, support, ids,
+         local_xyz, probabilities, candidate_valid, prior_world, range_xy, axes, declared_memory) = transferred.values()
         actions=[]
         for index,context in enumerate(self._pending):
             oi,mi=int(selected[index]),int(measured[index])
@@ -473,7 +513,9 @@ class BatchBuilder:
             state.transitions[r.frame]=innovation<=max(.5*np.hypot(*state.size[:2]),1e-3)
             state.previous_innovation=innovation;state.previous_quality=float(utilities[index,oi])
             if diagnostics:
-                raw,raw_ids=point_arrays(row['frames'][r.frame]);lookup={int(x):j for j,x in enumerate(raw_ids)}
+                raw,raw_ids=self._points(row['frames'][r.frame])
+                lookup=(self._raw_index(row['frames'][r.frame]) if self._raw_memo is not None
+                        else {int(x):j for j,x in enumerate(raw_ids)})
                 written=(state.memory.recent[-1]['ids'][state.memory.recent[-1]['fg']]
                          if wrote else np.empty(0,np.int64))
                 truth=inside_box(raw[[lookup[int(x)] for x in written]],context['current_gt'],

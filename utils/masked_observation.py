@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from utils.deterministic_pooling import DeterministicMaxPool1d
+from utils.feature_precision import feature_autocast
 
 
 def mask_values(value, valid):
@@ -27,10 +28,15 @@ def _training_bn_values(value, valid, weight, bias, count, eps):
     return mask_values(result, valid), mean, variance
 
 
-def masked_batch_norm(value, valid, module):
+def masked_batch_norm(value, valid, module, *, valid_count=None, force_fp32=False):
     """复用原 BN 参数/状态；无效值连统计与梯度都不进入网络。"""
+    if force_fp32:
+        with torch.autocast(device_type=value.device.type, enabled=False):
+            return masked_batch_norm(value.float(), valid, module, valid_count=valid_count)
     valid = valid.bool()
-    count = int(valid.sum().item())
+    if valid_count is not None and (type(valid_count) is not int or not 0 <= valid_count <= valid.numel()):
+        raise ValueError('valid_count must be an integer within the mask size')
+    count = int(valid.sum().item()) if valid_count is None else valid_count
     if count == valid.numel() and (not module.training or count >= 2):
         return module(value)
     if not module.training or count < 2:
@@ -61,24 +67,35 @@ def masked_max_pool(value, valid, output_size=1):
     return mask_values(pooled, token_valid), token_valid
 
 
-def masked_sequence(module, value, valid):
+def masked_sequence(module, value, valid, *, valid_count=None, feature_bf16=False):
     """运行已有 Sequential，保留 state_dict 键和全有效普通 BN 路径。"""
     # 输入只清理一次。Conv 后紧跟 masked BN，后者负责清理 bias；ReLU 保持零。
     value = mask_values(value, valid)
     layers = list(module)
     for index, layer in enumerate(layers):
         if isinstance(layer, nn.BatchNorm1d):
-            value = masked_batch_norm(value, valid, layer)
+            value = masked_batch_norm(value, valid, layer, valid_count=valid_count,
+                                      force_fp32=feature_bf16)
         elif isinstance(layer, (nn.AdaptiveMaxPool1d, DeterministicMaxPool1d)):
             value, valid = masked_max_pool(value, valid, layer.output_size)
+            valid_count = None
         elif isinstance(layer, nn.Flatten):
             value = layer(value)
             valid = valid.any(-1)
+            valid_count = None
         elif isinstance(layer, nn.ReLU):
             value = layer(value)
         elif (isinstance(layer, (nn.Conv1d, nn.Linear)) and index + 1 < len(layers)
               and isinstance(layers[index + 1], nn.BatchNorm1d)):
-            value = layer(value)
+            if feature_bf16:
+                with feature_autocast(value, enabled=True):
+                    value = layer(value)
+            else:
+                value = layer(value)
         else:
-            value = mask_values(layer(value), valid)
+            if feature_bf16 and isinstance(layer, (nn.Conv1d, nn.Linear)):
+                with feature_autocast(value, enabled=True):
+                    value = mask_values(layer(value), valid)
+            else:
+                value = mask_values(layer(value), valid)
     return value, valid

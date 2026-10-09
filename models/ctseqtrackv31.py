@@ -21,6 +21,8 @@ from models.ct_v31.identity import model_schema, model_version, runtime_key, tra
 from models.ct_v31.runtime import (move_tensors, TrackingEvaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
 from utils.bn_policy import running_batch_norm
+from utils.execution_profile import optimized_execution
+from utils.batch_materialization import attach_materialization_cache, clear_materialization_cache
 
 
 class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
@@ -55,7 +57,8 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         self.training_diagnostics = None
         if self.config.net_model == 'ctseqtrackv35' and self.config.get('v35_train_diagnostics', True):
             from models.ct_v31.training_diagnostics import TrainingDiagnostics
-            self.training_diagnostics = TrainingDiagnostics(self.config.seed)
+            self.training_diagnostics = TrainingDiagnostics(
+                self.config.seed, optimized=optimized_execution(self.config))
         if pl is not None:
             self.save_hyperparameters(dict(config=dict(self.config)))
 
@@ -97,18 +100,40 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def _forward_raw(self, rows, builder, *, training):
         device = next(self.tracker.parameters()).device
-        batch = move_tensors(builder.prepare(rows), device)
-        prior = self.tracker.plan_prior(batch)
-        builder.acquire(batch, prior, training=training)
-        # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
-        # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
-        # teacher/单轨迹 EMA 覆盖；只切换 B0 BN，affine 和共享特征仍可学。
-        use_running = training and (len(rows) < self.config.batch_size
-            or any(getattr(row['request'], 'drain', False) for row in rows))
-        bn_scope = getattr(self.tracker, 'observation', self.tracker)
-        with running_batch_norm(bn_scope, enabled=use_running):
-            output = self.tracker(batch, prior=prior)
+        batch = {}
+        try:
+            batch = move_tensors(builder.prepare(rows), device)
+            batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
+            prior = self.tracker.plan_prior(batch)
+            builder.acquire(batch, prior, training=training)
+            # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
+            # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
+            # teacher/单轨迹 EMA 覆盖；只切换 B0 BN，affine 和共享特征仍可学。
+            use_running = training and (len(rows) < self.config.batch_size
+                or any(getattr(row['request'], 'drain', False) for row in rows))
+            bn_scope = getattr(self.tracker, 'observation', self.tracker)
+            with running_batch_norm(bn_scope, enabled=use_running):
+                output = self.tracker(batch, prior=prior)
+        except BaseException:
+            self._release_materialization(batch, builder)
+            raise
         return batch, output
+
+    @staticmethod
+    def _release_materialization(batch, builder):
+        clear_materialization_cache(batch)
+        release = getattr(builder, 'clear_materialization_cache', None)
+        if release is not None:
+            release()
+
+    def clear_pending_materialization(self):
+        """异常清理只释放瞬时缓存，不提交或重置跟踪状态。"""
+        if self._pending_train is not None:
+            self._release_materialization(self._pending_train[1], self.train_builder)
+        for builder in (self.train_builder, self.evaluation_builder):
+            release = getattr(builder, 'clear_materialization_cache', None)
+            if release is not None:
+                release()
 
     def configure_optimizers(self):
         parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
@@ -174,20 +199,24 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
         if self._pending_train is not None:
             raise RuntimeError('previous training output was not committed')
         batch, output = self._forward_raw(rows, self.train_builder, training=True)
-        if self.training_diagnostics is not None:
-            # 瞬时 detached 统计容器；loss 内复用已经算出的 quality 标签，
-            # 不改变返回字典，也不为分桶重新计算全量几何 IoU。
-            output.loss_statistics = {}
-        losses = self.tracker.compute_losses(batch, output)
-        total = losses['loss_total']
-        if total.ndim != 0 or not bool(torch.isfinite(total)):
-            raise FloatingPointError('v31 loss_total must be a finite scalar')
-        if self.training_diagnostics is not None:
-            self.training_diagnostics.add_batch(rows, batch, output, losses)
-        self._pending_train = (output, batch, len(rows))
-        for name, value in losses.items():
-            if torch.is_tensor(value) and value.ndim == 0:
-                self.log('train/' + name, value, on_step=True, on_epoch=True, batch_size=len(rows))
+        try:
+            if self.training_diagnostics is not None:
+                # 瞬时 detached 统计容器；loss 内复用已经算出的 quality 标签，
+                # 不改变返回字典，也不为分桶重新计算全量几何 IoU。
+                output.loss_statistics = {}
+            losses = self.tracker.compute_losses(batch, output)
+            total = losses['loss_total']
+            if total.ndim != 0 or not bool(torch.isfinite(total)):
+                raise FloatingPointError('v31 loss_total must be a finite scalar')
+            if self.training_diagnostics is not None:
+                self.training_diagnostics.add_batch(rows, batch, output, losses)
+            self._pending_train = (output, batch, len(rows))
+            for name, value in losses.items():
+                if torch.is_tensor(value) and value.ndim == 0:
+                    self.log('train/' + name, value, on_step=True, on_epoch=True, batch_size=len(rows))
+        except BaseException:
+            self._release_materialization(batch, self.train_builder)
+            raise
         # 普通 mean loss、每批一次标准 Adam；不声称小批按样本数缩放
         # loss 可以同比缩小 Adam 更新，也不临时改变 LR/scheduler。
         return total
@@ -195,7 +224,10 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
     def on_train_batch_end(self, outputs, batch, batch_idx):
         # Lightning automatic optimization has completed backward + Adam here.
         output, prepared, count = self._pending_train
-        self.train_builder.commit(output, prepared)
+        try:
+            self.train_builder.commit(output, prepared)
+        finally:
+            self._release_materialization(prepared, self.train_builder)
         self._pending_train = None
         self._epoch_rows += count
         self._epoch_steps += 1
@@ -254,8 +286,11 @@ class CTSEQTRACKV31(pl.LightningModule if pl is not None else nn.Module):
 
     def _evaluation_step(self, rows):
         batch, output = self._forward_raw(rows, self.evaluation_builder, training=False)
-        committed = self.evaluation_builder.commit(output, batch, diagnostics=True)
-        self.evaluation.add_batch(rows, batch, output, committed)
+        try:
+            committed = self.evaluation_builder.commit(output, batch, diagnostics=True)
+            self.evaluation.add_batch(rows, batch, output, committed)
+        finally:
+            self._release_materialization(batch, self.evaluation_builder)
 
     def validation_step(self, rows, batch_idx):
         self._evaluation_step(rows)

@@ -13,6 +13,8 @@ import torch
 from torch import Tensor, nn
 
 from utils.masked_observation import mask_values, masked_max_pool, masked_sequence
+from utils.batch_materialization import materialization_cache
+from utils.feature_precision import feature_autocast
 from .contracts import ObservationFeatures
 from .geometry import anchor_yaw, rotate_xyz, transform_boxes
 from .history_context import history_descriptor
@@ -111,15 +113,20 @@ class SegPointNet(nn.Module):
             _conv_block(i, o) for i, o in zip(widths[:-1], widths[1:]))
         self.fc = nn.Conv1d(128, 11, 1)
 
-    def forward(self, value: Tensor, valid: Tensor):
+    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
         for index, layer in enumerate(self.seq_per_point):
-            value, _ = masked_sequence(layer, value, valid)
+            value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
+                                       feature_bf16=feature_bf16)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
         value = torch.cat((point_features, pooled.expand(-1, -1, value.shape[-1])), dim=1)
         for layer in self.seq_per_point2:
-            value, _ = masked_sequence(layer, value, valid)
+            value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
+                                       feature_bf16=feature_bf16)
+        if feature_bf16:
+            with torch.autocast(device_type=value.device.type, enabled=False):
+                return mask_values(self.fc(value.float()), valid), point_features.float()
         return mask_values(self.fc(value), valid), point_features
 
 
@@ -133,17 +140,20 @@ class MiniPointNet(nn.Module):
             _conv_block(i, o) for i, o in zip(widths[:-1], widths[1:]))
         self.hidden = nn.ModuleList((_linear_block(512, 512), _linear_block(512, 256)))
 
-    def forward(self, value: Tensor, valid: Tensor, foreground: Tensor):
+    def forward(self, value: Tensor, valid: Tensor, foreground: Tensor, *, valid_count=None,
+                row_count=None, feature_bf16=False):
         for layer in self.per_point:
-            value, _ = masked_sequence(layer, value, valid)
+            value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
+                                       feature_bf16=feature_bf16)
         # value 已经过 ReLU；此处加权保持原始几何输入，不产生缩放后的伪坐标。
         value = value * foreground.detach()[:, None]
         value, _ = masked_max_pool(value, valid)
         value = value.squeeze(-1)
         row_valid = valid.any(-1)
         for layer in self.hidden:
-            value, _ = masked_sequence(layer, value, row_valid)
-        return value
+            value, _ = masked_sequence(layer, value, row_valid, valid_count=row_count,
+                                       feature_bf16=feature_bf16)
+        return value.float() if feature_bf16 else value
 
 
 class FeaturePointNet(nn.Module):
@@ -162,16 +172,23 @@ class FeaturePointNet(nn.Module):
             _conv_block(i, o) for i, o in zip(widths[:-1], widths[1:]))
         self.fc = nn.Conv1d(128, 128, 1)
 
-    def forward(self, value: Tensor, valid: Tensor):
+    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
         for index, layer in enumerate(self.seq_per_point):
-            value, _ = masked_sequence(layer, value, valid)
+            value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
+                                       feature_bf16=feature_bf16)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
         tokens, token_valid = _pooled_tokens(point_features, valid, self.token_count)
+        token_valid_count = int(token_valid.sum().item()) if valid_count is not None else None
         value = torch.cat((tokens, pooled.expand(-1, -1, self.token_count)), dim=1)
         for layer in self.seq_per_point2:
-            value, _ = masked_sequence(layer, value, token_valid)
+            value, _ = masked_sequence(layer, value, token_valid, valid_count=token_valid_count,
+                                       feature_bf16=feature_bf16)
+        if feature_bf16:
+            with feature_autocast(value, enabled=True):
+                source = self.fc(value)
+            return mask_values(source.float(), token_valid), token_valid
         return mask_values(self.fc(value), token_valid), token_valid
 
 
@@ -181,6 +198,7 @@ class B0Observation(nn.Module):
     def __init__(self, token_count: int = 128, *, query_context: bool = False,
                  coarse_condition: bool = False, time_scale: float = .5):
         super().__init__()
+        self.execution_profile = 'legacy'
         self.query_context = bool(query_context)
         self.coarse_condition = bool(coarse_condition)
         self.context_time_scale = float(time_scale)
@@ -209,6 +227,10 @@ class B0Observation(nn.Module):
 
     @staticmethod
     def measurement_mask(batch: Mapping[str, Tensor]) -> Tensor:
+        cache = materialization_cache(batch)
+        cached = None if cache is None else cache.point_mask(batch)
+        if cached is not None:
+            return cached
         points, valid = batch['points'], batch['point_valid']
         if points.ndim != 4 or points.shape[1] != 4 or points.shape[-1] != 5:
             raise ValueError("B0 points must be [B,4,N,5]")
@@ -218,8 +240,11 @@ class B0Observation(nn.Module):
         if history_valid.shape != (len(points), 3):
             raise ValueError("history_valid must be [B,3]")
         exists = torch.cat((history_valid, torch.ones_like(history_valid[:, :1])), dim=1)
-        return unique_valid_mask(valid.to(points.device).bool() & exists[..., None],
-                                 batch.get('point_ids'))
+        result = unique_valid_mask(valid.to(points.device).bool() & exists[..., None],
+                                   batch.get('point_ids'))
+        if cache is not None:
+            cache.remember_point_mask(batch, result)
+        return result
 
     @staticmethod
     @torch.no_grad()
@@ -281,14 +306,20 @@ class B0Observation(nn.Module):
         point_input = torch.cat((clean, candidate_bc), dim=-1)
         flat_valid = valid.reshape(batch_size, frames * count)
         flat_input = point_input.reshape(batch_size, frames * count, 14).transpose(1, 2)
-        segmentation, features = self.seg_pointnet(flat_input, flat_valid)
+        point_count = row_count = None
+        feature_bf16 = self.execution_profile == 'optimized_bf16'
+        if self.execution_profile != 'legacy':
+            point_count, row_count = torch.stack((valid.sum(), flat_valid.any(-1).sum())).cpu().tolist()
+        segmentation, features = self.seg_pointnet(flat_input, flat_valid,
+            valid_count=point_count, feature_bf16=feature_bf16)
         logits = segmentation[:, :2].transpose(1, 2).reshape(batch_size, frames, count, 2)
         bc = segmentation[:, 2:].transpose(1, 2).reshape(batch_size, frames, count, 9)
         foreground = logits.softmax(-1)[..., 1] * valid.to(points.dtype)
         mini_input = torch.cat((clean[..., :4], bc), dim=-1)
         pooled = self.mini_pointnet(
             mini_input.reshape(batch_size, frames * count, 13).transpose(1, 2),
-            flat_valid, foreground.reshape(batch_size, frames * count))
+            flat_valid, foreground.reshape(batch_size, frames * count),
+            valid_count=point_count, row_count=row_count, feature_bf16=feature_bf16)
         per_frame_count = valid.sum(-1).to(points.dtype)
         current_count = per_frame_count[:, -1]
         current_valid = current_count > 0
@@ -308,7 +339,8 @@ class B0Observation(nn.Module):
                                             self.context_time_scale, include_initial=True)
             condition = self.coarse_history_condition(torch.cat((descriptor, current_support.detach()), dim=-1))
             coarse_input = pooled + condition
-        coarse, _ = masked_sequence(self.coarse_box_head, coarse_input, sequence_valid)
+        coarse, _ = masked_sequence(self.coarse_box_head, coarse_input, sequence_valid,
+                                    valid_count=row_count)
         nonzero = coarse[:, 3].square() + coarse[:, 4].square() > 1e-12
         yaw = torch.atan2(torch.where(nonzero, coarse[:, 3], 0.),
                           torch.where(nonzero, coarse[:, 4], 1.))
@@ -317,7 +349,8 @@ class B0Observation(nn.Module):
         coarse = torch.where(sequence_valid[:, None], coarse, 0.)
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
-            valid.reshape(batch_size * frames, count))
+            valid.reshape(batch_size * frames, count), valid_count=point_count,
+            feature_bf16=feature_bf16)
         if self.query_context and not self.coarse_condition:
             history_support, current_support = self.observation_support(clean, valid, foreground, boxes, size)
         return ObservationFeatures(
