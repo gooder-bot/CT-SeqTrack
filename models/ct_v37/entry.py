@@ -164,25 +164,41 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
     """正式入口只接收五组登记的完整归一化配置与源码；工程运行独立。"""
     if config.ct_engineering_check:
         return None
+    from utils.b1_training_recipes import (RECIPE_KEY, REGISTRATION_FILE,
+        REGISTRATION_SCHEMA, recipe_identity)
+    is_recipe = RECIPE_KEY in config
+    filename = REGISTRATION_FILE if is_recipe else '37_registration.json'
     path = (Path(registration_path) if registration_path is not None else
-            Path(__file__).resolve().parents[2] / 'cfgs/ct_seqtrack/37_registration.json')
+            Path(__file__).resolve().parents[2] / 'cfgs/ct_seqtrack' / filename)
     registration = json.loads(path.read_text(encoding='utf-8'))
-    if registration.get('schema') != 'ct_seqtrack.v37.registration.v1':
+    expected_schema = REGISTRATION_SCHEMA if is_recipe else 'ct_seqtrack.v37.registration.v1'
+    if registration.get('schema') != expected_schema:
         raise ValueError('v37 formal registration schema mismatch')
     source = source_identity() if source is None else source
     if registration.get('source') != source:
-        raise ValueError('v37 formal source differs from 37_registration.json')
+        raise ValueError('v37 formal source differs from ' + filename)
     matches = [row for row in registration.get('runs', [])
         if row.get('config_sha256') == config_identity(config)
         and row.get('arm') == config.v37_arm
         and row.get('execution_profile') == config.execution_profile]
     if len(matches) != 1:
         raise ValueError('v37 formal config is not exactly one registered run')
+    if is_recipe and matches[0].get('training_execution_recipe') != recipe_identity(config):
+        raise ValueError('registered B1 execution recipe identity mismatch')
     return dict(schema=registration['schema'], label=matches[0]['label'],
                 sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
 def run(config, *, loaders=None):
+    # 训练、逐轮validation、late-3、独立test及同run恢复共用登记的执行算法。
+    from .config import normalize_config
+    from utils.b1_training_recipes import recipe_scope
+    config = normalize_config(config)
+    with recipe_scope(config):
+        return _run(config, loaders=loaders)
+
+
+def _run(config, *, loaders=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
     configure_numerics()
     version = model_version(config)
@@ -219,6 +235,9 @@ def run(config, *, loaders=None):
                     calibration_required=False, source=source, registration=registration,
                     evaluation_rng_policy='per_checkpoint_seed_v1')
     manifest.update(initialization_identity(model.tracker))
+    from utils.b1_training_recipes import recipe_identity
+    if recipe_identity(config) is not None:
+        manifest['training_execution_recipe'] = recipe_identity(config)
     manifest['execution_identity'] = execution_identity(config, manifest['source'])
     import uuid
     existing_manifest = (json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))

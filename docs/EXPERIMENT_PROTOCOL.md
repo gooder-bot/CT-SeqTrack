@@ -1,5 +1,15 @@
 # CT-SeqTrack 实验协议
 
+## 2026-10-14：四组 B1 执行配方独立登记
+
+用户已确认：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch128 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch128组不扩大LR、不梯度累积。四组总计240epoch，实际更新由采样器登记，不能套用batch16总数。
+
+新配置由`v37_training_recipe`及`37_b1_execution_registration.json`绑定source/config/执行算法，参数键兼容不表示允许旧checkpoint初始化或跨配方恢复。分解保留global信息；FP32数值差异已知，另起scratch评价。B1实际公共去重只有unique_mask，不执行prior局部读取，concat组不构成prior_read消融。固定final60/late3，额外每轮验证只增加观察频率，不跨实验挑不同最佳轮。
+
+服务器只读，由用户等旧任务完成后部署及启动。batch128需用户一次短CUDA检查；不保证并发显存，不能用并发墙钟声称算法提速。当前源码及命令见[四组操作页](CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。旧五组及下方历史协议保持，不覆盖旧登记和证据。
+
+2026-10-14用户进一步要求直接修改主项目；已验证修订现同步到本地`CT-SeqTrack`的main工作区。迁移前源码已封存，服务器尚未部署，旧checkpoint的源码身份要求不变。
+
 ## 2026-10-09：v37 五组登记
 
 当前实施以强 v35 scaled B0/B1 和现有执行提速为基础；完整模型/损失合同见 [v37 设计](CTSEQTRACK_V37_DESIGN.md)，精确配置与源码见 `cfgs/ct_seqtrack/37_registration.json`，命令见 [操作页](CTSEQTRACK_V37_LAUNCH.md)。此节覆盖历史“尚无新结构”状态，不改写旧结果。

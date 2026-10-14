@@ -4,7 +4,10 @@ import torch
 from torch.nn import functional as F
 
 from models.ct_v31.losses import (compute_losses as v35_losses, balanced_mean,
-    frame_endpoint_mean, oriented_iou_labels, quality_targets)
+    frame_endpoint_mean, oriented_iou_labels, quality_targets, masked_mean,
+    local_observation_box_terms, observation_segmentation_loss, observation_bc_loss)
+from models.ct_v31.geometry import anchor_yaw
+from models.ct_v31.motion import physical_motion_uncertainty_loss
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 
 
@@ -79,9 +82,92 @@ def _record_balanced(sink, name, values, foreground, valid, coefficient):
             batch_contribution=numerator / denominator.sum().clamp_min(1))
 
 
+def _engineering_base_losses(batch, output, q0_exact):
+    """v37 专用 B0/B1 适配；逐项保持旧函数(False,False)及日志字典。
+
+旧模型默认函数不变。仅删除乘零的 mode/pad IoU 标签计算，q0 exact
+由同次监督缓存提供；仍构造原四槽质量张量以保持归约与 fallback 监督。
+    """
+    target = batch['target_box']
+    size = batch['box_size'].to(target).clamp_min(1e-3)
+    observation, prior, decoder = output.observation, output.prior, output.decoder
+    point_valid = batch['point_valid'].bool()
+    labels = batch['segmentation_labels'].long()
+    zero = observation.coarse_box.sum() * 0.
+    losses = {}
+    yaw_anchor = anchor_yaw(batch, target)
+    for name, predicted, truth, valid, center_weight, angle_weight, endpoint_mean in (
+        ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10., False),
+        ('main', decoder.hypothesis_boxes[:, 0], target, observation.sequence_valid, 2., 10., False),
+        ('history', decoder.history_boxes, batch['history_target_boxes'],
+         batch['history_valid'].bool(), .2, 1., True)):
+        center, angle = local_observation_box_terms(predicted, truth, valid, yaw_anchor,
+            center_weight, angle_weight, endpoint_mean=endpoint_mean)
+        losses['loss_' + name] = center + angle
+        losses['loss_' + name + '_center'] = center.detach()
+        losses['loss_' + name + '_angle'] = angle.detach()
+    (losses['loss_seg'], losses['loss_seg_current'], losses['loss_seg_history']) = observation_segmentation_loss(
+        observation.segmentation_logits, labels, point_valid)
+    losses['loss_bc'], bc_current, bc_history = observation_bc_loss(
+        observation.bc_prediction, batch['bc_targets'], point_valid)
+    losses['loss_bc_current'], losses['loss_bc_history'] = bc_current.detach(), bc_history.detach()
+    physical_valid = batch['physical_valid'].bool() & prior.valid.bool()
+    terms = physical_motion_uncertainty_loss(
+        prior.mean_xy, batch['physical_displacement'], prior.log_sigma,
+        prior.direction_xy.detach(), physical_valid,
+        kinematic_xy=prior.kinematic_xy.detach(), envelope_parallel_perp=prior.envelope.detach(),
+        residual_unit_parallel_perp=prior.unit_residual)
+    losses['loss_physical'] = masked_mean(terms['mean_per_sample'], terms['valid'])
+    losses['loss_sigma'] = masked_mean(terms['nll_per_sample'], terms['valid'])
+    error = batch['acquisition_target'].detach() - prior.acquisition_fraction
+    pinball = torch.maximum(.9 * error, -.1 * error).mean(-1)
+    valid = batch['acquisition_valid'].bool()
+    demand = batch.get('acquisition_demand', valid).bool()
+    losses['loss_acquisition'] = balanced_mean(pinball, demand, valid)
+    purity = target.new_ones((len(target), 4))
+    mode_positive = torch.zeros((len(target), 3), dtype=torch.bool, device=target.device)
+    losses.update(loss_identity=zero, loss_vote=zero, loss_reliability=zero)
+    purity[:, 1:] = 0
+    mode_center, mode_angle = zero, zero
+    losses['loss_modes'] = mode_center + mode_angle
+    losses['loss_modes_center'], losses['loss_modes_angle'] = mode_center.detach(), mode_angle.detach()
+    iou = decoder.hypothesis_boxes.new_zeros(decoder.hypothesis_boxes.shape[:2])
+    iou[:, :1] = q0_exact
+    quality_target = quality_targets(decoder.hypothesis_boxes, target, size, purity, iou)
+    quality_error = F.binary_cross_entropy_with_logits(decoder.quality_logits, quality_target, reduction='none')
+    main_quality = masked_mean(quality_error[:, 0], decoder.hypothesis_valid[:, 0])
+    diagnostic_sink = getattr(output, 'loss_statistics', None)
+    if diagnostic_sink is not None:
+        quality_valid = decoder.hypothesis_valid[:, 0].detach().bool()
+        denominator = quality_valid.to(quality_error)
+        numerator = torch.where(quality_valid, .5 * quality_error[:, 0].detach(), 0.)
+        diagnostic_sink['loss_main_quality'] = dict(numerator=numerator, denominator=denominator,
+            batch_contribution=numerator / denominator.sum().clamp_min(1.))
+    mode_quality = zero
+    losses['loss_quality'] = main_quality + mode_quality
+    losses['loss_total'] = (
+        losses['loss_coarse'] + losses['loss_main'] + losses['loss_modes'] + losses['loss_history']
+        + .1 * losses['loss_seg'] + losses['loss_bc']
+        + .1 * losses['loss_physical'] + .05 * losses['loss_sigma'] + .05 * losses['loss_acquisition']
+        + .2 * losses['loss_identity'] + losses['loss_vote'] + .1 * losses['loss_reliability']
+        + .5 * losses['loss_quality'])
+    losses['loss_contribution_seg'] = (.1 * losses['loss_seg']).detach()
+    losses['loss_contribution_quality'] = (.5 * losses['loss_quality']).detach()
+    losses['quality_target_mean'] = masked_mean(quality_target, decoder.hypothesis_valid).detach()
+    losses['mode_positive_fraction'] = mode_positive.to(target).mean().detach()
+    return losses
+
+
 def compute_losses(batch, output):
     # q0/history/B1逐项计算沿用原函数，包括q0质量loss的原梯度与.5系数。
-    losses = v35_losses(batch, output, enable_b1=True, enable_b2=False, enable_b3=False)
+    from utils.execution_lab import enabled
+    targets = None
+    if enabled('labels'):
+        from .engineering_geometry import supervision_geometry
+        targets, q0_exact = supervision_geometry(batch, output)
+        losses = _engineering_base_losses(batch, output, q0_exact)
+    else:
+        losses = v35_losses(batch, output, enable_b1=True, enable_b2=False, enable_b3=False)
     base_total = losses['loss_total']
     target, size = batch['target_box'], batch['box_size'].to(batch['target_box']).clamp_min(1e-3)
     evidence, candidates = output.evidence, output.candidates
@@ -117,7 +203,8 @@ def compute_losses(batch, output):
     losses['loss_modes'] = losses['loss_modes_center'] + losses['loss_modes_angle']
     _record_endpoint(sink, 'loss_modes_center', center, positive, 2.)
     _record_endpoint(sink, 'loss_modes_angle', angle, positive, 10.)
-    targets = supervision_targets(batch, output)
+    if targets is None:
+        targets = supervision_targets(batch, output)
     output.supervision_targets = targets
     logits = output.verification.logits
     losses['loss_success'], st = endpoint_bce(logits[..., 0], targets['utility'][..., 0], candidates.valid)

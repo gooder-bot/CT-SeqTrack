@@ -174,10 +174,17 @@ def _install_trace_ranges(model, trainer):
         wrap(optimizer, 'step', 'Adam')
     if model.training_diagnostics is not None:
         wrap(model.training_diagnostics, 'add_batch', 'diagnostics')
+    if model.config.net_model == 'ctseqtrackv37':
+        from models.ct_v37 import losses, engineering_geometry
+        from models.ct_v31 import losses as legacy_losses
+        wrap(engineering_geometry, 'supervision_geometry', 'cpu_geometry_labels_shared')
+        wrap(losses, 'supervision_targets', 'cpu_geometry_labels_v37')
+        wrap(legacy_losses, 'oriented_iou_labels', 'cpu_geometry_labels_legacy')
     return restorations
 
 
-def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=False):
+def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=False,
+             course_epoch=None, implementation_id=None):
     import torch
     import pytorch_lightning as pl
     from pytorch_lightning.callbacks import Callback, LearningRateMonitor
@@ -192,6 +199,11 @@ def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=Fa
     entry = importlib.import_module(package + '.entry')
     host_module = importlib.import_module('models.ctseqtrackv' + implementation)
     host_type = getattr(host_module, 'CTSEQTRACKV' + implementation)
+    if course_epoch is not None:
+        if implementation != '37' or not base_config.get('ct_engineering_check'):
+            raise ValueError('explicit course benchmarking is v37 engineering only')
+        from tools.execution_lab_runtime import course_host
+        host_type = course_host(host_type, course_epoch)
     directory.mkdir(parents=True, exist_ok=False)
     config = config_module.normalize_config(dict(base_config, execution_profile=profile,
         ct_engineering_check=True, log_dir=str(directory), checkpoint=None, init_checkpoint=None,
@@ -206,6 +218,8 @@ def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=Fa
     loggers = [CSVLogger(str(directory), name='csv'), TensorBoardLogger(str(directory), name='tensorboard')]
     restorations = []
     console_messages = []
+    coverage = dict(branches={}, max_depth=0, tail_steps=0, drain_steps=0,
+                    nonempty_postcommit_state_steps=0)
     display_version = version.removeprefix('ctseqtrack')
     original_end = model.on_train_batch_end
 
@@ -213,6 +227,8 @@ def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=Fa
     def committed_end(*args, **kwargs):
         result = original_end(*args, **kwargs)
         timer.after_commit()
+        if course_epoch is not None:
+            coverage['nonempty_postcommit_state_steps'] += int(bool(model.train_builder.states))
         return result
     model.on_train_batch_end = committed_end
 
@@ -225,6 +241,14 @@ def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=Fa
 
         def on_train_batch_start(self, trainer, module, rows, batch_idx):
             timer.before_batch(rows)
+            if course_epoch is not None:
+                for row in rows:
+                    request = row['request']
+                    branch = str(request.branch)
+                    coverage['branches'][branch] = coverage['branches'].get(branch, 0) + 1
+                    coverage['max_depth'] = max(coverage['max_depth'], request.frame - request.window_start)
+                coverage['tail_steps'] += int(len(rows) < config.batch_size)
+                coverage['drain_steps'] += int(any(getattr(row['request'], 'drain', False) for row in rows))
 
         def on_exception(self, trainer, module, exception):
             module.clear_pending_materialization()
@@ -277,6 +301,14 @@ def _run_one(base_config, profile, device, directory, *, warmup, steps, trace=Fa
         callbacks=['LearningRateMonitor', 'ConsoleProgress'],
         progress_bar_enabled=sys.stdout.isatty(),
         training_diagnostics_enabled=model.training_diagnostics is not None)
+    if course_epoch is not None:
+        from utils.execution_lab import active_options
+        from tools.execution_lab_runtime import bundle_identity
+        report.update(benchmark_epoch_index=course_epoch, implementation_id=implementation_id,
+            engineering_options=list(active_options()), code_bundle=bundle_identity(Path(__file__).resolve().parents[1]),
+            workload_note='explicit curriculum phase with scratch weights; actual Trainer epoch starts at 0; '
+                          'not a resume or weights trained for course_epoch epochs',
+            training_coverage=coverage)
     _write_json(directory / 'execution_manifest.json', dict(report, config=dict(config)))
     try:
         if trace:

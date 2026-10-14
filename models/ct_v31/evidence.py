@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from utils.execution_lab import enabled
 
 from .contracts import EvidenceHypotheses
 
@@ -173,8 +174,13 @@ class RawLocalGeometry(nn.Module):
                 selected_valid = neighbor_valid.gather(2, selected)
                 relative = delta.gather(2, selected[..., None].expand(-1, -1, -1, 3)) / radius[:, None, None, None]
                 distance = relative.square().sum(-1, keepdim=True).sqrt()
-                attribute_delta = ordered[:, None, :, 3:] - raw[:, start:stop, None, 3:]
-                attributes = attribute_delta.gather(2, selected[..., None].expand(-1, -1, -1, 2))
+                if enabled('geometry_gather'):
+                    attributes = ordered[:, None, :, 3:].expand(-1, stop - start, -1, -1).gather(
+                        2, selected[..., None].expand(-1, -1, -1, 2))
+                    attributes = attributes - raw[:, start:stop, None, 3:]
+                else:
+                    attribute_delta = ordered[:, None, :, 3:] - raw[:, start:stop, None, 3:]
+                    attributes = attribute_delta.gather(2, selected[..., None].expand(-1, -1, -1, 2))
                 descriptor = torch.cat((relative, distance, attributes), -1)
                 descriptor = torch.where(selected_valid[..., None], descriptor, 0.)
             encoded = self.projection(descriptor).masked_fill(~selected_valid[..., None], -torch.inf)

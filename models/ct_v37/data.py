@@ -4,6 +4,7 @@
 """
 import torch
 from utils.raw_frame_memo import raw_transaction
+from utils.execution_lab import enabled
 
 from models.ct_v31.data import (BatchBuilder as LegacyBatchBuilder, build_loaders as legacy_loaders,
     ReadyQueueBatchSampler, RawEndpointDataset, EndpointRequest, AcceptedState,
@@ -59,9 +60,11 @@ class BatchBuilder(LegacyBatchBuilder):
         prepared['point_valid'] = valid
         extension_valid = torch.zeros_like(batch['extension_valid'], dtype=torch.bool)
         evidence = output.evidence
+        selected_cpu = (selected.cpu().tolist() if enabled('commit_indices')
+                        and (self.v37_config.v37_arm == 'full' or diagnostics) else None)
         if self.v37_config.v37_arm == 'full':
             for row in range(len(selected)):
-                index = int(selected[row])
+                index = selected_cpu[row] if selected_cpu is not None else int(selected[row])
                 if index >= 2:
                     members = evidence.members[row, index - 2].bool() & evidence.point_valid[row].bool()
                     if not bool(members.any()) or not bool(evidence.mode_valid[row, index - 2]):
@@ -74,7 +77,8 @@ class BatchBuilder(LegacyBatchBuilder):
         contexts = list(self._pending)
         result = super().commit(output, prepared, diagnostics=diagnostics)
         if diagnostics:
-            selected_cpu = selected.cpu().tolist()
+            if selected_cpu is None:
+                selected_cpu = selected.cpu().tolist()
             quality_cpu = quality.cpu().tolist()
             forbidden_cpu = forbidden.cpu().tolist()
             for i, record in enumerate(result):

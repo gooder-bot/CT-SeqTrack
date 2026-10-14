@@ -1,4 +1,9 @@
 *.sh text eol=lf
+# 新B1登记递归覆盖执行源码；Windows/Linux上传保持同一字节身份。
+models/**/*.py text eol=lf
+datasets/**/*.py text eol=lf
+utils/**/*.py text eol=lf
+requirement.txt text eol=lf
 # 固定参考包的字节来源与运行身份，避免跨平台 checkout 改写换行后 SHA 漂移。
 models/seqtrack_reference/** text eol=lf
 # 本轮登记的执行源码保持跨 Windows/Linux 字节一致。

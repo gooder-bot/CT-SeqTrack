@@ -7,6 +7,7 @@ from pathlib import Path
 from models.ct_v31.config import DEFAULTS as OLD_DEFAULTS, V35_DEFAULTS, V31Config
 from utils.config import load_yaml_config
 from .identity import SCHEMA
+from utils.b1_training_recipes import RECIPE_KEY, recipe_spec, recipe_identity
 
 ARMS = ('b0', 'b1', 'b1_b2', 'full')
 EXECUTION_PROFILES = ('legacy', 'optimized_fp32', 'optimized_bf16')
@@ -25,11 +26,12 @@ POLICY_KEYS = tuple(key for key in DEFAULTS if key.startswith('v37_') and key.en
 
 def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
-    unknown = set(supplied) - set(DEFAULTS)
+    unknown = set(supplied) - set(DEFAULTS) - {RECIPE_KEY}
     if unknown:
         raise ValueError('v37 unknown/inactive configuration keys: ' + ', '.join(sorted(unknown)))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
+    recipe = recipe_spec(cfg)
     if 'v37_arm' in supplied and 'v31_arm' not in supplied:
         cfg.v31_arm = cfg.v37_arm
     if 'v31_arm' in supplied and 'v37_arm' not in supplied:
@@ -60,9 +62,12 @@ def normalize_config(config=None):
         if not math.isfinite(float(cfg[key])):
             raise ValueError('nonfinite configuration value: ' + key)
     cfg.lr_milestones = list(cfg.lr_milestones)
-    if (cfg.lr_schedule != 'multistep' or cfg.lr_milestones != [20, 50]
+    milestones = [20, 50] if recipe is None else recipe['lr_milestones']
+    if (cfg.lr_schedule != 'multistep' or cfg.lr_milestones != milestones
             or cfg.lr_warmup_steps != 0):
-        raise ValueError('v37 requires fixed 20/50 multistep without warmup')
+        raise ValueError('v37 requires its registered multistep schedule without warmup')
+    if recipe is not None and (cfg.v37_arm != 'b1' or cfg.execution_profile != 'optimized_fp32'):
+        raise ValueError('registered execution recipes require B1 FP32')
     if not cfg.ct_engineering_check:
         fixed = dict(epoch=60, batch_size=16, workers=4, seed=42, lr=.00015, wd=0.,
             lr_decay_step=20, lr_decay_rate=.1, point_sample_size=1024,
@@ -74,6 +79,8 @@ def normalize_config(config=None):
             v31_temporal_backend='cfc', dynamics_time_mode='true',
             v31_evaluate_late3=True, v35_train_diagnostics=True, v37_diagnostics=True,
             precision=32, trainer_devices=1, limit_train_batches=1., limit_val_batches=1.)
+        if recipe is not None:
+            fixed.update(batch_size=recipe['batch_size'], check_val_every_n_epoch=1)
         bad = [key for key, value in fixed.items() if cfg[key] != value
                or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
@@ -122,5 +129,7 @@ def config_identity(config):
     if manifest:
         payload['dynamics_time_manifest_sha256'] = hashlib.sha256(Path(manifest).read_bytes()).hexdigest()
     payload.update(schema=SCHEMA, evaluation_rng_policy='per_checkpoint_seed_v1')
+    if RECIPE_KEY in cfg:
+        payload['training_execution_recipe'] = recipe_identity(cfg)
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
                                      ensure_ascii=False).encode('utf-8')).hexdigest()

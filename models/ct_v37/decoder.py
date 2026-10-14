@@ -9,6 +9,7 @@ from models.ct_v31.contracts import DecoderOutput, EvidenceHypotheses as V35Evid
 from models.ct_v31.geometry import anchor_yaw, rotate_xy, transform_boxes
 from models.ct_v31.observation import box_corners_xyz
 from utils.feature_precision import feature_autocast, feature_fp32
+from utils.execution_lab import enabled
 from .contracts import CandidateSet
 from .verification import build_current_pool, candidate_authorization, read_lwh_local
 
@@ -37,7 +38,7 @@ class SharedHypothesisDecoder(V35Decoder):
             with torch.no_grad():
                 self.mode_pose_head.bias.copy_(torch.tensor([0., 0., 0., 0., 1.]))
 
-    def forward(self, observation, evidence, batch, prior):
+    def forward(self, observation, evidence, batch, prior, *, _current_pool=None):
         reference = observation.coarse_box
         b = len(reference)
         history_valid = batch['history_valid'].bool()
@@ -67,14 +68,22 @@ class SharedHypothesisDecoder(V35Decoder):
                               context[:, None].expand(-1, 4, -1)), 1)
         queries = queries + by_query.repeat_interleave(8, dim=1)
         # q0 严格沿用 v35 的 LWH 邻域与参数；一次读取中只禁止它看 extension。
-        pool = build_current_pool(observation, evidence, batch)
+        pool = (build_current_pool(observation, evidence, batch)
+                if _current_pool is None else _current_pool)
         local_valid = torch.cat((query_valid[:, 3:4], torch.ones_like(query_valid[:, 3:4]), query_valid[:, 4:6]), 1)
         permission = candidate_authorization(pool, evidence.members, local_valid, q0_extension=False)
         local_seeds_public = torch.cat((corner_seeds[:, 3:4], prior_box[:, None], corner_seeds[:, 4:6]), 1)
-        increment, local_diag = read_lwh_local(self.local_reader, pool, local_seeds_public, permission, size)
-        local = torch.cat((increment[:, [0, 2, 3]], increment.new_zeros(b, 1, 8, 64)), 1)
+        if enabled('prior_read'):
+            # prior 的 decoder 局部结果从未使用；verifier 仍读取完整四候选。
+            increment, local_diag = read_lwh_local(self.local_reader, pool,
+                local_seeds_public[:, [0, 2, 3]], permission[:, [0, 2, 3]], size)
+        else:
+            increment, local_diag = read_lwh_local(self.local_reader, pool, local_seeds_public, permission, size)
+            increment = increment[:, [0, 2, 3]]
+            local_diag = {key: value[:, [0, 2, 3]] for key, value in local_diag.items()}
+        local = torch.cat((increment, increment.new_zeros(b, 1, 8, 64)), 1)
         queries = queries + torch.cat((local.new_zeros(b, 3, 8, 64), local), 1).reshape(b, 56, 64)
-        diagnostics = {key: torch.cat((value[:, [0, 2, 3]], torch.zeros_like(value[:, :1])), 1)
+        diagnostics = {key: torch.cat((value, torch.zeros_like(value[:, :1])), 1)
                        for key, value in local_diag.items()}
         source, source_valid = self.encode_sources(observation, history_valid)
         ext_valid = evidence.point_valid.bool()

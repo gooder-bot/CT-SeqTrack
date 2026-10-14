@@ -1,6 +1,7 @@
 """v37共享训练图；B1+B2与Full只在选择/提交政策上不同。"""
 import torch
 from torch import nn
+from utils.execution_lab import enabled
 
 from models.ct_v31.contracts import EvidenceHypotheses as V35Evidence, TrackOutput as V35Output
 from models.ct_v31.model import canonicalize_batch, select_hypothesis
@@ -64,6 +65,12 @@ class JointTracker(nn.Module):
         return self.prior(prepared) if self.prior is not None else empty_prior(prepared)
 
     def forward(self, batch, prior=None):
+        # 配方随模型配置保留；直接模型调用也不能静默回到concat。
+        from utils.b1_training_recipes import recipe_scope
+        with recipe_scope(self.config):
+            return self._forward(batch, prior)
+
+    def _forward(self, batch, prior=None):
         prepared = canonicalize_batch(batch)
         prior = self.plan_prior(prepared) if prior is None else prior
         observation = self.observation(prepared)
@@ -73,8 +80,15 @@ class JointTracker(nn.Module):
             accepted, selected, quality = select_hypothesis(decoder)
             return V35Output(accepted, selected, quality, prior, observation, evidence, decoder)
         evidence = self.evidence(observation, prepared, prior)
-        candidates = self.decoder(observation, evidence, prepared, prior)
-        verification = self.verifier(candidates, observation, evidence, prepared, prior)
+        if enabled('pool'):
+            from .verification import build_current_pool
+            # 只传递当前调用的 live 点池；verifier 在自己的边界 detach。
+            pool = build_current_pool(observation, evidence, prepared)
+            candidates = self.decoder(observation, evidence, prepared, prior, _current_pool=pool)
+            verification = self.verifier(candidates, observation, evidence, prepared, prior, _current_pool=pool)
+        else:
+            candidates = self.decoder(observation, evidence, prepared, prior)
+            verification = self.verifier(candidates, observation, evidence, prepared, prior)
         # 旧诊断布局保留q0原logit；新增两个mode记录自身提交头，不伪造第三mode。
         candidates.decoder.quality_logits = torch.cat((candidates.q0_quality_logits[:, None],
             verification.logits[:, 2:, 2], verification.logits.new_full((len(prepared['points']), 1), -20.)), 1)

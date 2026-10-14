@@ -1,5 +1,9 @@
 # CT-SeqTrack
 
+**2026-10-14 当前新增：四组去重版 B1 执行配方。** 用户已确认分解投影/原拼接（GPU0），分解投影仅保留第20轮衰减/分解投影batch128（GPU1）。四组均seed42、FP32、scratch60、每轮验证，其余沿用v37 B1。最新配置表、逐组nohup、日志及一次batch128检查见 [四组B1操作页](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。登记文件为 `cfgs/ct_seqtrack/37_b1_execution_registration.json`；不是改写旧五组登记。B1不执行prior局部读取，不能把该选项列为本轮有效变量。
+
+2026-10-14 按用户要求，已将验证后的修订从独立工程副本同步到 `D:/desktop/research/CT-SeqTrack` 的 main 工作区，最新代码和配置直接在本项目中维护。旧五组YAML、登记文件和已有输出保留；服务器尚未更新，旧v37任务完成前不覆盖服务器源码，旧checkpoint只用其原登记源码恢复/评测。分解投影保持全局信息及原参数，但FP32训练数值不同；本轮新scratch检验其实际影响，不预先宣称无损或提速。原工程去重与成对测速说明仍见 [执行实验室](docs/CT_EXECUTION_LAB.md)，真实CUDA配对速度报告尚未完成。下方各日期的“当前”是历史安排。
+
 **2026-10-09 当前：v37 基于强 v35 B0/B1 与现有工程提速实施。** 新版隔离扩展证据与主定位，重建两个恢复候选，分别学习最终框定位效用和提交质量。B1+B2 与 Full 训练同一候选及核验系统，仅执行选择与更新政策不同。结构与监督见 [v37 设计](docs/CTSEQTRACK_V37_DESIGN.md)，五组启动、恢复和比较见 [v37 操作页](docs/CTSEQTRACK_V37_LAUNCH.md)。以下 v36/v35 的“当前”均为历史记录。
 
 五组固定 B0、B1、B1+B2、Full FP32、Full 局部 BF16，全部 mini Car、seed42、scratch60、batch16、LR=1.5e-4、20/50 衰减及原 W 课程，共 **300 epoch、358,500 更新**。FP32 Full 是研究主结果；单 seed mini 不足以证明论文结论。真实 CUDA 生命周期和两精度实测由用户在服务器执行，本地实现不代表已涨分或已获得加速。

@@ -1,5 +1,13 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-14 当前新增：用户批准四组去重 B1 执行配方
+
+- 首先在独立工程副本实施；2026-10-14用户进一步明确要求同步到`D:/desktop/research/CT-SeqTrack`的main工作区，最新代码现直接在本项目维护。旧五份YAML、`37_registration.json`及已有输出/权重保留；迁移前源码已另存于`artifacts/ct_checks/20261014-155937_main_sync/baseline_source/`。新四组由`v37_training_recipe`绑定执行算法，登记为`37_b1_execution_registration.json`，操作唯一入口见[四组B1配置/命令](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。
+- GPU0：分解投影batch16、原concat batch16；GPU1：分解投影batch16仅第20轮衰减、分解投影batch128保留20/50衰减。全部B1、FP32、mini Car、seed42、scratch60、LR1.5e-4、每轮validation；其余原W课程/损失/采样保持。四组共240epoch，batch128实际更新数由sampler记录，不写死原batch16预算。
+- 用户明确确认“无全局拼接”是保留global信息的分解投影，不删除分支；B1不走新版prior局部读取，第二组只有concat变量，不登记空操作。五项工程去重中B1实际生效为unique_mask。
+- 新配方训练/validation/late3/test/同run恢复共用执行scope，配置身份包含执行算法；不放宽旧恢复检查。分解FP32不逐位等价，不能称旧v37无损替换。最终固定final60/late3。
+- 当前服务器仍只读；代理不上传、安装、启动或停止。旧v37结束后由用户部署新源码。batch128显存待真实CUDA短检查；不自动改小batch或用累积替代。旧output/artifacts受保护。
+
 ## 2026-10-09 当前：用户批准 v37 实施与五组固定实验
 
 - 当前活动新增源码为 `models/ct_v37/`、`models/ctseqtrackv37.py`，入口仍 `main.py`；基于提速后的强 v35 B0/B1，保留物理时间、主路、W 课程、768→256 和记忆容量。v36 仅复用身份/几何分工、顺序去重等明确选定机制，不采用事件 B1、固定米制 q0 邻域或整轨迹课程。

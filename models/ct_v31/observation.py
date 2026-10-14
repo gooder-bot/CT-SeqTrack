@@ -15,6 +15,8 @@ from torch import Tensor, nn
 from utils.masked_observation import mask_values, masked_max_pool, masked_sequence
 from utils.batch_materialization import materialization_cache
 from utils.feature_precision import feature_autocast
+from utils.execution_lab import enabled as execution_lab_enabled
+from utils.factorized_observation import factorized_global_block
 from .contracts import ObservationFeatures
 from .geometry import anchor_yaw, rotate_xyz, transform_boxes
 from .history_context import history_descriptor
@@ -37,6 +39,9 @@ def unique_valid_mask(valid: Tensor, point_ids: Tensor | None = None) -> Tensor:
     sorted_valid = valid.gather(-1, order)
     first = torch.cat((torch.ones_like(sorted_valid[..., :1]),
                        sorted_ids[..., 1:] != sorted_ids[..., :-1]), dim=-1)
+    if execution_lab_enabled('unique_mask'):
+        # order 是置换，scatter 的目标索引不重复；直接还原原点槽，省去逆置换排序。
+        return torch.empty_like(valid).scatter_(-1, order, sorted_valid & first)
     inverse = torch.argsort(order, dim=-1)
     return (sorted_valid & first).gather(-1, inverse)
 
@@ -114,14 +119,23 @@ class SegPointNet(nn.Module):
         self.fc = nn.Conv1d(128, 11, 1)
 
     def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
+        factorized = execution_lab_enabled('factorized_projection')
+        if factorized and feature_bf16:
+            raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
                                        feature_bf16=feature_bf16)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
-        value = torch.cat((point_features, pooled.expand(-1, -1, value.shape[-1])), dim=1)
-        for layer in self.seq_per_point2:
+        if factorized:
+            value = factorized_global_block(self.seq_per_point2[0], point_features, pooled, valid,
+                                            valid_count=valid_count)
+            remaining_layers = tuple(self.seq_per_point2)[1:]
+        else:
+            value = torch.cat((point_features, pooled.expand(-1, -1, value.shape[-1])), dim=1)
+            remaining_layers = self.seq_per_point2
+        for layer in remaining_layers:
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
                                        feature_bf16=feature_bf16)
         if feature_bf16:
@@ -173,6 +187,9 @@ class FeaturePointNet(nn.Module):
         self.fc = nn.Conv1d(128, 128, 1)
 
     def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
+        factorized = execution_lab_enabled('factorized_projection')
+        if factorized and feature_bf16:
+            raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
                                        feature_bf16=feature_bf16)
@@ -181,8 +198,15 @@ class FeaturePointNet(nn.Module):
         pooled, _ = masked_max_pool(value, valid)
         tokens, token_valid = _pooled_tokens(point_features, valid, self.token_count)
         token_valid_count = int(token_valid.sum().item()) if valid_count is not None else None
-        value = torch.cat((tokens, pooled.expand(-1, -1, self.token_count)), dim=1)
-        for layer in self.seq_per_point2:
+        if factorized:
+            # 第一维为 B*frames：每帧的 pooled 独立投影，不跨帧共享全局值。
+            value = factorized_global_block(self.seq_per_point2[0], tokens, pooled, token_valid,
+                                            valid_count=token_valid_count)
+            remaining_layers = tuple(self.seq_per_point2)[1:]
+        else:
+            value = torch.cat((tokens, pooled.expand(-1, -1, self.token_count)), dim=1)
+            remaining_layers = self.seq_per_point2
+        for layer in remaining_layers:
             value, _ = masked_sequence(layer, value, token_valid, valid_count=token_valid_count,
                                        feature_bf16=feature_bf16)
         if feature_bf16:

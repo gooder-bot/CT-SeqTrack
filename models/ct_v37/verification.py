@@ -3,11 +3,21 @@ import math
 
 import torch
 from torch import nn
+from utils.execution_lab import enabled
 
 from models.ct_v31.observation import box_corners_xyz
-from models.ct_v36.verification import (build_current_pool,
+from models.ct_v36.verification import (build_current_pool as _build_current_pool,
     candidate_authorization, inside_final_boxes)
 from .contracts import VerificationOutput
+
+
+def build_current_pool(observation, evidence, batch):
+    """工程缓存只属于当前 forward；不进入候选输出或递推状态。"""
+    pool = _build_current_pool(observation, evidence, batch)
+    if enabled('pool'):
+        pool['_raw_id_order'] = torch.argsort(
+            pool['ids'].masked_fill(~pool['valid'], torch.iinfo(torch.long).max), stable=True)
+    return pool
 
 
 def read_lwh_local(reader, pool, boxes, allowed, size):
@@ -18,7 +28,9 @@ def read_lwh_local(reader, pool, boxes, allowed, size):
     ids, valid = pool['ids'], pool['valid']
     if allowed.shape != (b, q, ids.shape[1]):
         raise ValueError('v37 local permissions do not align')
-    order = torch.argsort(ids.masked_fill(~valid, torch.iinfo(torch.long).max), stable=True)
+    order = pool.get('_raw_id_order')
+    if order is None:
+        order = torch.argsort(ids.masked_fill(~valid, torch.iinfo(torch.long).max), stable=True)
     xyz = pool['xyz'].gather(1, order[..., None].expand(-1, -1, 3)).detach()
     features = pool['features'].gather(1, order[..., None].expand(-1, -1, 64))
     probability = pool['probability'].gather(1, order).detach()
@@ -125,8 +137,9 @@ class FinalBoxVerifier(nn.Module):
             raise ValueError('v37 verifier requires finite [B,4,35] metadata')
         return result.detach()
 
-    def forward(self, candidates, observation, evidence, batch, prior):
-        raw_pool = build_current_pool(observation, evidence, batch)
+    def forward(self, candidates, observation, evidence, batch, prior, *, _current_pool=None):
+        raw_pool = (build_current_pool(observation, evidence, batch)
+                    if _current_pool is None else _current_pool)
         # 边界只阻断评分目标对定位/身份特征的反推；它们仍由各自loss正常学习。
         pool = {key: value.detach() if torch.is_tensor(value) else value
                 for key, value in raw_pool.items()}
