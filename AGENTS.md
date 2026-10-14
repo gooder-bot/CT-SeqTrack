@@ -1,12 +1,12 @@
 # CT-SeqTrack 工作约定
 
-## 2026-10-14 当前新增：用户批准四组去重 B1 执行配方
+## 2026-10-14 当前新增：用户批准分解投影 B1 batch8 对照
 
 - 首先在独立工程副本实施；2026-10-14用户进一步明确要求同步到`D:/desktop/research/CT-SeqTrack`的main工作区，最新代码现直接在本项目维护。旧五份YAML、`37_registration.json`及已有输出/权重保留；迁移前源码已另存于`artifacts/ct_checks/20261014-155937_main_sync/baseline_source/`。新四组由`v37_training_recipe`绑定执行算法，登记为`37_b1_execution_registration.json`，操作唯一入口见[四组B1配置/命令](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。
-- GPU0：分解投影batch16、原concat batch16；GPU1：分解投影batch16仅第20轮衰减、分解投影batch128保留20/50衰减。全部B1、FP32、mini Car、seed42、scratch60、LR1.5e-4、每轮validation；其余原W课程/损失/采样保持。四组共240epoch，batch128实际更新数由sampler记录，不写死原batch16预算。
+- GPU0：分解投影batch16、原concat batch16；GPU1：分解投影batch16仅第20轮衰减、分解投影batch8保留20/50衰减。用户在batch128同卡并发OOM后明确新增batch8配置`37_b1_dedup_factorized_bs8_mini.yaml`，除batch及配方身份外保持factorized batch16参数；原batch128配置与失败证据保留。全部B1、FP32、mini Car、seed42、scratch60、LR1.5e-4、每轮validation；其余原W课程/损失/采样保持。当前四组目标共240epoch，失败尝试成本另记；实际更新数由sampler记录，不套用原batch16预算。
 - 用户明确确认“无全局拼接”是保留global信息的分解投影，不删除分支；B1不走新版prior局部读取，第二组只有concat变量，不登记空操作。五项工程去重中B1实际生效为unique_mask。
 - 新配方训练/validation/late3/test/同run恢复共用执行scope，配置身份包含执行算法；不放宽旧恢复检查。分解FP32不逐位等价，不能称旧v37无损替换。最终固定final60/late3。
-- 当前服务器仍只读；代理不上传、安装、启动或停止。旧v37结束后由用户部署新源码。batch128显存待真实CUDA短检查；不自动改小batch或用累积替代。旧output/artifacts受保护。
+- 当前服务器仍只读；代理不上传、安装、启动或停止。新增batch8配方会改变源码登记；正在运行的任务保持原源码，新任务使用独立部署目录或等旧任务完成后更新原目录，不能覆盖运行中目录后继续旧任务。batch8为新scratch，不从batch16/128权重初始化，不启用梯度累积；旧output/artifacts受保护。
 
 ## 2026-10-09 当前：用户批准 v37 实施与五组固定实验
 

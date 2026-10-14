@@ -1,4 +1,4 @@
-"""2026-10-14 用户登记的四组 B1；执行算法是配置身份的一部分。"""
+"""2026-10-14 用户登记的 B1 配方；执行算法是配置身份的一部分。"""
 from contextlib import nullcontext
 
 from utils.execution_lab import execution_scope
@@ -16,6 +16,8 @@ RECIPES = {
                                   options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
     'b1_factorized_bs128': dict(batch_size=128, lr_milestones=[20, 50],
                                 options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
+    'b1_factorized_bs8': dict(batch_size=8, lr_milestones=[20, 50],
+                              options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
 }
 
 
@@ -34,7 +36,7 @@ def recipe_options(config):
 
 
 def recipe_identity(config):
-    """原五组不新增默认字段；新四组显式登记算法与实际生效范围。"""
+    """原五组不新增默认字段；执行配方显式登记算法与实际生效范围。"""
     spec = recipe_spec(config)
     if spec is None:
         return None

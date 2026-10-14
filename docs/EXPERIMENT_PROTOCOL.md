@@ -1,14 +1,16 @@
 # CT-SeqTrack 实验协议
 
-## 2026-10-14：四组 B1 执行配方独立登记
+## 2026-10-14：四组 B1 执行配方，第四组更新为 batch8
 
-用户已确认：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch128 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch128组不扩大LR、不梯度累积。四组总计240epoch，实际更新由采样器登记，不能套用batch16总数。
+用户最新明确新增分解投影batch8：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch8 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch8除批大小及配方身份外保持factorized batch16的参数，不缩放LR、不梯度累积。当前四组目标总计240epoch，实际更新由采样器登记，不能套用batch16总数。batch8与batch16比较的是固定轮数、固定LR下的批大小配方，更新次数及BN批统计也会变化，不解释为纯工程加速。
+
+原第四组batch128由用户报告在同卡另一训练并发时OOM；原配置、失败运行和证据保留，该情况不能证明独占GPU也一定失败。当前batch8使用`37_b1_dedup_factorized_bs8_mini.yaml`与`b1_factorized_bs8`独立身份，从epoch0随机初始化；不从batch128或batch16 checkpoint继续，失败尝试成本另记，不追加batch128重跑要求。
 
 新配置由`v37_training_recipe`及`37_b1_execution_registration.json`绑定source/config/执行算法，参数键兼容不表示允许旧checkpoint初始化或跨配方恢复。分解保留global信息；FP32数值差异已知，另起scratch评价。B1实际公共去重只有unique_mask，不执行prior局部读取，concat组不构成prior_read消融。固定final60/late3，额外每轮验证只增加观察频率，不跨实验挑不同最佳轮。
 
-服务器只读，由用户等旧任务完成后部署及启动。batch128需用户一次短CUDA检查；不保证并发显存，不能用并发墙钟声称算法提速。当前源码及命令见[四组操作页](CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。旧五组及下方历史协议保持，不覆盖旧登记和证据。
+服务器只读，代理本轮未访问或修改服务器。新增配方改变源码登记；正在运行的任务继续使用原源码目录，新任务使用独立部署目录，或由用户等旧任务完成后保留原登记源码再更新。不能在运行中目录覆盖源码后继续旧运行；旧checkpoint仍按其原登记源码恢复/评测。不能用并发墙钟声称算法提速。当前源码及命令见[四组操作页](CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。旧五组及下方历史协议保持，不覆盖旧登记和证据。
 
-2026-10-14用户进一步要求直接修改主项目；已验证修订现同步到本地`CT-SeqTrack`的main工作区。迁移前源码已封存，服务器尚未部署，旧checkpoint的源码身份要求不变。
+2026-10-14用户进一步要求直接修改主项目；修订现直接维护在本地`CT-SeqTrack`的main工作区。迁移前源码已封存，旧checkpoint的源码身份要求不变。
 
 ## 2026-10-09：v37 五组登记
 

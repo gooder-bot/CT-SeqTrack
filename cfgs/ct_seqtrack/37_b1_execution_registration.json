@@ -2,7 +2,7 @@
   "schema": "ct_seqtrack.v37.b1_execution_registration.v1",
   "registered_on": "2026-10-14",
   "source": {
-    "sha256": "644ff3a12d1d4f08fa0c958e9531d363032620b85b45f9d88a9d529dfadc0d90",
+    "sha256": "0d18a22c75999f7a420e5052598cb431c59e50877b75be96fc67743f3c8d7315",
     "files": {
       "datasets/__init__.py": "db1d4808794a2b4ef1566878439db1d7115e23847c8fc8f523cc7402b5051be4",
       "datasets/base_dataset.py": "2b9e745f24401f114b70179a164d0cb36fcd3eefafa6c3f11bd2f6df9be1e646",
@@ -99,7 +99,7 @@
       "models/seqtrack_reference/protocol.py": "c24b1f7b4adcfaff5938622c15cb4df6c569cc8399f573977e8e24d95ab8c1db",
       "requirement.txt": "0ae3a35477a74533742d253bf2596a3673a89069d87829f6a0e6ea4b5894d634",
       "utils/__init__.py": "6e1173c060d636d70568a0b894fb8079f8e9e2a3e3618b6b2b9384677f911182",
-      "utils/b1_training_recipes.py": "c7250036cad8c7a08423b17104030217dd013233e284c6892f5c0922e6b21738",
+      "utils/b1_training_recipes.py": "24b5994181550873736a624147dc661dbc305bc44898d6b8fe7fb663e2f50c3e",
       "utils/batch_materialization.py": "e02f88579bd204f8a3d57071647a3cad8ce2e743d2ac67f32db744be6ef42244",
       "utils/bn_policy.py": "20fc87fa3377c8ddfe5f71e6f1c59e2c594cd4e5fc97f668847e66589a53a83a",
       "utils/config.py": "7a3e4bd0dc6c68a55fe0cf5cdf07e5c3a1a25f90e97ae6f90fdbc94214fdc39a",
@@ -248,11 +248,55 @@
         20,
         50
       ]
+    },
+    {
+      "label": "b1_factorized_bs8",
+      "arm": "b1",
+      "config": "cfgs/ct_seqtrack/37_b1_dedup_factorized_bs8_mini.yaml",
+      "config_sha256": "a83954149b6c1d4198003baab30cbe0117ca1ffe0345a4c3a13e24d8ba2e9393",
+      "execution_profile": "optimized_fp32",
+      "training_execution_recipe": {
+        "recipe": "b1_factorized_bs8",
+        "implementation_id": "v37_b1_dedup_20261014_v1",
+        "options": [
+          "labels",
+          "pool",
+          "geometry_gather",
+          "unique_mask",
+          "commit_indices",
+          "factorized_projection"
+        ],
+        "effective_b1_options": [
+          "unique_mask",
+          "factorized_projection"
+        ],
+        "projection": "factorized",
+        "prior_read_applicable": false
+      },
+      "gpu": 1,
+      "seed": 42,
+      "epochs": 60,
+      "batch_size": 8,
+      "check_val_every_n_epoch": 1,
+      "lr_milestones": [
+        20,
+        50
+      ]
     }
   ],
   "planned_epochs_total": 240,
-  "optimizer_steps_policy": "actual_sampler_per_run; batch128 changes update count and tail batches",
+  "optimizer_steps_policy": "actual_sampler_per_run; batch8 changes update count and batch composition",
   "comparison": "final60/late3; no cross-run best-epoch selection",
   "initialization": "scratch_only",
-  "server_execution": "user_only_after_old_v37_finishes"
+  "server_execution": "user_only; separate_source_checkout_while_existing_runs_continue",
+  "active_run_labels": [
+    "b1_factorized",
+    "b1_concat",
+    "b1_factorized_hold_lr",
+    "b1_factorized_bs8"
+  ],
+  "superseded_run_labels": [
+    "b1_factorized_bs128"
+  ],
+  "plan_revision": "2026-10-14: batch8 replaces the planned batch128 arm; previous config retained"
 }

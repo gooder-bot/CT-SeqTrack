@@ -1,13 +1,15 @@
 # CT-SeqTrack 当前状态（2026-10-14）
 
-## 当前新增：四组 B1 去重/投影执行配方
+## 当前新增：分解投影 B1 batch8 对照
 
-- [x] 用户确认四组B1：GPU0分解/concat，GPU1分解取消50轮衰减/分解batch128；全部每轮验证、scratch60、seed42、FP32，其余原配方不变。
-- [x] 补齐独立四份YAML、执行scope、配置/运行身份；旧五组配置哈希和旧恢复门保持。B1没有prior局部读取，本轮不登记该空变量。
-- [x] 最新配置表、独立日期目录nohup与tail命令见[四组操作页](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。本地专项检查及真实Lightning2.0.2两轮合成验证/独立评测通过。
+- [x] 用户在batch128同卡并发OOM后明确将第四组改为分解batch8；当前四组B1为GPU0分解/concat batch16，GPU1分解取消50轮衰减batch16/分解batch8。batch8保持LR1.5e-4、20/50衰减、每轮验证、scratch60、seed42、FP32及原W课程，其余原配方不变。
+- [x] 前版四份YAML、执行scope、配置/运行身份已完成；旧五组配置哈希和旧恢复门保持。B1没有prior局部读取，本轮不登记该空变量。
+- [x] 最新配置表、独立日期目录nohup与tail命令见[四组操作页](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。前版（未包含batch8）的本地专项检查及真实Lightning2.0.2两轮合成验证/独立评测通过；本次batch8检查单列如下。
 - [x] 按用户后续要求，将已验证代码/配置/文档同步到本项目main工作区；迁移前源码另存独立ct_checks目录，服务器未更新。
-- [ ] 用户等当前v37完成后部署新源码；真实batch128 CUDA短检查与显存确认，工程权重丢弃。
-- [ ] 用户启动四组scratch训练，按final60/late3比较；尚无分数或速度结论。
+- [x] 新增独立batch8配方与配置`37_b1_dedup_factorized_bs8_mini.yaml`；原batch128配置与失败记录保留，不复用其checkpoint或运行身份。
+- [x] batch8本地检查：两份配方/检查工具测试共59 passed，compileall与diff检查通过；5个现存登记配方source/config校验通过，原4配方完整归一化配置及原5组v37配置哈希不变。11个文档Bash块语法通过；不代表真实CUDA或正式训练已验证。
+- [ ] 用户部署batch8新源码：正在运行的任务保持原源码目录；新任务用独立部署目录，或等旧任务结束后更新原目录。代理本轮未操作服务器。
+- [ ] 完成当前四组scratch训练，按final60/late3比较；batch8的更新次数与耗时另记，不预先宣称省时或涨分。
 - [ ] 上轮工程实验的真实CUDA严格对照与2880更新配对测速尚未执行，不以新四组并发墙钟替代。
 
 下方是此前实验历史，尚未完成项不自动授权追加本轮训练。
