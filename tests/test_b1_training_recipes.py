@@ -25,6 +25,7 @@ FILES = {
     'b1_factorized_hold_lr': '37_b1_dedup_factorized_hold_lr_mini.yaml',
     'b1_factorized_bs128': '37_b1_dedup_factorized_bs128_mini.yaml',
     'b1_factorized_bs8': '37_b1_dedup_factorized_bs8_mini.yaml',
+    'b1_factorized_bs4': '37_b1_dedup_factorized_bs4_mini.yaml',
 }
 
 
@@ -42,7 +43,9 @@ def test_yaml_recipes_lock_exact_arms_budget_algorithms_and_distinct_identities(
         assert (cfg.epoch, cfg.seed, cfg.precision, cfg.check_val_every_n_epoch) == (60, 42, 32, 1)
         assert not cfg.ct_engineering_check and cfg.checkpoint is None and cfg.init_checkpoint is None
         assert cfg.execution_profile == 'optimized_fp32'
-        assert cfg.batch_size == {'b1_factorized_bs128': 128, 'b1_factorized_bs8': 8}.get(name, 16)
+        assert cfg.batch_size == {
+            'b1_factorized_bs128': 128, 'b1_factorized_bs8': 8, 'b1_factorized_bs4': 4,
+        }.get(name, 16)
         assert cfg.lr_milestones == ([20] if name.endswith('hold_lr') else [20, 50])
         assert cfg.lr == .00015 and cfg.lr_decay_rate == .1 and cfg.lr_warmup_steps == 0
         identity = recipe_identity(cfg)
@@ -55,12 +58,13 @@ def test_yaml_recipes_lock_exact_arms_budget_algorithms_and_distinct_identities(
     assert len(identities) == len(FILES)
 
 
-def test_batch8_changes_only_batch_size_and_run_identity_from_factorized16():
-    baseline, small = config('b1_factorized'), config('b1_factorized_bs8')
+@pytest.mark.parametrize('batch_size', [4, 8])
+def test_small_batch_changes_only_batch_size_and_run_identity_from_factorized16(batch_size):
+    baseline, small = config('b1_factorized'), config(f'b1_factorized_bs{batch_size}')
     changed = {key for key in baseline.keys() | small.keys() if baseline.get(key) != small.get(key)}
     assert changed == {'cfg', 'experiment_name', 'tag', RECIPE_KEY, 'batch_size'}
     assert recipe_options(small) == recipe_options(baseline)
-    assert small.batch_size == 8 and baseline.batch_size == 16
+    assert small.batch_size == batch_size and baseline.batch_size == 16
     with pytest.raises(ValueError, match='batch_size'):
         normalize_config(dict(small, batch_size=16))
 

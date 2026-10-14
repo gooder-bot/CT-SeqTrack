@@ -18,6 +18,8 @@ RECIPES = {
                                 options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
     'b1_factorized_bs8': dict(batch_size=8, lr_milestones=[20, 50],
                               options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
+    'b1_factorized_bs4': dict(batch_size=4, lr_milestones=[20, 50],
+                              options=DEDUP_OPTIONS + ('factorized_projection',), gpu=1),
 }
 
 

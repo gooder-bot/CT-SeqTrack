@@ -1,10 +1,10 @@
 # CT-SeqTrack 实验协议
 
-## 2026-10-14：四组 B1 执行配方，第四组更新为 batch8
+## 2026-10-14：四组 B1 执行配方，第四条命令更新为 batch4
 
-用户最新明确新增分解投影batch8：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch8 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch8除批大小及配方身份外保持factorized batch16的参数，不缩放LR、不梯度累积。当前四组目标总计240epoch，实际更新由采样器登记，不能套用batch16总数。batch8与batch16比较的是固定轮数、固定LR下的批大小配方，更新次数及BN批统计也会变化，不解释为纯工程加速。
+用户最新明确新增分解投影batch4：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch4 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch4除批大小及配方身份外保持factorized batch16的参数，不缩放LR、不梯度累积。本页四组各60epoch、共240epoch，不是包含历史尝试的累计预算；实际更新由采样器登记，不能套用batch16总数。batch4与batch16比较的是固定轮数、固定LR下的批大小配方，更新次数及BN批统计也会变化，不解释为纯工程加速。
 
-原第四组batch128由用户报告在同卡另一训练并发时OOM；原配置、失败运行和证据保留，该情况不能证明独占GPU也一定失败。当前batch8使用`37_b1_dedup_factorized_bs8_mini.yaml`与`b1_factorized_bs8`独立身份，从epoch0随机初始化；不从batch128或batch16 checkpoint继续，失败尝试成本另记，不追加batch128重跑要求。
+最初第四组batch128由用户报告在同卡另一训练并发时OOM；原配置、失败运行和证据保留，该情况不能证明独占GPU也一定失败。之后新增的`37_b1_dedup_factorized_bs8_mini.yaml`与`b1_factorized_bs8`也原样保留；本次不假定batch8已启动或完成，不停止、重启或迁移旧运行。当前第四条命令使用`37_b1_dedup_factorized_bs4_mini.yaml`与`b1_factorized_bs4`独立身份，从epoch0随机初始化，不从batch8/16/128 checkpoint继续。历史失败尝试及任何已有batch8运行成本另记，不追加batch128重跑要求。
 
 新配置由`v37_training_recipe`及`37_b1_execution_registration.json`绑定source/config/执行算法，参数键兼容不表示允许旧checkpoint初始化或跨配方恢复。分解保留global信息；FP32数值差异已知，另起scratch评价。B1实际公共去重只有unique_mask，不执行prior局部读取，concat组不构成prior_read消融。固定final60/late3，额外每轮验证只增加观察频率，不跨实验挑不同最佳轮。
 

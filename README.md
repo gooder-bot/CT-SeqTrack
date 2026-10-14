@@ -1,8 +1,8 @@
 # CT-SeqTrack
 
-**2026-10-14 当前新增：分解投影 B1 batch8 对照。** 用户报告batch128同卡并发时OOM，现将第四组改为batch8，其他参数沿用分解投影batch16：LR1.5e-4、20/50衰减、seed42、FP32、scratch60、每轮验证。当前四组为分解投影/原拼接batch16（GPU0），分解投影仅第20轮衰减batch16/分解投影batch8（GPU1）。新配置为 `37_b1_dedup_factorized_bs8_mini.yaml`；原batch128配置与失败记录保留。最新配置表、逐组nohup和日志见 [四组B1操作页](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。登记文件为 `cfgs/ct_seqtrack/37_b1_execution_registration.json`；不是改写旧五组登记。B1不执行prior局部读取，不能把该选项列为本轮有效变量。
+**2026-10-14 当前新增：分解投影 B1 batch4 对照。** 用户最新明确新增batch4，当前四条命令的第四组由batch8更新为batch4，其他参数沿用分解投影batch16：LR1.5e-4、20/50衰减、seed42、FP32、scratch60、每轮验证。当前四组为分解投影/原拼接batch16（GPU0），分解投影仅第20轮衰减batch16/分解投影batch4（GPU1）。新配置为 `37_b1_dedup_factorized_bs4_mini.yaml`；原batch8、batch128配置及已有运行证据保留，不停止或迁移旧运行。最新配置表、逐组nohup和日志见 [四组B1操作页](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。登记文件为 `cfgs/ct_seqtrack/37_b1_execution_registration.json`；不是改写旧五组登记。B1不执行prior局部读取，不能把该选项列为本轮有效变量。
 
-2026-10-14 按用户要求，已将验证后的修订从独立工程副本同步到 `D:/desktop/research/CT-SeqTrack` 的 main 工作区，最新代码和配置直接在本项目中维护。本次batch8修改仅在本地，代理未操作服务器。新增配方会改变源码登记：正在运行的任务保持原源码，新任务用独立部署目录，或等旧任务完成后再更新原目录；旧checkpoint只用其原登记源码恢复/评测。旧五组YAML、登记文件和已有输出保留。分解投影保持全局信息及原参数，但FP32训练数值不同；本轮新scratch检验其实际影响，不预先宣称无损或提速。原工程去重与成对测速说明仍见 [执行实验室](docs/CT_EXECUTION_LAB.md)，真实CUDA配对速度报告尚未完成。下方各日期的“当前”是历史安排。
+2026-10-14 按用户要求，已将验证后的修订从独立工程副本同步到 `D:/desktop/research/CT-SeqTrack` 的 main 工作区，最新代码和配置直接在本项目中维护。本次batch4修改仅在本地，代理未操作服务器。新增配方会改变源码登记：正在运行的任务保持原源码，新任务用独立部署目录，或等旧任务完成后再更新原目录；旧checkpoint只用其原登记源码恢复/评测。旧五组YAML、登记文件和已有输出保留。分解投影保持全局信息及原参数，但FP32训练数值不同；本轮新scratch检验其实际影响，不预先宣称无损或提速。原工程去重与成对测速说明仍见 [执行实验室](docs/CT_EXECUTION_LAB.md)，真实CUDA配对速度报告尚未完成。下方各日期的“当前”是历史安排。
 
 **2026-10-09 当前：v37 基于强 v35 B0/B1 与现有工程提速实施。** 新版隔离扩展证据与主定位，重建两个恢复候选，分别学习最终框定位效用和提交质量。B1+B2 与 Full 训练同一候选及核验系统，仅执行选择与更新政策不同。结构与监督见 [v37 设计](docs/CTSEQTRACK_V37_DESIGN.md)，五组启动、恢复和比较见 [v37 操作页](docs/CTSEQTRACK_V37_LAUNCH.md)。以下 v36/v35 的“当前”均为历史记录。
 
