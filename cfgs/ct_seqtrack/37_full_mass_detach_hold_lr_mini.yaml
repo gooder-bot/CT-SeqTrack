@@ -1,0 +1,7 @@
+_base_: 37_formal_base.yaml
+experiment_name: ct37_full_mass_detach_hold_lr_mini_car_scratch_seed42
+tag: v37_full_mass_detach_hold_lr_mini_car_seed42
+v37_arm: full
+v31_arm: full
+v37_centroid_recipe: full_mass_detach_hold_lr
+lr_milestones: [20]

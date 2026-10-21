@@ -13,6 +13,10 @@ from utils.diagnostic_transfer import tensors_to_numpy
 class TrainingDiagnostics(LegacyDiagnostics):
     SCHEMA = 'ct_seqtrack.v37.training_diagnostics.v1'
 
+    def __init__(self, seed=42, *, optimized=False, centroid_semantics=False):
+        self.centroid_semantics = bool(centroid_semantics)
+        super().__init__(seed=seed, optimized=optimized)
+
     @torch.no_grad()
     def add_batch(self, rows, batch, output, losses):
         view = output
@@ -44,6 +48,24 @@ class TrainingDiagnostics(LegacyDiagnostics):
             v37_q0_is_fallback=output.q0_is_fallback,
             v37_foreground_vote_error_sum=torch.where(foreground, errors, 0.).sum(-1),
             v37_foreground_vote_error_count=foreground.sum(-1))
+        if self.centroid_semantics:
+            # 仅新 centroid 配方附加语义摘要；分子/真实点数分开累计，不填造空类均值。
+            identity = evidence.identity_logits.detach().sigmoid()
+            extension_valid = batch['extension_valid'].bool()
+            extension_fg = batch['extension_labels'] > .5
+            size = batch['box_size'].detach().to(batch['target_box']).clamp_min(1e-3)
+            scale = (.5 * size[:, :2].norm(dim=1)).clamp_min(1e-3)
+            reliability_target = selected_labels.clamp(0, 1) / (1. + errors / scale[:, None])
+            reliability_error = (evidence.reliability_logits.detach().sigmoid() - reliability_target).abs()
+            for name, positive in (('fg', True), ('bg', False)):
+                identity_mask = extension_valid & (extension_fg == positive)
+                reliability_mask = evidence.point_valid.bool() & ((selected_labels > .5) == positive)
+                values[f'v37_centroid_identity_{name}_probability_sum'] = torch.where(
+                    identity_mask, identity, 0.).sum(-1)
+                values[f'v37_centroid_identity_{name}_probability_count'] = identity_mask.sum(-1)
+                values[f'v37_centroid_reliability_{name}_abs_error_sum'] = torch.where(
+                    reliability_mask, reliability_error, 0.).sum(-1)
+                values[f'v37_centroid_reliability_{name}_abs_error_count'] = reliability_mask.sum(-1)
         targets = getattr(output, 'supervision_targets', {})
         for name in ('exact_iou', 'utility', 'commit_quality', 'measurement', 'support_count', 'support_purity', 'foreground_count'):
             value = targets.get(name) if isinstance(targets, dict) else None

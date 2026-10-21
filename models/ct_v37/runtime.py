@@ -2,7 +2,7 @@
 import hashlib
 import json
 
-from .config import config_identity, as_v35_config
+from .config import config_identity, as_v35_config, normalize_config
 from .identity import SCHEMA, runtime_schema
 from models.ct_v31.runtime import (capture_rng_state, restore_rng_state, move_tensors,
     loss_episode_summary, TrackingEvaluation as LegacyEvaluation)
@@ -55,6 +55,7 @@ def validate_resume_payload(payload, config, *, training=True):
 class TrackingEvaluation(LegacyEvaluation):
     """评分完全沿用 v35；新增台账仅在 accepted 提交后读取 GT。"""
     def __init__(self, config):
+        self.v37_config = normalize_config(config)
         super().__init__(as_v35_config(config, arm=config.v37_arm))
         from utils.execution_profile import optimized_execution
         self.optimized = optimized_execution(config)
@@ -63,6 +64,11 @@ class TrackingEvaluation(LegacyEvaluation):
         self._last_commit = {}
 
     def add_batch(self, raw_rows, batch, output, commit_results=None):
+        from utils.b2_centroid_recipes import recipe_scope
+        with recipe_scope(self.v37_config):
+            return self._add_batch(raw_rows, batch, output, commit_results)
+
+    def _add_batch(self, raw_rows, batch, output, commit_results=None):
         from .candidate_records import candidate_records
         first = len(self.rows)
         super().add_batch(raw_rows, batch, output, commit_results)

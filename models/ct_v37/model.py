@@ -2,6 +2,7 @@
 import torch
 from torch import nn
 from utils.execution_lab import enabled
+from utils.b2_centroid_recipes import detach_mass_weights, recipe_scope
 
 from models.ct_v31.contracts import EvidenceHypotheses as V35Evidence, TrackOutput as V35Output
 from models.ct_v31.model import canonicalize_batch, select_hypothesis
@@ -57,7 +58,8 @@ class JointTracker(nn.Module):
         self.prior = (PhysicalTimePrior(self.config.time_scale, self.config.v31_temporal_backend)
                       if self.enable_b1 else None)
         with torch.random.fork_rng(devices=[]):
-            self.evidence = B2IdentityEvidence() if self.enable_b2 else None
+            self.evidence = (B2IdentityEvidence(detach_mass_weights=detach_mass_weights(self.config))
+                             if self.enable_b2 else None)
             self.verifier = FinalBoxVerifier(self.config.time_scale) if self.enable_b2 else None
 
     def plan_prior(self, batch):
@@ -65,8 +67,7 @@ class JointTracker(nn.Module):
         return self.prior(prepared) if self.prior is not None else empty_prior(prepared)
 
     def forward(self, batch, prior=None):
-        # 配方随模型配置保留；直接模型调用也不能静默回到concat。
-        from utils.b1_training_recipes import recipe_scope
+        # 直接调用也遵守配方：B1保留执行算法，新B2配方显式隔离工程开关。
         with recipe_scope(self.config):
             return self._forward(batch, prior)
 
@@ -98,6 +99,10 @@ class JointTracker(nn.Module):
             candidates, verification, utility, commit_quality, candidates.q0_is_fallback)
 
     def compute_losses(self, batch, output):
+        with recipe_scope(self.config):
+            return self._compute_losses(batch, output)
+
+    def _compute_losses(self, batch, output):
         prepared = canonicalize_batch(batch)
         if not self.enable_b2:
             return v35_losses(prepared, output, enable_b1=self.enable_b1, enable_b2=False, enable_b3=False)

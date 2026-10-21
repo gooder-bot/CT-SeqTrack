@@ -8,6 +8,8 @@ from models.ct_v31.config import DEFAULTS as OLD_DEFAULTS, V35_DEFAULTS, V31Conf
 from utils.config import load_yaml_config
 from .identity import SCHEMA
 from utils.b1_training_recipes import RECIPE_KEY, recipe_spec, recipe_identity
+from utils.b2_centroid_recipes import (RECIPE_KEY as CENTROID_RECIPE_KEY,
+    recipe_spec as centroid_recipe_spec, recipe_identity as centroid_recipe_identity)
 
 ARMS = ('b0', 'b1', 'b1_b2', 'full')
 EXECUTION_PROFILES = ('legacy', 'optimized_fp32', 'optimized_bf16')
@@ -26,11 +28,12 @@ POLICY_KEYS = tuple(key for key in DEFAULTS if key.startswith('v37_') and key.en
 
 def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
-    unknown = set(supplied) - set(DEFAULTS) - {RECIPE_KEY}
+    unknown = set(supplied) - set(DEFAULTS) - {RECIPE_KEY, CENTROID_RECIPE_KEY}
     if unknown:
         raise ValueError('v37 unknown/inactive configuration keys: ' + ', '.join(sorted(unknown)))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
+    centroid_recipe = centroid_recipe_spec(cfg)
     recipe = recipe_spec(cfg)
     if 'v37_arm' in supplied and 'v31_arm' not in supplied:
         cfg.v31_arm = cfg.v37_arm
@@ -62,12 +65,16 @@ def normalize_config(config=None):
         if not math.isfinite(float(cfg[key])):
             raise ValueError('nonfinite configuration value: ' + key)
     cfg.lr_milestones = list(cfg.lr_milestones)
-    milestones = [20, 50] if recipe is None else recipe['lr_milestones']
+    schedule_recipe = centroid_recipe if centroid_recipe is not None else recipe
+    milestones = [20, 50] if schedule_recipe is None else schedule_recipe['lr_milestones']
     if (cfg.lr_schedule != 'multistep' or cfg.lr_milestones != milestones
             or cfg.lr_warmup_steps != 0):
         raise ValueError('v37 requires its registered multistep schedule without warmup')
     if recipe is not None and (cfg.v37_arm != 'b1' or cfg.execution_profile != 'optimized_fp32'):
         raise ValueError('registered execution recipes require B1 FP32')
+    if centroid_recipe is not None and (cfg.v37_arm != centroid_recipe['arm']
+            or cfg.execution_profile != 'optimized_fp32'):
+        raise ValueError('registered centroid recipe requires its exact arm and FP32')
     if not cfg.ct_engineering_check:
         fixed = dict(epoch=60, batch_size=16, workers=4, seed=42, lr=.00015, wd=0.,
             lr_decay_step=20, lr_decay_rate=.1, point_sample_size=1024,
@@ -131,5 +138,7 @@ def config_identity(config):
     payload.update(schema=SCHEMA, evaluation_rng_policy='per_checkpoint_seed_v1')
     if RECIPE_KEY in cfg:
         payload['training_execution_recipe'] = recipe_identity(cfg)
+    if CENTROID_RECIPE_KEY in cfg:
+        payload['centroid_recipe_identity'] = centroid_recipe_identity(cfg)
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
                                      ensure_ascii=False).encode('utf-8')).hexdigest()

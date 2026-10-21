@@ -166,12 +166,21 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
         return None
     from utils.b1_training_recipes import (RECIPE_KEY, REGISTRATION_FILE,
         REGISTRATION_SCHEMA, recipe_identity)
+    from utils.b2_centroid_recipes import (RECIPE_KEY as CENTROID_RECIPE_KEY,
+        REGISTRATION_FILE as CENTROID_REGISTRATION_FILE,
+        REGISTRATION_SCHEMA as CENTROID_REGISTRATION_SCHEMA,
+        recipe_identity as centroid_recipe_identity)
     is_recipe = RECIPE_KEY in config
-    filename = REGISTRATION_FILE if is_recipe else '37_registration.json'
+    is_centroid = CENTROID_RECIPE_KEY in config
+    if is_recipe and is_centroid:
+        raise ValueError('v37 centroid and B1 execution recipes are mutually exclusive')
+    filename = (CENTROID_REGISTRATION_FILE if is_centroid else
+                REGISTRATION_FILE if is_recipe else '37_registration.json')
     path = (Path(registration_path) if registration_path is not None else
             Path(__file__).resolve().parents[2] / 'cfgs/ct_seqtrack' / filename)
     registration = json.loads(path.read_text(encoding='utf-8'))
-    expected_schema = REGISTRATION_SCHEMA if is_recipe else 'ct_seqtrack.v37.registration.v1'
+    expected_schema = (CENTROID_REGISTRATION_SCHEMA if is_centroid else
+                       REGISTRATION_SCHEMA if is_recipe else 'ct_seqtrack.v37.registration.v1')
     if registration.get('schema') != expected_schema:
         raise ValueError('v37 formal registration schema mismatch')
     source = source_identity() if source is None else source
@@ -185,6 +194,9 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
         raise ValueError('v37 formal config is not exactly one registered run')
     if is_recipe and matches[0].get('training_execution_recipe') != recipe_identity(config):
         raise ValueError('registered B1 execution recipe identity mismatch')
+    if is_centroid and (matches[0].get('centroid_recipe_identity') != centroid_recipe_identity(config)
+            or matches[0].get('label') != config[CENTROID_RECIPE_KEY]):
+        raise ValueError('registered B2 centroid recipe identity mismatch')
     return dict(schema=registration['schema'], label=matches[0]['label'],
                 sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
@@ -192,7 +204,7 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
 def run(config, *, loaders=None):
     # 训练、逐轮validation、late-3、独立test及同run恢复共用登记的执行算法。
     from .config import normalize_config
-    from utils.b1_training_recipes import recipe_scope
+    from utils.b2_centroid_recipes import recipe_scope
     config = normalize_config(config)
     with recipe_scope(config):
         return _run(config, loaders=loaders)
@@ -238,6 +250,9 @@ def _run(config, *, loaders=None):
     from utils.b1_training_recipes import recipe_identity
     if recipe_identity(config) is not None:
         manifest['training_execution_recipe'] = recipe_identity(config)
+    from utils.b2_centroid_recipes import recipe_identity as centroid_recipe_identity
+    if centroid_recipe_identity(config) is not None:
+        manifest['centroid_recipe_identity'] = centroid_recipe_identity(config)
     manifest['execution_identity'] = execution_identity(config, manifest['source'])
     import uuid
     existing_manifest = (json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))

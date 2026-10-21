@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-21 17:14 当前安排为 [B2 重心梯度三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)，均物理GPU1、单进程单卡；scratch60、batch16、workers4、FP32、每5轮验证。三组完整启动与新终端tail命令以该页为准，以下旧日期的卡号与配方属于历史。
+
+本次通过SSH只读确认：服务器HEAD=`09a7809698d512f53d999574b00df2e0773fa93f`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全。GPU1为A40，总46,068MiB、已用2,358MiB（约42.7GiB空闲），/home可用约1.5T。存在其他任务，显存为检查时快照。当前没有CT-SeqTrack训练进程，旧batch4日志在第42轮记录SIGTERM、无results.json。新增B2源码/登记/文档尚未上传，由用户完整上传后执行一次真实Full batch检查及正式训练。代理未写入服务器、安装、启动或停止任务；只读记录见 [server_readonly.json](../artifacts/ct_checks/20261021_b2_launch_readiness/server_readonly.json)。
+
 2026-10-09 当前为 [v37 五组](CTSEQTRACK_V37_LAUNCH.md)：B0、B1、B1+B2、Full FP32、Full 局部 BF16，seed42、scratch60，共300epoch/358,500更新。代理仅通过 SSH 只读查看，未上传、安装、运行检查、启动或停止任务。服务器尚无本地新增 v37 与工程提速工具；由用户上传完整最新代码，执行一次 Full CUDA 生命周期及短 BF16 数值检查后启动正式实验。
 
 本次快照：HEAD=`aec7fd6fa41b08fd8d2bdfe7061da176b023f31f`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全，磁盘约1909GiB可用。两张A40各46,068MiB，CUDA与BF16支持均已确认；GPU0/1分别空闲41,852/42,219MiB，仍有其他计算任务。以实际Full峰值安排并发，不保证五组同时放得下，不停止其他任务。服务器原有工作树内容保持。完整快照及本地复核见 [上传就绪报告](../artifacts/ct_checks/20261009-161150_v37_upload_readiness/REPORT.md)。

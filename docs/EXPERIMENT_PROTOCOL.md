@@ -1,5 +1,19 @@
 # CT-SeqTrack 实验协议
 
+## 2026-10-21 新登记：B2 重心梯度三组
+
+用户批准本地实施，并固定三组独立scratch60：`b1_b2_mass_detach`、`full_mass_detach`、`full_mass_detach_hold_lr`。结构变量仅为重心mass的identity×reliability权重停止反向；第三组另外保留20轮衰减、取消50轮衰减。全部mini Car/seed42/batch16/FP32/concat/val5，工程options为空，原W、点数、memory和loss保持。独立登记为 `37_b2_centroid_registration.json`，操作见 [B2三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
+
+预算180epoch/215,100更新，不从标准组50轮权重分叉。标准Full为主结果；fixed final60/late3及原R/C门保持，hold_lr不能替代结构对照，B1+B2与Full不是纯有无B3网络消融。旧配置/登记/输出与源码证据保留，不放宽同run完整epoch恢复。此次已实施但未在服务器启动，尚无新三组正式成绩；下方“尚未实施”是之前的审查状态。
+
+## 2026-10-21 结果状态补充（不变更登记与门槛）
+
+原 10/09 v37 五组均完成 60 轮及末三轮原帧评测，共 300 epoch / 358,500 更新。Full FP32 final60 S/P=49.9136/59.5274、late-3=50.0715/59.6327，未通过原总体/移动门，低于强 B1；BF16 不替代预登记主模型。见 [完整审查](CTSEQTRACK_V37_RESEARCH_AUDIT_20261021.md)。
+
+10/14 登记、10/16 启动的新 B1 三组 batch16 已完成；concat 复现旧 B1，factorized 与 hold_lr 未通过原门。batch4 本地完整记录到 41 轮、日志进入 42 轮，未有正式 final60/late3；其完整预算为 286,620 更新，不套用 batch16 的 71,700。实际四组运行均登记 CUDA_VISIBLE_DEVICES=1，与下方计划分卡不同；并发耗时不是配对速度实验。三个完成运行有 allocator allocated 峰值，含义与限制见新审查，不能写成完全无显存记录。
+
+新审查中的首框保持、低运动端点及额外机制诊断只补充解释，不更换原 R/C 门槛，不把 171 个运动端点代替 657 个曾移动轨迹端点。仍固定 final60/late3，阶段最好分和未完成 batch4 均不能替代正式结果。新结构建议尚未实施/登记，不据本节追加训练或修改旧身份。下方按日期保存原登记，待运行文字按本节更新。
+
 ## 2026-10-14：四组 B1 执行配方，第四条命令更新为 batch4
 
 用户最新明确新增分解投影batch4：GPU0为分解投影/原concat两个batch16 B1；GPU1为分解投影只在20轮衰减的batch16 B1，以及分解投影原20/50衰减的batch4 B1。共同保持mini Car、seed42、FP32、scratch60、LR1.5e-4、无warmup、原W课程/采样/loss，全部每轮validation。只取消hold_lr组第50轮后的第二次衰减；batch4除批大小及配方身份外保持factorized batch16的参数，不缩放LR、不梯度累积。本页四组各60epoch、共240epoch，不是包含历史尝试的累计预算；实际更新由采样器登记，不能套用batch16总数。batch4与batch16比较的是固定轮数、固定LR下的批大小配方，更新次数及BN批统计也会变化，不解释为纯工程加速。

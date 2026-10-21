@@ -24,8 +24,10 @@ class CTSEQTRACKV37(CTSEQTRACKV31):
         self.evaluation_builder = BatchBuilder(config)
         self.evaluation = TrackingEvaluation(config)
         from models.ct_v37.training_diagnostics import TrainingDiagnostics
+        from utils.b2_centroid_recipes import detach_mass_weights
         self.training_diagnostics = TrainingDiagnostics(config.seed,
-            optimized=config.execution_profile != 'legacy') if config.v37_diagnostics else None
+            optimized=config.execution_profile != 'legacy',
+            centroid_semantics=detach_mass_weights(config)) if config.v37_diagnostics else None
         if pl is not None:
             self.save_hyperparameters(dict(config=dict(config)))
 

@@ -1,6 +1,28 @@
-# CT-SeqTrack 当前状态（2026-10-14）
+# CT-SeqTrack 当前状态（2026-10-21）
 
-## 当前新增：分解投影 B1 batch4 对照
+## 最新实施：B2 重心梯度三组
+
+- [x] 按用户批准方案实施 mass 权重 detach、三份独立配方及两类被动语义摘要；默认旧行为保留，未修改 B3。见 [实现与操作](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
+- [ ] 用户在本版独立部署目录完成一次真实 Full batch16 CUDA 生命周期检查；工程权重丢弃。
+- [ ] 用户运行三组scratch60：shadow 20/50、Full 20/50、Full仅20。新增预算180epoch/215,100更新，旧强B1/shadow/Full证据复用，代理不自动启动。
+- [ ] 固定final60/late3比较标准Full与旧Full/强B1，再比较本轮两组Full的LR影响；核验两组Full前50轮相同、51轮分叉，复核候选供给、主路副作用、漂移与恢复。没有新结果前不宣称收益。
+
+## 当前结果与下一步研究
+
+- [x] 原 v37 B0/B1/shadow/Full FP32/Full BF16 全部完成 scratch60，共 300 epoch / 358,500 更新；Full FP32 final60=49.9136/59.5274、late-3=50.0715/59.6327，未通过原门，低于强 B1。见 [10/16 结果](artifacts/ct_checks/20261016_v37_five_run_review/REPORT.html)。
+- [x] 复核 10/16 新 B1 三组 batch16 已完成：concat 精确复现旧 B1；factorized final/late3=50.6663/61.5088、51.0835/62.2319；hold_lr=52.5952/64.2374、49.0430/59.6349，后两者未过原门。工作配方建议保留 concat，不自动重跑或扩到 Full。
+- [x] 核对 batch4 本地进度：41 份完整训练审计与验证、日志进入第 42 轮；第 41 轮=43.8807/49.2505。未有正式 final60/late3，不能把缺少本地结果写成已停机或已失败。三组已完成预算 180 epoch / 215,100 更新；batch4 的完整 60 轮为 286,620 更新，其已耗成本单列，不套用 batch16。
+- [x] 同步 [新 B1 执行结果](artifacts/ct_checks/20261021_v37_execution_decision_review/execution/README.md)、[首框保持与学习价值](artifacts/ct_checks/20261021_learning_value_audit/summary.json)、[本轮研究审查及论文/代码](docs/CTSEQTRACK_V37_RESEARCH_AUDIT_20261021.md)。旧工程报告“无 peak 显存记录”的表述已在新审查更正；allocated 高水位不是受控净收益。
+- [x] 新增 mode 局部读取复核与评测重复开销审计：67 个正 mode 均读到 GT，33 个读入 GT 全低概率；训练 depth0 占 42.96%、depth4–7 占 11.15%；没有执行新 forward 或 GPU 测速。
+- [ ] 若获取更晚 batch4 记录，补齐其真实完成/终止状态及实际成本；已有本地快照不代替服务器实时状态，不自动启停。
+- [ ] 优先做强 B1 同输入主路/辅助梯度边界诊断、低运动累计漂移诊断、固定权重候选接管的状态分叉回放；保留 171 运动端点与 657 曾移动轨迹端点两种口径，不用 GT 在线选策略。
+- [ ] 按训练集恢复条件核查身份/几何坐标参照、memory 来源及 age/anchor 误差覆盖，再收缩下一版改法。Q 按自身提交支持学习，输出替换价值与 memory 资格分开；这些尚未实施，不直接加大 point/memory/loop 预算。
+- [ ] 评测效率先查重复 D2H、相同框几何和 summary 模式仍构建完整记录的开销；在相同日志和排程下实测。没有受控配对证据前不宣称提速。
+- [ ] 下一版结构、正式 scratch 预算及独立泛化验证另行明确；不改变旧 final60/late3、R/C 门槛，不扫验证集阈值或追加 LR/seed。
+
+以下日期段保留历史登记与实施过程；未勾选项不表示现在仍待启动，也不要求重跑已完成训练。
+
+## 历史登记（10月14日）：分解投影 B1 batch4 对照
 
 - [x] 用户最新明确新增分解batch4，四条命令的第四组由batch8更新为batch4；当前四组B1为GPU0分解/concat batch16，GPU1分解取消50轮衰减batch16/分解batch4。batch4保持LR1.5e-4、20/50衰减、每轮验证、scratch60、seed42、FP32及原W课程，其余原配方不变。
 - [x] 前版四份YAML、执行scope、配置/运行身份已完成；旧五组配置哈希和旧恢复门保持。B1没有prior局部读取，本轮不登记该空变量。
@@ -16,14 +38,14 @@
 
 下方是此前实验历史，尚未完成项不自动授权追加本轮训练。
 
-## 当前：v37 基于强 v35 的 B2/B3 优化实施
+## 历史实施（10月9日）：v37 基于强 v35 的 B2/B3 优化
 
 - [x] 封存本次工程提速基线；新版本独立源码、五配置、运行/恢复身份，不修改旧输出与权重。设计见 [v37](docs/CTSEQTRACK_V37_DESIGN.md)。
 - [x] 实施主路输入隔离、身份/几何分工、两顺序模式、独立 mode 残差头、最终框 S/P 效用与 Qmode 提交质量；B1+B2 与 Full 同图训练，仅执行政策不同。
 - [x] 本地合同与真实 CPU Trainer 验证完成：新增 75 passed；PL2.0.2 专项 8 passed，CPU Full batch16×1024 和原 W 的 epoch10→11 恢复通过。旧仓回归 828 passed/17 skipped，另一次历史时间戳碰撞定向复核 5 passed；详见 [完整记录与限制](artifacts/ct_checks/20261009-153604_v37_implementation/REPORT.md)。
 - [x] 上传前修复 v37 恢复日志同微秒撞名、统一新增源码 LF 并刷新 source 登记；五组配置身份不变。更新五套独立 nohup/tail 命令，服务器只读核实环境、数据和 BF16 支持，详见 [就绪复核](artifacts/ct_checks/20261009-161150_v37_upload_readiness/REPORT.md)。
-- [ ] 用户上传后执行真实 CUDA 生命周期及 FP32/BF16 数值检查；按 [五组操作页](docs/CTSEQTRACK_V37_LAUNCH.md) 独立启动或同 run 完整 epoch 恢复，代理不操作服务器。
-- [ ] 完成 B0/B1/B1+B2/Full FP32/Full BF16 五组，共 300 epoch/358,500 更新；固定 final60/late-3、原 R/C、强 B0/B1 与错写/漂移/恢复链评估。FP32 是研究主结果。
+- [ ] 历史独立 CUDA 生命周期/FP32-BF16 数值检查的证据另查；正式训练完成不能反推短工程对照已单独留存，也不因此重跑已完成五组。
+- [x] B0/B1/B1+B2/Full FP32/Full BF16 五组已完成，共 300 epoch/358,500 更新；固定 final60/late-3 复盘见本页顶部，FP32 主结果未达标。
 - [ ] 同卡同负载配对测训练与推理速度；不得用并发墙钟代替加速证据。五组结束后据证据决定下一步，不自动追加 LR/seed/时长或预先承诺涨分。
 
 下方为历史状态，v36 已完成且失败的结果保持原样。

@@ -5,6 +5,7 @@
 import torch
 from utils.raw_frame_memo import raw_transaction
 from utils.execution_lab import enabled
+from utils.b2_centroid_recipes import recipe_scope
 
 from models.ct_v31.data import (BatchBuilder as LegacyBatchBuilder, build_loaders as legacy_loaders,
     ReadyQueueBatchSampler, RawEndpointDataset, EndpointRequest, AcceptedState,
@@ -27,6 +28,10 @@ class BatchBuilder(LegacyBatchBuilder):
 
     @raw_transaction
     def commit(self, output, batch, *, diagnostics=False):
+        with recipe_scope(self.v37_config):
+            return self._commit(output, batch, diagnostics=diagnostics)
+
+    def _commit(self, output, batch, *, diagnostics=False):
         # B0/B1 完整复用原数值及状态数学，不增加推理门控。
         if self.v37_config.v37_arm in ('b0', 'b1'):
             return super().commit(output, batch, diagnostics=diagnostics)

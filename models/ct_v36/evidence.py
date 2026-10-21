@@ -51,12 +51,16 @@ def sequential_members(votes, weights, valid, point_ids):
     return torch.stack(members, 1), torch.stack(hubers, 1), torch.stack(valids, 1)
 
 
-def build_live_modes(votes, weights, valid, point_ids):
+def build_live_modes(votes, weights, valid, point_ids, *, detach_mass_weights=False):
+    if type(detach_mass_weights) is not bool:
+        raise TypeError('detach_mass_weights must be bool')
     valid = (valid.bool() & torch.isfinite(votes).all(-1) & torch.isfinite(weights)
              & (weights>0) & (point_ids>=0))
     members, huber, mode_valid = sequential_members(votes, weights, valid, point_ids)
     clean = torch.where(valid[..., None], votes, 0.)
-    mass = torch.where(valid, weights, 0.)[:, None] * members * huber
+    # 只切重心权重的直接梯度；成员/前向数值不变，当前 votes 仍保持 live。
+    mass_weights = weights.detach() if detach_mass_weights else weights
+    mass = torch.where(valid, mass_weights, 0.)[:, None] * members * huber
     denominator = mass.sum(-1).clamp_min(1e-8)
     centers = (mass[..., None] * clean[:, None]).sum(2) / denominator[..., None]
     centers = torch.where(mode_valid[..., None], centers, 0.)
@@ -68,10 +72,13 @@ def build_live_modes(votes, weights, valid, point_ids):
 
 
 class B2IdentityEvidence(nn.Module):
-    def __init__(self, config=None, feature_dim=64):
+    def __init__(self, config=None, feature_dim=64, *, detach_mass_weights=False):
         super().__init__()
         if feature_dim != 64:
             raise ValueError('v36 evidence features are fixed to 64')
+        if type(detach_mass_weights) is not bool:
+            raise TypeError('detach_mass_weights must be bool')
+        self.detach_mass_weights = detach_mass_weights
         self.point_encoder = nn.Sequential(nn.Linear(5,64), nn.LayerNorm(64), nn.GELU(),
             nn.Linear(64,64), nn.LayerNorm(64), nn.GELU())
         self.local_geometry = RawLocalGeometry()
@@ -145,7 +152,8 @@ class B2IdentityEvidence(nn.Module):
         selected_logits = _gather(logits,selected).masked_fill(~valid,0.)
         ids = _gather(cache['ids'],selected).masked_fill(~valid,-1)
         weights = selected_logits.sigmoid()*reliability.sigmoid()*valid
-        centers,mode_valid,members,covariance = build_live_modes(votes,weights,valid,ids)
+        centers,mode_valid,members,covariance = build_live_modes(votes,weights,valid,ids,
+            detach_mass_weights=self.detach_mass_weights)
         return EvidenceHypotheses(centers_xyz=centers,mode_valid=mode_valid,members=members,
             covariance_xy=covariance,point_features=geometry,point_xyz=xyz,point_valid=valid,
             point_ids=ids,point_indices=selected,identity_logits=logits,selected_identity_logits=selected_logits,

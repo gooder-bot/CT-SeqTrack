@@ -1,5 +1,21 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-21 最新实施：B2 centroid mass 梯度三组
+
+- 用户已明确批准实施。新 `v37_centroid_recipe` 仅在重心 mass 路径 detach identity×reliability，votes/精修及两头显式监督保留；共享 v36 接口默认 False，旧模型默认语义不变。结构和操作见 [B2 三组说明](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
+- 三组是 `b1_b2_mass_detach`、`full_mass_detach`（主结果）、`full_mass_detach_hold_lr`；第三组保留20轮衰减、取消50轮衰减。全部mini Car/seed42/scratch60/batch16/FP32/concat/val5，工程options为空，180epoch/215,100更新；不混入Full去重、分解或B3改法，不自动追加训练。
+- 2026-10-21 启动安排更新：用户指定三组全部物理 GPU1（`CUDA_VISIBLE_DEVICES=1`），每进程 `--trainer_devices 1`，其余参数不变。不要照搬旧命令的 val1；本轮仍为 val5。SSH只读快照见 `artifacts/ct_checks/20261021_b2_launch_readiness/server_readonly.json`，检查时新版尚未上传、无CT训练进程，旧batch4日志止于第42轮SIGTERM；不自动恢复或停止任何任务。
+- 独立登记 `37_b2_centroid_registration.json`；旧五组和B1执行登记/YAML/输出保持。旧checkpoint仍用原源码，不放宽跨源码/跨配方恢复。修改前快照在 `artifacts/ct_checks/20261021-163831_b2_centroid_implementation/baseline_source/`。
+- 实施完成不代表正式涨分；三组训练与一次真实CUDA Full batch检查仍由用户操作。服务器只读、不启停任务、不读取TrajTrack。下方“本轮只读/尚未实施”属于此前审查阶段。
+
+## 2026-10-21 当前：结果已完成部分与研究审查
+
+- 最新状态与建议见 [研究审查](docs/CTSEQTRACK_V37_RESEARCH_AUDIT_20261021.md) 和 [待办](need_to_do.md)。原 10/09 v37 五组已完成 300 epoch / 358,500 更新；Full FP32 final60=49.9136/59.5274、late-3=50.0715/59.6327，未过原门且低于 B1。下方“尚无 v37 正式成绩”仅为历史状态。
+- 10/16 新 B1 三组 batch16 已完成；concat 精确复现旧 B1，分解和 hold_lr 未通过原门。batch4 本地完整训练/验证记录到 41 轮、日志进入 42 轮，没有正式 final60/late3；不据本地快照认定服务器停止或仍在运行。四组实际 manifest 均为 CUDA_VISIBLE_DEVICES=1，与旧分卡计划不同。
+- 推荐工作配方为强 concat batch16 + 原 20/50 衰减；该推荐不修改任何旧配置/运行身份、不自动停止已有任务或追加训练。旧输出、旧 artifacts、旧 checkpoint 对应源码均保持。
+- 本轮授权范围为详细阅读、相关研究检索与项目文档更新；新增审计写 `artifacts/ct_checks/20261021_research_audit/`。模型改法为研究提案，不表示已经实施。服务器仍只读，不上传、安装、启停任务；不读取/参考 TrajTrack。
+- 解释原五组用原登记源码/0662c21 快照，解释新 B1 用对应 09a7809 登记源码。不要用最新执行开关解释旧结果，不把同状态 oracle 当闭环成绩，不把单 seed late3 当独立重复。
+
 ## 2026-10-14 当前新增：用户批准分解投影 B1 batch4 对照
 
 - 首先在独立工程副本实施；2026-10-14用户进一步明确要求同步到`D:/desktop/research/CT-SeqTrack`的main工作区，最新代码现直接在本项目维护。旧五份YAML、`37_registration.json`及已有输出/权重保留；迁移前源码已另存于`artifacts/ct_checks/20261014-155937_main_sync/baseline_source/`。新四组由`v37_training_recipe`绑定执行算法，登记为`37_b1_execution_registration.json`，操作唯一入口见[四组B1配置/命令](docs/CTSEQTRACK_V37_B1_EXECUTION_LAUNCH.md)。
@@ -74,7 +90,7 @@
 ## 当前范围与授权
 
 - 唯一活动项目为本仓库，所有命令从本仓库根目录执行。兄弟基线只读，不修改；不读取 TrajTrack。
-- 下方为 v33–v35 实验历史约定；当前范围以顶部10月4日v36五组及其设计/协议为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
+- 下方为 v33–v35 实验历史约定；当前状态和本轮范围以顶部 2026-10-21 记录为准，正式配方仍以各自登记及实验协议为准。v32 通过 Git `ddcb1a1`、v31 通过 `b1d886e` 复现；不改写历史。
 - 用户最新要求：服务器 `lishengjie@10.109.253.86` 本轮只读；允许本地修复，由用户自行上传和启动。不得自行上传、安装、启动训练、停止进程或改写服务器文件。旧部署授权不延续到本轮。
 - 本轮由用户从头运行四组 mini Car、seed42：R 独立 SeqTrack、A 综合 B0 原配方、B 综合 B0 延后第二次衰减、C 为 B 全程半学习率。物理 GPU 依次为 0/0/1/1，每组单卡。
 - 2026-09-25用户追加D：综合B0的B配方全程学习率×1.5，初始1.5e-4、milestones=[20,50]，物理GPU0；原A/B/C保留。只登记新增B0配方，不改变预算或参考模型配方，见`docs/CTSEQTRACK_V33_SCALED_LR_GPU0.md`。
