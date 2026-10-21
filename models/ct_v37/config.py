@@ -9,7 +9,8 @@ from utils.config import load_yaml_config
 from .identity import SCHEMA
 from utils.b1_training_recipes import RECIPE_KEY, recipe_spec, recipe_identity
 from utils.b2_centroid_recipes import (RECIPE_KEY as CENTROID_RECIPE_KEY,
-    recipe_spec as centroid_recipe_spec, recipe_identity as centroid_recipe_identity)
+    recipe_spec as centroid_recipe_spec, recipe_identity as centroid_recipe_identity,
+    OVERRIDABLE_FIELDS, validate_runtime_parameters)
 
 ARMS = ('b0', 'b1', 'b1_b2', 'full')
 EXECUTION_PROFILES = ('legacy', 'optimized_fp32', 'optimized_bf16')
@@ -28,13 +29,17 @@ POLICY_KEYS = tuple(key for key in DEFAULTS if key.startswith('v37_') and key.en
 
 def normalize_config(config=None):
     supplied = {} if config is None else dict(config)
-    unknown = set(supplied) - set(DEFAULTS) - {RECIPE_KEY, CENTROID_RECIPE_KEY}
+    unknown = set(supplied) - set(DEFAULTS) - {RECIPE_KEY, CENTROID_RECIPE_KEY, 'devices'}
     if unknown:
         raise ValueError('v37 unknown/inactive configuration keys: ' + ', '.join(sorted(unknown)))
     cfg = V31Config(DEFAULTS)
     cfg.update(supplied)
+    if cfg.get('devices') is not None and (type(cfg['devices']) is not int or cfg['devices'] < 0):
+        raise ValueError('devices selects one nonnegative physical GPU ID; trainer_devices is the count')
     centroid_recipe = centroid_recipe_spec(cfg)
     recipe = recipe_spec(cfg)
+    if centroid_recipe is not None:
+        validate_runtime_parameters(cfg)
     if 'v37_arm' in supplied and 'v31_arm' not in supplied:
         cfg.v31_arm = cfg.v37_arm
     if 'v31_arm' in supplied and 'v37_arm' not in supplied:
@@ -88,6 +93,10 @@ def normalize_config(config=None):
             precision=32, trainer_devices=1, limit_train_batches=1., limit_val_batches=1.)
         if recipe is not None:
             fixed.update(batch_size=recipe['batch_size'], check_val_every_n_epoch=1)
+        if centroid_recipe is not None:
+            # CLI/YAML 中的可用运行参数不是固定数学合同；默认值由配置给出。
+            for key in OVERRIDABLE_FIELDS:
+                fixed.pop(key, None)
         bad = [key for key, value in fixed.items() if cfg[key] != value
                or (key.startswith('limit_') and isinstance(cfg[key], int))]
         if bad:
@@ -130,7 +139,7 @@ def load_config(path, overrides=None):
 def config_identity(config):
     cfg = normalize_config(config)
     excluded = {'cfg', 'path', 'log_dir', 'tag', 'checkpoint', 'init_checkpoint',
-                'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3'}
+                'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3', 'devices'}
     payload = {key: value for key, value in cfg.items() if key not in excluded}
     manifest = payload.pop('dynamics_time_manifest', None)
     if manifest:

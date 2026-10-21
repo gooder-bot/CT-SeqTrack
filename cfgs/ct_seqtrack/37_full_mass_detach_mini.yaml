@@ -4,3 +4,4 @@ tag: v37_full_mass_detach_mini_car_seed42
 v37_arm: full
 v31_arm: full
 v37_centroid_recipe: full_mass_detach
+check_val_every_n_epoch: 1

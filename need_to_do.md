@@ -3,8 +3,13 @@
 ## 最新实施：B2 重心梯度三组
 
 - [x] 按用户批准方案实施 mass 权重 detach、三份独立配方及两类被动语义摘要；默认旧行为保留，未修改 B3。见 [实现与操作](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
+- [x] 用户最新将本轮三组改为每轮validation（val1）；GPU1、每进程单卡、workers4、scratch60/batch16和固定final60/late3保持。17:14快照及val5核验为历史，原val5版本封存于 `artifacts/ct_checks/20261021_b2_every_epoch_validation/previous_val5_source/`；旧其他正式配方val5不改。
+- [x] 此前val1固定配方聚焦回归133项通过，三条完整CLI及当时登记校验通过，编译和diff检查通过；历史证据见 [val1检查](artifacts/ct_checks/20261021_b2_every_epoch_validation/REPORT.md)，不计作本次参数覆盖改动的测试结果。
+- [x] 按最新要求说明三个B2配方的六字段覆盖：验证频率/workers为runtime_override，batch_size/epoch/lr/seed为recipe_variant；未传沿配置、未知参数报错，默认三份YAML和三组完整命令保持val1。见 [覆盖说明](docs/CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。研究变体不计原三组预算，代理不自动启动。
+- [x] 同步GPU/YAML/路径覆盖说明：devices为物理GPU编号、trainer_devices固定单卡数量；CLI devices > YAML devices > 环境，实际GPU记录manifest。launcher可接收同recipe的cfg、path、新/空log_dir和devices，不自动启动额外运行。
+- [ ] 用户上传本次完整新源码和独立登记，默认三份YAML随版本保持一致；以后六字段合法覆盖无需改代码/登记。旧已运行仍用原源码，同run恢复保持全部actual参数，例如val5启动仍须val5恢复。修改前版在 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`。
 - [ ] 用户在本版独立部署目录完成一次真实 Full batch16 CUDA 生命周期检查；工程权重丢弃。
-- [ ] 用户运行三组scratch60：shadow 20/50、Full 20/50、Full仅20。新增预算180epoch/215,100更新，旧强B1/shadow/Full证据复用，代理不自动启动。
+- [ ] 用户在GPU1运行三组scratch60、每轮验证：shadow 20/50、Full 20/50、Full仅20。新增预算180epoch/215,100更新，旧强B1/shadow/Full证据复用，代理不自动启动。
 - [ ] 固定final60/late3比较标准Full与旧Full/强B1，再比较本轮两组Full的LR影响；核验两组Full前50轮相同、51轮分叉，复核候选供给、主路副作用、漂移与恢复。没有新结果前不宣称收益。
 
 ## 当前结果与下一步研究

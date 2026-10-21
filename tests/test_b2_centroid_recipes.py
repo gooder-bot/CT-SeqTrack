@@ -39,14 +39,14 @@ def test_three_yaml_recipes_bind_exact_arms_schedule_and_old_execution_path():
         assert B1_RECIPE_KEY not in cfg and detach_mass_weights(cfg)
         assert (cfg.epoch, cfg.batch_size, cfg.seed, cfg.workers) == (60, 16, 42, 4)
         assert cfg.precision == 32 and cfg.execution_profile == 'optimized_fp32'
-        assert cfg.check_val_every_n_epoch == 5 and cfg.v31_evaluate_late3 is True
+        assert cfg.check_val_every_n_epoch == 1 and cfg.v31_evaluate_late3 is True
         assert cfg.lr_milestones == ([20] if name.endswith('hold_lr') else [20, 50])
         assert cfg.lr == .00015 and cfg.lr_decay_rate == .1 and cfg.lr_warmup_steps == 0
         assert not cfg.ct_engineering_check and cfg.checkpoint is None and cfg.init_checkpoint is None
         identity = recipe_identity(cfg)
         assert identity['options'] == [] and identity['projection'] == 'concat'
         assert identity['centroid_mass_gradient'] == 'detached_identity_reliability'
-        assert identity['arm'] == arm and identity['check_val_every_n_epoch'] == 5
+        assert identity['arm'] == arm and identity['check_val_every_n_epoch'] == 1
         assert identity['lr_milestones'] == cfg.lr_milestones
         assert RECIPE_KEY not in as_v35_config(cfg)
         identities.add(config_identity(cfg))
@@ -67,12 +67,12 @@ def test_all_eleven_old_config_hashes_remain_exact_and_no_optional_default_is_ad
     assert count == 11
 
 
-def test_only_recipe_identity_changes_from_old_arm_and_only_schedule_changes_between_fulls():
+def test_only_recipe_identity_and_validation_cadence_change_from_old_arm():
     for name, arm in [('b1_b2_mass_detach', 'b1_b2'), ('full_mass_detach', 'full')]:
         old = load_config(ROOT / f'cfgs/ct_seqtrack/37_{arm}_mini.yaml')
         new = config(name)
         changed = {k for k in old.keys() | new.keys() if old.get(k) != new.get(k)}
-        assert changed == {'cfg', 'experiment_name', 'tag', RECIPE_KEY}
+        assert changed == {'cfg', 'experiment_name', 'tag', RECIPE_KEY, 'check_val_every_n_epoch'}
     base, hold = config(), config('full_mass_detach_hold_lr')
     changed = {k for k in base.keys() | hold.keys() if base.get(k) != hold.get(k)}
     assert changed == {'cfg', 'experiment_name', 'tag', RECIPE_KEY, 'lr_milestones'}
@@ -95,9 +95,9 @@ def test_b1_and_centroid_recipe_keys_are_mutually_exclusive_even_when_value_is_i
 @pytest.mark.parametrize('change', [
     dict(v37_arm='b1', v31_arm='b1'), dict(v37_arm='b1_b2', v31_arm='b1_b2'),
     dict(execution_profile='optimized_bf16'), dict(execution_profile='legacy'),
-    dict(seed=52), dict(batch_size=4), dict(epoch=59), dict(workers=0),
-    dict(lr=.0001), dict(lr_milestones=[20]), dict(lr_warmup_steps=1),
-    dict(check_val_every_n_epoch=1), dict(v31_evaluate_late3=False),
+    dict(seed=-1), dict(batch_size=0), dict(epoch=0), dict(workers=-1),
+    dict(lr=0.), dict(lr_milestones=[20]), dict(lr_warmup_steps=1),
+    dict(check_val_every_n_epoch=0), dict(v31_evaluate_late3=False),
     dict(precision='bf16-mixed'), dict(v31_short_window=3),
     dict(init_checkpoint='old.ckpt'), dict(limit_train_batches=1),
     dict(v37_detach_mass=False), dict(execution_options=['unique_mask']),
@@ -238,11 +238,17 @@ def test_runtime_keeps_schema_but_rejects_cross_recipe_and_old_run_checkpoints(m
                         validate_resume_payload(payload, other_cfg, training=training)
 
 
-def test_main_parser_uses_yaml_recipe_and_rejects_cli_cadence_or_late3_drift():
+def test_main_parser_uses_yaml_defaults_and_accepts_valid_cadence_override():
     path = str(ROOT / 'cfgs/ct_seqtrack' / FILES['full_mass_detach_hold_lr'])
     parsed = entry.parse_config(['--cfg', path, '--path', 'local-data-root', '--tag', 'new-run'])
     assert parsed.lr_milestones == [20] and parsed[RECIPE_KEY] == 'full_mass_detach_hold_lr'
     assert config_identity(parsed) == config_identity(config('full_mass_detach_hold_lr'))
-    for args in (['--check_val_every_n_epoch', '1'], ['--no_late3']):
+    explicit = entry.parse_config(['--cfg', path, '--check_val_every_n_epoch', '1'])
+    assert explicit.check_val_every_n_epoch == 1
+    assert config_identity(explicit) == config_identity(parsed)
+    alternate = entry.parse_config(['--cfg', path, '--check_val_every_n_epoch', '5'])
+    assert alternate.check_val_every_n_epoch == 5
+    assert config_identity(alternate) != config_identity(parsed)
+    for args in (['--check_val_every_n_epoch', '0'], ['--no_late3']):
         with pytest.raises(ValueError):
             entry.parse_config(['--cfg', path, *args])

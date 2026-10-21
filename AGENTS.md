@@ -3,8 +3,10 @@
 ## 2026-10-21 最新实施：B2 centroid mass 梯度三组
 
 - 用户已明确批准实施。新 `v37_centroid_recipe` 仅在重心 mass 路径 detach identity×reliability，votes/精修及两头显式监督保留；共享 v36 接口默认 False，旧模型默认语义不变。结构和操作见 [B2 三组说明](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
-- 三组是 `b1_b2_mass_detach`、`full_mass_detach`（主结果）、`full_mass_detach_hold_lr`；第三组保留20轮衰减、取消50轮衰减。全部mini Car/seed42/scratch60/batch16/FP32/concat/val5，工程options为空，180epoch/215,100更新；不混入Full去重、分解或B3改法，不自动追加训练。
-- 2026-10-21 启动安排更新：用户指定三组全部物理 GPU1（`CUDA_VISIBLE_DEVICES=1`），每进程 `--trainer_devices 1`，其余参数不变。不要照搬旧命令的 val1；本轮仍为 val5。SSH只读快照见 `artifacts/ct_checks/20261021_b2_launch_readiness/server_readonly.json`，检查时新版尚未上传、无CT训练进程，旧batch4日志止于第42轮SIGTERM；不自动恢复或停止任何任务。
+- 默认三组是 `b1_b2_mass_detach`、`full_mass_detach`（主结果）、`full_mass_detach_hold_lr`；第三组保留20轮衰减、取消50轮衰减。三份YAML默认mini Car/seed42/scratch60/batch16/FP32/concat/val1、workers4、LR1.5e-4，工程options为空，180epoch/215,100更新，固定final60/late3；不混入Full去重、分解或B3改法，不自动追加训练。
+- 用户最新要求当前三个B2配方支持六字段覆盖，优先级CLI > 子YAML > base YAML > 代码DEFAULTS；未传沿配置，未知参数报错。check_val_every_n_epoch/workers变更为 `runtime_override`，batch_size/epoch/lr/seed变更为 `recipe_variant`，研究变体不计原三组；结构、单卡、scratch、时间合同不放宽。新 `--lr` 与launcher参数透传见 [覆盖说明](docs/CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。核验基础模板+source，完整actual配置仍进哈希及恢复检查。
+- 用户也开放 `--devices`、`--cfg`、`--path`、`--log_dir`。devices为单个非负物理GPU编号，CLI > YAML devices > 现有CUDA_VISIBLE_DEVICES，初始化CUDA前应用；不注入默认devices，实际GPU进manifest但不进算法hash。trainer_devices仍只能1。launcher额外cfg限同recipe、log_dir限新/空目录，devices覆盖位置GPU；恢复/test使用main，旧运行原源码。
+- 默认启动仍全部物理 GPU1（`CUDA_VISIBLE_DEVICES=1`），每进程 `--trainer_devices 1`，完整命令仍val1。此次需上传完整新源码和独立登记，默认三份YAML不改；以后六字段合法值覆盖无需改代码/登记。旧已运行继续原源码，新版同run恢复必须保持全部actual参数，例如val5启动须val5恢复。修改前版在 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`；17:14快照与此前val5/val1检查保留为历史。不据历史快照断言当前状态，不自动启停或恢复；旧其他正式配方不改。
 - 独立登记 `37_b2_centroid_registration.json`；旧五组和B1执行登记/YAML/输出保持。旧checkpoint仍用原源码，不放宽跨源码/跨配方恢复。修改前快照在 `artifacts/ct_checks/20261021-163831_b2_centroid_implementation/baseline_source/`。
 - 实施完成不代表正式涨分；三组训练与一次真实CUDA Full batch检查仍由用户操作。服务器只读、不启停任务、不读取TrajTrack。下方“本轮只读/尚未实施”属于此前审查阶段。
 

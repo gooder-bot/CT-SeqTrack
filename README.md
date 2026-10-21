@@ -1,8 +1,10 @@
 # CT-SeqTrack
 
-**2026-10-21 最新实施：B2 重心权重梯度修正。** 已新增独立三组配方：B1+B2 shadow、Full（均20/50衰减），以及Full仅20衰减；统一scratch60、batch16、FP32、concat和每5轮验证。结构改动仅在mass路径detach identity×reliability，保留vote/精修及两头显式监督。新配置、一次CUDA检查、启动与恢复命令见 [B2 三组操作页](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。旧配置/登记/输出保持，旧checkpoint继续用原源码；本次未启动服务器训练，尚无新三组成绩。下方“仅文档/尚未实施”是本轮实施之前的审查记录。
+**2026-10-21 最新实施：B2 重心权重梯度修正。** 已新增独立三组配方：B1+B2 shadow、Full（均20/50衰减），以及Full仅20衰减；用户最新将三组统一改为每轮验证（val1），scratch60、batch16、FP32、concat及固定final60/late3保持。结构改动仅在mass路径detach identity×reliability，保留vote/精修及两头显式监督。新配置、一次CUDA检查、启动与恢复命令见 [B2 三组操作页](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。旧其他配方/登记/输出保持，旧checkpoint继续用原源码；代理未启动服务器训练，尚无新三组成绩。下方“仅文档/尚未实施”是本轮实施之前的审查记录。
 
-本轮启动命令已按用户要求统一为物理GPU1、每进程单卡，workers4与每5轮验证保持；操作页提供三组独立日期目录的完整nohup和新终端tail命令。10月21日17:14服务器只读检查确认现有环境与mini数据可用，新版文件尚待上传，无CT训练进程；旧batch4日志在第42轮收到SIGTERM，未生成最终结果。
+默认启动命令仍为物理GPU1、每进程单卡、workers4和每轮验证。用户最新要求三个B2配方支持CLI覆盖六项参数：验证频率/workers记为运行覆盖，batch_size/epoch/lr/seed偏离模板记为研究变体，不计默认三组。优先级CLI > 子YAML > base YAML > 代码默认，未传沿配置、未知参数报错；例子和恢复规则见 [参数覆盖说明](docs/CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。需上传本次完整新源码和独立登记；默认三份YAML不改，之后六字段合法覆盖无需改代码/登记。旧已运行继续原源码，同run恢复仍要求同actual配置；17:14快照和此前检查为历史。修改前版封存于 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`，旧其他正式配方不改。
+
+GPU、YAML和路径也可显式覆盖：`--devices 1` 选择物理GPU1，`--trainer_devices 1` 表示仅用一张卡；devices按CLI > YAML > 环境解析。`--cfg`、`--path`、`--log_dir`支持自选YAML、数据根和输出目录，启动器同样透传；默认三条完整命令仍有效，不开放真正多卡训练。
 
 **2026-10-21 当前：实验结果与研究问题已同步。** 原 v37 五组均完成 scratch60；Full FP32 final60 S/P=49.9136/59.5274，late-3=50.0715/59.6327，未通过原门槛，仍低于强 B1 的 53.7133/66.2746、52.8541/65.3082。10/16 新 B1 的 concat、分解、hold_lr 三组也已完成：concat 精确复现旧 B1；分解与 hold_lr 未通过。batch4 本地完整记录到 41 轮、日志进入 42 轮，未见正式 final60；本地快照不代表服务器实时状态。
 

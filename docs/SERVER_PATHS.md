@@ -1,8 +1,12 @@
 # CT-SeqTrack 当前服务器路径
 
-2026-10-21 17:14 当前安排为 [B2 重心梯度三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)，均物理GPU1、单进程单卡；scratch60、batch16、workers4、FP32、每5轮验证。三组完整启动与新终端tail命令以该页为准，以下旧日期的卡号与配方属于历史。
+2026-10-21 默认安排仍为 [B2 重心梯度三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)：每轮验证（val1）、物理GPU1、单进程单卡，scratch60、batch16、workers4、FP32及固定final60/late3保持。用户最新要求三个B2配方支持六字段CLI覆盖，未传沿YAML，验证频率/workers归为运行覆盖、batch_size/epoch/lr/seed归为研究变体，详见 [参数覆盖说明](CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。启动器支持额外参数透传并按实际seed/epoch/batch命名目录。
 
-本次通过SSH只读确认：服务器HEAD=`09a7809698d512f53d999574b00df2e0773fa93f`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全。GPU1为A40，总46,068MiB、已用2,358MiB（约42.7GiB空闲），/home可用约1.5T。存在其他任务，显存为检查时快照。当前没有CT-SeqTrack训练进程，旧batch4日志在第42轮记录SIGTERM、无results.json。新增B2源码/登记/文档尚未上传，由用户完整上传后执行一次真实Full batch检查及正式训练。代理未写入服务器、安装、启动或停止任务；只读记录见 [server_readonly.json](../artifacts/ct_checks/20261021_b2_launch_readiness/server_readonly.json)。
+本次需上传完整新源码和独立登记，默认三份YAML不改；以后六字段合法覆盖无需改代码/登记。旧已运行继续原源码，同run恢复要求全部actual参数及源码一致，例如val5启动仍须val5恢复。修改前版在 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`；旧其他正式配方不改，以下17:14及更早的快照和此前核验均属历史，本次未访问服务器。
+
+也可通过 `--devices` 选择单个物理GPU，CLI devices > YAML devices > 环境GPU；`--trainer_devices 1`只是单卡数量。CLI `--cfg`、`--path`、`--log_dir`可覆盖YAML、数据根和输出路径，启动器也接受这些参数（同recipe YAML、新/空log_dir）；未显式设置时继承配置/环境。默认命令的绝对Python/data路径和环境GPU1仍有效，实际GPU进入manifest，不能用多卡参数绕过单卡协议。
+
+17:14历史SSH只读快照：服务器HEAD=`09a7809698d512f53d999574b00df2e0773fa93f`；Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全。GPU1为A40，总46,068MiB、已用2,358MiB（约42.7GiB空闲），/home可用约1.5T。当时存在其他任务、没有CT-SeqTrack训练进程，旧batch4日志在第42轮记录SIGTERM、无results.json，新增B2文件尚未上传；这些数值和状态不代表当前。只读记录见 [server_readonly.json](../artifacts/ct_checks/20261021_b2_launch_readiness/server_readonly.json)，原val5源码/配置/登记封存于 `artifacts/ct_checks/20261021_b2_every_epoch_validation/previous_val5_source/`。本次val1文档更新未访问服务器，由用户上传更新后的版本并执行真实Full batch检查及正式训练。
 
 2026-10-09 当前为 [v37 五组](CTSEQTRACK_V37_LAUNCH.md)：B0、B1、B1+B2、Full FP32、Full 局部 BF16，seed42、scratch60，共300epoch/358,500更新。代理仅通过 SSH 只读查看，未上传、安装、运行检查、启动或停止任务。服务器尚无本地新增 v37 与工程提速工具；由用户上传完整最新代码，执行一次 Full CUDA 生命周期及短 BF16 数值检查后启动正式实验。
 

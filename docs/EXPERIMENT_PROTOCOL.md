@@ -2,9 +2,15 @@
 
 ## 2026-10-21 新登记：B2 重心梯度三组
 
-用户批准本地实施，并固定三组独立scratch60：`b1_b2_mass_detach`、`full_mass_detach`、`full_mass_detach_hold_lr`。结构变量仅为重心mass的identity×reliability权重停止反向；第三组另外保留20轮衰减、取消50轮衰减。全部mini Car/seed42/batch16/FP32/concat/val5，工程options为空，原W、点数、memory和loss保持。独立登记为 `37_b2_centroid_registration.json`，操作见 [B2三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
+用户批准本地实施，并固定三组独立scratch60：`b1_b2_mass_detach`、`full_mass_detach`、`full_mass_detach_hold_lr`。结构变量仅为重心mass的identity×reliability权重停止反向；第三组另外保留20轮衰减、取消50轮衰减。用户最新将本轮三组改为每轮validation：全部mini Car/seed42/batch16/FP32/concat/val1，均物理GPU1、单进程单卡、workers4；工程options为空，原W、点数、memory和loss保持。独立登记为 `37_b2_centroid_registration.json`，操作见 [B2三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
 
-预算180epoch/215,100更新，不从标准组50轮权重分叉。标准Full为主结果；fixed final60/late3及原R/C门保持，hold_lr不能替代结构对照，B1+B2与Full不是纯有无B3网络消融。旧配置/登记/输出与源码证据保留，不放宽同run完整epoch恢复。此次已实施但未在服务器启动，尚无新三组正式成绩；下方“尚未实施”是之前的审查状态。
+预算180epoch/215,100更新，不从标准组50轮权重分叉。标准Full为主结果；fixed final60/late3及原R/C门保持，hold_lr不能替代结构对照，B1+B2与Full不是纯有无B3网络消融。每轮validation增加观察频率和耗时，不改变训练更新预算或改为最佳轮选模。旧其他正式配方的val5、登记、输出与源码证据保留，不放宽同run完整epoch恢复。尚无新三组正式成绩；下方“尚未实施”是之前的审查状态。
+
+用户进一步明确要求当前三个B2配方支持六字段覆盖：优先级CLI > 子YAML > base YAML > 代码DEFAULTS，未传沿配置，未知参数报错。check_val_every_n_epoch/workers偏离默认标记 `runtime_override`；batch_size/epoch/lr/seed任一偏离默认标记 `recipe_variant`，不计默认三组预算或替代原主结果。默认三份YAML、val1完整命令和既定三组仍保持，结构、FP32/concat、单卡、scratch、时间协议不放宽。基础模板+source核验保留，完整actual配置哈希、覆盖字典和实际运行参数进入记录，详见 [参数覆盖说明](CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。变体按实际轮数与sampler核算预算；epoch少于3仅评测最后min(3,epoch)轮，不能称正式final60/late3。
+
+GPU、YAML和路径允许显式选择：`--devices`仅接受单个非负物理GPU编号，优先级CLI > YAML devices > 现有CUDA_VISIBLE_DEVICES，CUDA初始化前应用；trainer_devices固定1，不支持真正多卡。设备编号不参与算法配置哈希，实际GPU记录manifest。cfg/path/log_dir沿CLI优先规则，启动器的cfg必须与位置recipe一致、显式log_dir必须新/空；数据与时间协议仍核验，不能借路径改变绕过实验约束。
+
+本次需上传完整新源码和独立登记；此后六字段合法覆盖无需改代码或重新登记模板。旧已运行继续原源码，新版同run恢复必须保持全部actual参数和源码，例如val5启动仍须val5恢复，不因属于runtime_override而免除身份检查。修改前版在 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`；17:14快照及此前val5/val1检查均保留为历史，不推断当前进程状态。
 
 ## 2026-10-21 结果状态补充（不变更登记与门槛）
 

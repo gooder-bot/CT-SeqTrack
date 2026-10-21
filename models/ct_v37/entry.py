@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from .config import load_config, config_identity
+from .config import load_config, config_identity, normalize_config
 from .identity import model_schema, model_version, runtime_key
 from utils.execution_profile import (EXECUTION_PROFILES, execution_identity,
                                      validate_execution_identity)
@@ -22,12 +22,15 @@ def batch_limit(value):
 
 
 def parse_config(argv=None):
-    parser = argparse.ArgumentParser(description='CT-SeqTrack v37 protected observation and structural evidence tracking')
+    parser = argparse.ArgumentParser(description='CT-SeqTrack v37 protected observation and structural evidence tracking',
+                                     allow_abbrev=False)
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)
     for key in ('batch_size', 'epoch', 'workers', 'seed', 'check_val_every_n_epoch', 'trainer_devices'):
         parser.add_argument('--' + key, type=int)
+    parser.add_argument('--lr', type=float)
+    parser.add_argument('--devices', type=int, help='single physical GPU ID; trainer_devices remains 1')
     parser.add_argument('--accelerator', choices=('auto', 'cpu', 'gpu'))
     parser.add_argument('--dynamics_time_mode', choices=('true', 'fixed', 'shuffled'))
     parser.add_argument('--execution_profile', choices=EXECUTION_PROFILES)
@@ -40,6 +43,17 @@ def parse_config(argv=None):
     supplied = vars(parser.parse_args(argv))
     path = supplied.pop('cfg')
     return load_config(path, {key: value for key, value in supplied.items() if value is not None})
+
+
+def apply_device_selection(config):
+    """显式物理卡优先于环境；缺省不改环境，不在 CUDA 初始化后静默换卡。"""
+    if config.get('devices') is None:
+        return
+    requested = str(config['devices'])
+    import torch
+    if torch.cuda.is_initialized() and os.environ.get('CUDA_VISIBLE_DEVICES') != requested:
+        raise RuntimeError('CUDA is already initialized; cannot change CUDA_VISIBLE_DEVICES with --devices')
+    os.environ['CUDA_VISIBLE_DEVICES'] = requested
 
 
 def configure_numerics():
@@ -161,7 +175,7 @@ def initialization_identity(tracker):
 
 
 def validate_formal_registration(config, source=None, *, registration_path=None):
-    """正式入口只接收五组登记的完整归一化配置与源码；工程运行独立。"""
+    """旧登记精确匹配；新 B2 参数覆盖只改变实际运行身份，不改登记默认值。"""
     if config.ct_engineering_check:
         return None
     from utils.b1_training_recipes import (RECIPE_KEY, REGISTRATION_FILE,
@@ -169,7 +183,8 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
     from utils.b2_centroid_recipes import (RECIPE_KEY as CENTROID_RECIPE_KEY,
         REGISTRATION_FILE as CENTROID_REGISTRATION_FILE,
         REGISTRATION_SCHEMA as CENTROID_REGISTRATION_SCHEMA,
-        recipe_identity as centroid_recipe_identity)
+        recipe_identity as centroid_recipe_identity, OVERRIDABLE_FIELDS,
+        TRAINING_OVERRIDE_FIELDS, override_policy)
     is_recipe = RECIPE_KEY in config
     is_centroid = CENTROID_RECIPE_KEY in config
     if is_recipe and is_centroid:
@@ -186,19 +201,48 @@ def validate_formal_registration(config, source=None, *, registration_path=None)
     source = source_identity() if source is None else source
     if registration.get('source') != source:
         raise ValueError('v37 formal source differs from ' + filename)
-    matches = [row for row in registration.get('runs', [])
-        if row.get('config_sha256') == config_identity(config)
-        and row.get('arm') == config.v37_arm
-        and row.get('execution_profile') == config.execution_profile]
+    actual_checksum = config_identity(config)
+    accepts_overrides = is_centroid and 'override_policy' in registration
+    if accepts_overrides:
+        if registration['override_policy'] != override_policy():
+            raise ValueError('registered B2 override policy mismatch')
+        matches = [row for row in registration.get('runs', [])
+            if row.get('label') == config[CENTROID_RECIPE_KEY]
+            and row.get('arm') == config.v37_arm
+            and row.get('execution_profile') == config.execution_profile]
+    else:
+        # 没有新 policy 的历史登记/测试夹具继续要求完整实际配置精确相等。
+        matches = [row for row in registration.get('runs', [])
+            if row.get('config_sha256') == actual_checksum
+            and row.get('arm') == config.v37_arm
+            and row.get('execution_profile') == config.execution_profile]
     if len(matches) != 1:
         raise ValueError('v37 formal config is not exactly one registered run')
+    row = matches[0]
+    registered_config = config
+    if accepts_overrides:
+        defaults = row.get('override_defaults')
+        if not isinstance(defaults, dict) or set(defaults) != set(OVERRIDABLE_FIELDS):
+            raise ValueError('registered B2 override defaults must contain exactly the allowed fields')
+        # 默认值只来自登记，不能从已修改的 YAML/CLI 反推登记配方。
+        registered_config = normalize_config(dict(config, **defaults))
+        if row.get('config_sha256') != config_identity(registered_config):
+            raise ValueError('v37 formal config is not exactly one registered run')
     if is_recipe and matches[0].get('training_execution_recipe') != recipe_identity(config):
         raise ValueError('registered B1 execution recipe identity mismatch')
-    if is_centroid and (matches[0].get('centroid_recipe_identity') != centroid_recipe_identity(config)
-            or matches[0].get('label') != config[CENTROID_RECIPE_KEY]):
+    if is_centroid and (row.get('centroid_recipe_identity') != centroid_recipe_identity(registered_config)
+            or row.get('label') != config[CENTROID_RECIPE_KEY]):
         raise ValueError('registered B2 centroid recipe identity mismatch')
-    return dict(schema=registration['schema'], label=matches[0]['label'],
-                sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    result = dict(schema=registration['schema'], label=row['label'],
+                  sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    if accepts_overrides:
+        overrides = {key: dict(registered=defaults[key], effective=config[key])
+                     for key in OVERRIDABLE_FIELDS if config[key] != defaults[key]}
+        kind = ('recipe_variant' if any(key in TRAINING_OVERRIDE_FIELDS for key in overrides)
+                else 'runtime_override' if overrides else 'registered')
+        result.update(actual_config_sha256=actual_checksum,
+            registered_config_sha256=row['config_sha256'], run_kind=kind, overrides=overrides)
+    return result
 
 
 def run(config, *, loaders=None):
@@ -212,6 +256,7 @@ def run(config, *, loaders=None):
 
 def _run(config, *, loaders=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
+    apply_device_selection(config)
     configure_numerics()
     version = model_version(config)
     root = resolve_run_directory(config)
@@ -246,6 +291,11 @@ def _run(config, *, loaders=None):
                     cuda_visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
                     calibration_required=False, source=source, registration=registration,
                     evaluation_rng_policy='per_checkpoint_seed_v1')
+    if registration is not None and 'run_kind' in registration:
+        from utils.b2_centroid_recipes import OVERRIDABLE_FIELDS
+        # recipe_variant 明确是新参数变体，不能归入默认三组的登记结果。
+        manifest.update(run_kind=registration['run_kind'],
+                        run_parameters={key: config[key] for key in OVERRIDABLE_FIELDS})
     manifest.update(initialization_identity(model.tracker))
     from utils.b1_training_recipes import recipe_identity
     if recipe_identity(config) is not None:
