@@ -1,5 +1,13 @@
 # CT-SeqTrack
 
+**2026-10-22 当前主线：v38 强 concat B1＋独立 B3。** B2 扩展点、身份记忆、vote、mode退出新主线；保留完整强 B1 学习路径、accepted历史、可信位置/速度、真实时间。B3 用S/P选框、独立T决定真实q0的可信写入，从第1轮启用。见 [设计说明](docs/CTSEQTRACK_V38_DESIGN.md) 和 [检查、启动、恢复、比较](docs/CTSEQTRACK_V38_LAUNCH.md)。
+
+三组独立scratch：B1 standard、concat B1 hold、Full standard。共同mini Car/seed42/scratch60/batch16/FP32/workers4/val1/LR1.5e-4，共180epoch/215,100更新。standard与Full在20/50轮后衰减，hold仅20轮。不由旧权重分叉，hold不替代结构对照。旧版本与产物保留，旧checkpoint使用原源码。服务器真实CUDA检查及正式训练由用户执行；当前没有v38正式成绩。下方B2及更早记录为历史，不自动重启或追加。
+
+**上传前复核：两组B1使用物理GPU1，Full使用物理GPU0。** 最新操作页提供三条独立、带日期的nohup及新终端tail命令，验证频率仍为1。10月22日20:28 SSH只读核实环境与mini路径，服务器尚无v38、无CT训练进程；未执行上传或训练。完整记录见 [上传就绪检查](artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。
+
+本地115项v38合同及真实CPU Lightning入口/恢复检查通过；全仓1351项通过，唯一源码收束期间的恢复拒绝已在冻结源码后复测通过。三组登记、保护审计和服务器待执行边界见 [实施与验证记录](artifacts/ct_checks/v38_implementation_20261022/REPORT.md)。
+
 **2026-10-21 最新实施：B2 重心权重梯度修正。** 已新增独立三组配方：B1+B2 shadow、Full（均20/50衰减），以及Full仅20衰减；用户最新将三组统一改为每轮验证（val1），scratch60、batch16、FP32、concat及固定final60/late3保持。结构改动仅在mass路径detach identity×reliability，保留vote/精修及两头显式监督。新配置、一次CUDA检查、启动与恢复命令见 [B2 三组操作页](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。旧其他配方/登记/输出保持，旧checkpoint继续用原源码；代理未启动服务器训练，尚无新三组成绩。下方“仅文档/尚未实施”是本轮实施之前的审查记录。
 
 默认启动命令仍为物理GPU1、每进程单卡、workers4和每轮验证。用户最新要求三个B2配方支持CLI覆盖六项参数：验证频率/workers记为运行覆盖，batch_size/epoch/lr/seed偏离模板记为研究变体，不计默认三组。优先级CLI > 子YAML > base YAML > 代码默认，未传沿配置、未知参数报错；例子和恢复规则见 [参数覆盖说明](docs/CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。需上传本次完整新源码和独立登记；默认三份YAML不改，之后六字段合法覆盖无需改代码/登记。旧已运行继续原源码，同run恢复仍要求同actual配置；17:14快照和此前检查为历史。修改前版封存于 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`，旧其他正式配方不改。

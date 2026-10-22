@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 EXECUTION_PROFILES = ('legacy', 'optimized_fp32', 'optimized_bf16')
 EXECUTION_SCHEMA = 'ct_seqtrack.execution.v1'
-_SUPPORTED_MODELS = ('ctseqtrackv35', 'ctseqtrackv36', 'ctseqtrackv37')
+_SUPPORTED_MODELS = ('ctseqtrackv35', 'ctseqtrackv36', 'ctseqtrackv37', 'ctseqtrackv38')
 
 
 def validate_execution_profile(config):
@@ -12,7 +12,7 @@ def validate_execution_profile(config):
     if 'execution_profile' not in config:
         return
     if config.get('net_model') not in _SUPPORTED_MODELS:
-        raise ValueError('execution_profile is supported only for v35/v36/v37')
+        raise ValueError('execution_profile is supported only for v35/v36/v37/v38')
     profile = config['execution_profile']
     if profile not in EXECUTION_PROFILES:
         raise ValueError('unknown execution_profile: ' + str(profile))

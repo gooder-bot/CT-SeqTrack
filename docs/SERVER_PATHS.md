@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-22 当前安排为 [v38强B1＋独立B3三组](CTSEQTRACK_V38_LAUNCH.md)：B1 standard和B1 hold使用物理GPU1，Full使用物理GPU0；每进程单卡，val1，其余已登记参数保持。由用户上传完整源码及v38登记，执行一次真实CUDA Full batch检查及三组scratch；旧checkpoint仍使用对应源码。
+
+本轮20:28 SSH只读确认：项目 `/home/lishengjie/study/lcyu/CT-SeqTrack` 的HEAD为 `cc8458b`，尚无v38文件，没有CT训练进程。Python3.9.19、torch2.0.1+cu118、pytorch_lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全，磁盘可用1492.11GiB。两张A40的GPU0/1分别空闲16,495/27,386MiB，有其他任务，资源会变化。未上传、安装、启停任务或修改远端文件。原始快照见 [server_readonly.json](../artifacts/ct_checks/20261022_v38_upload_readiness/server_readonly.json)，上传前结论见 [复核报告](../artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。以下旧GPU分配、尚未访问和资源数字均只作历史。
+
 2026-10-21 默认安排仍为 [B2 重心梯度三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)：每轮验证（val1）、物理GPU1、单进程单卡，scratch60、batch16、workers4、FP32及固定final60/late3保持。用户最新要求三个B2配方支持六字段CLI覆盖，未传沿YAML，验证频率/workers归为运行覆盖、batch_size/epoch/lr/seed归为研究变体，详见 [参数覆盖说明](CTSEQTRACK_V37_CONFIG_OVERRIDES.md)。启动器支持额外参数透传并按实际seed/epoch/batch命名目录。
 
 本次需上传完整新源码和独立登记，默认三份YAML不改；以后六字段合法覆盖无需改代码/登记。旧已运行继续原源码，同run恢复要求全部actual参数及源码一致，例如val5启动仍须val5恢复。修改前版在 `artifacts/ct_checks/20261021_v37_cli_overrides/previous_source/`；旧其他正式配方不改，以下17:14及更早的快照和此前核验均属历史，本次未访问服务器。

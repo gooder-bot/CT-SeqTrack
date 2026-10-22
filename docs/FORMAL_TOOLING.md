@@ -1,5 +1,14 @@
 # CT-SeqTrack 工具范围
 
+## 2026-10-22 v38 工具面
+
+- `main.py` 分派 `ctseqtrackv38`；独立新模型和host，旧入口保留。
+- `tools/launch_v38.sh`、`tools/resume_v38.sh`：登记三组scratch或同run完整epoch恢复，严格核验配置/source/run身份。
+- `tools/check_v38_full_batch.py`：一次真实CUDA Full batch16×1024生命周期，工程报告新建于artifacts，不保存checkpoint。
+- `tools/compare_v38.py`：只读核验三组预算/原帧/配置/source，重算final60/late3及原R/C，报告Full−standard、hold−standard及可信/运动风险。
+
+具体见 [v38操作页](CTSEQTRACK_V38_LAUNCH.md)。下方工具为历史版本，不能混用新三组身份。
+
 ## 当前 v37 五组（2026-10-09）
 
 - `main.py --cfg cfgs/ct_seqtrack/37_*_mini.yaml` 分派独立 v37；`tools/launch_v37.sh` 每次只启动指定的一组。五组配方与恢复命令见 [v37 操作页](CTSEQTRACK_V37_LAUNCH.md)，登记见 `37_registration.json`。

@@ -1,4 +1,13 @@
-# CT-SeqTrack 当前状态（2026-10-21）
+# CT-SeqTrack 当前状态（2026-10-22）
+
+## 2026-10-22 v38 当前任务
+
+- [x] 实施强concat B1＋独立B3，B2退出新主线，保留历史和可信几何。
+- [x] 新增三组配置及启动/恢复/真实batch检查/比较工具，见 [v38操作页](docs/CTSEQTRACK_V38_LAUNCH.md)。
+- [x] 上传前复核源码/登记/三组实际CLI、历史报错路径和服务器环境；最新命令为B1两组GPU1、Full GPU0，val1保持。只读记录与剩余验证见 [复核报告](artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。
+- [ ] 用户执行一次真实CUDA Full batch检查，丢弃工程权重。
+- [ ] 用户上传完整新源码和v38登记后，独立启动B1 standard、concat B1 hold（均GPU1）、Full standard（GPU0），均scratch60/seed42，共180epoch/215,100更新。
+- [ ] 全部完成后固定final60/late3，报告Full−standard、hold−standard、原R/C、657曾移动轨迹帧和171运动端点、低运动/启停、漂移/恢复与T可靠性。保留负结果，不自动扩实验。
 
 ## 最新实施：B2 重心梯度三组
 

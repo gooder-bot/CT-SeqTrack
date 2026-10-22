@@ -10,7 +10,9 @@ def main(argv=None):
     parser.add_argument('--cfg')
     known, _ = parser.parse_known_args(arguments)
     model = load_yaml_config(known.cfg).get('net_model') if known.cfg else None
-    if model == 'ctseqtrackv37':
+    if model == 'ctseqtrackv38':
+        from models.ct_v38.entry import main as entry
+    elif model == 'ctseqtrackv37':
         from models.ct_v37.entry import main as entry
     elif model == 'ctseqtrackv36':
         from models.ct_v36.entry import main as entry

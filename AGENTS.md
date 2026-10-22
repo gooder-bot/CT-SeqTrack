@@ -1,5 +1,14 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-22 当前：v38 强 B1＋独立 B3
+
+- 新实现为 `models/ct_v38/`、`models/ctseqtrackv38.py`，由 `main.py` 分派。旧v37/配置/输出保留，不读取TrajTrack。用户本轮授权SSH只读检查；不上传、安装、启停任务或修改服务器文件。
+- B2退出新主线；B1原quality/acquisition监督及accepted/可信几何/真实时间保留。三候选为真实q0、原prior、原fallback（trusted propagation）。位置效用、旧quality、T分开；GT仅监督或被动审计。
+- 第1轮启用B3，无shadow/warmup，margin0，SPT零头，同分q0→prior→trusted propagation。仅选中真实q0可申请可信写入；下一crop跟最终accepted。位置更新不自动恢复速度，无静止门、低分hold或传播次数停止门。
+- 三组为concat B1 standard、concat B1 hold、Full standard，seed42/scratch60/bs16/FP32/workers4/val1/LR1.5e-4，共180epoch/215,100更新，独立登记 `38_registration.json`。不继承旧B2开放参数或factorized hold。
+- 最新设备安排为两组B1物理GPU1、Full物理GPU0，三组 `--trainer_devices 1`；带日期的独立nohup和新终端tail命令已同步至操作页。20:28只读确认环境/数据路径正常、v38尚未上传、没有CT训练进程；这不替代上传后由用户执行的一次真实CUDA Full batch检查。
+- [设计](docs/CTSEQTRACK_V38_DESIGN.md)、[操作](docs/CTSEQTRACK_V38_LAUNCH.md)为新入口。fixed final60/late3、原R/C和运动保护保持。旧源码封存 `artifacts/ct_checks/v38_implementation_20261022/baseline_source_cc8458b.zip`；本地验证不代表正式收益。
+
 ## 2026-10-21 最新实施：B2 centroid mass 梯度三组
 
 - 用户已明确批准实施。新 `v37_centroid_recipe` 仅在重心 mass 路径 detach identity×reliability，votes/精修及两头显式监督保留；共享 v36 接口默认 False，旧模型默认语义不变。结构和操作见 [B2 三组说明](docs/CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。

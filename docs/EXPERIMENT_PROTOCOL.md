@@ -1,5 +1,13 @@
 # CT-SeqTrack 实验协议
 
+## 2026-10-22 v38 独立登记
+
+主线为强concat B1＋独立B3；B2扩展点/身份记忆/vote/mode不执行，历史观测与accepted/可信位置/速度/真实时间保留。[结构与监督](CTSEQTRACK_V38_DESIGN.md)。
+
+仅三组B1 standard、concat B1 hold、Full standard，mini Car/seed42/scratch60/batch16/FP32/workers4/val1/LR1.5e-4/原Adam/W课程。standard及Full完成20/50轮后乘0.1，hold仅20轮；共180epoch/215,100更新。三组独立随机初始化；Full−standard为方法对照，hold−standard为调度对照，禁止事后替换比较对象。
+
+从第1轮启用B3，无预热/shadow/额外epoch，margin0、T阈值0.5固定，不扫阈值或新增静止门。固定final60/late3(58/59/60)、原R/C与运动口径，另报T覆盖/错误/Brier/可靠性及三候选风险。旧版本/登记/产物保留，旧checkpoint用原source，同run完整epoch严格恢复。代理不启动服务器，尚无v38正式成绩。
+
 ## 2026-10-21 新登记：B2 重心梯度三组
 
 用户批准本地实施，并固定三组独立scratch60：`b1_b2_mass_detach`、`full_mass_detach`、`full_mass_detach_hold_lr`。结构变量仅为重心mass的identity×reliability权重停止反向；第三组另外保留20轮衰减、取消50轮衰减。用户最新将本轮三组改为每轮validation：全部mini Car/seed42/batch16/FP32/concat/val1，均物理GPU1、单进程单卡、workers4；工程options为空，原W、点数、memory和loss保持。独立登记为 `37_b2_centroid_registration.json`，操作见 [B2三组](CTSEQTRACK_V37_B2_CENTROID_LAUNCH.md)。
