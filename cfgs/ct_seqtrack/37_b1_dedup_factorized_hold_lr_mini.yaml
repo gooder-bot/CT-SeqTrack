@@ -1,6 +1,0 @@
-_base_: 37_b1_dedup_base.yaml
-experiment_name: ct37_b1_dedup_factorized_hold_lr_mini_car_scratch_seed42
-tag: v37_b1_dedup_factorized_hold_lr_mini_car_seed42
-v37_training_recipe: b1_factorized_hold_lr
-# 保留第20轮结束后的衰减；第21–60轮均为1.5e-5。
-lr_milestones: [20]

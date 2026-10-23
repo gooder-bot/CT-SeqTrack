@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from models.ct_v38.config import (RECIPES, REGISTRATION_SCHEMA, as_v35_config,
+from models.ct_v38.config import (RECIPES, REGISTRATION_SCHEMA,
     config_identity, load_config, normalize_config, recipe_identity, recipe_scope)
 from models.ct_v38.entry import parse_config, validate_formal_registration
 
@@ -14,12 +14,11 @@ def test_three_recipes_share_b1_math_except_registered_schedule_and_policy():
     assert len({config_identity(cfg) for cfg in configs}) == 3
     assert [cfg.lr_milestones for cfg in configs] == [[20, 50], [20], [20, 50]]
     assert [cfg.v38_arm for cfg in configs] == ['b1', 'b1', 'full']
-    legacy = [as_v35_config(cfg) for cfg in configs]
-    assert all(cfg.v31_arm == 'b1' and cfg.net_model == 'ctseqtrackv35' for cfg in legacy)
-    allowed = {'experiment_name', 'tag', 'cfg', 'lr_milestones'}
-    common = [{key: value for key, value in cfg.items() if key not in allowed} for cfg in legacy]
+    allowed = {'experiment_name','tag','cfg','lr_milestones','v38_arm','v38_training_recipe'}
+    common = [{key:value for key,value in cfg.items() if key not in allowed} for cfg in configs]
     assert common[0] == common[1] == common[2]
-    assert all(not any(key.startswith(('v37_', 'v38_')) for key in cfg) for cfg in legacy)
+    assert all(cfg.v38_execution_revision == 'clean1' for cfg in configs)
+
 
 
 @pytest.mark.parametrize('change', [dict(seed=52), dict(epoch=61), dict(batch_size=8),
@@ -42,15 +41,15 @@ def test_engineering_adjustment_is_distinct_and_paths_devices_do_not_change_algo
     engineered = normalize_config(dict(ct_engineering_check=True, epoch=2, batch_size=2,
         workers=0, v31_curriculum_epochs=1))
     assert config_identity(engineered) != baseline
-    assert as_v35_config(engineered).v31_arm == 'b1'
+    assert engineered.v31_arm == 'b1'
 
 
 def test_recipe_scope_never_inherits_factorized_or_b2_options():
     from utils.execution_lab import execution_scope, enabled
-    with execution_scope(('factorized_projection', 'pool'), engineering=True):
+    with execution_scope(('factorized_projection',), engineering=True):
         with recipe_scope(normalize_config()):
             assert enabled('unique_mask')
-            assert not enabled('factorized_projection') and not enabled('pool')
+            assert not enabled('factorized_projection')
 
 
 def test_cli_rejects_unknown_abbreviated_and_training_override():
@@ -82,3 +81,15 @@ def test_formal_registration_binds_exact_three_configs_and_source(tmp_path):
     path.write_text(json.dumps(dict(schema=REGISTRATION_SCHEMA, source=source, runs=rows[:1])), encoding='utf-8')
     with pytest.raises(ValueError, match='exactly three'):
         validate_formal_registration(configs[0], source, registration_path=path)
+
+
+def test_current_training_recipe_matches_frozen_resolved_strong_b1():
+    import hashlib
+    fixture=json.loads(Path('tests/fixtures/strong_b1_preclean_resolved.json').read_text(encoding='utf-8'))
+    old=fixture['config']
+    assert hashlib.sha256(json.dumps(old,sort_keys=True,separators=(',',':')).encode()).hexdigest()==fixture['resolved_sha256']
+    new=load_config('cfgs/ct_seqtrack/38_b1_standard_mini.yaml')
+    identity={'net_model','experiment_family','experiment_name','tag','cfg','ct_engineering_check','log_dir'}
+    for key,value in new.items():
+        if key in old and key not in identity:
+            assert value == old[key], key

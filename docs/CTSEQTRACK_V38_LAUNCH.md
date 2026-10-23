@@ -1,6 +1,6 @@
 # v38 三组 mini：检查、启动、恢复与比较
 
-2026-10-22 上传前复核版。新方法见 [设计说明](CTSEQTRACK_V38_DESIGN.md)。本页是当前配置和命令入口：两组 B1 使用物理 GPU1，Full 使用物理 GPU0；均为单进程单卡。已按授权只读检查服务器，未上传、安装或启停任务；上传、一次真实 CUDA 检查和正式训练由用户执行。
+2026-10-23 clean1版。执行修订与数值边界见[精简说明](CTSEQTRACK_V38_CLEAN1.md)。新方法见 [设计说明](CTSEQTRACK_V38_DESIGN.md)。本页是当前配置和命令入口：两组 B1 使用物理 GPU1，Full 使用物理 GPU0；均为单进程单卡。已按授权只读检查服务器，未上传、安装或启停任务；上传、一次真实 CUDA 检查和正式训练由用户执行。
 
 | 配方 | 配置 | 完成哪些轮后LR乘0.1 | 物理 GPU |
 |---|---|---|---|
@@ -12,11 +12,24 @@
 
 `--devices` 是物理GPU编号，`--trainer_devices 1` 是使用一张卡，Full也必须保持后者为1。验证频率保持批准方案的 `--check_val_every_n_epoch 1`，不使用旧v35示例的5。GPU和数据/输出路径可选，以上正式训练参量保持固定；旧v37的六字段研究变体不属于本轮三组。
 
-20:28只读快照确认 Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9及mini数据路径正常；服务器尚无v38文件，没有CT-SeqTrack训练进程。A40 GPU0/1分别空闲16,495/27,386MiB，另有其他任务，资源会变化；这不是新Full或两组B1并发显存的实测保证。无需升级环境。记录见 [上传前复核](../artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。
+以下为2026-10-22 20:28的历史只读快照，不代表当前状态：当时确认 Python3.9.19、PyTorch2.0.1+cu118、Lightning2.0.2、nuscenes-devkit1.1.9及mini数据路径正常；服务器尚无v38文件，没有CT-SeqTrack训练进程。A40 GPU0/1分别空闲16,495/27,386MiB，另有其他任务，资源会变化；这不是新Full或两组B1并发显存的实测保证。无需升级环境。记录见 [上传前复核](../artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。
 
 ## 准备与一次真实 CUDA 检查
 
-将完整新版源码、三份 `38_*_mini.yaml` 和 `38_registration.json` 一起上传到 `/home/lishengjie/study/lcyu/CT-SeqTrack`，不要只上传YAML或模型文件。旧输出保留；旧checkpoint恢复仍使用其对应的封存源码。以下命令均从该项目根目录执行，Python与数据路径已只读核实，详见 [服务器路径](SERVER_PATHS.md)。
+按用户要求，直接更新原目录 `/home/lishengjie/study/lcyu/CT-SeqTrack`，只维护这一套活动源码。`clean1` 仅是执行修订和 checkpoint 身份，不是目录要求。历史代码通过 Git 恢复，不需要常驻另一套源码。
+
+2026-10-23 22:13–22:14（北京时间）只读检查确认：该原目录已有旧 v38 三组训练在运行，Full 使用 GPU0，B1 standard/hold 使用 GPU1。**这些任务结束前不覆盖原目录源码**；本轮没有启停任务。此后是否结束须以更新时实际进程状态为准。
+
+任务结束后，同步完整当前源码、三份 `38_*_mini.yaml` 和 `38_clean1_registration.json`，并同步本次 Git 删除记录。仅覆盖新文件会留下退役模块；不要只传 YAML 或模型文件，也不要对包含 `output/`、`artifacts/` 的整仓使用无差别删除同步。旧实验输出保持，旧 checkpoint 仍须匹配其 Git 历史源码。退役文件逐项清单见 [清单](../artifacts/ct_checks/20261023_v38_clean1/retired_files.json)。
+
+上传后先只读核对登记，失败时修正上传内容，不用 `--refresh` 掩盖残留旧文件或源码不匹配：
+
+```bash
+cd /home/lishengjie/study/lcyu/CT-SeqTrack
+/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python -B tools/register_v38.py --verify
+```
+
+该命令检查模型源码、三份配置和登记工具；旧配置、工具和测试的删除仍以 Git 删除记录/上述清单同步。核对通过再执行下面的真实 CUDA 检查。以下命令均从原项目根目录执行，环境与数据路径见 [服务器路径](SERVER_PATHS.md)。
 
 ```bash
 cd /home/lishengjie/study/lcyu/CT-SeqTrack
@@ -30,7 +43,7 @@ CUDA_VISIBLE_DEVICES=0 "$CT_PYTHON" tools/check_v38_full_batch.py \
   --path "$CT_DATA_ROOT" --device cuda
 ```
 
-检查覆盖真实batch16×4×1024点、forward/loss/backward/Adam/commit、梯度和三候选台账，报告写到新的 `artifacts/ct_checks/` 文件。它不保存工程checkpoint；正式训练重新启动scratch进程。若失败，应修复后更新新v38源码登记再启动，不绕过检查或修改旧source身份。
+检查覆盖真实batch16×4×1024点、forward/loss/backward/Adam/commit、梯度和三候选台账，报告写到新的 `artifacts/ct_checks/` 文件。它不保存工程checkpoint；正式训练重新启动scratch进程。若失败，应先定位上传不一致或实现问题；实现修复并重新验证后才在本地刷新新登记、同步完整源码，不绕过检查或修改旧 source 身份。
 
 ## 启动
 

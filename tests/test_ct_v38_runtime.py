@@ -6,7 +6,7 @@ import pytest
 from models.ct_v38.config import normalize_config
 from models.ct_v38.data import build_loaders
 from models.ct_v38.runtime import resume_payload, validate_resume_payload, loss_episode_summary
-from tests.test_ct_v31_runtime import TinySource
+from tests.helpers.raw_tracking import TinySource
 
 
 def config(**updates):

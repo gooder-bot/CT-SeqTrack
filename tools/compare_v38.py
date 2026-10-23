@@ -15,19 +15,19 @@ ROOT = Path(__file__).resolve().parents[1]
 if __package__ in (None, ''):
     sys.path.insert(0, str(ROOT))
 
-from tools import compare_v35_b0 as original
-from tools.compare_v37 import validate_sampler
+from tools import _tracking_audit as original
+from tools._tracking_audit import validate_sampler
 from models.ct_v38.config import (REGISTRATION_FILE, REGISTRATION_SCHEMA, RECIPES,
     normalize_config, config_identity, recipe_identity)
-from models.ct_v38.identity import SCHEMA
+from models.ct_v38.identity import (SCHEMA, COMPARE_SCHEMA, CANDIDATE_SCHEMA,
+                                    RESUME_SCHEMA, TRAINING_AUDIT_SCHEMA, RELIABILITY_PLOT_SCHEMA)
 from utils.execution_profile import validate_execution_identity
 
-base = original.base
+base = original
 require, EvidenceError = original.require, original.EvidenceError
 LABELS = tuple(RECIPES)
 SOURCES = ['q0', 'prior', 'trusted_propagation']
-REPORT_SCHEMA = 'ct_seqtrack.v38.comparison.v1'
-CANDIDATE_SCHEMA = 'ct_seqtrack.v38.candidate_records.v1'
+REPORT_SCHEMA = COMPARE_SCHEMA
 
 
 def load_registration():
@@ -38,7 +38,7 @@ def load_registration():
     require(source.get('sha256') == original.digest(source['files']), 'source checksum mismatch')
     for path, checksum in source['files'].items():
         original._sha256(checksum, 'source.' + path)
-    for path in ('models/ct_v31/data.py', 'utils/tracking_metrics.py'):
+    for path in ('models/ct_v38/data.py', 'utils/tracking_metrics.py'):
         require(source['files'].get(path) == hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
                 'metric/sampler reconstruction source differs: ' + path)
     rows = value.get('runs', [])
@@ -120,7 +120,7 @@ def validate_candidates(row, label, arm):
     actual_eligible = eligible if arm == 'full' else selected == 0 and real_q0 and actual_count >= 3 and score >= .5
     require(row.get('trusted_write') is actual_eligible and row.get('supported') is actual_eligible,
             label + ': trusted commit mismatch')
-    require(row.get('memory_write') is False, label + ': v38 must never write identity memory')
+    require('memory_write' not in row, label + ': clean1 has no identity-memory write field')
     for metric in original.METRICS:
         original.close(geometry[selected].get(metric), row[metric], label + '.selected_' + metric, 2e-7)
 
@@ -160,7 +160,7 @@ def read_run(directory, spec, registration):
     require(manifest.get('training_execution_recipe') == spec['training_execution_recipe'] == recipe_identity(config), label + ': execution recipe mismatch')
     validate_execution_identity(manifest.get('execution_identity'), config, source)
     for path in sorted((root / 'resume_manifests').glob('*.json')):
-        original.equal_fields(read(path.relative_to(root).as_posix()), dict(schema='ct_seqtrack.v38.resume.v1',
+        original.equal_fields(read(path.relative_to(root).as_posix()), dict(schema=RESUME_SCHEMA,
             run_id=run_id, config_sha256=manifest['config_sha256'], source=source), label + '.resume')
     budget = read('training_budget.json')
     original.equal_fields(budget, dict(schema=SCHEMA, **original.BUDGET), label + '.budget')
@@ -170,7 +170,7 @@ def read_run(directory, spec, registration):
     plans = {}
     for epoch in range(1, 61):
         audit = read(f'training_audits/epoch={epoch:03d}.json')
-        original.equal_fields(audit, dict(schema='ct_seqtrack.v38.training_audit.v1', model_schema=SCHEMA,
+        original.equal_fields(audit, dict(schema=TRAINING_AUDIT_SCHEMA, model_schema=SCHEMA,
             run_id=run_id, config_sha256=manifest['config_sha256'], completed_epoch=epoch,
             rows=19108, optimizer_steps=1195), label + '.audit')
         require(audit.get('epoch_complete') is True and validate_sampler(audit.get('sampler'), config, epoch, label) == training_source,
@@ -277,7 +277,7 @@ def reliability_plot_data(report):
         else:
             require(summary.get('brier') is None, f'epoch {epoch}: empty Brier must remain missing')
         epochs[str(epoch)] = summary
-    return dict(schema='ct_seqtrack.v38.reliability_plot.v1', epochs=epochs,
+    return dict(schema=RELIABILITY_PLOT_SCHEMA, epochs=epochs,
         report_schema=report.get('schema'), report_without_plot_sha256=original.digest(report),
         source_sha256=report.get('source_sha256'), synthetic_fixture=bool(report.get('synthetic_fixture', False)),
         transformations=['Full standard only; one panel per epoch 58/59/60',

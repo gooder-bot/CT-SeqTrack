@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from models.ct_v31.data import ReadyQueueBatchSampler
+from models.ct_v38.data import ReadyQueueBatchSampler
 from models.ct_v38.config import load_config, config_identity, recipe_identity
 from models.ct_v38.runtime import reliability_summary
 from tools import compare_v38 as compare
 from utils.execution_profile import execution_identity
-from tests import test_ct_v34_comparison as old
+from tests.helpers import formal_run_factory as old
 from tests.test_compare_v38 import record
 
 
@@ -33,6 +33,8 @@ def new_evaluation(root, arm, *, failing=False):
         candidate['trusted_eligible'] = count >= 3
         template.update(success=row['success'], precision=row['precision'],
             geometric_fg_count=count, supported=count >= 3, trusted_write=count >= 3)
+        row.pop('memory_write', None)
+        row.pop('memory_wrong_write', None)
         row.update(template, strong=count >= 3, diagnostic_candidates=candidate)
     reliability = reliability_summary([row['diagnostic_candidates'] for row in rows if not row['initialization']])
     for epoch in compare.original.EPOCHS:
@@ -49,7 +51,7 @@ def new_evaluation(root, arm, *, failing=False):
 
 @pytest.fixture
 def complete_runs(tmp_path, monkeypatch):
-    legacy = old.runs.__wrapped__(tmp_path, monkeypatch)
+    legacy = old.runs(tmp_path, monkeypatch)
     actual_root = compare.ROOT
     monkeypatch.setattr(compare, 'ROOT', tmp_path)
     monkeypatch.setattr(compare.original, 'COUNTS', old.compare.COUNTS)
@@ -57,7 +59,7 @@ def complete_runs(tmp_path, monkeypatch):
         for epoch in compare.original.EPOCHS) for label in ('reference', 'baseline')}
     monkeypatch.setattr(compare.original, 'REGISTERED_FRAME_SHA256', hashes)
     files = {}
-    for relative in ('models/ct_v31/data.py', 'utils/tracking_metrics.py'):
+    for relative in ('models/ct_v38/data.py', 'utils/tracking_metrics.py'):
         data = (actual_root / relative).read_bytes()
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +75,7 @@ def complete_runs(tmp_path, monkeypatch):
     registration = dict(schema=compare.REGISTRATION_SCHEMA, source=source, runs=specs,
         registered_main_model='full_standard', policy_activation='active_from_epoch1',
         reference_frames_sha256={name: list(values) for name, values in hashes.items()})
-    registration_path = tmp_path / 'cfgs/ct_seqtrack/38_registration.json'
+    registration_path = tmp_path / 'cfgs/ct_seqtrack/38_clean1_registration.json'
     old.write(registration_path, registration)
     registration_hash = hashlib.sha256(registration_path.read_bytes()).hexdigest()
     sampler = ReadyQueueBatchSampler([4778], batch_size=16, short_window=4,
@@ -100,7 +102,7 @@ def complete_runs(tmp_path, monkeypatch):
         (root / 'resolved_config.yaml').write_text(yaml.safe_dump(dict(cfg)), encoding='utf-8')
         for epoch in range(1, 61):
             old.write(root / f'training_audits/epoch={epoch:03d}.json', dict(
-                schema='ct_seqtrack.v38.training_audit.v1', model_schema=compare.SCHEMA, run_id=run_id,
+                schema='ct_seqtrack.v38_clean1.training_audit.v1', model_schema=compare.SCHEMA, run_id=run_id,
                 config_sha256=config_identity(cfg), completed_epoch=epoch, rows=19108, optimizer_steps=1195,
                 epoch_complete=True, sampler=plans[epoch]))
         old.write(root / 'training_budget.json', dict(schema=compare.SCHEMA, **compare.original.BUDGET,

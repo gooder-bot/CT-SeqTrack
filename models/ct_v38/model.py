@@ -2,12 +2,11 @@
 import torch
 from torch import nn
 
-from models.ct_v31.contracts import EvidenceHypotheses
-from models.ct_v31.model import canonicalize_batch
-from models.ct_v31.observation import B0Observation
-from models.ct_v31.decoder import SharedHypothesisDecoder
-from models.ct_v31.prior import PhysicalTimePrior
-from models.ct_v31.losses import compute_losses as base_losses
+from .input import canonicalize_batch
+from .observation import B0Observation
+from .decoder import SharedHypothesisDecoder
+from .prior import PhysicalTimePrior
+from .base_losses import compute_losses as base_losses
 from .config import normalize_config, recipe_scope
 from .contracts import CandidateSet, SelectionDecision, CommitDecision, TrackOutput
 from .verification import FinalBoxVerifier, current_q0_support
@@ -15,8 +14,8 @@ from .verification import FinalBoxVerifier, current_q0_support
 
 def build_candidates(decoder, observation, batch, prior):
     """去重仅用于 B3；保留原 decoder 数学及完整来源。"""
-    boxes = torch.stack((decoder.hypothesis_boxes[:, 0], prior.box.to(decoder.hypothesis_boxes),
-                         batch['fallback_box'].detach().to(decoder.hypothesis_boxes)), 1)
+    boxes = torch.stack((decoder.q0_box, prior.box.to(decoder.q0_box),
+                         batch['fallback_box'].detach().to(decoder.q0_box)), 1)
     if not bool(torch.isfinite(boxes).all()):
         raise FloatingPointError('v38 position candidates must be finite')
     real = observation.sequence_valid.detach().bool()
@@ -37,7 +36,7 @@ def build_candidates(decoder, observation, batch, prior):
     if not bool(valid.any(-1).all()):
         raise RuntimeError('v38 requires a finite position candidate')
     return CandidateSet(boxes, valid, raw_valid, alias, ~real,
-        decoder.quality_logits[:, 0], decoder)
+        decoder.q0_quality_logits)
 
 
 def select_candidates(candidates, verification, observation, batch, *, apply_policy=True):
@@ -85,7 +84,6 @@ class JointTracker(nn.Module):
     def __init__(self, config=None):
         super().__init__()
         self.config = normalize_config(config)
-        self.enable_b1, self.enable_b2 = True, False
         self.enable_b3 = self.config.v38_arm == 'full'
         # 与强 v37 B1 完全同序实例化；新 B3 不消耗公共初始化随机数。
         self.observation = B0Observation(token_count=128, query_context=True,
@@ -95,7 +93,6 @@ class JointTracker(nn.Module):
         self.prior = PhysicalTimePrior(self.config.time_scale, self.config.v31_temporal_backend)
         self.execution_profile = self.config.execution_profile
         self.observation.execution_profile = self.decoder.execution_profile = self.execution_profile
-        self.evidence = None
         with torch.random.fork_rng(devices=[]):
             self.verifier = FinalBoxVerifier(self.config.time_scale) if self.enable_b3 else None
 
@@ -108,14 +105,13 @@ class JointTracker(nn.Module):
             prepared = canonicalize_batch(batch)
             prior = self.prior(prepared) if prior is None else prior
             observation = self.observation(prepared)
-            evidence = EvidenceHypotheses.empty(observation.coarse_box)
-            decoder = self.decoder(observation, evidence, prepared, prior)
+            decoder = self.decoder(observation, prepared, prior)
             candidates = build_candidates(decoder, observation, prepared, prior)
             verification = self.verifier(candidates, observation, prepared, prior) if self.enable_b3 else None
             decision, commit, quality, candidate_trust = select_candidates(
                 candidates, verification, observation, prepared, apply_policy=self.enable_b3)
             return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
-                evidence, decoder, candidates, verification, decision, commit,
+                decoder, candidates, verification, decision, commit,
                 candidates.q0_quality_logits.sigmoid(), decision.output_utility,
                 candidate_trust, candidates.q0_is_fallback)
 
@@ -123,6 +119,6 @@ class JointTracker(nn.Module):
         with recipe_scope(self.config):
             prepared = canonicalize_batch(batch)
             if not self.enable_b3:
-                return base_losses(prepared, output, enable_b1=True, enable_b2=False, enable_b3=False)
+                return base_losses(prepared, output)
             from .losses import compute_losses
             return compute_losses(prepared, output)

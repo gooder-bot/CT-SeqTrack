@@ -4,8 +4,8 @@ import copy
 import pytest
 import torch
 
-from models.ct_v31 import observation
-from models.ct_v31.observation import SegPointNet, FeaturePointNet, unique_valid_mask
+from models.ct_v38 import observation
+from models.ct_v38.observation import SegPointNet, FeaturePointNet, unique_valid_mask
 from utils.execution_lab import execution_scope, enabled
 
 

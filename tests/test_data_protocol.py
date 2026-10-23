@@ -253,7 +253,7 @@ def _scene_splits():
 
 @pytest.mark.parametrize('version,role', FACTORY_SHA256)
 def test_raw_factory_matches_frozen_constructor_arguments(monkeypatch, version, role):
-    from models.ct_v31.config import normalize_config
+    from models.ct_v38.config import normalize_config
     from datasets import get_raw_dataset
     import datasets.protocol as protocol
     original = protocol.build_dataset_manifest
@@ -263,7 +263,7 @@ def test_raw_factory_matches_frozen_constructor_arguments(monkeypatch, version, 
     module = types.ModuleType('datasets.kitti_mf' if kind == 'kitti_mf' else 'datasets.nuscenes_lidar_mf')
     setattr(module, 'KITTIMFDataset' if kind == 'kitti_mf' else 'NuScenesMFDataset', lambda **kw: kw)
     monkeypatch.setitem(sys.modules, module.__name__, module)
-    config = normalize_config(dict(dataset=kind, version=version, path='DATA_ROOT',
+    config = normalize_config(dict(ct_engineering_check=True,dataset=kind, version=version, path='DATA_ROOT',
         ct_coordinate_mode='sensor_relative' if kind == 'kitti_mf' else 'global'))
     actual = get_raw_dataset(config, role)
     assert canonical_sha256(actual) == FACTORY_SHA256[(version, role)]

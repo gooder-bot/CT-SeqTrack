@@ -13,7 +13,7 @@ def record(*, arm='full', selected=0, real=True):
     if arm == 'full' and selected != 0:
         utility[selected] = .8
     eligible = real and selected == 0
-    candidate = dict(schema='ct_seqtrack.v38.candidate_records.v1',
+    candidate = dict(schema='ct_seqtrack.v38_clean1.candidate_records.v1',
         names=['q0', 'prior', 'trusted_propagation'],
         boxes_anchor_relative=[[0., 0., 0., 0.], [1., 0., 0., 0.], [2., 0., 0., 0.]],
         valid=valid, raw_valid=valid, alias_of=[-1 if real else 1, -1, -1],
@@ -26,7 +26,7 @@ def record(*, arm='full', selected=0, real=True):
         trusted_eligible=eligible)
     return dict(diagnostic_candidates=candidate, selected_index=selected,
         trusted_write=eligible, supported=eligible, geometric_fg_count=3 if arm == 'b1' or selected == 0 else 0,
-        memory_write=False, success=.825, precision=.925)
+        success=.825, precision=.925)
 
 
 @pytest.mark.parametrize('arm,selected,real', [('full', 0, True), ('full', 1, True),
@@ -134,7 +134,7 @@ def test_real_host_candidate_output_passes_independent_comparator(arm, empty):
     from models.ct_v38.data import build_loaders
     from models.ctseqtrackv38 import CTSEQTRACKV38
     from tests.test_ct_v38_runtime import config
-    from tests.test_ct_v31_runtime import TinySource
+    from tests.helpers.raw_tracking import TinySource
     class EmptySource(TinySource):
         def get_frames(self, index, frame_ids):
             frames = super().get_frames(index, frame_ids)

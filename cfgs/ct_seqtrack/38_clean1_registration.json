@@ -1,0 +1,207 @@
+{
+  "schema": "ct_seqtrack.v38_clean1.registration.v1",
+  "source": {
+    "sha256": "9d84738ec62bd0b4aeb48f2967bf52b7af82050dfd93e55cdbcbcf14abd65c21",
+    "files": {
+      "datasets/__init__.py": "db1d4808794a2b4ef1566878439db1d7115e23847c8fc8f523cc7402b5051be4",
+      "datasets/base_dataset.py": "2b9e745f24401f114b70179a164d0cb36fcd3eefafa6c3f11bd2f6df9be1e646",
+      "datasets/cache.py": "de39eb3aefd1ed1eb34550e26c7815f124c0bb5faba802d1d43eb0448681670d",
+      "datasets/data_classes.py": "0feafab96b1656b0ad4de87a61974d1e3eb9a0d8937357a02479fd6be1ca4f7e",
+      "datasets/kitti_mf.py": "0d6869dc129d0ff1c31c0104e2bbdd79ab18c2f3902523e0df55c193484bfee0",
+      "datasets/nuscenes_lidar_mf.py": "828bb3420574f20aca1890135d1febab9d957bcec54207dd7166aa62c088411d",
+      "datasets/protocol.py": "bd9ea8eed6cd457cb4c7006c9a926ad679b6753bdf02a7f7b8916c03006d859b",
+      "datasets/protocol_utils.py": "9ba1e5de4b857b0b514b55a87ea749484ec31abbad43a3f1fa6b3defcc2d2aa1",
+      "datasets/temporal_protocol.py": "621ce45c41306c39bdc97f8e2f8a9e1de7678b03eb229c39164d248bd3f82fff",
+      "main.py": "9145e3fddd813f2f671363af61aae99ecb0026024d11675c72af71d4bf3921a0",
+      "models/__init__.py": "c3bb1bbe5b3b2711fc6420cb5a80b73af422d98b774fbd9544f7541fc21df979",
+      "models/attn/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "models/attn/Layers.py": "1eba20763b0a81a43acde6425356f559768583e5de56bdc855e9e8bdc715fb84",
+      "models/attn/Models.py": "a85ec68e9a5ad7757ef56c3df4045a8971a184606c7f781e5b8577b7e8532167",
+      "models/attn/Modules.py": "49e7fb8484f8127f2d29e40ffe83de206868ea745114774e415dd2f65d5b6e8b",
+      "models/attn/SubLayers.py": "218caf2dddd8ce7cd2d77292d62ae41d723a0f5e2a86928868bd72c1006aea3f",
+      "models/ct_v38/__init__.py": "6edfb83052f306047e9b49d696b8dd8bbc7fb4eca1bfaabc4ef753f5f3666a37",
+      "models/ct_v38/acquisition_supervision.py": "870f70eb6947a3d66feff0621a70e33f3142047349974a75f8336bb9b4166cae",
+      "models/ct_v38/base_losses.py": "bef6d85d071bb81c72a51c3aebede97188bedcb08632073e16d48e9111c114cb",
+      "models/ct_v38/candidate_records.py": "b439d60d627a858b1ea9741718694537c4e9d519ed95d22154166a755c562a18",
+      "models/ct_v38/cfc.py": "11193d2ce2b75be3af0caeea9b26d1f3a867bf0143568c2bb755cf4457076315",
+      "models/ct_v38/config.py": "8f7148a936fc0a853230fdcded7b0d393e62017c60d35e6780b7abb1e74c45d0",
+      "models/ct_v38/contracts.py": "85cfbcb9a3b7b662a1e38c70655a40da8483fa625f29caeddf19fce87bd8acb8",
+      "models/ct_v38/data.py": "6c836e2ce611be011179ceb95bb90c6bc12348e944b6ee4bd8961047c8b97e16",
+      "models/ct_v38/decoder.py": "b9c7c877bb956a0c4485b41b1e65735de2e9867f72aa8373e6aa39f2b9d70cff",
+      "models/ct_v38/entry.py": "43932f62e4872a4ba2ad89e96d07ce94344d0f015e1474211c5d70696b3c1c31",
+      "models/ct_v38/geometry.py": "21caaf3640f12df97b951c87b2c575d830c404ff2b691177a6d08aec41bbad28",
+      "models/ct_v38/history_context.py": "c7e4cb3d79d2784a783effba2885c7cd7ca2b2afe5da486313784b5f9d638ed7",
+      "models/ct_v38/identity.py": "166b7821f66812f87194d17e6488bf575304821f34553eb9e9456d1fe430238c",
+      "models/ct_v38/input.py": "9f5d919a81da01321518d5bf8094cddda51fc8e68d6c697bcac08db950507554",
+      "models/ct_v38/local_observation.py": "a830d1f18c4f54532d2a8e0fe231b0993cdefd90012797cb0b34d8f98f54dd06",
+      "models/ct_v38/losses.py": "24bd973a6b7cc4b74523882a4bd242a45fdd1b1466a7c154b8645e3b6ac5bfb4",
+      "models/ct_v38/lr_schedule.py": "fda6f97c13cb28000935967d4c65dec7042251885d275e93b10cafc7cbffac4a",
+      "models/ct_v38/model.py": "ca86e5cf9d242f610b6308df2f91b0d9be7238c3ccb2a66a1b9df9d3c51b0492",
+      "models/ct_v38/motion.py": "039a02d502859a81d19dcd64a2f15f98b6471f81d032e4e1aa42a8f6d1f85d11",
+      "models/ct_v38/observation.py": "48fc392646fbcfee2d7a68713050debc84f4fd9815fab10a3ff3fc8d961105ca",
+      "models/ct_v38/prior.py": "57532daab0509130aa8605cf427cbd85e20604988288c15f7623725dbd1a5aa8",
+      "models/ct_v38/runtime.py": "1fbdc51353d709388fa41ccf2a5ff5ab5d15a07ff1a0bf3a8994eeded43cbefc",
+      "models/ct_v38/training_diagnostics.py": "30509f797300cce487e971f391afe4e82e5d9912c621138ac22c7979e19c70dc",
+      "models/ct_v38/verification.py": "2ed1241b22ce89cfe7629834107df2c48d7ae4dfb79c859d780002c365ef8c30",
+      "models/ctseqtrackv38.py": "4471c3b78ff40bf622a166ed227f54789cb8d888dd38eb646c517418761082e1",
+      "models/seqtrack_reference/__init__.py": "d9a11b5cddef5c241e46746007bae412e66f99197f7ac160921999a5dbd3b5c9",
+      "models/seqtrack_reference/_vendor/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "models/seqtrack_reference/_vendor/attn/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "models/seqtrack_reference/_vendor/attn/Layers.py": "4c3bbbc66c4990c125955ff58256c3da291291fd8152677fa959c17ed0d3b544",
+      "models/seqtrack_reference/_vendor/attn/Models.py": "1cc58ecd432d70f056ae5a704fca45debba1f5b567decae7aad369c946d05d49",
+      "models/seqtrack_reference/_vendor/attn/Modules.py": "782739f042c45b8fe5396989fa2b62a669e5874b9ee96c7685768ef0f9351e6d",
+      "models/seqtrack_reference/_vendor/attn/SubLayers.py": "f79787ea39a951372d77e502e1b5240d5fd2600fc11653e4cca54994ea012ad4",
+      "models/seqtrack_reference/_vendor/misc.py": "afc3cb37c31542a0bd20253f725b31e74fbc8a3b3abe1d54626d32eaee2a51a8",
+      "models/seqtrack_reference/_vendor/pointnet.py": "99eda9f45d40f8869074f73c9dc170c73caa8efc90074aa12e769de20a4b51ea",
+      "models/seqtrack_reference/_vendor/points.py": "e9e11ea5da17e8f906f49021f117bf1ff37587f158d4c308528f5418f6ffea4c",
+      "models/seqtrack_reference/_vendor/processing.py": "5d7ae9db8774db9be9ffba0d7e09ab7fb7a2b0961608dc6829108c1e89d72943",
+      "models/seqtrack_reference/_vendor/spatial.py": "44b29386bdc8c794a7bb052a41bf986a0f00f9f0394df430379dd050bc238cb1",
+      "models/seqtrack_reference/config.py": "2b45cc45eb383fa0049cab4b1f9881e419969066ec2827ab6766ea7f731a81b5",
+      "models/seqtrack_reference/data.py": "64dcf3b38aa732c35845bcf9cb69bdeb87c960c6cca06dfb7b4de479fcf9a292",
+      "models/seqtrack_reference/entry.py": "a472e53dca0d2d9091803d184c2737f234e0ffbe8749d4033ae6c64ebd070eb5",
+      "models/seqtrack_reference/host.py": "b63113afdbdbb4bb72ad5694413b742eadf7ee671a5aaf91c21231498ffb3d9e",
+      "models/seqtrack_reference/identity.py": "215c109410cefcc30b08e880767d58df9216e1ec9bab583643b670cca7b02cae",
+      "models/seqtrack_reference/network.py": "ea626a19094d1b39d789452c8d3dc15a8c6c72ce355c4b70887523cd24a6a5ba",
+      "models/seqtrack_reference/numerics.py": "b549c9980888c8b82697bfe85e1a475b9069085801c3534f844de3e2d193b68a",
+      "models/seqtrack_reference/protocol.py": "c24b1f7b4adcfaff5938622c15cb4df6c569cc8399f573977e8e24d95ab8c1db",
+      "models/seqtrack_reference/runtime.py": "b51a87b50d30b57f01e34bc85f8e7baeea78e02c743f385af74efec7c6e96268",
+      "requirement.txt": "0ae3a35477a74533742d253bf2596a3673a89069d87829f6a0e6ea4b5894d634",
+      "utils/__init__.py": "6e1173c060d636d70568a0b894fb8079f8e9e2a3e3618b6b2b9384677f911182",
+      "utils/b1_training_recipes.py": "49d7cbd0755ab7ee7d2d88daa68e231a2127b7ffa5419c319c288e0331980033",
+      "utils/b2_centroid_recipes.py": "7471922b0a96993b12fbafd658c3822a49ae115e150b39656b22bc58a11147c6",
+      "utils/batch_materialization.py": "2c9dfac5f1b792fea7d01b7e6f9bdfec4d84c5af22fda2f3811f9e651a25ae2e",
+      "utils/bn_policy.py": "20fc87fa3377c8ddfe5f71e6f1c59e2c594cd4e5fc97f668847e66589a53a83a",
+      "utils/config.py": "7a3e4bd0dc6c68a55fe0cf5cdf07e5c3a1a25f90e97ae6f90fdbc94214fdc39a",
+      "utils/deterministic_pooling.py": "7e48ec8ef4d96bba1ef02467780c7321c61b53d1cd773960e842c2f5f7334cd5",
+      "utils/diagnostic_transfer.py": "f6856c30b5244924b309a982bd3cd56175c52395d1c70ac4936b06723abe172c",
+      "utils/execution_lab.py": "89e3a5095960ccd13b044a94730d52a9296104c6ffa6304863141464d878594d",
+      "utils/execution_profile.py": "442bbd628ba466bc2fa911f28cc32afbebcfa8294f64695a4e5d94b06df3b210",
+      "utils/factorized_observation.py": "e69c3d850f2b1e490d5c7b0687058b12b0234f6b1ef18585e3f043f44d66716b",
+      "utils/feature_precision.py": "b6da31b21a85c48d0062fbcb8b463de82f691e32bb326a4ab1f7c06aeb865ff8",
+      "utils/lightning_runtime.py": "5283ed57ca6e74bf94c161525b4bc30644b310908481f201cc36bbde939520f2",
+      "utils/masked_observation.py": "0b99719a97ce452597337bce29a1bffef7298a6b5aaf0c255dac259492792bd6",
+      "utils/raw_frame_memo.py": "bfaac518f9c5a33dd881a01e9b2719939ca6227d50fd0a0ab4b5f6e9d94bde8f",
+      "utils/time_config.py": "8ffe40dab3558aecbf98cec72788a4862f5d8c49212906efdadb804094bfee29",
+      "utils/tracking_metrics.py": "e1b0363f0826e32339c8bd6d6e70e755caac264f02956cedfedaa352422ec7ab"
+    }
+  },
+  "runs": [
+    {
+      "label": "b1_standard",
+      "arm": "b1",
+      "cfg": "cfgs/ct_seqtrack/38_b1_standard_mini.yaml",
+      "config_sha256": "03050b887b80b80b81b536d6d23797a885d96e96a5b98d9d98774b3de4a4b8be",
+      "execution_profile": "optimized_fp32",
+      "training_execution_recipe": {
+        "recipe": "b1_standard",
+        "implementation_id": "v38_clean1_concat_b1_selective_update_v1",
+        "execution_revision": "clean1",
+        "projection": "concat",
+        "options": [
+          "unique_mask"
+        ],
+        "prior_read_applicable": false,
+        "arm": "b1",
+        "lr_milestones": [
+          20,
+          50
+        ],
+        "active_from_epoch": 1,
+        "candidates": [
+          "q0",
+          "prior",
+          "trusted_propagation"
+        ],
+        "duplicate_xyz_tolerance": 0.0001,
+        "duplicate_yaw_tolerance": 1e-05
+      },
+      "yaml_sha256": "aa0274e8a7edaeec22194e47b81e03732f9ce2a4f3b4f59144c6473e0c15143f"
+    },
+    {
+      "label": "b1_hold",
+      "arm": "b1",
+      "cfg": "cfgs/ct_seqtrack/38_b1_hold_mini.yaml",
+      "config_sha256": "6a1a9df67838c7071542549a6bbe493756927f000e5c448a479c8e0f0f990876",
+      "execution_profile": "optimized_fp32",
+      "training_execution_recipe": {
+        "recipe": "b1_hold",
+        "implementation_id": "v38_clean1_concat_b1_selective_update_v1",
+        "execution_revision": "clean1",
+        "projection": "concat",
+        "options": [
+          "unique_mask"
+        ],
+        "prior_read_applicable": false,
+        "arm": "b1",
+        "lr_milestones": [
+          20
+        ],
+        "active_from_epoch": 1,
+        "candidates": [
+          "q0",
+          "prior",
+          "trusted_propagation"
+        ],
+        "duplicate_xyz_tolerance": 0.0001,
+        "duplicate_yaw_tolerance": 1e-05
+      },
+      "yaml_sha256": "654558f9b758e9199035b00e5527ad6a22cf9189e3fb9e90dd5548a251c24687"
+    },
+    {
+      "label": "full_standard",
+      "arm": "full",
+      "cfg": "cfgs/ct_seqtrack/38_full_standard_mini.yaml",
+      "config_sha256": "9bab30e8cc828e9f4764f94474c5153a98e8a7b87a08ba2171b6c3cc35783dba",
+      "execution_profile": "optimized_fp32",
+      "training_execution_recipe": {
+        "recipe": "full_standard",
+        "implementation_id": "v38_clean1_concat_b1_selective_update_v1",
+        "execution_revision": "clean1",
+        "projection": "concat",
+        "options": [
+          "unique_mask"
+        ],
+        "prior_read_applicable": false,
+        "arm": "full",
+        "lr_milestones": [
+          20,
+          50
+        ],
+        "active_from_epoch": 1,
+        "candidates": [
+          "q0",
+          "prior",
+          "trusted_propagation"
+        ],
+        "duplicate_xyz_tolerance": 0.0001,
+        "duplicate_yaw_tolerance": 1e-05
+      },
+      "yaml_sha256": "e313f3467d4dcf1f7770558121cbf62c775d6b1777bbfc8194b9d614ed21c8aa"
+    }
+  ],
+  "registered_main_model": "full_standard",
+  "policy_activation": "active_from_epoch1",
+  "budget": {
+    "epochs_per_run": 60,
+    "optimizer_steps_per_run": 71700,
+    "total_epochs": 180,
+    "total_optimizer_steps": 215100
+  },
+  "reference_frames_sha256": {
+    "reference": [
+      "b5a9b0a571f4b4b7b97f5d8196937f5f66c1ecf3544d24e7e9e890a0a28092c9",
+      "dc57cab49715eb5e25b2d4053ac94bdff2fff314dbfaa1d62f7049bf0ef21a19",
+      "0115681e71460ff05652c886a229e52489464eeda8190bad4e24f76bd09576bd"
+    ],
+    "baseline": [
+      "257a98cd560838852492a674154d8418b2cd5a52d9d3a77a64d4fe8edc1ef081",
+      "2a4454f03f5bade87ca0e3aae324604f9e075f2e5e8db9360a8d11f626979023",
+      "7524d6b032f0bc1815d291ca49f66cc2913179ac7d3f982f9f2e3bb3d42a748c"
+    ]
+  },
+  "limitations": [
+    "single seed42 mini Car; late3 is not independent replication",
+    "no new formal results are implied by this registration"
+  ],
+  "generator_sha256": "0adf57bba52c7c28fc460bef396162fbaac6d6228b01fae6cc21aeeeb97c7c45"
+}

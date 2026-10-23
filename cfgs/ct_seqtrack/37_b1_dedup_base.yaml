@@ -1,3 +1,0 @@
-# 2026-10-14 新登记：旧 v37 完成后另起 scratch，不恢复旧权重。
-_base_: 37_b1_mini.yaml
-check_val_every_n_epoch: 1

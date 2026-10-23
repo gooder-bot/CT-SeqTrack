@@ -1,5 +1,12 @@
 # CT-SeqTrack 工具范围
 
+## 2026-10-23 当前v38 clean1工具
+
+- 当前入口`main.py`；五个v38工具为`launch_v38.sh`、`resume_v38.sh`、`check_v38_full_batch.py`、`compare_v38.py`、`register_v38.py`。登记只写新的`38_clean1_registration.json`，原登记不刷新。
+- 新增`benchmark_v38_clean1.py`用于旧/新源码独立进程工程对照；默认20预热/100测量/3交替，真实性能仍需用户同卡执行。
+- 当前比较器独立持有R/C指纹和核验函数，不导入历史比较脚本。旧v31–v37及B2专用工具只在对应冻结源码使用。
+- 数值边界与恢复方法见[clean1说明](CTSEQTRACK_V38_CLEAN1.md)。以下工具列表按原日期保留，不能直接在当前精简树执行。
+
 ## 2026-10-22 v38 工具面
 
 - `main.py` 分派 `ctseqtrackv38`；独立新模型和host，旧入口保留。

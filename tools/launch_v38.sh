@@ -19,7 +19,7 @@ fi
 "$python_bin" -c 'import sys; from models.ct_v38.entry import parse_config, validate_formal_registration; c=parse_config(sys.argv[1:]); validate_formal_registration(c)' \
   --cfg "$cfg" --path "$data_root" --devices "$gpu"
 mkdir -p output
-run_dir="$(mktemp -d "output/$(date +%Y%m%d-%H%M%S)-38_${recipe}-mini_car_seed42_60ep_bs16-XXXXXX")"
+run_dir="$(mktemp -d "output/$(date +%Y%m%d-%H%M%S)-38_clean1_${recipe}-mini_car_seed42_60ep_bs16-XXXXXX")"
 nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=backend:native CUBLAS_WORKSPACE_CONFIG=:4096:8 \
   "$python_bin" -u main.py --cfg "$cfg" --path "$data_root" --devices "$gpu" \
   --accelerator gpu --trainer_devices 1 --log_dir "$run_dir" \

@@ -1,5 +1,7 @@
 # CT-SeqTrack
 
+**2026-10-23 当前：v38 clean1。** 代码直接修改、部署在原 `CT-SeqTrack/`，只保留一套活动实现；clean1 是执行修订标识，不需要单独目录。 当前主线已从v31/v36/v37中抽出，B0/B1/B3独立运行；空memory、extension、旧mode计算及两个投影已删除。三份正式YAML保持，新登记为`38_clean1_registration.json`；旧checkpoint仍使用原源码。结构、数值边界、验证和历史恢复见 [本次精简说明](docs/CTSEQTRACK_V38_CLEAN1.md)。下方带日期的内容保留为历史记录，其中旧入口仅在对应冻结源码使用，不代表当前可执行工具或服务器状态。
+
 **2026-10-22 当前主线：v38 强 concat B1＋独立 B3。** B2 扩展点、身份记忆、vote、mode退出新主线；保留完整强 B1 学习路径、accepted历史、可信位置/速度、真实时间。B3 用S/P选框、独立T决定真实q0的可信写入，从第1轮启用。见 [设计说明](docs/CTSEQTRACK_V38_DESIGN.md) 和 [检查、启动、恢复、比较](docs/CTSEQTRACK_V38_LAUNCH.md)。
 
 三组独立scratch：B1 standard、concat B1 hold、Full standard。共同mini Car/seed42/scratch60/batch16/FP32/workers4/val1/LR1.5e-4，共180epoch/215,100更新。standard与Full在20/50轮后衰减，hold仅20轮。不由旧权重分叉，hold不替代结构对照。旧版本与产物保留，旧checkpoint使用原源码。服务器真实CUDA检查及正式训练由用户执行；当前没有v38正式成绩。下方B2及更早记录为历史，不自动重启或追加。

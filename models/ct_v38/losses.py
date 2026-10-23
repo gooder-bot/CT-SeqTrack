@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from models.ct_v31.losses import compute_losses as base_losses, frame_endpoint_mean
+from .base_losses import compute_losses as base_losses, frame_endpoint_mean
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 from .verification import current_q0_support
 
@@ -78,7 +78,7 @@ def _record(sink, name, values, valid, coefficient):
 
 
 def compute_losses(batch, output):
-    losses = base_losses(batch, output, enable_b1=True, enable_b2=False, enable_b3=False)
+    losses = base_losses(batch, output)
     original = losses['loss_total']
     target = supervision_targets(batch, output)
     output.supervision_targets = target

@@ -1,5 +1,9 @@
 # CT-SeqTrack 实验协议
 
+## 2026-10-23 clean1执行身份
+
+当前v38结构精简不改变三组scratch60/seed42/bs16/FP32及原final60/late3、R/C和运动保护口径。三份YAML保持，新执行revision为clean1，登记为`38_clean1_registration.json`。旧登记和checkpoint继续配原源码，禁止跨身份恢复；本次不新增正式训练。用户接受紧凑FP32数值轨迹差异，工程等价检查不能代替正式得分验证。见[结构与验收](CTSEQTRACK_V38_CLEAN1.md)。
+
 ## 2026-10-22 v38 独立登记
 
 主线为强concat B1＋独立B3；B2扩展点/身份记忆/vote/mode不执行，历史观测与accepted/可信位置/速度/真实时间保留。[结构与监督](CTSEQTRACK_V38_DESIGN.md)。

@@ -6,8 +6,8 @@ import pytest
 import torch
 from torch import nn
 
-from models.ct_v31.observation import B0Observation
-from tests.test_ct_v31_joint import make_batch
+from models.ct_v38.observation import B0Observation
+from tests.helpers.synthetic_batch import make_batch
 from utils.masked_observation import masked_batch_norm, masked_sequence
 
 

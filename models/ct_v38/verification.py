@@ -4,8 +4,8 @@ import math
 import torch
 from torch import nn
 
-from models.ct_v31.observation import B0Observation, box_corners_xyz
-from models.ct_v36.verification import inside_final_boxes
+from .observation import B0Observation, box_corners_xyz
+from .geometry import inside_final_boxes
 from .contracts import VerificationOutput
 
 
@@ -168,8 +168,5 @@ class FinalBoxVerifier(nn.Module):
         feature = self.box_encoder(local.reshape(len(local), 3, 512))
         metadata = self.metadata(candidates, pool, inside, support, observation, batch, prior)
         logits = self.output(self.fusion(torch.cat((feature, metadata), -1)))
-        commit_support = torch.zeros_like(support)
-        commit_support[:, 0] = support[:, 0] & ~candidates.q0_is_fallback[:, None]
-        return VerificationOutput(logits, support.detach(), pool['ids'], pool['xyz'], pool['probability'],
-            authorized.detach(), metadata, commit_support_mask=commit_support,
-            support_source=pool['source'], **statistics)
+        return VerificationOutput(logits=logits, support_mask=support.detach(),
+                                  metadata=metadata, **statistics)

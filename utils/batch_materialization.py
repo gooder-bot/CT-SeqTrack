@@ -8,7 +8,6 @@ import torch
 
 _CACHE_KEY = '_ct_materialization_cache'
 _POINT_FIELDS = ('points', 'point_valid', 'point_ids', 'history_valid')
-_EXTENSION_FIELDS = ('extension_points', 'extension_valid', 'extension_ids')
 
 
 def _signature(values, fields):
@@ -61,10 +60,9 @@ class BatchMaterializationCache:
     """每类仅一条记录；原输入与 canonical 输出同时登记别名及版本。"""
     def __init__(self):
         self.point = None
-        self.extension = None
 
     def clear(self):
-        self.point = self.extension = None
+        self.point = None
 
     def _get(self, name, batch):
         record = getattr(self, name)
@@ -77,8 +75,8 @@ class BatchMaterializationCache:
         record = self._get('point', batch)
         return None if record is None else record.valid
 
-    def canonical_values(self, batch, *, extension=False):
-        record = self._get('extension' if extension else 'point', batch)
+    def canonical_values(self, batch):
+        record = self._get('point', batch)
         return None if record is None else record.canonical
 
     def remember_point_mask(self, batch, valid):
@@ -87,15 +85,15 @@ class BatchMaterializationCache:
             self.point = _Record(_POINT_FIELDS,
                 {key: batch.get(key) for key in _POINT_FIELDS}, signature, valid)
 
-    def remember_canonical(self, original, canonical, *, extension=False):
-        fields = _EXTENSION_FIELDS if extension else _POINT_FIELDS
+    def remember_canonical(self, original, canonical):
+        fields = _POINT_FIELDS
         signature, alias = _signature(original, fields), _signature(canonical, fields)
         if signature is None or alias is None:
             return
-        valid_key = 'extension_valid' if extension else 'point_valid'
+        valid_key = 'point_valid'
         record = _Record(fields, {key: original.get(key) for key in fields}, signature,
             canonical[valid_key], {key: canonical.get(key) for key in fields}, alias)
-        setattr(self, 'extension' if extension else 'point', record)
+        self.point = record
 
 
 def materialization_cache(batch):

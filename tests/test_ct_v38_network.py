@@ -6,13 +6,12 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from models.ct_v31.model import JointTracker as OriginalB1
-from models.ct_v31.losses import compute_losses as base_losses
-from models.ct_v38.config import normalize_config, as_v35_config, recipe_scope
+from models.ct_v38.base_losses import compute_losses as base_losses
+from models.ct_v38.config import normalize_config, recipe_scope
 from models.ct_v38.model import JointTracker, build_candidates, select_candidates
 from models.ct_v38.losses import supervision_targets, pairwise_gap_loss
 from models.ct_v38.verification import current_q0_support
-from tests.test_ct_v37_network import batch
+from tests.helpers.synthetic_batch import batch
 
 
 @pytest.fixture(autouse=True)
@@ -39,64 +38,8 @@ def values(b=2, n=16):
     return result
 
 
-def test_registered_b1_standard_retains_the_actual_strong_v37_concat_configuration():
-    from utils.config import load_yaml_config
-    from models.ct_v37.config import normalize_config as normalize_v37, as_v35_config as legacy_v37
-    from models.ct_v38.config import load_config
-    old = legacy_v37(normalize_v37(load_yaml_config('cfgs/ct_seqtrack/37_b1_dedup_concat_mini.yaml')))
-    new = as_v35_config(load_config('cfgs/ct_seqtrack/38_b1_standard_mini.yaml'))
-    identity_fields = {'cfg', 'tag', 'experiment_name'}
-    assert {key: value for key, value in old.items() if key not in identity_fields} == {
-        key: value for key, value in new.items() if key not in identity_fields}
 
 
-@pytest.mark.parametrize('arm', ['b1', 'full'])
-def test_common_b1_two_adam_steps_preserve_parameters_gradients_bn_rng_and_losses(arm):
-    cfg = config(arm)
-    torch.manual_seed(738)
-    old = OriginalB1(as_v35_config(cfg)).train()
-    old_rng = torch.get_rng_state().clone()
-    torch.manual_seed(738)
-    new = JointTracker(cfg).train()
-    assert torch.equal(old_rng, torch.get_rng_state())
-    for name, value in old.state_dict().items():
-        assert torch.equal(value, new.state_dict()[name]), name
-    if new.verifier is not None:
-        # 零头会掩盖上游梯度错误；此处从非零 B3 出口验证主路隔离。
-        torch.nn.init.normal_(new.verifier.output.weight, std=.1)
-    optimizers = [torch.optim.Adam(model.parameters(), lr=1.5e-4, betas=(.5, .999),
-        eps=1e-6, foreach=False) for model in (old, new)]
-    data = values()
-    for _ in range(2):
-        rng = torch.get_rng_state().clone()
-        results = []
-        for model, optimizer in zip((old, new), optimizers):
-            torch.set_rng_state(rng)
-            optimizer.zero_grad(set_to_none=True)
-            with recipe_scope(cfg):
-                output = model(data)
-                losses = model.compute_losses(data, output)
-            losses['loss_total'].backward()
-            gradients = {name: None if parameter.grad is None else parameter.grad.clone()
-                         for name, parameter in model.named_parameters()}
-            optimizer.step()
-            results.append((output, losses, gradients, torch.get_rng_state().clone()))
-        assert torch.equal(results[0][0].decoder.hypothesis_boxes, results[1][0].decoder.hypothesis_boxes)
-        assert torch.equal(results[0][0].prior.box, results[1][0].prior.box)
-        for name, loss in results[0][1].items():
-            if name != 'loss_total':
-                assert torch.equal(loss, results[1][1][name]), name
-        assert 'loss_acquisition' in results[1][1]
-        for name, gradient in results[0][2].items():
-            other = results[1][2][name]
-            assert (gradient is None and other is None) or torch.equal(gradient, other), name
-        assert torch.equal(results[0][3], results[1][3])
-        for name, value in old.state_dict().items():
-            assert torch.equal(value, new.state_dict()[name]), name
-        for name, parameter in old.named_parameters():
-            other = dict(new.named_parameters())[name]
-            for key, value in optimizers[0].state[parameter].items():
-                assert torch.equal(value, optimizers[1].state[other][key]), (name, key)
 
 
 def test_zero_heads_immediate_q0_tie_and_independent_legacy_quality():
@@ -105,7 +48,7 @@ def test_zero_heads_immediate_q0_tie_and_independent_legacy_quality():
     assert torch.equal(output.verification.logits, torch.zeros_like(output.verification.logits))
     assert output.selected_index.tolist() == [0, 0]
     assert output.verification.metadata.shape == (2, 3, 45)
-    assert torch.equal(output.legacy_q0_quality, output.decoder.quality_logits[:, 0].sigmoid())
+    assert torch.equal(output.legacy_q0_quality, output.decoder.q0_quality_logits.sigmoid())
     assert output.commit_quality[:, 1:].eq(0).all()
     assert output.commit_decision.trusted_score.eq(.5).all()
 
@@ -129,8 +72,8 @@ def test_nonzero_b3_loss_has_no_upstream_gradient_but_trains_reader():
 
 def test_candidate_dedup_wrap_tolerances_prior_legality_and_q0_alias():
     q0 = torch.tensor([[0., 0., 0., 0.], [4., 0., 0., 0.], [9., 0., 0., 0.]])
-    decoder = SimpleNamespace(hypothesis_boxes=q0[:, None].expand(-1, 4, -1).clone(),
-        quality_logits=torch.zeros(3, 4))
+    decoder = SimpleNamespace(q0_box=q0.clone(),
+        q0_quality_logits=torch.zeros(3))
     prior = SimpleNamespace(box=torch.tensor([[1e-5, 0., 0., 2*torch.pi],
         [1., 0., 0., 0.], [9., 0., 0., 0.]]), valid=torch.zeros(3, dtype=torch.bool))
     observation = SimpleNamespace(sequence_valid=torch.tensor([True, True, False]))
@@ -146,7 +89,7 @@ def test_candidate_dedup_wrap_tolerances_prior_legality_and_q0_alias():
 
 @pytest.mark.parametrize('xyz,yaw,duplicate', [(5e-5, 5e-6, True), (2e-4, 0., False), (0., 2e-5, False)])
 def test_registered_duplicate_thresholds_are_separate_for_xyz_and_wrapped_yaw(xyz, yaw, duplicate):
-    decoder = SimpleNamespace(hypothesis_boxes=torch.zeros(1, 4, 4), quality_logits=torch.zeros(1, 4))
+    decoder = SimpleNamespace(q0_box=torch.zeros(1, 4), q0_quality_logits=torch.zeros(1))
     prior = SimpleNamespace(box=torch.tensor([[xyz, 0., 0., yaw]]), valid=torch.tensor([False]))
     observation = SimpleNamespace(sequence_valid=torch.tensor([True]))
     candidates = build_candidates(decoder, observation, {'fallback_box': torch.ones(1, 4)}, prior)
@@ -283,20 +226,32 @@ def test_final_q0_reference_and_support_are_independent_of_unused_coarse_box():
     assert torch.equal(support['mask'], second.support_mask[:, 0])
 
 
-def test_gt_and_dead_extension_changes_do_not_change_prediction():
+def test_gt_changes_do_not_change_prediction():
     model, data = JointTracker(config()).eval(), values(1)
+    # 初始零出口会掩盖上游输入泄漏；先让所有有效分支参与前向。
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if name.endswith('weight') and parameter.ndim > 1 and bool(parameter.eq(0).all()):
+                parameter.normal_(0., .01)
     first = model(data)
     changed = copy.deepcopy(data)
-    for key in ('target_box', 'history_target_boxes', 'physical_displacement', 'segmentation_labels',
-                'bc_targets', 'extension_labels', 'acquisition_target'):
+    for key in ('target_box', 'target_box_size', 'history_target_boxes', 'physical_displacement',
+                'physical_valid', 'segmentation_labels', 'bc_targets', 'acquisition_target',
+                'acquisition_valid', 'acquisition_demand'):
         if key in changed:
-            changed[key].fill_(99)
-    changed['extension_points'].fill_(100.)
-    changed['memory_points'].fill_(100.)
+            changed[key].fill_(float('nan') if changed[key].is_floating_point() else 0)
     second = model(changed)
+    assert torch.equal(first.prior.feature, second.prior.feature)
+    assert torch.equal(first.prior.box, second.prior.box)
+    assert torch.equal(first.prior.acquisition_fraction, second.prior.acquisition_fraction)
+    assert torch.equal(first.observation.point_features, second.observation.point_features)
+    assert torch.equal(first.observation.coarse_box, second.observation.coarse_box)
     assert torch.equal(first.candidates.boxes, second.candidates.boxes)
+    assert torch.equal(first.verification.metadata, second.verification.metadata)
     assert torch.equal(first.verification.logits, second.verification.logits)
     assert torch.equal(first.verification.support_mask, second.verification.support_mask)
+    assert torch.equal(first.commit_decision.eligible, second.commit_decision.eligible)
+    assert torch.equal(first.accepted_box, second.accepted_box)
 
 
 def test_risk_metadata_and_invalid_velocity_age_are_finite_and_explicit():
@@ -327,7 +282,7 @@ def test_losses_record_weighted_endpoint_contributions_and_keep_original_quality
     output = model(data)
     output.loss_statistics = {}
     losses = model.compute_losses(data, output)
-    original = base_losses(data, output, enable_b1=True, enable_b2=False, enable_b3=False)
+    original = base_losses(data, output)
     assert torch.equal(losses['loss_quality'], original['loss_quality'])
     for name, weight in (('loss_success', .125), ('loss_precision', .125),
                          ('loss_ranking', .1), ('loss_trusted_write', .5)):

@@ -2,9 +2,9 @@
 import pytest
 import torch
 
-from models.ct_v31.model import canonicalize_batch
-from models.ct_v31.observation import B0Observation
-from tests.test_ct_v31_joint import make_batch
+from models.ct_v38.model import canonicalize_batch
+from models.ct_v38.observation import B0Observation
+from tests.helpers.synthetic_batch import make_batch
 from utils.batch_materialization import (attach_materialization_cache,
     clear_materialization_cache, materialization_cache)
 
@@ -14,7 +14,7 @@ def cached_batch():
 
 
 def test_original_and_canonical_aliases_reuse_validated_tensors(monkeypatch):
-    import models.ct_v31.observation as observation
+    import models.ct_v38.observation as observation
     original = observation.unique_valid_mask
     calls = []
     def counted(*args, **kwargs):
@@ -28,7 +28,7 @@ def test_original_and_canonical_aliases_reuse_validated_tensors(monkeypatch):
     second = canonicalize_batch(batch)
     third = canonicalize_batch(first)
     assert len(calls) == 1
-    for key in ('points', 'point_valid', 'extension_points', 'extension_valid'):
+    for key in ('points', 'point_valid'):
         assert first[key] is second[key] is third[key]
     assert B0Observation.measurement_mask(first) is first['point_valid']
     assert B0Observation.measurement_mask(batch) is first['point_valid']
@@ -66,20 +66,6 @@ def test_canonical_mutation_invalidates_original_and_rechecks_finite_values():
     assert torch.isfinite(fresh['points']).all()
 
 
-def test_extension_addition_and_replacement_do_not_discard_point_cache():
-    batch = cached_batch()
-    extension = {key: batch.pop(key) for key in list(batch) if key.startswith('extension_')}
-    before = canonicalize_batch(batch)
-    batch.update(extension)
-    after = canonicalize_batch(batch)
-    assert after['points'] is before['points']
-    assert 'extension_points' in after
-    batch['extension_points'] = batch['extension_points'].clone()
-    batch['extension_points'][0, 0, 0] += 5
-    newer = canonicalize_batch(batch)
-    assert newer['points'] is before['points']
-    assert newer['extension_points'] is not after['extension_points']
-    assert newer['extension_points'][0, 0, 0] == batch['extension_points'][0, 0, 0]
 
 
 def test_mask_only_cache_detects_mutated_returned_mask():
@@ -95,7 +81,7 @@ def test_clear_invalidates_copied_batch_sidecar_and_new_transactions():
     cache = materialization_cache(batch)
     clear_materialization_cache(batch)
     assert materialization_cache(batch) is None
-    assert cache.point is None and cache.extension is None
+    assert cache.point is None
     assert materialization_cache(prepared).canonical_values(prepared) is None
     attach_materialization_cache(batch, enabled=True)
     assert materialization_cache(batch) is not cache

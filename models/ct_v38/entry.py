@@ -12,9 +12,10 @@ import sys
 import time
 
 from .config import load_config, config_identity, normalize_config
-from .identity import model_schema, model_version, runtime_key
+from .identity import model_schema, model_version, runtime_key, RESUME_SCHEMA
 from utils.execution_profile import (EXECUTION_PROFILES, execution_identity,
                                      validate_execution_identity)
+from utils.time_config import TIME_MANIFEST_KEYS
 
 
 def batch_limit(value):
@@ -27,6 +28,9 @@ def parse_config(argv=None):
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
         parser.add_argument('--' + key)
+    for key in TIME_MANIFEST_KEYS[1:]:
+        parser.add_argument('--' + key, help='engineering-only manifest for its dataset role')
+    parser.add_argument('--dynamics_fixed_delta_t', type=float, help='engineering-only fixed interval')
     for key in ('batch_size', 'epoch', 'workers', 'seed', 'check_val_every_n_epoch', 'trainer_devices'):
         parser.add_argument('--' + key, type=int)
     parser.add_argument('--lr', type=float)
@@ -77,7 +81,7 @@ def resolve_run_directory(config):
     parent = Path('artifacts/ct_checks') if config.ct_engineering_check else Path('output')
     suffix = '-test' if config.test else ''
     version = model_version(config).removeprefix('v')
-    return (parent / f'{stamp}-{version}_{arm}-{config.tag}{suffix}').resolve()
+    return (parent / f'{stamp}-{version}_{config.v38_execution_revision}_{arm}-{config.tag}{suffix}').resolve()
 
 
 def write_json(path, value):
@@ -134,7 +138,7 @@ def write_resume_event(config, root, manifest):
     name = datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '-' + uuid.uuid4().hex + '.json'
     event_path = directory / name
     with event_path.open('x', encoding='utf-8') as stream:
-        json.dump(dict(schema='ct_seqtrack.v38.resume.v1', run_id=manifest['run_id'],
+        json.dump(dict(schema=RESUME_SCHEMA, run_id=manifest['run_id'],
             checkpoint=str(Path(config.checkpoint).resolve()), source=manifest['source'],
             config_sha256=config_identity(config)), stream, ensure_ascii=False, indent=2)
     return event_path
@@ -164,8 +168,7 @@ def initialization_identity(tracker):
             value.update(tensor.numpy().tobytes())
         return value.hexdigest()
     common = [(name, value) for name, value in state.items()
-        if (name.startswith('observation.') or name.startswith('decoder.'))
-        and not name.startswith(('decoder.memory_projection.', 'decoder.mode_pose_head.'))]
+        if name.startswith(('observation.', 'decoder.'))]
     prior = [(name, value) for name, value in state.items() if name.startswith('prior.')]
     if not common:
         raise ValueError('v38 common initialization group is empty')
@@ -243,7 +246,7 @@ def _run(config, *, loaders=None):
     manifest = dict(schema=model_schema(config), config_sha256=config_identity(config), git_head=revision,
                     model=config.net_model, seed=config.seed,
                     arm=config.v38_arm, temporal_backend=config.v31_temporal_backend,
-                    enabled=dict(B1=model.tracker.enable_b1, B2=model.tracker.enable_b2,
+                    enabled=dict(B1=True, B2=False,
                                  B3=model.tracker.enable_b3),
                     parameters=sum(p.numel() for p in model.parameters()),
                     torch=torch.__version__, lightning=pl.__version__, python=sys.version,

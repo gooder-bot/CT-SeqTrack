@@ -3,11 +3,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 
-STAGE_A = ('labels', 'pool', 'prior_read', 'geometry_gather', 'unique_mask', 'commit_indices')
+STAGE_A = ('unique_mask',)
 FACTORIZED = 'factorized_projection'
 OPTIONS = STAGE_A + (FACTORIZED,)
-# 删除prior行改变GEMM归约形状：已复现第二步梯度差异，不可进入严格A组合。
-KNOWN_NUMERICAL_OPTIONS = ('prior_read',)
+# 退役 B2/v37 专用实验开关由冻结源码保留。
+KNOWN_NUMERICAL_OPTIONS = ()
 _active = ContextVar('ct_execution_lab_options', default=frozenset())
 
 

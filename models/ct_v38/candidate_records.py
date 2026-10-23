@@ -3,10 +3,29 @@ import numpy as np
 import torch
 
 from utils.diagnostic_transfer import tensors_to_numpy
-from models.ct_v37.candidate_records import _geometry_both
+from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
+from .identity import CANDIDATE_SCHEMA
 
-CANDIDATE_RECORD_SCHEMA = 'ct_seqtrack.v38.candidate_records.v1'
+CANDIDATE_RECORD_SCHEMA = CANDIDATE_SCHEMA
 NAMES = ('q0', 'prior', 'trusted_propagation')
+
+
+def _geometry(prediction, target, size, target_size):
+    overlap, distance = box_metrics(LocalYawBox(prediction, size[[1, 0, 2]]),
+        LocalYawBox(target, target_size[[1, 0, 2]]), up_axis=(0, 0, 1),
+        mode='benchmark_compat', dim=3)
+    yaw = float(abs(np.arctan2(np.sin(prediction[3] - target[3]),
+                              np.cos(prediction[3] - target[3]))))
+    return dict(iou=overlap, center_error_m=distance,
+                center_xy_error_m=float(np.linalg.norm(prediction[:2] - target[:2])),
+                yaw_error_rad=yaw, axis_yaw_error_rad=min(yaw, np.pi - yaw))
+
+def _geometry_both(box, target, size, target_size):
+    result = _geometry(box, target, size, target_size)
+    result['exact_iou'] = box_metrics(LocalYawBox(box, size[[1, 0, 2]]),
+        LocalYawBox(target, target_size[[1, 0, 2]]), up_axis=(0, 0, 1), mode='geometry_exact', dim=3)[0]
+    result['success'], result['precision'] = metric_contributions(result['iou'], result['center_error_m'])
+    return result
 
 
 @torch.no_grad()

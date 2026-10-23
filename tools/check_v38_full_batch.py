@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if __package__ in (None, ''):
     sys.path.insert(0, str(ROOT))
 
-from tools.check_v35_batch import report_destination, gradient_summary, cuda_memory
+from tools._batch_check import report_destination, gradient_summary, cuda_memory
+from models.ct_v38.identity import SCHEMA, FULL_BATCH_SCHEMA
 
 
 def parse_args(argv=None):
@@ -106,11 +107,7 @@ def run_one_batch(config, device, report, *, loaders=None):
             report['training_diagnostics'] = model.training_diagnostics.summary(complete=False)
         report['batch'] = dict(shape=list(batch['points'].shape), dtype=str(batch['points'].dtype),
             valid_points_per_frame=batch['point_valid'].sum(-1).cpu().tolist(),
-            extension_points=batch['extension_valid'].sum(-1).cpu().tolist(),
-            memory_points=batch['memory_valid'].sum(-1).cpu().tolist(),
             sequence_valid=output.observation.sequence_valid.detach().cpu().tolist())
-        if bool(batch['extension_valid'].any()):
-            raise RuntimeError('v38 must never acquire extension points')
         model._pending_train = (output, batch, len(rows))
         report['stage'] = 'backward'
         started = time.perf_counter()
@@ -120,7 +117,7 @@ def run_one_batch(config, device, report, *, loaders=None):
         report['gradients'] = gradient_summary(model)
         # 稀疏首批允许某模块监督为空；记录覆盖，不能把合法零梯度判成故障。
         report['module_gradients'] = {}
-        for name in ('observation', 'prior', 'evidence', 'decoder', 'mode_decoder', 'verifier'):
+        for name in ('observation', 'prior', 'decoder', 'verifier'):
             if not hasattr(model.tracker, name):
                 continue
             module = getattr(model.tracker, name)
@@ -166,7 +163,7 @@ def main(argv=None):
     args = parse_args(argv)
     destination = report_destination(args.output, version=38)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    report = dict(schema='ct_seqtrack.v38.full_batch_check.v1', status='failed', stage='load_config',
+    report = dict(schema=FULL_BATCH_SCHEMA, status='failed', stage='load_config',
         device=args.device, checkpoint_saved=False, formal_training_requires_new_scratch_process=True,
         started_utc=datetime.now(timezone.utc).isoformat(), cuda_visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
         tool_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
@@ -179,7 +176,7 @@ def main(argv=None):
         if args.path is not None:
             overrides['path'] = args.path
         config = load_config(args.cfg, overrides)
-        report.update(model_schema='ct_seqtrack.selective_update.v38', config=dict(config),
+        report.update(model_schema=SCHEMA, config=dict(config),
             config_sha256=config_identity(config), source=source_identity())
         configure_numerics()
         import torch

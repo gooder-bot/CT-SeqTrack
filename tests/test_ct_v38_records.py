@@ -10,7 +10,7 @@ from models.ct_v38.data import BatchBuilder, RawEndpointDataset
 from models.ct_v38.losses import supervision_targets
 from models.ct_v38.model import JointTracker, build_candidates, select_candidates
 from models.ct_v38.runtime import TrackingEvaluation, reliability_summary, motion_slices
-from tests.test_ct_v31_runtime import TinySource, request
+from tests.helpers.raw_tracking import TinySource, request
 from tests.test_ct_v38_data import cfg
 
 
@@ -33,17 +33,17 @@ def case(*, selected=1, trusted_probability=.9, same_boxes=False, q0_real=True):
     model = JointTracker(config).eval()
     with torch.no_grad():
         prior = model.plan_prior(batch)
-        builder.acquire(batch, prior, training=False)
+        builder.supervise_prior(batch, prior, training=False)
         base = model(batch, prior)
-        decoder_boxes = base.decoder.hypothesis_boxes.clone()
+        decoder_boxes = base.decoder.q0_box.clone()
         # 仅测试合成：设已形成的 q0 等于标签，明确应有正 trusted 事件。
-        decoder_boxes[:, 0] = batch['target_box']
-        decoder = replace(base.decoder, hypothesis_boxes=decoder_boxes)
+        decoder_boxes[:] = batch['target_box']
+        decoder = replace(base.decoder, q0_box=decoder_boxes)
         observation = replace(base.observation,
             foreground_probability=torch.ones_like(base.observation.foreground_probability),
             sequence_valid=torch.tensor([q0_real]))
-        prior_box = decoder_boxes[:, 0].clone()
-        fallback_box = decoder_boxes[:, 0].clone()
+        prior_box = decoder_boxes.clone()
+        fallback_box = decoder_boxes.clone()
         if not same_boxes:
             prior_box[:, 0] += 3.
             fallback_box[:, 0] -= 3.
@@ -129,7 +129,7 @@ def test_full_evaluation_reports_unselected_q0_T_and_paired_oracle_without_extra
     assert report['trusted_reliability']['count'] == 1
     assert report['trusted_reliability']['positive'] == 1
     assert report['diagnostics']['erroneous_takeover'] == 1
-    assert report['diagnostics']['memory_writes'] == 0
+    assert 'memory_writes' not in report['diagnostics']
     assert report['same_state_oracle']['interpretation'] == 'passive_one_step_not_closed_loop'
     assert report['same_state_oracle']['success'] >= report['success']
     prediction = [row for row in evaluation.rows if not row['initialization']][0]

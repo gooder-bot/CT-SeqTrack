@@ -312,6 +312,11 @@ class BatchBuilder:
         if self._pending is None:
             raise RuntimeError('duplicate reference commit')
         predictions = output.accepted_box.detach().cpu().numpy()
+        # 全批先校验，再写 accepted 或曝光记录；后续坏行不能留下半批提交。
+        if predictions.shape != (len(self._pending), 4):
+            raise ValueError('reference accepted boxes must match pending rows as [B,4]')
+        if not np.isfinite(predictions).all():
+            raise FloatingPointError('nonfinite SeqTrack reference prediction')
         records = []
         for index, row in enumerate(self._pending):
             r = row['request']
@@ -321,8 +326,6 @@ class BatchBuilder:
             else:
                 first = row['first_frame']['3d_bbox']
                 value = predictions[index]
-                if not np.isfinite(value).all():
-                    raise FloatingPointError('nonfinite SeqTrack reference prediction')
                 self.states[r.state_key][r.frame] = Box(value[:3].copy(), first.wlh.copy(),
                     Quaternion(axis=[0, 0, 1], radians=float(value[3])))
                 # 只需要最新三框；缺失历史重复首帧只发生前三帧。

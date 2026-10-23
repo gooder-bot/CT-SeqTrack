@@ -1,5 +1,0 @@
-_base_: 37_b1_dedup_base.yaml
-experiment_name: ct37_b1_dedup_factorized_bs128_mini_car_scratch_seed42
-tag: v37_b1_dedup_factorized_bs128_mini_car_seed42
-v37_training_recipe: b1_factorized_bs128
-batch_size: 128

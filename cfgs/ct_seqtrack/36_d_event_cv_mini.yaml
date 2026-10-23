@@ -1,4 +1,0 @@
-_base_: 36_formal_base.yaml
-experiment_name: ct36_D_event_cv_mini_car_scratch_seed42
-tag: D_event_cv_mini_car_seed42_60ep_bs16
-v36_arm: D

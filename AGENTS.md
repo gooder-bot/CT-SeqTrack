@@ -1,5 +1,18 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-23 当前：v38 clean1（覆盖下方历史结构）
+
+- 最新用户要求：只在原 `CT-SeqTrack/` 维护和部署一套源码，不建立 `CT-SeqTrack-clean1` 目录；clean1 仅保留为执行身份。2026-10-23 22:13–22:14只读检查发现服务器原目录三组旧v38正在运行，结束前不得覆盖。服务器仍仅授权只读检查，上传与启停由用户操作。
+
+- 唯一活动路径为`models/ct_v38/`和独立`models/ctseqtrackv38.py`；不导入v31/v36/v37。旧算法及其专属配置/工具/测试已归档到14c3b2f完整快照。参考模型独立工程入口位于`models/seqtrack_reference/`。
+- 数据事务为prepare→plan_prior→supervise_prior→forward→Adam→commit；无identity memory、extension或mode字段。acquisition和q0 quality监督保留，全空q0仍参与quality BCE。
+- 保留32query/1024 B0 K/V、三个B3候选、原可信写入和相邻速度规则。三份38 YAML字节保持；新登记`38_clean1_registration.json`，旧`38_registration.json`不得刷新。
+- 用户确认数值边界：同seed有效初始化精确一致；FP64连续Adam、FP32同权重输出/梯度及新版自身恢复验证。compact FP32和自然dropout不承诺复现旧训练轨迹；不得为通过测试改BN/Adam数学或放宽容差。
+- 旧正式运行仅用对应源码，服务器由用户操作；本轮不上传、不启停、不新增正式训练。不读取TrajTrack。output及既有artifacts受保护，新报告进独立ct_checks目录。
+- 本地验证pytest、compileall和diff；真实CUDA及成对性能由用户执行。独立工具`benchmark_v38_clean1.py`支持旧/新源比较。详见[精简与恢复](docs/CTSEQTRACK_V38_CLEAN1.md)。
+
+以下为历史约定，不将其旧路径或阶段性服务器快照解释为当前状态。
+
 ## 2026-10-22 当前：v38 强 B1＋独立 B3
 
 - 新实现为 `models/ct_v38/`、`models/ctseqtrackv38.py`，由 `main.py` 分派。旧v37/配置/输出保留，不读取TrajTrack。用户本轮授权SSH只读检查；不上传、安装、启停任务或修改服务器文件。

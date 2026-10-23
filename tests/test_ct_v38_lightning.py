@@ -13,7 +13,7 @@ from models.ct_v38.config import normalize_config
 from models.ct_v38.data import build_loaders
 from models.ct_v38.entry import run
 from models.ctseqtrackv38 import CTSEQTRACKV38
-from tests.test_ct_v31_runtime import TinySource
+from tests.helpers.raw_tracking import TinySource
 from utils.lightning_runtime import FinalWindowCheckpoint
 
 
@@ -47,7 +47,7 @@ def test_actual_entry_saves_complete_checkpoint_and_standalone_eval_matches(arti
     root = run(config, loaders=build_loaders(config, roles=tuple(sources), sources=sources))
     checkpoint = root / 'formal_checkpoints' / 'epoch=001.ckpt'
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
-    runtime = saved['ct_v38_runtime']
+    runtime = saved['ct_v38_clean1_runtime']
     assert runtime['completed_epoch'] == 1 and runtime['epoch_complete']
     assert runtime['rows'] == 12 and runtime['optimizer_steps'] == 3
     assert saved['global_step'] == 3 and saved['lr_schedulers'][0]['last_epoch'] == 1
@@ -106,9 +106,9 @@ def test_actual_trainer_epoch10_to11_resume_is_bitwise_identical(artifact_root):
     interrupted.fit(first)
     checkpoint = artifact_root / 'resumed' / 'formal_checkpoints' / 'epoch=010.ckpt'
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
-    assert saved['ct_v38_runtime']['completed_epoch'] == 10
-    assert saved['ct_v38_runtime']['epoch_complete']
-    assert saved['ct_v38_runtime']['sampler']['epoch'] == 9
+    assert saved['ct_v38_clean1_runtime']['completed_epoch'] == 10
+    assert saved['ct_v38_clean1_runtime']['epoch_complete']
+    assert saved['ct_v38_clean1_runtime']['sampler']['epoch'] == 9
     assert saved['lr_schedulers'][0]['last_epoch'] == 10
     resumed, continuation, resumed_order = make(artifact_root / 'resumed')
     continuation.fit(resumed, ckpt_path=str(checkpoint))
@@ -119,8 +119,8 @@ def test_actual_trainer_epoch10_to11_resume_is_bitwise_identical(artifact_root):
                for _, _, _, requests in resumed_order.rows for request in requests)
     assert all(request.frame - request.window_start < 8
                for _, _, _, requests in resumed_order.rows for request in requests if request.branch == 3)
-    assert saved['ct_v38_runtime']['sampler']['schema'] == 'ct_seqtrack.v32.ready_queue.v2'
-    assert saved['ct_v38_runtime']['sampler']['initial_seed_policy'] == 'initial_exact_other_perturbed_v1'
+    assert saved['ct_v38_clean1_runtime']['sampler']['schema'] == 'ct_seqtrack.v32.ready_queue.v2'
+    assert saved['ct_v38_clean1_runtime']['sampler']['initial_seed_policy'] == 'initial_exact_other_perturbed_v1'
     assert all(torch.equal(value, resumed.state_dict()[key]) for key, value in expected.items())
     actual_optimizer = continuation.optimizers[0].state_dict()
     assert actual_optimizer['param_groups'] == expected_optimizer['param_groups']

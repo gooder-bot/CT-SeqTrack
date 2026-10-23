@@ -9,9 +9,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from models.ct_v31.cfc import FullGatedCfCCell
-from models.ct_v31.losses import seqtrack_segmentation_cross_entropy
-from models.ct_v31.motion import motion_aligned_axes, motion_aligned_covariance, physical_motion_uncertainty_loss
+from models.ct_v38.cfc import FullGatedCfCCell
+from models.ct_v38.base_losses import seqtrack_segmentation_cross_entropy
+from models.ct_v38.motion import motion_aligned_axes, motion_aligned_covariance, physical_motion_uncertainty_loss
 from models.attn.Modules import ScaledDotProductAttention
 from utils.masked_observation import masked_batch_norm, masked_max_pool
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions

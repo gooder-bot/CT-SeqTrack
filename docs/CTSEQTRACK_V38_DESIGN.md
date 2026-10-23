@@ -1,10 +1,12 @@
 # v38：强 B1 与独立 B3
 
+2026-10-23 clean1：当前实现、数值边界及历史恢复见[精简说明](CTSEQTRACK_V38_CLEAN1.md)。
+
 2026-10-22，按用户批准方案实施。新入口为 `main.py` → `models/ct_v38/entry.py`，宿主为 `models/ctseqtrackv38.py`。当前尚无 v38 正式成绩；本地合成检查不替代真实 nuScenes CUDA 检查。操作见 [三组启动页](CTSEQTRACK_V38_LAUNCH.md)。
 
 ## 主路与候选
 
-完整复用已复现的 concat B1：B0、V35 decoder、PhysicalTimePrior、W=1/4/4/8 课程、采样、BN 和主路监督。原 q0 quality 和 acquisition head/loss 均保留。B2 扩展取点、身份检索、vote、mode、相关损失不执行；identity memory 只保留全空兼容张量，不初始化或更新点记忆。accepted 历史、真实时间、可信位置/速度以及 B0 历史观测保留。
+完整复用已复现的 concat B1：独立迁入v38的B0、紧凑decoder、PhysicalTimePrior、W=1/4/4/8 课程、采样、BN 和主路监督。原 q0 quality 和 acquisition head/loss 均保留。B2 扩展取点、身份检索、vote、mode、相关损失不执行；clean1彻底删除identity memory与extension张量、投影及mode计算。accepted 历史、真实时间、可信位置/速度以及 B0 历史观测保留。
 
 B3 在单次 B1 forward 后读取 detached 候选、点特征、分割概率与状态，初始化放在独立 RNG scope 中。主路参数继续正常训练，不冻结。Full 的真实闭环允许因选择策略而与 B1 分叉；只要求相同输入/状态下主路数值与梯度合同成立。
 

@@ -268,7 +268,7 @@ def test_world_offset_and_empty_fallback_match_original_getoffsetbb():
 
 
 def test_eval_complete_recursive_frames_and_shared_metric_denominator():
-    from models.ct_v31.runtime import TrackingEvaluation
+    from models.seqtrack_reference.runtime import TrackingEvaluation
     source = TinyReferenceSource((4, 3, 1))
     loader = build_loaders(dict(workers=0, batch_size=2), roles=('test',), sources={'test': source})['test']
     builder, evaluator = BatchBuilder(), TrackingEvaluation()
@@ -315,12 +315,12 @@ def test_source_manifest_and_protocol_are_complete_and_isolated():
     assert (ROOT / 'LICENSE').read_text(encoding='utf-8').startswith('MIT License')
     for file in ROOT.rglob('*.py'):
         text = file.read_text(encoding='utf-8')
-        assert 'from models.ct_v31.observation' not in text
-        assert 'from models.ct_v31.model' not in text
+        assert 'from models.ct_v38.observation' not in text
+        assert 'from models.ct_v38.model' not in text
 
 
 def test_reference_and_production_source_identity_describe_same_raw_population():
-    from models.ct_v31.data import RawEndpointDataset
+    from models.ct_v38.data import RawEndpointDataset
     source = TinyReferenceSource()
     assert ReferenceDataset(source, training=True).source_sha256 == RawEndpointDataset(source).source_sha256
     source.tracklet_anno_list = [[{'t': 10. + t * .5} for t in range(n)] for n in source.lengths]

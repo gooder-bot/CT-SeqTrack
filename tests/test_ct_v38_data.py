@@ -6,12 +6,10 @@ import numpy as np
 import pytest
 import torch
 
-from models.ct_v31.data import BatchBuilder as LegacyBuilder
-from models.ct_v31.memory import RawIdentityMemory
-from models.ct_v38.config import normalize_config, as_v35_config, recipe_scope
-from models.ct_v38.data import BatchBuilder, EmptyIdentityMemory, RawEndpointDataset
-from tests.test_ct_v31_runtime import TinySource, request, fake_prior, fake_output
-from tests.test_ct_v34_resume import _assert_identical
+from models.ct_v38.config import normalize_config, recipe_scope
+from models.ct_v38.data import BatchBuilder, RawEndpointDataset
+from tests.helpers.raw_tracking import TinySource, request, fake_prior, fake_output
+from tests.helpers.assertions import _assert_identical
 
 
 RISK_KEYS = {'previous_is_propagation', 'consecutive_propagations',
@@ -49,54 +47,12 @@ def output_for(batch, *, selected=0, trusted=.9, legacy=.8, delta=0., probabilit
 def next_batch(builder, raw, frame):
     row = raw[request(frame)]
     batch = builder.prepare([row])
-    builder.acquire(batch, fake_prior(batch))
+    builder.supervise_prior(batch, fake_prior(batch))
     return row, batch
 
 
-@pytest.mark.parametrize('start', [1, 4])
-def test_b1_geometry_sampling_targets_and_state_equal_legacy(start):
-    config = cfg('b1')
-    new, old = BatchBuilder(config), LegacyBuilder(as_v35_config(config))
-    raw = RawEndpointDataset(TinySource())
-    for frame in range(start, start + 3):
-        row = raw[request(frame, start=start)]
-        a = new.prepare([deepcopy(row)])
-        with recipe_scope(config):
-            b = old.prepare([deepcopy(row)])
-        _assert_identical({k: v for k, v in a.items() if k not in MEMORY_KEYS | RISK_KEYS},
-                          {k: v for k, v in b.items() if k not in MEMORY_KEYS})
-        new.acquire(a, fake_prior(a))
-        with recipe_scope(config):
-            old.acquire(b, fake_prior(b))
-        _assert_identical({k: v for k, v in a.items() if k not in MEMORY_KEYS | RISK_KEYS},
-                          {k: v for k, v in b.items() if k not in MEMORY_KEYS})
-        out = fake_output(a, quality=.9 if frame % 2 else .1)
-        new.commit(out, a)
-        with recipe_scope(config):
-            old.commit(deepcopy(out), b)
-        left, right = new.states[row['request'].state_key], old.states[row['request'].state_key]
-        for key, value in vars(right).items():
-            if key != 'memory':
-                _assert_identical(getattr(left, key), value)
-        assert isinstance(left.memory, EmptyIdentityMemory)
-        assert not a['memory_valid'].any() and (a['memory_ids'] == -1).all()
 
 
-def test_no_identity_memory_initialization_or_write(monkeypatch):
-    def forbidden(*args, **kwargs):
-        raise AssertionError('v38 must never touch identity memory')
-    monkeypatch.setattr(RawIdentityMemory, 'initialize', forbidden)
-    monkeypatch.setattr(RawIdentityMemory, 'update', forbidden)
-    monkeypatch.setattr(RawIdentityMemory, 'export', forbidden)
-    for arm in ('b1', 'full'):
-        builder = BatchBuilder(cfg(arm))
-        _, batch = next_batch(builder, RawEndpointDataset(TinySource()), 1)
-        out = fake_output(batch) if arm == 'b1' else output_for(batch)
-        record = builder.commit(out, batch, diagnostics=True)[0]
-        assert not record['memory_write']
-        assert not batch['extension_valid'].any()
-        assert not batch['memory_valid'].any()
-        assert bool(batch['acquisition_valid'].all())
 
 
 def test_q0_prior_trusted_propagation_q0_separates_position_and_velocity():
@@ -201,8 +157,8 @@ def test_current_GT_never_enters_commit_and_next_crop_follows_selected_output():
     left = builder.commit(out, batch, diagnostics=True)
     right = alternative.commit(deepcopy(out), deepcopy(batch), diagnostics=True)
     assert left == right
-    _assert_identical(vars(builder.states[row['request'].state_key]) | {'memory': None},
-                      vars(alternative.states[row['request'].state_key]) | {'memory': None})
+    _assert_identical(vars(builder.states[row['request'].state_key]),
+                      vars(alternative.states[row['request'].state_key]))
     next_row = raw[request(2)]
     next_prepared = builder.prepare([next_row])
     expected = batch['anchor_box'][0].numpy().copy()
@@ -265,12 +221,61 @@ def test_bad_second_row_does_not_partially_commit_first_row():
     builder, raw = BatchBuilder(cfg()), RawEndpointDataset(TinySource())
     rows = [raw[request(1, track=track)] for track in (0, 1)]
     batch = builder.prepare(rows)
-    builder.acquire(batch, fake_prior(batch))
+    builder.supervise_prior(batch, fake_prior(batch))
     out = output_for(batch)
     out.commit_decision.eligible[1] = False
     with pytest.raises(ValueError, match='eligibility disagrees'):
         builder.commit(out, batch)
     assert all(state.next_frame == 1 and 1 not in state.boxes for state in builder.states.values())
+
+
+@pytest.mark.parametrize('arm', ['b1', 'full'])
+@pytest.mark.parametrize('bad', ['prior_fewer_rows', 'prior_wrong_width', 'prior_nan_second',
+    'prior_inf_second', 'probability_fewer_rows', 'probability_wrong_width', 'probability_wrong_time'])
+def test_malformed_commit_input_is_atomic_and_retryable(arm, bad):
+    builder, raw = BatchBuilder(cfg(arm)), RawEndpointDataset(TinySource())
+    rows = [raw[request(1, track=track)] for track in (0, 1)]
+    batch = builder.prepare(rows)
+    builder.supervise_prior(batch, fake_prior(batch))
+    pending = builder._pending
+    before = {key: deepcopy(vars(state)) for key, state in builder.states.items()}
+    good = output_for(batch)
+    out = deepcopy(good)
+    if bad == 'prior_fewer_rows':
+        out.prior.box = out.prior.box[:1]
+    elif bad == 'prior_wrong_width':
+        out.prior.box = out.prior.box[:, :3]
+    elif bad == 'prior_nan_second':
+        out.prior.box[1, 0] = float('nan')
+    elif bad == 'prior_inf_second':
+        out.prior.box[1, 3] = float('inf')
+    elif bad == 'probability_fewer_rows':
+        out.observation.foreground_probability = out.observation.foreground_probability[:1]
+    elif bad == 'probability_wrong_width':
+        out.observation.foreground_probability = out.observation.foreground_probability[..., :-1]
+    else:
+        out.observation.foreground_probability = out.observation.foreground_probability[:, :-1]
+    error = FloatingPointError if bad in ('prior_nan_second', 'prior_inf_second') else ValueError
+    with pytest.raises(error, match='prior|probability'):
+        builder.commit(out, batch)
+    assert builder._pending is pending
+    assert builder.states.keys() == before.keys()
+    for key, state in builder.states.items():
+        _assert_identical(vars(state), before[key])
+    # 异常整批不消费 pending；同一事务仍可用完整合法输出提交。
+    records = builder.commit(good, batch, diagnostics=True)
+    assert len(records) == 2 and builder._pending is None
+    assert all(state.next_frame == 2 and 1 in state.boxes for state in builder.states.values())
+
+
+def test_b1_nonfinite_foreground_probability_remains_unsupported():
+    builder, raw = BatchBuilder(cfg('b1')), RawEndpointDataset(TinySource())
+    row, batch = next_batch(builder, raw, 1)
+    out = fake_output(batch, quality=.9)
+    out.observation.foreground_probability[:, -1] = float('nan')
+    record = builder.commit(out, batch, diagnostics=True)[0]
+    assert record['geometric_fg_count'] == 0 and not record['supported']
+    assert builder.states[row['request'].state_key].next_frame == 2
 
 
 def test_thirty_two_low_confidence_propagations_keep_selected_crop_and_age_without_hold():
@@ -282,7 +287,7 @@ def test_thirty_two_low_confidence_propagations_keep_selected_crop_and_age_witho
     def prepare_frame(frame):
         row = raw[request(frame, branch=4, end=35)]
         batch = builder.prepare([row])
-        builder.acquire(batch, fake_prior(batch), training=False)
+        builder.supervise_prior(batch, fake_prior(batch), training=False)
         return row, batch
 
     row, batch = prepare_frame(1)
@@ -336,3 +341,15 @@ def test_thirty_two_low_confidence_propagations_keep_selected_crop_and_age_witho
     assert following['consecutive_propagations'].item() == 32
     assert following['consecutive_untrusted_outputs'].item() == 32
     assert following['supported_age'].item() == pytest.approx(33 * dt)
+
+
+@pytest.mark.parametrize('arm',['b1','full'])
+def test_transaction_has_no_b2_storage_or_compute_fields(arm):
+    builder=BatchBuilder(cfg(arm))
+    row,batch=next_batch(builder,RawEndpointDataset(TinySource()),1)
+    assert not any(key.startswith(('memory','extension')) for key in batch)
+    assert not hasattr(builder.states[row['request'].state_key], 'memory')
+    assert batch['acquisition_valid'].all()
+    out=fake_output(batch) if arm=='b1' else output_for(batch)
+    record=builder.commit(out,batch,diagnostics=True)[0]
+    assert not any(key.startswith(('memory','extension')) for key in record)

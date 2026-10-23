@@ -1,5 +1,4 @@
 """独立原 SeqTrack 网络与原 loss；运行适配见 README.md。"""
-from types import SimpleNamespace
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -287,7 +286,6 @@ class ReferenceTracker(_Base):
         output.selected_index = torch.zeros(len(local), dtype=torch.long, device=local.device)
         # 原模型无质量头：该占位仅供统一评测接口，不进入状态写入或 quality 指标。
         output.selected_quality = local.new_ones(len(local))
-        output.evidence = SimpleNamespace(mode_valid=None)
         return output
 
 

@@ -1,32 +1,13 @@
+# 已登记源码使用跨平台一致的LF字节；历史源从冻结快照复现。
 *.sh text eol=lf
-# 新B1登记递归覆盖执行源码；Windows/Linux上传保持同一字节身份。
 models/**/*.py text eol=lf
 datasets/**/*.py text eol=lf
 utils/**/*.py text eol=lf
-requirement.txt text eol=lf
-# 固定参考包的字节来源与运行身份，避免跨平台 checkout 改写换行后 SHA 漂移。
+tools/**/*.py text eol=lf
 models/seqtrack_reference/** text eol=lf
-# 本轮登记的执行源码保持跨 Windows/Linux 字节一致。
-models/ct_v31/config.py text eol=lf
-models/ct_v31/runtime.py text eol=lf
-models/ct_v31/candidate_records.py text eol=lf
-models/ct_v31/data.py text eol=lf
-# v36 source registration must survive Windows/Linux checkout without byte changes.
 main.py text eol=lf
-models/ct_v36/** text eol=lf
-models/ctseqtrackv36.py text eol=lf
-# v37 and its execution helpers are registered by content hash across platforms.
-models/ct_v37/** text eol=lf
-models/ctseqtrackv37.py text eol=lf
-models/ct_v31/** text eol=lf
-models/ctseqtrackv31.py text eol=lf
-utils/batch_materialization.py text eol=lf
-utils/diagnostic_transfer.py text eol=lf
-utils/execution_profile.py text eol=lf
-utils/feature_precision.py text eol=lf
-utils/raw_frame_memo.py text eol=lf
-utils/masked_observation.py text eol=lf
-# Frozen legacy blobs contain mixed/CRLF endings; retain their registered bytes.
+requirement.txt text eol=lf
+# 冻结的底层文件保持原始混合/CRLF字节，不重写其算法来源。
 datasets/data_classes.py -text
 models/attn/Layers.py -text
 models/attn/Modules.py -text
