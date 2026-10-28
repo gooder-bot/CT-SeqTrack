@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前服务器路径
 
+2026-10-28 当前为 [v39 两组 Full](CTSEQTRACK_V39_LAUNCH.md)，详细参数见[最新配置说明](CTSEQTRACK_V39_CONFIG.md)。项目仍为 `/home/lishengjie/study/lcyu/CT-SeqTrack`，mini 数据仍为 `/home/lishengjie/data/nuscenes-mini`。两组按用户要求同时使用物理 GPU0，OMP/MKL/OPENBLAS 各2、workers4、每轮验证，独立日期输出目录。
+
+目标独立环境为 `/home/lishengjie/miniconda3/envs/ctseqtrack3d`。最后只读核验时该名称尚未创建，已有可作为克隆来源的 `ctseqtrack_v39`（Python3.9.19、torch2.0.1+cu118、Lightning2.0.2、flash-attn2.5.8）；环境克隆命令见启动页。当前代理仅只读服务器，不上传、安装、改名或启停任务，最新本地源码与登记由用户上传。真实 CUDA batch、FA2 内核及两组并行显存尚未验证，不以 CPU 检查代替。下方所有旧版本运行安排和资源数字仅为历史记录。
+
 2026-10-22 当前安排为 [v38强B1＋独立B3三组](CTSEQTRACK_V38_LAUNCH.md)：B1 standard和B1 hold使用物理GPU1，Full使用物理GPU0；每进程单卡，val1，其余已登记参数保持。由用户上传完整源码及v38登记，执行一次真实CUDA Full batch检查及三组scratch；旧checkpoint仍使用对应源码。
 
 本轮20:28 SSH只读确认：项目 `/home/lishengjie/study/lcyu/CT-SeqTrack` 的HEAD为 `cc8458b`，尚无v38文件，没有CT训练进程。Python3.9.19、torch2.0.1+cu118、pytorch_lightning2.0.2、nuscenes-devkit1.1.9；mini metadata/samples/sweeps齐全，磁盘可用1492.11GiB。两张A40的GPU0/1分别空闲16,495/27,386MiB，有其他任务，资源会变化。未上传、安装、启停任务或修改远端文件。原始快照见 [server_readonly.json](../artifacts/ct_checks/20261022_v38_upload_readiness/server_readonly.json)，上传前结论见 [复核报告](../artifacts/ct_checks/20261022_v38_upload_readiness/REPORT.md)。以下旧GPU分配、尚未访问和资源数字均只作历史。

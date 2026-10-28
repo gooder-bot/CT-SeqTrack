@@ -1,0 +1,11 @@
+net_model: ctseqtrackv39
+experiment_family: ct_seqtrack_v39
+experiment_name: ct39_full_b_mini_car_scratch_seed42
+tag: v39_full_b_mini_car_seed42
+v39_arm: full
+v39_training_recipe: full_b
+lr: 0.0001
+lr_schedule: step
+lr_milestones: []
+lr_decay_step: 20
+lr_decay_rate: 0.2

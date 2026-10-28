@@ -1,5 +1,9 @@
 # CT-SeqTrack
 
+**2026-10-28：v39 已进入实现验收。** 新主线为 E＋B1＋M＋G＋自适应跟踪，所有模块从epoch1启用；两份 Full 仅学习率配方不同。用户最新要求新环境名`ctseqtrack3d`、OMP/MKL/OPENBLAS均为2、两组同GPU0并行，workers4和其他训练配方不变。[最新配置说明](docs/CTSEQTRACK_V39_CONFIG.md)已汇总固定参数；分别启动及新终端tail命令见 [v39操作页](docs/CTSEQTRACK_V39_LAUNCH.md)。服务器现仅只读检查，最新源码由用户上传；CUDA验收、正式成绩和速度结论仍待实际执行。以下v38及更早记录保留为历史。
+
+**2026-10-26 实验结论与 profile 已整理。** 原版 v38 三组均完成60轮、各71,700更新，原工具与逐帧审计通过。无B2的Full通过原R/C总体和运动双门：final60=52.0230/63.1313、late3=53.7629/65.4792；相对旧Full改善，但尚未稳定超过强B1，严重漂移仍增加。用户指定GPU0的小规模真实训练/推理profile已完成，主要热点包含CPU数据准备、acquisition标签和掩码/归约，不应只押FlashAttention。见[结果、性能与下一步决策](docs/CTSEQTRACK_V38_RESULTS_PROFILE_20261026.md)。本次没有修改模型、启动新正式训练或部署clean1；下方“尚无成绩”等均为当时记录。
+
 **2026-10-23 当前：v38 clean1。** 代码直接修改、部署在原 `CT-SeqTrack/`，只保留一套活动实现；clean1 是执行修订标识，不需要单独目录。 当前主线已从v31/v36/v37中抽出，B0/B1/B3独立运行；空memory、extension、旧mode计算及两个投影已删除。三份正式YAML保持，新登记为`38_clean1_registration.json`；旧checkpoint仍使用原源码。结构、数值边界、验证和历史恢复见 [本次精简说明](docs/CTSEQTRACK_V38_CLEAN1.md)。下方带日期的内容保留为历史记录，其中旧入口仅在对应冻结源码使用，不代表当前可执行工具或服务器状态。
 
 **2026-10-22 当前主线：v38 强 concat B1＋独立 B3。** B2 扩展点、身份记忆、vote、mode退出新主线；保留完整强 B1 学习路径、accepted历史、可信位置/速度、真实时间。B3 用S/P选框、独立T决定真实q0的可信写入，从第1轮启用。见 [设计说明](docs/CTSEQTRACK_V38_DESIGN.md) 和 [检查、启动、恢复、比较](docs/CTSEQTRACK_V38_LAUNCH.md)。

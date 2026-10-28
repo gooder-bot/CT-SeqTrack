@@ -1,5 +1,13 @@
 # CT-SeqTrack 工具范围
 
+## 2026-10-28 v39工具
+
+- `main.py` 单入口；`register_v39.py` 管理两组源码与配方登记。
+- `check_v39_full_batch.py` 验证真实CUDA生命周期、FA2调用、FP32主参数、几何双精度抽样误差和Adam后唯一提交；合成CPU模式不替代CUDA验收。
+- `benchmark_v39.py` 分离plain延迟和trace，比较两种执行配方并记录递推工作量差异；不把BF16下不同crop当作同张量因果加速。
+- 当前用户指定同GPU0并行，使用[v39操作页](CTSEQTRACK_V39_LAUNCH.md)两条独立nohup命令；`launch_v39_sequential.sh`仅保留为可选串行工具，不用于本轮并行启动。
+- `compare_v39.py` 只比较完整final60/late3，并核对两组source/初始化；两档和阈值曲线完整保留。详见[v39操作页](CTSEQTRACK_V39_LAUNCH.md)。
+
 ## 2026-10-23 当前v38 clean1工具
 
 - 当前入口`main.py`；五个v38工具为`launch_v38.sh`、`resume_v38.sh`、`check_v38_full_batch.py`、`compare_v38.py`、`register_v38.py`。登记只写新的`38_clean1_registration.json`，原登记不刷新。

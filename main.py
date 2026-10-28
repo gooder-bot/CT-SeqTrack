@@ -1,4 +1,4 @@
-"""CT-SeqTrack v38 clean1 与独立 SeqTrack reference 的单一入口。"""
+"""CT-SeqTrack v39、v38 clean1 与独立 SeqTrack reference 的单一入口。"""
 
 def main(argv=None):
     """历史实验须用其冻结源码，避免误用当前执行身份恢复。"""
@@ -12,12 +12,16 @@ def main(argv=None):
     model = load_yaml_config(known.cfg).get('net_model') if known.cfg else None
     if model in (None, 'ctseqtrackv38'):
         from models.ct_v38.entry import main as entry
+    elif model == 'ctseqtrackv39':
+        from models.ct_v39.entry import main as entry
     elif model == 'seqtrack_reference':
         from models.seqtrack_reference.entry import main as entry
     else:
         parser.error('retired/unknown model ' + repr(model) +
             '; historical experiments and checkpoints require their original frozen source. '
-            'See docs/HISTORY_EVIDENCE_INDEX.md. Current recipes: cfgs/ct_seqtrack/38_*_mini.yaml')
+            'See docs/HISTORY_EVIDENCE_INDEX.md. Current recipes: '
+            'cfgs/ct_seqtrack/39_full_a_mini.yaml and 39_full_b_mini.yaml; '
+            'v38 clean1: cfgs/ct_seqtrack/38_*_mini.yaml')
     return entry(arguments)
 
 

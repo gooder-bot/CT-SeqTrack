@@ -1,5 +1,11 @@
 # CT-SeqTrack 实验协议
 
+## 2026-10-28 v39 两组 Full
+
+本轮架构为E＋B1＋M＋G＋自适应，全部从epoch1启用；训练仍完整B0监督，25%整窗真实路由提交，1/4/4/8及10轮窗口课程保留。删除旧acquisition，M只做训练辅助。共同miniCar/seed42/batch16/scratch60、每轮精度档验证；A=1.5e-4、20/50×.1，B=1e-4、每20轮×.2；Adam、无warmup及初始化一致。
+
+正式登记为 `39_registration.json`。两组从零训练，不用工程权重；只允许同run完整epoch恢复，源码/配置/采样身份必须匹配。主比较final60/late3；58–60同时评测默认速度档，60轮扫描.8/.9/.95。完整报告两组，不挑最佳epoch，不增加正式消融组；不能用两种LR结果声称单独模块因果收益。用户最新指定CUDA验收/profile后两组同GPU0并行，OMP/MKL/OPENBLAS各2、workers4，其余配方保持。共享状态需写入性能报告。环境名`ctseqtrack3d`，代理仅只读服务器；实现及验收以[v39操作页](CTSEQTRACK_V39_LAUNCH.md)为准，下方为历史协议。
+
 ## 2026-10-23 clean1执行身份
 
 当前v38结构精简不改变三组scratch60/seed42/bs16/FP32及原final60/late3、R/C和运动保护口径。三份YAML保持，新执行revision为clean1，登记为`38_clean1_registration.json`。旧登记和checkpoint继续配原源码，禁止跨身份恢复；本次不新增正式训练。用户接受紧凑FP32数值轨迹差异，工程等价检查不能代替正式得分验证。见[结构与验收](CTSEQTRACK_V38_CLEAN1.md)。

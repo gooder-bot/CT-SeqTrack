@@ -1,5 +1,15 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-28 当前：v39（覆盖下方历史状态）
+
+- 用户已授权实现并部署 E＋B1＋M＋G＋自适应方案；活动入口 `main.py`，新代码 `models/ct_v39/`、`models/ctseqtrackv39.py`，复用 clean1 的强 B0/decoder。旧 v38 配方、登记、output 不改；旧 checkpoint 使用封存源码。
+- 所有模块/损失/策略从epoch1启用；1/4/4/8及10轮窗口课程保留。训练始终完整B0监督，25%整窗按预测轻重路由真实递推；teacher B0 不更新轻路径刷新时间。
+- 两组仅LR不同：A=1.5e-4、20/50×.1；B=1e-4、每20轮×.2。共同miniCar/seed42/batch16/scratch60，final60与late3，禁止挑最佳轮或跨配方恢复。
+- 用户最新要求服务器仅只读，后续源码由用户上传，代理不再上传、安装、改名或启停服务器进程。新独立环境名改为 `ctseqtrack3d`，已有 `ctseqtrack_v39` 只是先前创建的环境来源；公共 `seqtrack3d` 不升级。两组同物理GPU0并行，OMP/MKL/OPENBLAS各2，workers4不变。不得把旧串行辅助工具当成当前默认启动方式；并行容量尚待真实CUDA峰值确认。
+- 当前工具与部署说明见 `docs/CTSEQTRACK_V39_LAUNCH.md`；工程报告只写新的 `artifacts/ct_checks/`。新正式登记 `39_registration.json`，只在未有正式v39运行且实现变更时显式刷新。
+- 源码身份仅忽略明确退役的ct_v31/v36/v37，避免服务器残留旧文件影响新版本；其余未知Python文件仍纳入哈希。不得读取/修改冻结基线或TrajTrack。
+- 本地门为pytest、compileall、diff检查和v39登记；CUDA专项、真实batch及配对profile是正式启动前门。尚无v39精度或提速结论。
+
 ## 2026-10-23 当前：v38 clean1（覆盖下方历史结构）
 
 - 最新用户要求：只在原 `CT-SeqTrack/` 维护和部署一套源码，不建立 `CT-SeqTrack-clean1` 目录；clean1 仅保留为执行身份。2026-10-23 22:13–22:14只读检查发现服务器原目录三组旧v38正在运行，结束前不得覆盖。服务器仍仅授权只读检查，上传与启停由用户操作。
