@@ -4,13 +4,15 @@ from types import SimpleNamespace
 import subprocess
 import sys
 import os
+import gc
+import weakref
 
 import numpy as np
 import pytest
 import torch
 
 from models.ct_v39.profiling import StageRecorder, attach_stages
-from tools.benchmark_v39 import workload
+from tools.benchmark_v39 import workload, release_profile_memory
 
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -41,6 +43,27 @@ def test_nested_cpu_stage_self_time_does_not_double_count():
     assert outer['wall_ms']['total']>=child['wall_ms']['total']
     assert outer['self_wall_ms']['total']+child['self_wall_ms']['total']==pytest.approx(outer['wall_ms']['total'])
     assert 'cuda_stream_span_ms' not in outer
+
+
+def test_profile_cleanup_releases_wrapper_cycle_before_emptying_cuda_cache(monkeypatch):
+    """真实计时 wrapper 的 bound method 会保活 module，empty_cache 前应已释放。"""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        owner = torch.nn.Linear(2, 2)
+        recorder = StageRecorder('cpu')
+        recorder.wrap(owner, 'forward', 'linear')
+        reference = weakref.ref(owner)
+        del owner, recorder
+        assert reference() is not None
+        observed = []
+        monkeypatch.setattr(torch.cuda, 'empty_cache', lambda: observed.append(reference() is None))
+        release_profile_memory()
+        assert observed == [True]
+        assert reference() is None
+    finally:
+        if enabled:
+            gc.enable()
 
 
 def test_workload_hash_distinguishes_crop_work_from_endpoint_identity():

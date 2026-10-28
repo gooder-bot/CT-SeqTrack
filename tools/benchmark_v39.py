@@ -9,6 +9,7 @@ crop；本工具记录工作量差异，不把结果称为同张量算子的因�
 from contextlib import nullcontext
 from pathlib import Path
 import argparse
+import gc
 import hashlib
 import json
 import os
@@ -32,6 +33,16 @@ def parameter_hash(model):
     for name,value in model.named_parameters():
         digest.update(name.encode());digest.update(value.detach().cpu().contiguous().numpy().tobytes())
     return digest.hexdigest()
+
+
+def release_profile_memory():
+    """先释放方法 wrapper/MethodType 自引用，再清空 CUDA allocator 缓存。
+
+    empty_cache 不会释放循环垃圾中仍被持有的张量；两配方之间必须先 GC，
+    防止 reference 的参数和暂存张量污染 optimized 的显存峰值。
+    """
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def workload(tx, committed):
@@ -175,7 +186,7 @@ def main():
     for name,optimized in (('reference',False),('optimized',True)):
         results[name]=run(cfg,destination/name,optimized=optimized,steps=args.steps,warmup=args.warmup,
                           training=args.training,checkpoint=args.checkpoint,mode=args.inference_mode)
-        torch.cuda.empty_cache()
+        release_profile_memory()
     if results['reference']['initial_parameter_sha256'] != results['optimized']['initial_parameter_sha256']:
         raise RuntimeError('paired profiles did not start with identical parameters')
     endpoint_match=([w['endpoint_sha256'] for w in results['reference']['workloads']]
