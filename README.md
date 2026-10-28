@@ -1,6 +1,6 @@
 # CT-SeqTrack
 
-**2026-10-28：v39 已进入实现验收。** 新主线为 E＋B1＋M＋G＋自适应跟踪，所有模块从epoch1启用；两份 Full 仅学习率配方不同。用户最新要求新环境名`ctseqtrack3d`、OMP/MKL/OPENBLAS均为2、两组同GPU0并行，workers4和其他训练配方不变。[最新配置说明](docs/CTSEQTRACK_V39_CONFIG.md)已汇总固定参数；分别启动及新终端tail命令见 [v39操作页](docs/CTSEQTRACK_V39_LAUNCH.md)。服务器现仅只读检查，最新源码由用户上传；CUDA验收、正式成绩和速度结论仍待实际执行。以下v38及更早记录保留为历史。
+**2026-10-28：v39 已进入实现验收。** 新主线为 E＋B1＋M＋G＋自适应跟踪，所有模块从epoch1启用；两份 Full 仅学习率配方不同。用户最新要求新环境名`ctseqtrack3d`、OMP/MKL/OPENBLAS均为2、两组同GPU0并行，workers4和其他训练配方不变。[最新配置说明](docs/CTSEQTRACK_V39_CONFIG.md)已汇总固定参数；分别启动及新终端tail命令见 [v39操作页](docs/CTSEQTRACK_V39_LAUNCH.md)。用户本次已授权备份服务器源码并更新匹配的最新代码；CUDA验收、正式成绩和速度结论仍待实际执行。以下v38及更早记录保留为历史。
 
 **2026-10-26 实验结论与 profile 已整理。** 原版 v38 三组均完成60轮、各71,700更新，原工具与逐帧审计通过。无B2的Full通过原R/C总体和运动双门：final60=52.0230/63.1313、late3=53.7629/65.4792；相对旧Full改善，但尚未稳定超过强B1，严重漂移仍增加。用户指定GPU0的小规模真实训练/推理profile已完成，主要热点包含CPU数据准备、acquisition标签和掩码/归约，不应只押FlashAttention。见[结果、性能与下一步决策](docs/CTSEQTRACK_V38_RESULTS_PROFILE_20261026.md)。本次没有修改模型、启动新正式训练或部署clean1；下方“尚无成绩”等均为当时记录。
 

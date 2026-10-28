@@ -206,5 +206,5 @@
     "two runs compare full learning-rate schedules, not E/G/M training ablations",
     "registration does not imply successful training or measured gains"
   ],
-  "generator_sha256": "b5fc38a50afed758f471eec7b28458e4a953d7acebb7d7fe8efd5d8515ea0b39"
+  "generator_sha256": "fb26923ce291a475e536f5a20bd31179ec21e1304b419327e396c5370c3b3e33"
 }

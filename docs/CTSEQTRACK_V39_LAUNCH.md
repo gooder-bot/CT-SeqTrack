@@ -1,6 +1,8 @@
 # v39：E＋B1＋M＋G＋自适应跟踪
 
-2026-10-28 最新实施版。基础是本地 v38 clean1；所有新模块、损失和闭环策略从第一个 epoch 启用。1/4/4/8 与前10轮窗口课程保留，M 的2/4跨度独立于窗口长度。用户最新要求：环境名`ctseqtrack3d`，两组同GPU0并行，OMP/MKL/OPENBLAS各2，workers4及其他训练配方不变。服务器现仅只读检查，最新源码及新环境名由用户部署。详细参数见[配置说明](CTSEQTRACK_V39_CONFIG.md)。
+2026-10-28 部署修正：`git pull`若出现`Aborting`，只完成下载，工作目录仍可能是混合旧版。本次用户已授权代理备份服务器源码并更新到匹配的最新版；不自动启动GPU任务。`ctseqtrack3d`已由用户创建，无需再次克隆。真实batch和profile现在先校验源码登记，失败会列出具体差异文件；不得在服务器`--refresh`掩盖混合版本。
+
+2026-10-28 最新实施版。基础是本地 v38 clean1；所有新模块、损失和闭环策略从第一个 epoch 启用。1/4/4/8 与前10轮窗口课程保留，M 的2/4跨度独立于窗口长度。用户最新要求：环境名`ctseqtrack3d`，两组同GPU0并行，OMP/MKL/OPENBLAS各2，workers4及其他训练配方不变。用户已创建ctseqtrack3d，本次授权代理备份并更新服务器源码；GPU任务由用户执行。详细参数见[配置说明](CTSEQTRACK_V39_CONFIG.md)。
 
 ## 代码和事务
 
@@ -20,7 +22,7 @@
 
 ## 环境及验收
 
-最新环境目标：`/home/lishengjie/miniconda3/envs/ctseqtrack3d`。服务器已有环境来源`ctseqtrack_v39`，实测Python3.9.19 / torch2.0.1+cu118 / Lightning2.0.2 / flash-attn2.5.8，扩展可导入但尚未执行CUDA。按只读要求，代理没有执行本次改名。用户只需克隆到新名称一次，不直接`mv`含绝对前缀的Conda环境：
+最新环境目标：`/home/lishengjie/miniconda3/envs/ctseqtrack3d`。服务器已有环境来源`ctseqtrack_v39`，实测Python3.9.19 / torch2.0.1+cu118 / Lightning2.0.2 / flash-attn2.5.8，扩展可导入但尚未执行CUDA。用户现已创建新名称；下面仅保留首次尚未创建时的克隆命令，无需重复执行，不直接`mv`含绝对前缀的Conda环境：
 
 ```bash
 /home/lishengjie/miniconda3/bin/conda create -n ctseqtrack3d \
@@ -36,8 +38,8 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTORCH_CUDA_ALLOC_CONF=backend:native
 PYTHON=/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python
-$PYTHON tools/register_v39.py --verify
-$PYTHON tools/check_v39_full_batch.py --cfg cfgs/ct_seqtrack/39_full_a_mini.yaml --path /home/lishengjie/data/nuscenes-mini --device cuda:0 --threads 2
+$PYTHON tools/register_v39.py --verify && \
+$PYTHON tools/check_v39_full_batch.py --cfg cfgs/ct_seqtrack/39_full_a_mini.yaml --path /home/lishengjie/data/nuscenes-mini --device cuda:0 --threads 2 && \
 $PYTHON tools/benchmark_v39.py --path /home/lishengjie/data/nuscenes-mini --training --steps 12 --warmup 2 --output "artifacts/ct_checks/$(date +%Y%m%d-%H%M%S)-v39-paired-profile"
 ```
 

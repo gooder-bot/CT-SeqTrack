@@ -2,7 +2,7 @@
 
 2026-10-28 当前为 [v39 两组 Full](CTSEQTRACK_V39_LAUNCH.md)，详细参数见[最新配置说明](CTSEQTRACK_V39_CONFIG.md)。项目仍为 `/home/lishengjie/study/lcyu/CT-SeqTrack`，mini 数据仍为 `/home/lishengjie/data/nuscenes-mini`。两组按用户要求同时使用物理 GPU0，OMP/MKL/OPENBLAS 各2、workers4、每轮验证，独立日期输出目录。
 
-目标独立环境为 `/home/lishengjie/miniconda3/envs/ctseqtrack3d`。最后只读核验时该名称尚未创建，已有可作为克隆来源的 `ctseqtrack_v39`（Python3.9.19、torch2.0.1+cu118、Lightning2.0.2、flash-attn2.5.8）；环境克隆命令见启动页。当前代理仅只读服务器，不上传、安装、改名或启停任务，最新本地源码与登记由用户上传。真实 CUDA batch、FA2 内核及两组并行显存尚未验证，不以 CPU 检查代替。下方所有旧版本运行安排和资源数字仅为历史记录。
+独立环境 `/home/lishengjie/miniconda3/envs/ctseqtrack3d` 已由用户创建；此前克隆来源为 `ctseqtrack_v39`（Python3.9.19、torch2.0.1+cu118、Lightning2.0.2、flash-attn2.5.8）；环境克隆命令见启动页。用户本次授权代理备份服务器源码并更新匹配的最新版本；output、日志和环境保留，GPU任务由用户执行。真实 CUDA batch、FA2 内核及两组并行显存尚未验证，不以 CPU 检查代替。下方所有旧版本运行安排和资源数字仅为历史记录。
 
 2026-10-22 当前安排为 [v38强B1＋独立B3三组](CTSEQTRACK_V38_LAUNCH.md)：B1 standard和B1 hold使用物理GPU1，Full使用物理GPU0；每进程单卡，val1，其余已登记参数保持。由用户上传完整源码及v38登记，执行一次真实CUDA Full batch检查及三组scratch；旧checkpoint仍使用对应源码。
 

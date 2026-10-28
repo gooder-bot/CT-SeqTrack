@@ -2,7 +2,7 @@
 
 ## 2026-10-28 v39工具
 
-- `main.py` 单入口；`register_v39.py` 管理两组源码与配方登记。
+- `main.py` 单入口；`register_v39.py` 管理两组源码与配方登记，不匹配时列出 changed/missing/unexpected 文件。真实batch与profile在CUDA工作前共用这项只读校验，不自动刷新登记。
 - `check_v39_full_batch.py` 验证真实CUDA生命周期、FA2调用、FP32主参数、几何双精度抽样误差和Adam后唯一提交；合成CPU模式不替代CUDA验收。
 - `benchmark_v39.py` 分离plain延迟和trace，比较两种执行配方并记录递推工作量差异；不把BF16下不同crop当作同张量因果加速。
 - 当前用户指定同GPU0并行，使用[v39操作页](CTSEQTRACK_V39_LAUNCH.md)两条独立nohup命令；`launch_v39_sequential.sh`仅保留为可选串行工具，不用于本轮并行启动。
