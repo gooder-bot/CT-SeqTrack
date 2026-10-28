@@ -36,6 +36,35 @@ def build_registration():
         generator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
 
 
+def verify_registration(path=None):
+    """只读验证完整部署，给出具体差异文件；不得通过刷新掩盖混合版本。"""
+    path = ROOT / 'cfgs/ct_seqtrack' / REGISTRATION_FILE if path is None else Path(path)
+    registered = json.loads(path.read_text(encoding='utf-8'))
+    actual = build_registration()
+    if registered != actual:
+        changed = sorted(key for key in registered.keys() | actual.keys()
+                         if registered.get(key) != actual.get(key))
+        details = ['v39 registration mismatch: ' + ', '.join(changed)]
+        if 'source' in changed:
+            expected_source, actual_source = registered.get('source', {}), actual['source']
+            expected_files = expected_source.get('files', {})
+            actual_files = actual_source['files']
+            details.extend(['registered source: ' + str(expected_source.get('sha256')),
+                            'actual source: ' + actual_source['sha256']])
+            differences = {
+                'changed': sorted(name for name in expected_files.keys() & actual_files.keys()
+                                  if expected_files[name] != actual_files[name]),
+                'missing': sorted(expected_files.keys() - actual_files.keys()),
+                'unexpected': sorted(actual_files.keys() - expected_files.keys()),
+            }
+            for kind, names in differences.items():
+                details.extend(kind + ': ' + name for name in names)
+        details.append('deploy the matching source AND cfgs/ct_seqtrack/39_registration.json; '
+                       'do not refresh to hide drift')
+        raise ValueError('\n'.join(details))
+    return actual
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     action = parser.add_mutually_exclusive_group()
@@ -44,13 +73,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     path = ROOT / 'cfgs/ct_seqtrack' / REGISTRATION_FILE
     if args.verify:
-        registered = json.loads(path.read_text(encoding='utf-8'))
-        actual = build_registration()
-        if registered != actual:
-            changed = sorted(key for key in registered.keys() | actual.keys()
-                             if registered.get(key) != actual.get(key))
-            raise ValueError('v39 registration mismatch: ' + ', '.join(changed)
-                             + '; deploy the matching source; do not refresh to hide drift')
+        actual = verify_registration(path)
         print(json.dumps(dict(status='verified', path=str(path), recipes=list(RECIPES),
                               source_sha256=actual['source']['sha256']), ensure_ascii=False))
         return

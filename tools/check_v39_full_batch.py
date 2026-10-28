@@ -412,6 +412,11 @@ def main(argv=None):
         from models.ct_v39.config import load_config, config_identity
         from models.ct_v39.entry import configure_numerics, source_identity
         original = load_config(args.cfg)
+        if not args.synthetic:
+            # 正式数据验收必须先确认完整部署；合成工程检查允许未登记的工作树。
+            report['stage'] = 'verify_registration'
+            from tools.register_v39 import verify_registration
+            report['registered_source_sha256'] = verify_registration()['source']['sha256']
         report['registered_config_sha256'] = config_identity(original)
         overrides = dict(ct_engineering_check=True, log_dir=str(destination.parent), v31_evaluate_late3=False,
             batch_size=args.batch_size, accelerator='cpu' if args.device == 'cpu' else 'gpu')
@@ -435,7 +440,10 @@ def main(argv=None):
         with destination.open('x', encoding='utf-8') as stream:
             json.dump(report, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.write('\n')
-    print(json.dumps(dict(status=report['status'], stage=report['stage'], report=str(destination)), ensure_ascii=False))
+    summary = dict(status=report['status'], stage=report['stage'], report=str(destination))
+    if report['status'] != 'passed':
+        summary.update(error_type=report.get('error_type'), error=report.get('error'))
+    print(json.dumps(summary, ensure_ascii=False))
     return 0 if report['status'] == 'passed' else 1
 
 

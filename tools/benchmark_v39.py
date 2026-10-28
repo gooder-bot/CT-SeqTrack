@@ -165,6 +165,8 @@ def main():
     if args.path: cfg.path=args.path
     if args.inference_mode=='adaptive' and (args.training or not args.checkpoint):
         parser.error('adaptive profile requires an evaluated checkpoint and cannot use --training')
+    from tools.register_v39 import verify_registration
+    verify_registration()
     from models.ct_v39.entry import apply_device_selection, configure_numerics
     apply_device_selection(cfg);configure_numerics()
     if not torch.cuda.is_available(): parser.error('paired FA2 profiling requires CUDA')
