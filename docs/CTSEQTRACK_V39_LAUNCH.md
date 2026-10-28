@@ -1,10 +1,14 @@
 # v39：E＋B1＋M＋G＋自适应跟踪
 
+**2026-10-28 最终工程验收通过，可以启动下方两组正式实验。** 服务器相关测试72项全部通过（含4项实际CUDA验收，无跳过）；真实A连续8个batch通过；`main.py`实际Lightning训练、验证、日志和checkpoint流程通过；A/B同卡并行各8个真实batch均通过，初始参数hash一致，无OOM，包含其他任务时最小空闲13537MiB。工程权重已丢弃，正式训练尚未启动。
+
+配对profile已完成并修复两段之间的模型循环引用释放：同一v39的dense/FP32/math与packed/BF16/FA2，batch中位时间3.216s/2.987s，p95为4.190s/3.078s，峰值allocated为9.661/4.025GiB；optimized实际FA2调用126次。该结果来自共享GPU、短程随机初始化，后续crop工作量存在差异，不作为独占提速、旧v38“51%已消除”或训练成绩结论。原始验收目录：`artifacts/ct_checks/v39_readiness_20261028-151545/`，采用`paired_profile_final/paired.json`。
+
 2026-10-28 部署修正：`git pull`若出现`Aborting`，只完成下载，工作目录仍可能是混合旧版。本次用户已授权代理备份服务器源码并更新到匹配的最新版；不自动启动GPU任务。`ctseqtrack3d`已由用户创建，无需再次克隆。真实batch和profile现在先校验源码登记，失败会列出具体差异文件；不得在服务器`--refresh`掩盖混合版本。
 
 同日BF16验收修正：G的Linear实际使用BF16，但LayerNorm后的编码出口为FP32；旧检查错误地把出口dtype当作计算精度。工具现按逐层Linear审计，并保留FP32分类/几何边界。该修正不改训练配方、模型参数或源码身份。用户已授权修复所需的短时CUDA验证与Git部署，正式训练仍由用户启动。
 
-**15:08 CUDA验收已通过。** GPU0、ctseqtrack3d、batch16/1024点的真实nuScenes前向/反传/Adam/提交全部通过，FA2实际调用9次；G精度专项9项通过。报告：`artifacts/ct_checks/v39_bf16_fix_20261028-150840/full_batch.json`。源码48f072d9…未变；下一步执行配对profile，不必为本次检查器修复重跑已通过的同一batch。
+**15:08 CUDA验收已通过。** GPU0、ctseqtrack3d、batch16/1024点的真实nuScenes前向/反传/Adam/提交全部通过，FA2实际调用9次；G精度专项9项通过。报告：`artifacts/ct_checks/v39_bf16_fix_20261028-150840/full_batch.json`。源码48f072d9…未变；后续完整验收见本页最上方，此处保留单批记录供回溯。
 
 2026-10-28 最新实施版。基础是本地 v38 clean1；所有新模块、损失和闭环策略从第一个 epoch 启用。1/4/4/8 与前10轮窗口课程保留，M 的2/4跨度独立于窗口长度。用户最新要求：环境名`ctseqtrack3d`，两组同GPU0并行，OMP/MKL/OPENBLAS各2，workers4及其他训练配方不变。用户已创建ctseqtrack3d，本次授权代理备份并更新服务器源码；GPU任务由用户执行。详细参数见[配置说明](CTSEQTRACK_V39_CONFIG.md)。
 
@@ -33,7 +37,7 @@
   --clone /home/lishengjie/miniconda3/envs/ctseqtrack_v39 -y
 ```
 
-公共`seqtrack3d`不升级。正式特征BF16，主参数/Adam/B1/BN统计/几何/回归及损失FP32。上传本地完整代码与`39_registration.json`后，首次启动前完成一次真实CUDA检查及profile：
+公共`seqtrack3d`不升级。正式特征BF16，主参数/Adam/B1/BN统计/几何/回归及损失FP32。以下命令供重新部署后复查；本轮已完成，无需在正式启动前重复：
 
 ```bash
 cd /home/lishengjie/study/lcyu/CT-SeqTrack
@@ -49,7 +53,7 @@ $PYTHON tools/benchmark_v39.py --path /home/lishengjie/data/nuscenes-mini --trai
 
 工程产物只写`artifacts/ct_checks/`。完整batch检查会确认实际FA2函数调用、QKV BF16、有限梯度、FP32出口、Adam后提交和GPU/CPU几何审计。FA2数值参考与packing专项可运行`python -m pytest -q tests/test_ct_v39_efficiency.py`，CUDA项skip不能算已通过。配对profile使用相同初始化与端点顺序；BF16及递推可能改变crop工作量，因此记录端点和工作量hash，不宣称同张量因果提速。plain计时与单独trace分离；包含原云、准备、搜索、模型、损失、Adam和提交。正式权重另测推理可传`--checkpoint`，速度档加`--inference-mode adaptive`。
 
-**真实CUDA单批验收已通过，配对profile仍待运行。** 此次单批峰值allocated约3382MiB、reserved约4020MiB；这不是完整训练最坏峰值或双进程并行容量证明。共享GPU时间必须标注共享状态。工具不自动改batch、学习率或网络来迁就显存。
+本轮CUDA专项、连续batch、实际入口、配对profile和双进程短程检查均已完成，不必重复上述检查。并行A/B各自峰值allocated约4231MiB，reserved分别6814/8302MiB；短程容量不代表全60轮的绝对最坏峰值。共享GPU时间必须标注共享状态，batch、学习率和网络参数保持原方案。
 
 CPU 合成工具只验证生命周期，不提供真实 nuScenes 精度或 FA2 速度证据。旧 v38 源码封存于 `artifacts/ct_checks/20261028_v39_implementation/baseline_v38_clean1.zip`，旧产物和旧登记不改；旧 checkpoint 必须配对应源代码。
 

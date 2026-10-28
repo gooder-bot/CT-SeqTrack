@@ -6,7 +6,7 @@
 - [x] 两组Full配方、严格恢复身份、真实batch检查、配对profile、双档late3和阈值扫描工具；只比较固定final60/late3。
 - [x] 已建立独立FA2 2.5.8环境来源`ctseqtrack_v39`，Python3.9/torch2.0.1/Lightning2.0.2；用户已克隆为要求的新名字`ctseqtrack3d`。
 - [x] 15:08真实CUDA batch16/1024点前向、反传、Adam和提交通过，FA2实际调用9次，G精度专项9项通过；已修复将LayerNorm的FP32出口误判为未启用BF16的检查器问题。
-- [ ] 配对profile与两组并行容量确认；单批通过不等于完整训练最坏峰值或提速结论。
+- [x] GPU0相关测试72项（CUDA项无跳过）、A连续8batch、main.py实际训练/验证/日志/checkpoint及A/B同卡各8batch均通过；配对profile完成，段间循环引用显存残留已修复。完整训练最坏峰值与独占提速仍不作保证。
 - [ ] 按用户最新要求，同GPU0并行启动A/B两组scratch60，三个线程上限均2、workers4，分别新建带日期目录；正式结果尚未产生。
 - [ ] 60轮结果按总体/运动门、late3、严重漂移和恢复统计验收，完整保留两组。
 
