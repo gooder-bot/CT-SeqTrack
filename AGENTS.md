@@ -2,6 +2,8 @@
 
 ## 2026-10-28 当前：v39（覆盖下方历史状态）
 
+- 用户后续要求修复真实CUDA验收报错并同步本地/Git/服务器；允许为该修复进行短时CUDA检查，不启动正式训练。G精度审计应观察隐藏Linear的BF16与输出Linear的FP32；LayerNorm后的FP32特征不能被误判为BF16未执行。
+
 - 本次追加授权：用户明确要求上传最新版并解决服务器 `git pull` 被残留源码阻挡的问题。允许备份服务器源码改动、更新 Git 和部署匹配登记；保留 output、日志和环境，不自动启动训练。此授权覆盖下方此前“仅只读”的部署限制；CUDA检查/profile/训练命令仍交用户执行。
 
 - 用户已授权实现并部署 E＋B1＋M＋G＋自适应方案；活动入口 `main.py`，新代码 `models/ct_v39/`、`models/ctseqtrackv39.py`，复用 clean1 的强 B0/decoder。旧 v38 配方、登记、output 不改；旧 checkpoint 使用封存源码。

@@ -81,6 +81,56 @@ class BackendAudit:
         self.module._flash_varlen = self.original
 
 
+class GPrecisionAudit:
+    """核验实际 Linear 输出；LayerNorm 的 FP32 出口不代表 BF16 未执行。"""
+    def __init__(self, module):
+        self.module = module
+        self.records = {}
+        self.handles = []
+
+    def __enter__(self):
+        import torch
+        for group_name in ('edge_mlp', 'point_projection', 'targetness', 'head'):
+            group = getattr(self.module, group_name)
+            last = tuple(group.children())[-1]
+            for child_name, layer in group.named_modules():
+                if not isinstance(layer, (torch.nn.Linear, torch.nn.LayerNorm)):
+                    continue
+                name = group_name + '.' + child_name
+                role = ('normalization' if isinstance(layer, torch.nn.LayerNorm) else
+                        'fp32_output' if group_name in ('targetness', 'head') and layer is last else
+                        'feature_linear')
+                self.records[name] = dict(role=role, calls=0, dtypes=set())
+                def record(module, args, output, name=name):
+                    row = self.records[name]
+                    row['calls'] += 1
+                    row['dtypes'].add(str(output.dtype))
+                self.handles.append(layer.register_forward_hook(record))
+        return self
+
+    def summary(self):
+        return {name: dict(role=row['role'], calls=row['calls'], dtypes=sorted(row['dtypes']))
+                for name, row in self.records.items()}
+
+    def assert_bf16(self):
+        encoder = [name for name, row in self.records.items() if row['role'] == 'feature_linear'
+                   and name.startswith(('edge_mlp.', 'point_projection.'))]
+        if not encoder or any(self.records[name]['calls'] == 0 for name in encoder):
+            raise RuntimeError('G BF16 audit did not observe every encoder Linear')
+        for name, row in self.records.items():
+            if row['calls'] == 0 or row['role'] == 'normalization':
+                continue
+            expected = 'torch.bfloat16' if row['role'] == 'feature_linear' else 'torch.float32'
+            if row['dtypes'] != {expected}:
+                raise RuntimeError('G precision mismatch at ' + name + ': expected ' + expected
+                                   + ', observed ' + ', '.join(sorted(row['dtypes'])))
+
+    def __exit__(self, *args):
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+
+
 def audit_tensor_geometry(output, transaction, *, maximum_endpoints=4, tolerance=2e-4):
     """仅首批小样本回 CPU double 审计；不改变训练标签或任何在线决策。"""
     import numpy as np
@@ -269,7 +319,7 @@ def run_check(config, args, report, destination):
             activities.append(torch.profiler.ProfilerActivity.CUDA)
         profiler_context = (torch.profiler.profile(activities=activities, record_shapes=True, profile_memory=True)
                             if args.profile else nullcontext())
-        with BackendAudit() as backend, profiler_context as profiler:
+        with BackendAudit() as backend, GPrecisionAudit(host.tracker.g) as g_precision, profiler_context as profiler:
             for step in range(args.steps):
                 current = dict(step=step + 1, timing={})
                 report['batches'].append(current)
@@ -312,14 +362,15 @@ def run_check(config, args, report, destination):
                     policy_full=output.policy_full.cpu().tolist(),
                     trusted_write=output.commit_decision.eligible.cpu().tolist(),
                     search_triggered=output.search_triggered.cpu().tolist())
+                report['stage'] = f'step{step+1}:precision_audit'
                 current['precision'] = dict(g_features=str(output.verification['encoded_pool']['features'].dtype),
                     g_logits=str(output.verification['logits'].dtype),
-                    boxes=str(output.accepted_box.dtype), prior=str(output.prior.mean_xy.dtype))
+                    boxes=str(output.accepted_box.dtype), prior=str(output.prior.mean_xy.dtype),
+                    g_operators=g_precision.summary())
                 if current['precision']['g_logits'] != 'torch.float32':
                     raise RuntimeError('G logits must remain FP32')
                 if config.v39_feature_bf16 and bool(output.pool['valid'].any()):
-                    if current['precision']['g_features'] != 'torch.bfloat16':
-                        raise RuntimeError('requested G feature BF16 was not exercised')
+                    g_precision.assert_bf16()
                 if step == 0:
                     report['stage'] = 'step1:geometry_audit'
                     report['geometry_audit'] = timed('geometry_audit',

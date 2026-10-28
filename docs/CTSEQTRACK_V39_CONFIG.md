@@ -54,6 +54,7 @@ B0原损失保留；B1 physical/sigma=.1/.05；删除acquisition .05，加入M .
 
 ## 已修复的兼容与契约问题
 
+- G混合精度验收按实际算子区分：隐藏Linear输出BF16，LayerNorm遵循autocast使用FP32，分类/质量出口保持FP32。不能因LayerNorm后的特征为FP32就判定BF16未启用；完整batch工具记录逐层dtype并核验真正的Linear执行精度，不改变模型或强制量化出口。[PyTorch2.0.1 autocast源码](https://github.com/pytorch/pytorch/blob/v2.0.1/aten/src/ATen/autocast_mode.cpp#L323-L379)
 - PyTorch2.0 SDPA无`scale`关键字：采用等价Q预缩放，注册head64/temperature8时缩放为1。
 - PyTorch2.0.1的CUDA `scatter_reduce(amax)`会在严格确定性模式报错（[官方源码](https://github.com/pytorch/pytorch/blob/v2.0.1/aten/src/ATen/native/cuda/ScatterGatherKernel.cu#L470-L485)）：恢复投票改为稳定分组后的`segment_reduce(max)`，CPU与原实现逐值相同；真实batch工具强制执行非空双峰恢复审计，避免随机batch未触发恢复而漏验。
 - PyTorch2.0 CPU oneDNN GELU反向对特定非连续梯度异常：CPU梯度连续化，CUDA前向/参数和checkpoint不变。
