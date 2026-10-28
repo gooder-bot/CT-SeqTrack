@@ -60,6 +60,6 @@ B0原损失保留；B1 physical/sigma=.1/.05；删除acquisition .05，加入M .
 - PyTorch2.0 CPU oneDNN GELU反向对特定非连续梯度异常：CPU梯度连续化，CUDA前向/参数和checkpoint不变。
 - FP32 packing不宣称逐元素bitwise等价；FP64输出/输入和参数梯度严格对照，FP32相对FP64的L2/L∞参数梯度误差门为1e-4，输出/输入梯度与BN检查保持。
 - 整云世界坐标提前FP32量化、未来缺标删除当前样本、恢复期间使用不可信边、teacher Full刷新轻路径时间、空恢复稀释loss、占位q0误算恢复均有对应实现修正/回归检查。
-- 原二维NLL、整数排序/计数、唯一raw ID、全空attention、退化拟合、原子提交及epoch-boundary身份规则保留。正式CUDA仍需真实运行验证，不能承诺从未执行的内核零报错。
+- 原二维NLL、整数排序/计数、唯一raw ID、全空attention、退化拟合、原子提交及epoch-boundary身份规则保留。15:08正式默认值的真实CUDA单批生命周期已通过；单批验收不等于全60轮或全部边界场景验证。
 
 环境创建、一次CUDA检查、两条独立后台训练与新终端tail命令见[启动页](CTSEQTRACK_V39_LAUNCH.md)。
