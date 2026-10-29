@@ -1,3 +1,9 @@
+# 2026-10-29：V40 已实现，待服务器运行验收
+
+当前新主线为 **v38clean1 dense B0＋窄 FlashAttention＋B1 MTP＋Full 独立搜索保护**。四组 mini 配置：`40_b0_mini.yaml`、`40_b1_mini.yaml`、`40_b1_mtp_mini.yaml`、`40_full_mini.yaml`，统一经 `main.py --cfg cfgs/ct_seqtrack/40_..._mini.yaml` 运行。
+
+见 [设计及解释边界](docs/CTSEQTRACK_V40_DESIGN.md) 与 [服务器验收、独立日期启动命令](docs/CTSEQTRACK_V40_LAUNCH.md)。**本机按用户要求未运行环境检查、测试、编译或训练；没有V40成绩或性能结论。** 后续只读服务器检查确认V40未部署、并发检查缺pynvml；已修复验证inference模式导致事务缓存不复用的静态缺口。用户上传后先执行六类服务器验收，工程权重丢弃，最新安排先GPU0并行B1 MTP+Full，B0/B1以后补齐。下面带日期的旧版本安排和成绩保留为历史记录。
+
 # CT-SeqTrack
 
 **2026-10-28：v39 工程验收通过，可以开始两组正式实验。** 新主线为 E＋B1＋M＋G＋自适应跟踪，所有模块从epoch1启用；两份 Full 仅学习率配方不同。用户最新要求新环境名`ctseqtrack3d`、OMP/MKL/OPENBLAS均为2、两组同GPU0并行，workers4和其他训练配方不变。[最新配置说明](docs/CTSEQTRACK_V39_CONFIG.md)已汇总固定参数；分别启动及新终端tail命令见 [v39操作页](docs/CTSEQTRACK_V39_LAUNCH.md)。用户本次已授权备份服务器源码并更新匹配的最新代码；服务器相关测试72项（CUDA项无跳过）、连续batch、实际main训练/验证/checkpoint及A/B同卡并行短程均已通过；配对profile已完成，正式成绩和独占速度结论仍待实验。以下v38及更早记录保留为历史。

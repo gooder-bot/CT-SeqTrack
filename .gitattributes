@@ -7,6 +7,9 @@ tools/**/*.py text eol=lf
 models/seqtrack_reference/** text eol=lf
 main.py text eol=lf
 requirement.txt text eol=lf
+cfgs/ct_seqtrack/40_*.yaml text eol=lf
+cfgs/ct_seqtrack/40_registration.json text eol=lf
+tests/test_ct_v40*.py text eol=lf
 # 冻结的底层文件保持原始混合/CRLF字节，不重写其算法来源。
 datasets/data_classes.py -text
 models/attn/Layers.py -text

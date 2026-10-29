@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 EXECUTION_PROFILES = ('legacy', 'optimized_fp32', 'optimized_bf16')
 EXECUTION_SCHEMA = 'ct_seqtrack.execution.v1'
-_SUPPORTED_MODELS = ('ctseqtrackv38', 'ctseqtrackv39')
+_SUPPORTED_MODELS = ('ctseqtrackv38', 'ctseqtrackv39', 'ctseqtrackv40')
 
 
 def validate_execution_profile(config):
@@ -12,7 +12,7 @@ def validate_execution_profile(config):
     if 'execution_profile' not in config:
         return
     if config.get('net_model') not in _SUPPORTED_MODELS:
-        raise ValueError('execution_profile is supported only for ctseqtrackv38/v39')
+        raise ValueError('execution_profile is supported only for ctseqtrackv38/v39/v40')
     profile = config['execution_profile']
     if profile not in EXECUTION_PROFILES:
         raise ValueError('unknown execution_profile: ' + str(profile))
@@ -35,7 +35,9 @@ def optimized_execution(config):
 def execution_identity(config, source=None):
     """记录实际执行路径；源码 hash 继续覆盖全部生产 Python 文件。"""
     if source is None:
-        if config.get('net_model') == 'ctseqtrackv39':
+        if config.get('net_model') == 'ctseqtrackv40':
+            from models.ct_v40.entry import source_identity
+        elif config.get('net_model') == 'ctseqtrackv39':
             from models.ct_v39.entry import source_identity
         else:
             from models.ct_v38.entry import source_identity

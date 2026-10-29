@@ -1,5 +1,16 @@
 # CT-SeqTrack 工作约定
 
+## 2026-10-29 当前：V40 实现，运行验收待上传服务器
+
+- 后续上传前复核：用户授权SSH只读，未授权上传、安装或启停任务；允许读取环境metadata和GPU占用。最新执行顺序先GPU0并行`b1_mtp+full`，其他参数不变，B0/B1对照以后补齐；启动器`--wave 2`只选择该对，四组登记和验收要求不变。独立日期nohup和新终端tail命令见V40操作页。
+- 用户明确批准按 V40 设计实施：以 v38clean1 concat 为基底，dense B0＋九处窄 FA2、B1 训练侧 MTP、Full 独立搜索保护；四组 b0/b1/b1_mtp/full。新入口仍为 `main.py`，新代码 `models/ct_v40/`、`models/ctseqtrackv40.py`。不得把 v39 的 G、跳骨干或 GPU raw cache 移入。
+- 本次用户明确要求本机只完成代码、测试用例、文档与静态审阅；**不在本机运行环境检查、pytest、compileall、训练或 CUDA smoke**。全部运行验收待用户上传服务器后执行。静态文件登记不执行模型导入或环境探测，不等于验证通过。本轮不上传、不安装、不启动或停止服务器任务。
+- 四组 mini Car/seed42/bs16/workers4/scratch60，LR=1e-4，完成20/40轮后×0.2；原1/4/4/8与10轮窗口课程。epoch1全部启用，无冻结/warmup；final60与late3。最新先GPU0并行b1_mtp+full，之后补b0/b1；默认启动器all仍保留原登记顺序，选择`--wave 2`执行当前请求。
+- B0运行时无learned prior/adapter/M/B3；B1三组均保留原acquisition。M只从128维B1 context做h2/4未来位移辅助，lambda=.05，不读未来点云、不参与在线候选/搜索/提交。FA2仅kernel QKV BF16，其他FP32，不允许正式静默math fallback。
+- Full的accepted继续写入，trusted规则不改；上一实际测量资格False才启双ROI。768主+256备用独有、原始ID去重/回填、总1024、共同accepted坐标锚点。备用trusted速度仅搜索外推cap1.5s；不修改原recovery/fallback、B1时间或acquisition的R域。
+- 旧v38/v39源码、YAML、登记、output、既有artifacts保持。新登记`40_registration.json`；模型恢复只允许同run完整epoch和完全匹配的source/config。既有历史运行仍使用原封存源码。
+- 文档：[V40设计](docs/CTSEQTRACK_V40_DESIGN.md)、[服务器验收与启动](docs/CTSEQTRACK_V40_LAUNCH.md)。工程产物只写新的`artifacts/ct_checks/`。没有新的涨分、提速、显存稳定或论文结论。
+
 ## 2026-10-28 当前：v39（覆盖下方历史状态）
 
 - 最新用户要求代理完成服务器v39验收、profile及必要修复，允许GPU0短时工程检查和代码同步；正式两组训练只提供命令，不自动启动。共享设备的计时不能当作独占速度结论。

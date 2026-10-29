@@ -1,0 +1,13 @@
+# V40 无可学习 B1 的 B0；保留原历史观测和非学习 trusted fallback。
+net_model: ctseqtrackv40
+experiment_family: ct_seqtrack_v40
+experiment_name: ct40_b0_mini_car_scratch_seed42
+tag: v40_b0_mini_car_seed42
+v40_arm: b0
+v40_training_recipe: b0
+v31_arm: b0
+lr: 0.0001
+lr_milestones: [20, 40]
+lr_decay_rate: 0.2
+v40_attention_backend: fa2_varlen
+check_val_every_n_epoch: 1

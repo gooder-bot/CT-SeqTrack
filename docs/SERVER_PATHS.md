@@ -1,3 +1,9 @@
+# 2026-10-29 V40 上传后安排
+
+后续用户授权SSH只读复核。2026-10-29 20:33服务器仍为`6dc7c4e`、无V40配置；项目 `/home/lishengjie/study/lcyu/CT-SeqTrack`，环境 `/home/lishengjie/miniconda3/envs/ctseqtrack3d`，mini数据 `/home/lishengjie/data/nuscenes-mini`均存在。包metadata为Python3.9.19、torch2.0.1+cu118、Lightning2.0.2、FA2 2.5.8；`pynvml`导入路径及`nvidia-ml-py`metadata缺失。GPU0为A40，总46068MiB、当时free29585MiB，已有其他进程占用；该快照不代表两组峰值容量验收。未上传、安装或启动任何任务，也未执行CUDA或项目运行检查。
+
+用户最新顺序为先GPU0并行B1 MTP+Full，其余配方不变，B0/B1对照以后补齐；具体独立命令及验收见 [V40操作](CTSEQTRACK_V40_LAUNCH.md)。旧版本“验收通过”和显存数字不代表V40状态。
+
 # CT-SeqTrack 当前服务器路径
 
 2026-10-28 当前为 [v39 两组 Full](CTSEQTRACK_V39_LAUNCH.md)，详细参数见[最新配置说明](CTSEQTRACK_V39_CONFIG.md)。项目仍为 `/home/lishengjie/study/lcyu/CT-SeqTrack`，mini 数据仍为 `/home/lishengjie/data/nuscenes-mini`。两组按用户要求同时使用物理 GPU0，OMP/MKL/OPENBLAS 各2、workers4、每轮验证，独立日期输出目录。

@@ -1,3 +1,13 @@
+# 2026-10-29 V40 补充协议
+
+本节为用户批准的新 V40 四组协议，覆盖下方对当前开发版本的历史描述；旧实验自身的身份与规则不改。代码与静态登记完成不代表运行验收通过，所有检查留到用户上传服务器后。
+
+正式配置固定 `40_b0_mini.yaml / 40_b1_mini.yaml / 40_b1_mtp_mini.yaml / 40_full_mini.yaml`，登记 `40_registration.json`；mini Car/seed42/bs16/workers4/scratch60，LR1e-4、完成20/40轮后×0.2，原窗口课程及数据划分不变。禁止旧checkpoint初始化、跨arm恢复、冻结启用模块或按组挑best；只比较final60及58/59/60均值。工程运行权重弃用。实际训练预算由每轮已重建sampler及Adam计数核验，不用估算步数替代。
+
+四组共同FA2窄BF16 attention及等价CPU优化。B0无可学习B1；B1/B1M/Full保留原acquisition；M为训练辅助。只有Full启用B3和新的双ROI搜索，故Full−B1M只能解释为联合机制。新LR和attention精度使历史v38仅作背景参考。原R/C及运动保护仍作为外部参考门，不能替代本次内部消融。
+
+服务器必须验证实际FA kernel、标签隔离、生命周期/恢复、显存平台、同权重性能与两波真实并发容量。PyTorch正常reserved缓存不等于泄漏，不宣称每批显存常量。单seed mini与late3不支持稳健提升/SOTA声明。完整规则见 [V40设计](CTSEQTRACK_V40_DESIGN.md)。
+
 # CT-SeqTrack 实验协议
 
 ## 2026-10-28 v39 两组 Full

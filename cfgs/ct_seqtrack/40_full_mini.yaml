@@ -1,0 +1,13 @@
+# V40 Full：B1 + MTP + B3 + 独立双区域搜索；联合机制消融。
+net_model: ctseqtrackv40
+experiment_family: ct_seqtrack_v40
+experiment_name: ct40_full_mini_car_scratch_seed42
+tag: v40_full_mini_car_seed42
+v40_arm: full
+v40_training_recipe: full
+v31_arm: b1
+lr: 0.0001
+lr_milestones: [20, 40]
+lr_decay_rate: 0.2
+v40_attention_backend: fa2_varlen
+check_val_every_n_epoch: 1

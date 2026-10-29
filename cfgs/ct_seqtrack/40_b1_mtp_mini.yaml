@@ -1,0 +1,13 @@
+# V40 强 B1 + 训练侧 MTP；推理不执行未来头，保留 acquisition。
+net_model: ctseqtrackv40
+experiment_family: ct_seqtrack_v40
+experiment_name: ct40_b1_mtp_mini_car_scratch_seed42
+tag: v40_b1_mtp_mini_car_seed42
+v40_arm: b1_mtp
+v40_training_recipe: b1_mtp
+v31_arm: b1
+lr: 0.0001
+lr_milestones: [20, 40]
+lr_decay_rate: 0.2
+v40_attention_backend: fa2_varlen
+check_val_every_n_epoch: 1

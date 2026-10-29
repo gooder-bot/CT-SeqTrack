@@ -1,3 +1,14 @@
+# 2026-10-29 V40 工具面补充
+
+V40入口为 `main.py` + 四份 `cfgs/ct_seqtrack/40_*_mini.yaml`。新增：
+
+- `tools/verify_ct_v40.py register`：仅标准库静态写入新登记，不导入模型、不执行环境检查。`verify` 供上传后核对；已有运行不得刷新登记掩盖差异。
+- `tools/check_v40_server.py`：上传后显式执行 contracts/kernel/lifecycle/memory/performance/parallel 六阶段，失败明确记录，不降级通过。
+- `tools/launch_ct_v40.py`：默认只打印两波GPU0命令计划；用户显式 `--execute` 且六阶段证据匹配时才启动四组从零训练。
+- `tools/compare_ct_v40.py`：四组final60/late3、完整sampler/audit、候选/可信/搜索台账及固定R/C证据核验。
+
+本机本轮不执行测试、编译、CUDA或环境检查；服务器操作由用户完成。工程输出仅进新建`artifacts/ct_checks/`目录。详见 [V40操作](CTSEQTRACK_V40_LAUNCH.md)。以下旧工具面保留原实验用途。
+
 # CT-SeqTrack 工具范围
 
 ## 2026-10-28 v39工具
