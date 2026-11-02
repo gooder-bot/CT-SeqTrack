@@ -1,5 +1,6 @@
 # 2026-11-02 V41 KITTI Car 当前安排
 
+21:39后排障：CT已上传，但旧登记因29文件仅CRLF→LF而拒绝启动；两次失败均在模型运行前。已在本地移除CT预登记依赖，待用户覆盖上传6个修复文件，随后直接重跑smoke。服务器Torch/Lightning/FA2/pointnet2_ops/nuScenes导入与Full配置解析正常，本次没有修改环境或服务器源码。
 21:05只读复核：两套Python路径和KITTI目录存在，baseline全部文件SHA与V41回执一致，CT的V41尚未上传。两环境均torch2.0.1+cu118/Lightning2.0.2/numpy1.23.0；CT为FA2 2.5.8，nvidia-ml-py12.560.30已安装。GPU0/1当时free为44,159/43,757MiB，未发现main.py训练进程。最新安排Full GPU0、SeqTrack GPU1，各2线程；这是状态快照，不代表真实batch、整轮或峰值验收。本次服务器没有写入。
 
 Full项目 `/home/lishengjie/study/lcyu/CT-SeqTrack`，Python `/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python`；原始SeqTrack项目 `/home/lishengjie/study/lcyu/seqtrack`，Python `/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`。共同KITTI输入 `/home/lishengjie/data/cxtrack/training`。仅baseline必要适配已按用户特许在服务器备份后部署，CT尚未上传；本次未安装环境、启停任务或运行模型。

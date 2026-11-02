@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -148,12 +147,11 @@ def check_output(batch, output):
 
 
 def run_smoke(args, report):
-    # 源码登记在任何模型导入、CUDA 初始化、数据读取之前验证。
-    from models.ct_v41.registration import verify_registration
-    registration = verify_registration()
-    report.update(source_sha256=registration['source']['sha256'],
-        registration_sha256=hashlib.sha256((ROOT / 'cfgs/ct_seqtrack/41_registration.json').read_bytes()).hexdigest(),
-        verified_engineering_file=registration['engineering_files'].get('tools/check_v41_server.py'))
+    # 直接检查实际代码/数据，不要求事先维护登记文件。
+    from models.ct_v41.provenance import source_identity, text_hash
+    source = source_identity()
+    report.update(source_sha256=source['sha256'], source_hash_policy=source['inventory_policy'],
+                  registration_required=False, tool_sha256=text_hash(__file__))
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.devices)
     from models.ct_v41.config import load_config
     from models.ct_v41.entry import configure_numerics, initialization_identity

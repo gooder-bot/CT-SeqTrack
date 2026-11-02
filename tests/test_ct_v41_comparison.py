@@ -14,7 +14,9 @@ def _write(path, value):
 def _fixture(tmp_path):
     full, baseline = tmp_path / 'full', tmp_path / 'baseline'
     shared = dict(dataset_manifest={'protocol': 'same'}, input_metadata={'content_sha256': 'same'})
-    _write(full / 'run_manifest.json', dict(model='ctseqtrackv41', seqtrack_baseline_source_sha256='source', **shared))
+    recipe = dict(epoch=60, batch_size=16, seed=42, lr=.00015, lr_milestones=[20, 40],
+        lr_decay_rate=.2, v41_arm='full', dataset='kitti_mf', category_name='Car')
+    _write(full / 'run_manifest.json', dict(model='ctseqtrackv41', run_type='formal', actual_recipe=recipe, **shared))
     _write(full / 'training_budget.json', dict(completed_epoch=60, epoch_complete=True, auxiliary={'complete': True}))
     _write(baseline / 'fixed_comparison.json', {'protocol': 'fixed_final60_and_mean58_59_60'})
     recipe = dict(batch_size=16, epoch=60, seed=42, lr=.0001, lr_decay_step=20, lr_decay_rate=.1, category_name='Car')
@@ -40,7 +42,7 @@ def test_comparison_uses_common_frames_and_fixed_final_late3(tmp_path):
     assert result['late3']['delta']['success'] == pytest.approx(10.)
 
 
-@pytest.mark.parametrize('problem', ['missing_frame', 'wrong_input', 'mixed_run', 'aux_incomplete'])
+@pytest.mark.parametrize('problem', ['missing_frame', 'wrong_input', 'mixed_run', 'aux_incomplete', 'baseline_changed'])
 def test_comparison_rejects_noncomparable_results(tmp_path, problem):
     full, baseline = _fixture(tmp_path)
     manifest = baseline / 'epoch=059/run_manifest.json'
@@ -53,6 +55,8 @@ def test_comparison_rejects_noncomparable_results(tmp_path, problem):
         row = json.loads(manifest.read_text(encoding='utf-8'))
         if problem == 'wrong_input':
             row['input_metadata']['content_sha256'] = 'changed'
+        elif problem == 'baseline_changed':
+            row['source_sha256'] = 'changed'
         else:
             row['checkpoint'] = '/other/train/fixed_checkpoints/epoch=059.ckpt'
         _write(manifest, row)

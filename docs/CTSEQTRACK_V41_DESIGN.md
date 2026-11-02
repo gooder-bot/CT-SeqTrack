@@ -2,6 +2,8 @@
 
 2026-11-02：按用户确认的第一版方案实施，仅将新 Full 学习率明确为 **1.5e-4，完成20/40轮后乘0.2**。主训练窗口1/4/4/8、10轮课程、B1融合、MTP及骨干保持V40方案。当前完成代码与静态审阅，运行验收待服务器执行，未产生V41精度或性能结论。
 
+当晚按用户要求取消CT预登记启动门：无需维护41_registration.json或外部baseline回执；运行时自动记录实际配置和归一化换行的源码身份。完整epoch、同run/同数据续训及必要数值检查保留，下文“登记”涉及的历史记录不再是启动要求。
+
 ## 恢复链
 
 ```mermaid
@@ -55,7 +57,7 @@ CT正常训练GT10宽缓存只作存储优化：历史、主和备用ROI完全�
 
 ## 版本隔离与解释边界
 
-新代码 `models/ct_v41/`、独立host `models/ctseqtrackv41.py`、独立数据适配 `datasets/kitti_v41.py`。新登记仅两组。旧V40源码、YAML、登记和output保持；改动共享入口后，旧checkpoint应使用实施前封存源码，不放宽跨版本恢复检查。
+新代码 `models/ct_v41/`、独立host `models/ctseqtrackv41.py`、独立数据适配 `datasets/kitti_v41.py`。只运行约定两组，无需预登记。旧V40源码、YAML、登记和output保持；改动共享入口后，旧checkpoint应使用实施前封存源码，不放宽跨版本恢复检查。
 
 实施前源码快照及逐文件SHA位于 `artifacts/ct_checks/v41_implementation_20261102-201312/`。服务器baseline修改前也逐字节备份，部署回执在该目录的 `seqtrack_baseline/`。本地冻结兄弟baseline未修改。CT服务器源码由用户上传；本次未启动训练、运行模型或安装环境。
 

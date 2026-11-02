@@ -1,5 +1,6 @@
 # 2026-11-02：V41 最小恢复优化与 KITTI Car
 
+最新简化：CT训练与smoke不再要求预登记或刷新源码清单；CRLF/LF变化不会阻挡启动。上传后直接运行真实batch检查，命令见[V41操作页](docs/CTSEQTRACK_V41_LAUNCH.md)。
 新增当前点XYZ恢复候选R，复用B3选框与可信更新；保留B1/MTP、骨干及主窗口1/4/4/8，增加独立完整轨迹辅助训练。新Full初始LR **1.5e-4，每20轮×0.2**。只比较Full与原始SeqTrack3D方法＋KITTI适配，两组bs16/60epoch/seed42，固定final60及late3。
 
 本地实现和静态审阅完成，服务器baseline必要适配已备份后部署；CT尚未上传。**未运行测试、模型、训练或性能验收，尚无V41涨分结论。** 使用 [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)、[上传后验收/启动/比较](docs/CTSEQTRACK_V41_LAUNCH.md)；配置为 `cfgs/ct_seqtrack/41_full_kitti.yaml`。旧源码/配置/登记/output保留，下方为历史记录。

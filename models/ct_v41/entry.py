@@ -154,7 +154,7 @@ def write_resume_event(config, root, manifest):
 
 def source_identity():
     """记录执行时源码内容；未提交的本地修订不能只用git HEAD标识。"""
-    from .registration import source_identity as static_source_identity
+    from .provenance import source_identity as static_source_identity
     return static_source_identity()
 
 
@@ -188,44 +188,6 @@ def initialization_identity(tracker):
                 initial_parameter_hash=digest(state.items()))
 
 
-def validate_formal_registration(config, source=None, *, registration_path=None):
-    """核验Full与外部原始SeqTrack登记；仅Full经此入口执行。"""
-    if config.ct_engineering_check:
-        return None
-    from .config import REGISTRATION_FILE, REGISTRATION_SCHEMA, recipe_identity
-    path = (Path(registration_path) if registration_path is not None else
-            Path(__file__).resolve().parents[2] / 'cfgs/ct_seqtrack' / REGISTRATION_FILE)
-    registration = json.loads(path.read_text(encoding='utf-8'))
-    if registration.get('schema') != REGISTRATION_SCHEMA:
-        raise ValueError('v41 formal registration schema mismatch')
-    source = source_identity() if source is None else source
-    if registration.get('source') != source:
-        raise ValueError('v41 formal source differs from ' + REGISTRATION_FILE)
-    runs = registration.get('runs', [])
-    labels = {'full', 'seqtrack'}
-    if len(runs) != 2 or {row.get('label') for row in runs} != labels:
-        raise ValueError('v41 requires exactly Full and original SeqTrack KITTI runs')
-    repo = Path(__file__).resolve().parents[2]
-    for row in runs:
-        expected_path = ('cfgs/ct_seqtrack/41_full_kitti.yaml' if row['label'] == 'full'
-                         else 'cfgs/seqtrack_baseline/41_seqtrack_kitti.yaml')
-        if row.get('cfg') != expected_path:
-            raise ValueError('unexpected v41 registered config path')
-        if hashlib.sha256((repo / expected_path).read_bytes()).hexdigest() != row.get('yaml_sha256'):
-            raise ValueError('v41 registered YAML bytes changed: ' + expected_path)
-    matches = [row for row in runs if row.get('label') == config.v41_training_recipe
-        and row.get('arm') == config.v41_arm
-        and config_identity(load_config(repo / row['cfg'])) == config_identity(config)
-        and row.get('execution_profile') == config.execution_profile]
-    if len(matches) != 1:
-        raise ValueError('v41 formal config is not exactly one registered run')
-    from .registration import verify_baseline_receipt
-    baseline = verify_baseline_receipt(registration, repo)
-    return dict(schema=REGISTRATION_SCHEMA, label=matches[0]['label'],
-                sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                seqtrack_baseline_source_sha256=baseline['provenance']['source_sha256'])
-
-
 def run(config, *, loaders=None):
     # 训练、逐轮validation、late-3、独立test及同run恢复共用登记的执行算法。
     from .config import normalize_config
@@ -247,7 +209,6 @@ def _run(config, *, loaders=None):
     root = resolve_run_directory(config)
     config.log_dir = str(root)
     source = source_identity()
-    registration = validate_formal_registration(config, source)
     if loaders is not None and not config.ct_engineering_check:
         raise ValueError('v41 formal entry does not accept injected loaders')
     checkpoint_identity = {}
@@ -278,15 +239,16 @@ def _run(config, *, loaders=None):
                     allocator=os.environ.get('PYTORCH_CUDA_ALLOC_CONF'),
                     flash_attention=fa_runtime,
                     precision_policy='FP32 except BF16 QKV inside FA2 kernel',
-                    calibration_required=False, source=source, registration=registration,
+                    calibration_required=False, source=source, registration_required=False,
+                    run_type='engineering' if config.ct_engineering_check else 'formal',
+                    actual_recipe={key: config[key] for key in ('epoch', 'batch_size', 'seed', 'lr',
+                        'lr_milestones', 'lr_decay_rate', 'v41_arm', 'dataset', 'category_name')},
                     evaluation_rng_policy='per_checkpoint_seed_v1')
     manifest.update(initialization_identity(model.tracker))
     if config.dataset == 'kitti_mf' and not config.ct_engineering_check:
         from datasets.kitti_v41 import build_v41_kitti_manifest, kitti_input_metadata_identity
         manifest['dataset_manifest'] = build_v41_kitti_manifest()
         manifest['input_metadata'] = kitti_input_metadata_identity(config.path)
-    if registration is not None:
-        manifest['seqtrack_baseline_source_sha256'] = registration['seqtrack_baseline_source_sha256']
     from .config import recipe_identity
     manifest['training_execution_recipe'] = recipe_identity(config)
     manifest['policy_activation'] = 'active_from_epoch1'
@@ -304,9 +266,8 @@ def _run(config, *, loaders=None):
     if existing_manifest and existing_manifest.get('source') != manifest['source']:
         raise ValueError('v41 resume source differs; use the original run source')
     if existing_manifest and any(existing_manifest.get(key) != manifest.get(key)
-                                 for key in ('dataset_manifest', 'input_metadata',
-                                             'seqtrack_baseline_source_sha256')):
-        raise ValueError('v41 resume dataset or paired baseline identity differs')
+                                 for key in ('dataset_manifest', 'input_metadata')):
+        raise ValueError('v41 resume dataset identity differs')
     if preserve_metadata:
         write_resume_event(config, root, manifest)
     write_run_metadata(config, root, manifest, preserve_existing=preserve_metadata)

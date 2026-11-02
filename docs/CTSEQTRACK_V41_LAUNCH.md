@@ -1,6 +1,8 @@
 # V41 服务器验收与两组KITTI Car
 
-本地只完成实现、测试用例、AST/文件静态审阅与登记。**未运行pytest、模型、真实batch、训练或性能测试。** CT代码尚未上传；服务器SeqTrack必要适配已备份后部署。不要把历史V40或更早版本的运行通过记录当成V41验收。
+当前已取消CT启动/真实batch工具对预先登记的依赖。**不用生成、同步或刷新41_registration.json，也不需要先运行verify。** 训练自动保存本次配置与源码信息；源码指纹归一化CRLF/LF，避免上传换行转换导致误拦截。恢复链、损失及学习率不变。
+
+2026-11-02 21:39的两次失败均停在旧登记门：29个文件全部仅有CRLF→LF变化，代码内容相同，并非CUDA或模型错误。此次修复在本地完成，需覆盖上传下列6个文件：`models/ct_v41/entry.py`、`models/ct_v41/config.py`、新增`models/ct_v41/provenance.py`，以及 `tools/check_v41_server.py`、`tools/verify_ct_v41.py`、`tools/compare_ct_v41.py`。旧登记文件可保留作历史记录，不参与启动。真实batch尚未通过，不把旧版运行记录当作V41验收。
 
 2026-11-02 21:05上传前复核：服务器仅只读检查，baseline全部登记文件SHA仍吻合。两套环境均为torch2.0.1+cu118、Lightning2.0.2、numpy1.23.0；CT的FA2为2.5.8，nvidia-ml-py已安装。两张A40当时free分别44,159/43,757MiB，未发现main.py训练进程；这只是当时快照，不替代新Full实测。最新分卡为 **Full物理GPU0，SeqTrack物理GPU1**，线程上限均2。
 
@@ -10,16 +12,15 @@
 - baseline：`/home/lishengjie/study/lcyu/seqtrack`；Python：`/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`。
 - KITTI：`/home/lishengjie/data/cxtrack/training`。
 
-上传CT时保留旧源码与output，并同步新增V41代码、数据适配、配置/登记、工具和测试，以及共享 `main.py`、`utils/execution_profile.py`。`cfgs/seqtrack_baseline/` 是两组身份镜像，不是CT可运行的baseline入口。不要以当前CT目录运行旧checkpoint；V40封存见 `artifacts/ct_checks/v41_implementation_20261102-201312/v40_frozen_source.zip` 与 `snapshot_manifest.json`。
+上传CT时保留旧源码与output，并同步V41代码、数据适配、配置、工具和测试，以及共享 `main.py`、`utils/execution_profile.py`。CT启动不再要求`cfgs/seqtrack_baseline/`里的外部回执。不要以当前CT目录运行旧checkpoint；V40封存见 `artifacts/ct_checks/v41_implementation_20261102-201312/v40_frozen_source.zip` 与 `snapshot_manifest.json`。
 
 ## 上传后验收
 
-以下由用户在服务器主动执行。上传后至少核对一次源码与实际Full batch；无需重复旧V40的六阶段并发容量流程。本次两组分卡运行。
+上传后直接做一次实际Full batch检查；无需登记核对或重复旧V40的六阶段并发容量流程。本次两组分卡运行。
 
 ```bash
 cd /home/lishengjie/study/lcyu/CT-SeqTrack
 PY=/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python
-$PY tools/verify_ct_v41.py verify --resolved
 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 PYTHONHASHSEED=42 \
   PYTORCH_CUDA_ALLOC_CONF=backend:native,roundup_power2_divisions:2 \
   $PY tools/check_v41_server.py --path /home/lishengjie/data/cxtrack/training --devices 0 --steps 2
@@ -34,7 +35,7 @@ $PY -m pytest -q
 $PY -m compileall -q models/ datasets/ utils/ tools/
 ```
 
-`verify` 默认仅静态文件哈希，`--resolved` 才解析正式配置。上传后只verify，不以刷新登记掩盖部署错配。旧slimming工具要求HEAD==001951a，不能用它代替V41登记。audit只核对metadata和文件清单，不证明点框几何或训练正确。
+`tools/verify_ct_v41.py verify --resolved`现在只是可选的源码语法/配置读取工具，不读取旧登记，不是训练前置步骤。audit只核对metadata和文件清单，不证明点框几何或训练正确。
 
 smoke检查真实主/辅助前向、辅助梯度隔离、BN/mode/RNG保留、同一次Adam和两流commit、FA2调用；不保存checkpoint。该工具为充分触发辅助流按每主batch一辅助batch执行，**不是正式稀疏插入比例的速度测试**。两batch不能证明完整epoch/同run恢复稳定。正式开跑前仍应完成完整辅助轨迹、整epoch结束与续训一致性检查，工程权重丢弃。开发集验收应查看：
 
@@ -153,6 +154,6 @@ $PY tools/compare_ct_v41.py \
   --output artifacts/ct_checks/v41_two_arm_results.json
 ```
 
-比较器先核对baseline来源、两组标注/标定hash与共同协议，再核对三轮scene/track/raw_frame_id集合、初始化帧和逐帧S/P与总分。Full必须完整60轮且辅助流完成，baseline三权重必须来自同一run。结果给出final60、late3与差值；late3不是三个独立seed，两组比较不能单独证明某个模块的因果收益。
+比较器读取两组实际运行配置和数据身份，核对三轮scene/track/raw_frame_id集合、初始化帧和逐帧S/P与总分，不要求CT事先登记baseline的源码。Full必须完整60轮且辅助流完成，baseline三权重必须来自同一run、使用同一份实际源码。结果给出final60、late3与差值；late3不是三个独立seed，两组比较不能单独证明某个模块的因果收益。
 
 源码/部署细节见 [设计](CTSEQTRACK_V41_DESIGN.md) 和 [baseline实施回执](../artifacts/ct_checks/v41_implementation_20261102-201312/seqtrack_baseline/REPORT.md)。

@@ -8,7 +8,7 @@ from utils.config import load_yaml_config
 from utils.execution_lab import execution_scope
 from utils.execution_profile import validate_execution_profile
 from utils.time_config import engineering_time_defaults, validate_time_config, hash_time_manifest_paths
-from .identity import SCHEMA, EXECUTION_REVISION, REGISTRATION_FILE, REGISTRATION_SCHEMA
+from .identity import SCHEMA, EXECUTION_REVISION
 
 
 # 数值和字段名沿用已验证的强 B1；定义由本版本持有，不再适配旧模型。
@@ -209,7 +209,7 @@ def normalize_config(config=None):
         bad = [key for key, value in fixed.items() if cfg[key] != value
                or (key.startswith('limit_') and type(cfg[key]) is not float)]
         if bad:
-            raise ValueError('unregistered formal v41 recipe: ' + ', '.join(bad))
+            raise ValueError('V41 experiment recipe differs from the agreed configuration: ' + ', '.join(bad))
     elif cfg.log_dir:
         root = (Path(__file__).resolve().parents[2] / 'artifacts/ct_checks').resolve()
         dest = Path(cfg.log_dir).resolve()

@@ -45,6 +45,10 @@ def compare(full_run, baseline_evaluation):
     full_manifest = _read(full_run / 'run_manifest.json')
     if full_manifest.get('model') != 'ctseqtrackv41':
         raise ValueError('Full run is not V41')
+    expected_recipe = dict(epoch=60, batch_size=16, seed=42, lr=.00015, lr_milestones=[20, 40],
+        lr_decay_rate=.2, v41_arm='full', dataset='kitti_mf', category_name='Car')
+    if full_manifest.get('run_type') != 'formal' or full_manifest.get('actual_recipe') != expected_recipe:
+        raise ValueError('Full run must use the agreed formal KITTI recipe')
     budget = _read(full_run / 'training_budget.json')
     if budget.get('completed_epoch') != 60 or budget.get('epoch_complete') is not True:
         raise ValueError('Full run must complete 60 epochs including auxiliary coverage')
@@ -54,6 +58,7 @@ def compare(full_run, baseline_evaluation):
     if baseline_summary.get('protocol') != 'fixed_final60_and_mean58_59_60':
         raise ValueError('baseline must use its fixed epoch evaluator')
     output, canonical, baseline_checkpoint_parent, full_checkpoint_parent = {}, None, None, None
+    baseline_sources = []
     for epoch in EPOCHS:
         full_dir = full_run / 'evaluation' / f'epoch={epoch:03d}'
         base_root = baseline_evaluation / f'epoch={epoch:03d}'
@@ -71,9 +76,9 @@ def compare(full_run, baseline_evaluation):
         if baseline_checkpoint_parent is not None and checkpoint.parent != baseline_checkpoint_parent:
             raise ValueError('baseline checkpoints must belong to the same run')
         baseline_checkpoint_parent = checkpoint.parent
-        expected_source = full_manifest.get('seqtrack_baseline_source_sha256')
-        if not expected_source or base_manifest['source_sha256'] != expected_source:
-            raise ValueError('two-arm baseline source identity mismatch')
+        baseline_sources.append(base_manifest.get('source_sha256'))
+        if any(source != baseline_sources[0] for source in baseline_sources):
+            raise ValueError('baseline evaluated checkpoints with different actual source versions')
         for field in ('dataset_manifest', 'input_metadata'):
             if not full_manifest.get(field) or full_manifest[field] != base_manifest.get(field):
                 raise ValueError('two-arm dataset identity mismatch: ' + field)
@@ -104,6 +109,8 @@ def compare(full_run, baseline_evaluation):
                   for metric in ('success', 'precision')} for arm in ('full', 'seqtrack')}
     late['delta'] = {metric: late['full'][metric] - late['seqtrack'][metric] for metric in ('success', 'precision')}
     return dict(schema='ct_seqtrack.v41.two_arm_results.v1', checkpoint_epochs=list(EPOCHS),
+        actual_source_sha256=dict(full=full_manifest.get('source', {}).get('sha256'),
+                                  seqtrack=baseline_sources[0]),
         final60=output['60'], late3=late, epochs=output,
         limitations=['one seed; late3 is not independent replication',
                      'two systems with different original training recipes; no module-causal attribution'])

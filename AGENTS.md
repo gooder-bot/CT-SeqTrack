@@ -2,6 +2,7 @@
 
 ## 2026-11-02 当前：V41 KITTI Car 两组实施
 
+- 最新用户明确取消多余预登记：CT训练、smoke和比较不再依赖`41_registration.json`/外部baseline receipt；旧文件保留历史但不再刷新。实际源码由`ct_v41/provenance.py`自动记录，CRLF/LF统一后仅用于同run续训身份。当前失败已证实29文件全部只是换行变化；不要重新引入原始字节上传门。用户要求源码修复先本地、由用户上传；环境问题可在其独立环境修复，不影响其他项目。
 - 最新上传前复核授权：服务器仅只读，不再修改baseline或上传CT；Full用物理GPU0，原始SeqTrack用GPU1，OMP/MKL/OPENBLAS各2。日期目录nohup与新终端tail命令见V41操作页。baseline日志/PID放日期父目录，模型 `--log_dir` 指向其空的 `run/` 子目录；原入口无 `--devices` 参数，使用 `CUDA_VISIBLE_DEVICES=1`。
 - 用户批准第一版最小恢复方案，新Full初始LR1.5e-4、完成20/40轮×0.2，其余原计划保持。活动增量为 `models/ct_v41/`、`models/ctseqtrackv41.py`、`datasets/kitti_v41.py`，入口仍 `main.py`。保留B1/MTP/骨干与主窗口1/4/4/8及10轮课程。
 - R复用当前点/B3局部读取，零初始化Linear(64,3)做有界XYZ恢复；q0/R共用原T与唯一前景点trusted资格，位置恢复与速度恢复分开。独立完整轨迹辅助端点≤N/4，仅训练B3/R，共用主Adam、不增加步数；完整双流才允许epoch续训。
