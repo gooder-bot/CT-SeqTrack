@@ -1,5 +1,16 @@
 # CT-SeqTrack 工作约定
 
+## 2026-11-02 当前：V41 KITTI Car 两组实施
+
+- 最新上传前复核授权：服务器仅只读，不再修改baseline或上传CT；Full用物理GPU0，原始SeqTrack用GPU1，OMP/MKL/OPENBLAS各2。日期目录nohup与新终端tail命令见V41操作页。baseline日志/PID放日期父目录，模型 `--log_dir` 指向其空的 `run/` 子目录；原入口无 `--devices` 参数，使用 `CUDA_VISIBLE_DEVICES=1`。
+- 用户批准第一版最小恢复方案，新Full初始LR1.5e-4、完成20/40轮×0.2，其余原计划保持。活动增量为 `models/ct_v41/`、`models/ctseqtrackv41.py`、`datasets/kitti_v41.py`，入口仍 `main.py`。保留B1/MTP/骨干与主窗口1/4/4/8及10轮课程。
+- R复用当前点/B3局部读取，零初始化Linear(64,3)做有界XYZ恢复；q0/R共用原T与唯一前景点trusted资格，位置恢复与速度恢复分开。独立完整轨迹辅助端点≤N/4，仅训练B3/R，共用主Adam、不增加步数；完整双流才允许epoch续训。
+- 只登记 Full 与“原始SeqTrack3D方法＋KITTI适配”两组，bs16/60epoch/seed42/scratch，固定final60/late3。Full workers4；baseline workers10、原LR1e-4每20轮×0.1及原网络/loss/teacher/采样/优化器。
+- KITTI train0000–16/dev17–18/test19–20；几何open3dsot_velodyne_v1。正常CT训练GT10缓存需预测ROI完整包含，否则raw回退；辅助/开发/测试禁GT预裁剪。仅已确认四个缺失bin为空观测，其他缺失损坏报错。
+- 本地继续只实现代码、测试用例、文档与静态审阅，**不运行环境检查、pytest、compileall、模型或CUDA smoke**。用户特许服务器 `/home/lishengjie/study/lcyu/seqtrack` 必要适配，已备份后部署；本地冻结baseline不改。CT服务器代码尚未上传，不安装或启停任务。全部运行验收待服务器执行。
+- V40源码、配置、登记、checkpoint/output受保护。实施前封存在 `artifacts/ct_checks/v41_implementation_20261102-201312/`；共享入口改动后旧checkpoint用封存源码，不刷新旧登记或放宽恢复检查。V41新登记 `41_registration.json`；仅未启动版本可显式刷新。
+- [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)、[服务器验收与两组命令](docs/CTSEQTRACK_V41_LAUNCH.md)为当前入口。下方V40及更早安排均为历史，不代表V41运行验证或收益。
+
 ## 2026-10-29 当前：V40 实现，运行验收待上传服务器
 
 - 后续上传前复核：用户授权SSH只读，未授权上传、安装或启停任务；允许读取环境metadata和GPU占用。最新执行顺序先GPU0并行`b1_mtp+full`，其他参数不变，B0/B1对照以后补齐；启动器`--wave 2`只选择该对，四组登记和验收要求不变。独立日期nohup和新终端tail命令见V40操作页。

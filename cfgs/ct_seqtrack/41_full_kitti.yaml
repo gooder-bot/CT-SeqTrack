@@ -1,0 +1,28 @@
+# V41：当前点 XYZ 恢复 + B3 持续接管 + 独立长轨迹辅助流。
+# 原主4N曝光、1/4/4/8及10轮课程保持；正式从零训练。
+net_model: ctseqtrackv41
+experiment_family: ct_seqtrack_v41
+experiment_name: ct41_full_kitti_car_scratch_seed42
+tag: v41_full_kitti_car_seed42
+v41_arm: full
+v41_training_recipe: full
+dataset: kitti_mf
+version: kitti_tracking
+category_name: Car
+path: /home/lishengjie/data/cxtrack/training
+ct_coordinate_mode: sensor_relative
+kitti_frame_period: 0.1
+v41_kitti_geometry: open3dsot_velodyne_v1
+batch_size: 16
+epoch: 60
+workers: 4
+seed: 42
+lr: 0.00015
+lr_milestones: [20, 40]
+lr_decay_rate: 0.2
+v41_attention_backend: fa2_varlen
+v41_recovery_weight: 0.1
+v41_aux_fraction: 0.25
+v41_aux_loss_weight: 0.25
+v41_train_preload_offset: 10.0
+check_val_every_n_epoch: 1

@@ -1,0 +1,82 @@
+# SeqTrack3D original network/loss with existing KITTI adapter; registered 60-epoch protocol.
+#
+# ``path`` may be either:
+#   /home/lishengjie/data/cxtrack
+# or:
+#   /home/lishengjie/data/cxtrack/training
+#
+# Split: train=0000-0016, valid=0017-0018, test=0019-0020.
+
+dataset: kitti_mf
+path: /home/lishengjie/data/cxtrack
+version: kitti_tracking
+category_name: Car
+kitti_frame_period: 0.1
+kitti_hv_interval: 1
+# KITTI Tracking contains a few known missing Velodyne files.  They are
+# represented as empty point clouds, matching established KITTI SOT loaders.
+kitti_allow_missing_pointcloud: false
+
+# Official KITTI-HV search-area offsets.  Interval 1 is standard KITTI.
+kitti_hv_search_offsets:
+  "1": 2
+  "2": 2
+  "3": 3
+  "5": 4
+  "10": 7
+
+bb_scale: 1.25
+bb_offset: 2
+point_sample_size: 1024
+degrees: false
+coordinate_mode: velodyne
+up_axis: [0, 0, 1]
+preload_offset: 10
+data_limit_box: true
+train_split: train
+val_split: valid
+test_split: test
+train_type: train_motion_mf
+num_candidates: 4
+motion_threshold: 0.15
+use_augmentation: false
+hist_num: 3
+empty_box_limit: 3
+limit_num_points_in_prev_box: 1
+
+net_model: seqtrack3d
+box_aware: true
+
+center_weight: 2
+angle_weight: 10.0
+seg_weight: 0.1
+bc_weight: 1
+ref_center_weight: 0.2
+ref_angle_weight: 1
+motion_cls_seg_weight: 0.1
+
+use_z: true
+limit_box: false
+IoU_space: 3
+
+batch_size: 16
+workers: 10
+epoch: 60
+save_top_k: 5
+check_val_every_n_epoch: 1
+from_epoch: 0
+lr: 0.0001
+max_lr: 0.001
+optimizer: Adam
+lr_decay_step: 20
+lr_decay_rate: 0.1
+wd: 0
+gradient_clip_val: 0.0
+
+# Only input boundaries, fixed epoch logging and the user-specified budget differ.
+seed: 42
+kitti_v41_protocol: true
+kitti_geometry: open3dsot_velodyne_v1
+kitti_missing_policy: whitelist_empty_preserve_endpoint_otherwise_error
+kitti_evaluation_size: first_frame
+kitti_fixed_epochs: [58, 59, 60]

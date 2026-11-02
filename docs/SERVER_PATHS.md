@@ -1,4 +1,12 @@
-# 2026-10-29 V40 上传后安排
+# 2026-11-02 V41 KITTI Car 当前安排
+
+21:05只读复核：两套Python路径和KITTI目录存在，baseline全部文件SHA与V41回执一致，CT的V41尚未上传。两环境均torch2.0.1+cu118/Lightning2.0.2/numpy1.23.0；CT为FA2 2.5.8，nvidia-ml-py12.560.30已安装。GPU0/1当时free为44,159/43,757MiB，未发现main.py训练进程。最新安排Full GPU0、SeqTrack GPU1，各2线程；这是状态快照，不代表真实batch、整轮或峰值验收。本次服务器没有写入。
+
+Full项目 `/home/lishengjie/study/lcyu/CT-SeqTrack`，Python `/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python`；原始SeqTrack项目 `/home/lishengjie/study/lcyu/seqtrack`，Python `/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`。共同KITTI输入 `/home/lishengjie/data/cxtrack/training`。仅baseline必要适配已按用户特许在服务器备份后部署，CT尚未上传；本次未安装环境、启停任务或运行模型。
+
+两组bs16/60epoch/seed42，Full LR1.5e-4每20轮×0.2、workers4；baseline原LR1e-4每20轮×0.1、workers10。GPU由用户按当前占用选择，不继承历史同卡并行安排。完整命令与待验收项见 [V41操作页](CTSEQTRACK_V41_LAUNCH.md)。下方设备容量与通过记录只适用于历史版本。
+
+# 2026-10-29 V40 上传后安排（历史）
 
 后续用户授权SSH只读复核。2026-10-29 20:33服务器仍为`6dc7c4e`、无V40配置；项目 `/home/lishengjie/study/lcyu/CT-SeqTrack`，环境 `/home/lishengjie/miniconda3/envs/ctseqtrack3d`，mini数据 `/home/lishengjie/data/nuscenes-mini`均存在。包metadata为Python3.9.19、torch2.0.1+cu118、Lightning2.0.2、FA2 2.5.8；`pynvml`导入路径及`nvidia-ml-py`metadata缺失。GPU0为A40，总46068MiB、当时free29585MiB，已有其他进程占用；该快照不代表两组峰值容量验收。未上传、安装或启动任何任务，也未执行CUDA或项目运行检查。
 
