@@ -21,7 +21,7 @@ from models.ct_v41.auxiliary import (AuxiliaryDiagnostics, insertion_indices, in
                                     isolated_auxiliary_rng)
 from models.ct_v41.lr_schedule import AbsolutePiecewiseLR, WarmupMultiStepLR
 from models.ct_v41.identity import model_schema, runtime_key, training_audit_schema
-from models.ct_v41.runtime import (move_tensors, TrackingEvaluation, resume_payload,
+from models.ct_v41.runtime import (move_tensors, make_evaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
 from utils.bn_policy import running_batch_norm
 from utils.execution_profile import optimized_execution
@@ -43,8 +43,12 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self.train_builder = BatchBuilder(self.config)
         self.auxiliary_builder = BatchBuilder(self.config)
         self.evaluation_builder = BatchBuilder(self.config)
-        self.evaluation = TrackingEvaluation(self.config)
+        self.evaluation = None
         self.evaluation_results = {}
+        self._epoch_reports = {}
+        self._full_epoch_diagnostics = self._full_diagnostics(1)
+        for builder in (self.train_builder, self.auxiliary_builder, self.evaluation_builder):
+            builder.detailed_diagnostics = self._full_epoch_diagnostics
         self._pending_train = None
         self._pending_auxiliary = None
         self._pending_auxiliary_diagnostics = None
@@ -66,9 +70,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self._memory_stream = None
         self._evaluation_stream = None
         self._evaluation_session = uuid.uuid4().hex
-        from models.ct_v41.training_diagnostics import TrainingDiagnostics
-        self.training_diagnostics = TrainingDiagnostics(self.config.seed,
-            optimized=optimized_execution(self.config)) if self.config.v41_diagnostics else None
+        self.training_diagnostics = None
         if pl is not None:
             self.save_hyperparameters(dict(config=dict(self.config)))
 
@@ -95,11 +97,22 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
 
     def val_dataloader(self):
         self._require_lightning()
-        return self._loader('val')
+        return self._evaluation_loader()
 
     def test_dataloader(self):
         self._require_lightning()
-        return self._loader('test')
+        return self._evaluation_loader()
+
+    def _evaluation_loader(self):
+        # Lightning 在 evaluation_start hook 前就可能构造 iterator；构造也须隔离。
+        from models.ct_v41.epoch_runtime import isolated_evaluation_rng
+        with isolated_evaluation_rng(self.config, self.config.eval_split, module=self):
+            role = 'val' if self.config.eval_split == 'dev' else 'test'
+            return self._loader(role)
+
+    def _full_diagnostics(self, epoch):
+        return (self.config.diagnostics_level == 'full'
+                or int(epoch) in self.config.full_diagnostic_epochs)
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         # raw NumPy frames remain on CPU; only prepared tensors enter the GPU.
@@ -115,7 +128,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             batch = move_tensors(builder.prepare(rows), device)
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
             prior = self.tracker.plan_prior(batch)
-            builder.supervise_prior(batch, prior, training=training)
+            if training or builder.detailed_diagnostics:
+                builder.supervise_prior(batch, prior, training=training)
             # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
             # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
             # teacher/单轨迹 EMA 覆盖；只切换 B0 BN，affine 和共享特征仍可学。
@@ -139,7 +153,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
             output = self.tracker.forward_aux(batch)
             # forward之后仅补被动诊断；不计算acquisition或M辅助监督。
-            builder.supervise_prior(batch, output.prior, training=False)
+            if builder.detailed_diagnostics:
+                builder.supervise_prior(batch, output.prior, training=False)
         except BaseException:
             self._release_materialization(batch, builder)
             builder._pending = None
@@ -203,6 +218,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
 
     def _memory_record(self, phase, *, batch_idx=None, prepared=None, output=None):
         if not self.config.v41_memory_logging or not self.config.log_dir:
+            return
+        if not self._full_epoch_diagnostics and phase in ('train_commit', 'train_cleanup', 'evaluation_commit'):
             return
         device = next(self.tracker.parameters()).device
         if device.type != 'cuda':
@@ -278,6 +295,21 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             raise ValueError('v41 curriculum requires reload_dataloaders_every_n_epochs=1')
 
     def on_train_epoch_start(self):
+        epoch = int(self.current_epoch) + 1
+        # 配置保留原间隔；Lightning 的本轮执行间隔允许最后一轮也评估。
+        trainer = getattr(self, '_trainer', None)
+        if trainer is not None:
+            due = epoch % self.config.check_val_every_n_epoch == 0 or epoch == trainer.max_epochs
+            trainer.check_val_every_n_epoch = 1 if due else trainer.max_epochs + 1
+        self._full_epoch_diagnostics = self._full_diagnostics(epoch)
+        for builder in (self.train_builder, self.auxiliary_builder):
+            builder.detailed_diagnostics = self._full_epoch_diagnostics
+        if self._full_epoch_diagnostics:
+            from models.ct_v41.training_diagnostics import TrainingDiagnostics
+            self.training_diagnostics = TrainingDiagnostics(self.config.seed,
+                optimized=optimized_execution(self.config))
+        else:
+            self.training_diagnostics = None
         self.train_builder.reset()
         self.auxiliary_builder.reset()
         self.auxiliary_diagnostics.reset()
@@ -359,8 +391,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                     auxiliary_batch, auxiliary_output = self._forward_auxiliary_raw(auxiliary_rows)
                     self._pending_auxiliary = (auxiliary_output, auxiliary_batch, len(auxiliary_rows))
                     auxiliary_losses = self.tracker.compute_aux_losses(auxiliary_batch, auxiliary_output)
-                    self._pending_auxiliary_diagnostics = self._auxiliary_diagnostic_records(
-                        auxiliary_rows, auxiliary_batch, auxiliary_output, auxiliary_losses)
+                    if self._full_epoch_diagnostics:
+                        self._pending_auxiliary_diagnostics = self._auxiliary_diagnostic_records(
+                            auxiliary_rows, auxiliary_batch, auxiliary_output, auxiliary_losses)
                     auxiliary_total = auxiliary_losses['loss_total']
                     if auxiliary_total.ndim != 0 or not bool(torch.isfinite(auxiliary_total)):
                         raise FloatingPointError('v41 auxiliary loss_total must be a finite scalar')
@@ -368,15 +401,18 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                     self._auxiliary_fetches += 1
                     for name, value in auxiliary_losses.items():
                         if torch.is_tensor(value) and value.ndim == 0:
-                            self.log('train_aux/' + name, value.detach(), on_step=True,
-                                     on_epoch=True, batch_size=len(auxiliary_rows))
+                            self.log('train_aux/' + name, value.detach(), on_step=False,
+                                     on_epoch=True, batch_size=len(auxiliary_rows),
+                                     reduce_fx='sum' if name.endswith('_count') else 'mean')
             if not bool(torch.isfinite(total)):
                 raise FloatingPointError('v41 combined optimization loss must be finite')
             self.log('train/optimization_loss', total.detach(), on_step=True, on_epoch=True,
                      batch_size=len(rows))
             for name, value in losses.items():
                 if torch.is_tensor(value) and value.ndim == 0:
-                    self.log('train/' + name, value.detach(), on_step=True, on_epoch=True, batch_size=len(rows))
+                    self.log('train/' + name, value.detach(), on_step=name == 'loss_total',
+                             on_epoch=True, batch_size=len(rows),
+                             reduce_fx='sum' if name.endswith('_count') else 'mean')
         except BaseException:
             self._release_materialization(batch, self.train_builder)
             self.train_builder._pending = None
@@ -395,7 +431,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             if auxiliary is not None:
                 auxiliary_output, auxiliary_prepared, auxiliary_count = auxiliary
                 self.auxiliary_builder.commit(auxiliary_output, auxiliary_prepared)
-                self.auxiliary_diagnostics.add(*self._pending_auxiliary_diagnostics)
+                if self._pending_auxiliary_diagnostics is not None:
+                    self.auxiliary_diagnostics.add(*self._pending_auxiliary_diagnostics)
                 self._auxiliary_rows += auxiliary_count
                 self._auxiliary_batches += 1
             self._memory_record('train_commit', batch_idx=batch_idx, prepared=prepared, output=output)
@@ -449,10 +486,11 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self.log('train/adam_steps', float(self._epoch_steps), on_step=False, on_epoch=True)
         self.log('train_aux/endpoint_rows', float(self._auxiliary_rows), on_step=False, on_epoch=True)
         self.log('train_aux/batches', float(self._auxiliary_batches), on_step=False, on_epoch=True)
-        diagnostics = self.auxiliary_diagnostics.state_dict()
-        for name in ('depth_ge8_endpoints', 'max_depth', 'loss_episodes', 'recoveries',
-                     'reappearance_training_endpoints', 'xyz_supervised_endpoints'):
-            self.log('train_aux/' + name, float(diagnostics[name]), on_step=False, on_epoch=True)
+        if self._full_epoch_diagnostics:
+            diagnostics = self.auxiliary_diagnostics.state_dict()
+            for name in ('depth_ge8_endpoints', 'max_depth', 'loss_episodes', 'recoveries',
+                         'reappearance_training_endpoints', 'xyz_supervised_endpoints'):
+                self.log('train_aux/' + name, float(diagnostics[name]), on_step=False, on_epoch=True)
 
     def _auxiliary_audit(self):
         loader = self._loaders.get('auxiliary')
@@ -462,7 +500,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             insertion_indices=list(self._auxiliary_insertions),
             insertion_plan_sha256=insertion_identity(self._auxiliary_insertions),
             loss_weight=self.config.v41_aux_loss_weight,
-            diagnostics=self.auxiliary_diagnostics.state_dict())
+            diagnostics=self.auxiliary_diagnostics.state_dict() if self._full_epoch_diagnostics else None)
 
     def _write_epoch_audit(self, sampler):
         if not self.config.log_dir:
@@ -485,38 +523,44 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 stream.write(content)
 
     def _evaluation_start(self, role):
+        epoch = ((self.config.eval_checkpoint_epoch or self._completed_epoch) if self.config.test
+                 else int(self.current_epoch) + 1)
+        self._evaluation_epoch = int(epoch)
+        self._evaluation_full = self._full_diagnostics(epoch)
+        self.evaluation_builder.detailed_diagnostics = self._evaluation_full
         self.evaluation_builder.reset()
-        self.evaluation = TrackingEvaluation(self.config)
-        if role in self._loaders:
-            self.evaluation.add_singleton_tracks(self._loaders[role].dataset)
         if self._evaluation_stream is not None:
             self._evaluation_stream.close()
             self._evaluation_stream = None
+        self._evaluation_frame_path = None
         if self.config.log_dir:
-            epoch = (self.config.eval_checkpoint_epoch or self._completed_epoch) if role == 'test' else int(self.current_epoch) + 1
             # 每次启动/恢复独立会话；从周期checkpoint重跑中断后的轮次不覆盖旧流。
             directory = Path(self.config.log_dir) / 'frame_streams' / role / self._evaluation_session
             directory.mkdir(parents=True, exist_ok=True)
-            self._evaluation_stream = (directory / f'epoch={epoch:03d}.jsonl').open('x', encoding='utf-8')
-            for row in self.evaluation.rows:
-                self._evaluation_stream.write(json.dumps(row, ensure_ascii=False) + '\n')
+            self._evaluation_frame_path = directory / f'epoch={epoch:03d}.jsonl'
+            self._evaluation_stream = self._evaluation_frame_path.open('x', encoding='utf-8')
+        self.evaluation = make_evaluation(self.config, full=self._evaluation_full,
+                                         row_sink=self._write_evaluation_row)
+        loader_role = 'val' if role == 'dev' else role
+        if loader_role in self._loaders:
+            self.evaluation.add_singleton_tracks(self._loaders[loader_role].dataset)
         self._memory_record(role + '_start')
 
+    def _write_evaluation_row(self, row):
+        if self._evaluation_stream is not None:
+            self._evaluation_stream.write(json.dumps(row, ensure_ascii=False) + '\n')
+
     def on_validation_epoch_start(self):
-        self._evaluation_start('val')
+        self._evaluation_start(self.config.eval_split)
 
     def on_test_epoch_start(self):
-        self._evaluation_start('test')
+        self._evaluation_start(self.config.eval_split)
 
     def _evaluation_step(self, rows):
         batch, output = self._forward_raw(rows, self.evaluation_builder, training=False)
         try:
-            first = len(self.evaluation.rows)
-            committed = self.evaluation_builder.commit(output, batch, diagnostics=True)
+            committed = self.evaluation_builder.commit(output, batch, diagnostics=self._evaluation_full)
             self.evaluation.add_batch(rows, batch, output, committed)
-            if self._evaluation_stream is not None:
-                for row in self.evaluation.rows[first:]:
-                    self._evaluation_stream.write(json.dumps(row, ensure_ascii=False) + '\n')
             self._memory_record('evaluation_commit', prepared=batch, output=output)
         finally:
             self._release_materialization(batch, self.evaluation_builder)
@@ -533,34 +577,31 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             self._evaluation_stream = None
         self._memory_record(role + '_end')
         self.evaluation_results = self.evaluation.summary()
-        if role in self._loaders:
-            expected = self._loaders[role].batch_sampler.endpoint_count
+        loader_role = 'val' if role == 'dev' else role
+        if loader_role in self._loaders:
+            expected = self._loaders[loader_role].batch_sampler.endpoint_count
             complete = self.evaluation_results['prediction_frames'] == expected
             self.evaluation_results['complete_coverage'] = complete
             if not complete and not self.config.ct_engineering_check:
                 raise RuntimeError('v41 evaluation did not consume every prediction endpoint')
-        self.log('success/' + role, self.evaluation_results['success'])
-        self.log('precision/' + role, self.evaluation_results['precision'])
+        self.evaluation_results.update(epoch=self._evaluation_epoch,
+            checkpoint_epoch=self._evaluation_epoch, split=role,
+            diagnostics_level='full' if self._evaluation_full else 'summary',
+            frame_file=str(self._evaluation_frame_path) if self._evaluation_frame_path else None)
+        report = self._epoch_reports.setdefault(self._evaluation_epoch,
+            dict(epoch=self._evaluation_epoch, evaluation={}, timing={}, checkpoint={}, losses={}))
+        report.setdefault('evaluation', {})[role] = self.evaluation_results
+        self.log('success/' + role, self.evaluation_results['success'], on_step=False, on_epoch=True)
+        self.log('precision/' + role, self.evaluation_results['precision'], on_step=False, on_epoch=True)
         for key, value in self.evaluation_results['diagnostics'].items():
-            if value is not None:
-                self.log('diagnostic/' + role + '/' + key, float(value))
+            if isinstance(value, (int, float)):
+                self.log('diagnostic/' + role + '/' + key, float(value), on_step=False, on_epoch=True)
 
     def on_validation_epoch_end(self):
-        self._evaluation_end('val')
-        if self.config.log_dir:
-            directory = Path(self.config.log_dir) / 'validation'
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f'epoch={int(self.current_epoch) + 1:03d}.json'
-            content = json.dumps(self.evaluation_results, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
-            if path.exists():
-                if path.read_text(encoding='utf-8') != content:
-                    raise FileExistsError('existing v41 validation differs: ' + str(path))
-            else:
-                with path.open('x', encoding='utf-8') as stream:
-                    stream.write(content)
+        self._evaluation_end(self.config.eval_split)
 
     def on_test_epoch_end(self):
-        self._evaluation_end('test')
+        self._evaluation_end(self.config.eval_split)
 
     def on_save_checkpoint(self, checkpoint):
         loader = self._loaders.get('train')

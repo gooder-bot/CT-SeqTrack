@@ -310,19 +310,22 @@ def test_resume_reconstructs_saved_auxiliary_selection_instead_of_trusting_a_sig
         host.on_train_epoch_start()
 
 
-def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, monkeypatch):
+@pytest.mark.parametrize('evaluate', [False, True])
+def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, monkeypatch, evaluate):
     """CPU toy只替代网络/点云；真实PL hooks、sampler、Adam、scheduler与恢复合同。
 
     服务器执行；捕获普通Callback早于module epoch-end而导致的半轮checkpoint，
     并将续训两轮的请求、随机前向及Adam状态与连续三轮逐项比较。
     """
     pl = pytest.importorskip('pytorch_lightning')
-    from torch.utils.data import DataLoader, Dataset
+    from torch.utils.data import DataLoader, Dataset, TensorDataset
     import models.ct_v41.entry as entry
     import models.ct_v41.runtime as runtime
     from models.ct_v41.data import raw_collate
     from models.ct_v41.identity import runtime_key
     from utils.lightning_runtime import FinalWindowCheckpoint
+    from models.ct_v41.epoch_runtime import EpochCheckpoint, install_evaluation_rng
+    from models.ct_v41.monitoring import AppendCSVLogger, EpochProgress
 
     # 不读取KITTI/登记，保留真实payload与aux计划验证；测试身份不会用于正式run。
     monkeypatch.setattr(entry, 'source_identity', lambda: {'sha256': 'toy-source', 'files': {}})
@@ -370,7 +373,7 @@ def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, mon
             pass
 
     class LifecycleHost(CTSEQTRACKV41):
-        def __init__(self):
+        def __init__(self, evaluate_run):
             main = ReadyQueueBatchSampler(lengths, config.batch_size, short_window=4,
                 long_window=8, curriculum_epochs=2, reserve_windows=0,
                 source_sha256='toy-data', initial_seed_policy=config.v35_seed_policy)
@@ -379,13 +382,34 @@ def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, mon
             loaders = {role: DataLoader(Requests(), batch_sampler=sampler,
                 collate_fn=raw_collate, num_workers=0, generator=torch.Generator())
                 for role, sampler in (('train', main), ('auxiliary', auxiliary))}
+            if evaluate_run:
+                loaders['test'] = DataLoader(TensorDataset(torch.arange(3)), batch_size=1,
+                    num_workers=0, generator=torch.Generator())
             super().__init__(config, tracker=ToyTracker(), loaders=loaders)
+            self.evaluate_run = evaluate_run
             self.train_builder, self.auxiliary_builder = TransactionBuilder(), TransactionBuilder()
             self.events, self.requests, self.forward_values = [], [], []
             self.epoch_audits = []
+            self.evaluation_draws = []
 
         def val_dataloader(self):
-            return []
+            return self._evaluation_loader() if self.evaluate_run else []
+
+        def on_validation_epoch_start(self):
+            assert self._pending_train is None and self._pending_auxiliary is None
+
+        def validation_step(self, batch, batch_idx):
+            assert not self.training
+            self.evaluation_draws.append((int(self.current_epoch), batch_idx,
+                float(torch.rand(())), random.random(), float(np.random.uniform())))
+
+        def on_validation_epoch_end(self):
+            epoch = int(self.current_epoch) + 1
+            self._epoch_reports.setdefault(epoch, dict(epoch=epoch, evaluation={}, timing={}, checkpoint={}))
+            self._epoch_reports[epoch]['evaluation']['test'] = dict(epoch=epoch, checkpoint_epoch=epoch, split='test',
+                complete_coverage=True, success=70. + epoch, precision=90. - epoch,
+                prediction_frames=3, diagnostics={}, loss_episodes={})
+            self.events.append(('evaluate', epoch))
 
         def _toy_forward(self, rows, builder, parameter, scale, role):
             batch = builder.prepare(rows)
@@ -421,14 +445,19 @@ def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, mon
             assert payload['completed_epoch'] == payload['sampler']['epoch'] + 1
             self.events.append(('save', payload['completed_epoch']))
 
-    def fit(directory, epochs, checkpoint=None, seed=42):
+    def fit(directory, epochs, checkpoint=None, seed=42, evaluate_run=evaluate):
         pl.seed_everything(seed, workers=True)
-        host = LifecycleHost()
+        host = LifecycleHost(evaluate_run)
+        logger = AppendCSVLogger(directory) if evaluate_run else False
+        callbacks = ([EpochProgress(config, logger), EpochCheckpoint(config)] if evaluate_run
+                     else [FinalWindowCheckpoint(keep=3, every_n_epochs=1)])
         trainer = pl.Trainer(default_root_dir=str(directory), accelerator='cpu', devices=1,
-            precision=32, max_epochs=epochs, logger=False, enable_progress_bar=False,
-            enable_model_summary=False, num_sanity_val_steps=0, limit_val_batches=0,
+            precision=32, max_epochs=epochs, logger=logger, enable_progress_bar=False,
+            enable_model_summary=False, num_sanity_val_steps=0, limit_val_batches=1. if evaluate_run else 0,
             reload_dataloaders_every_n_epochs=1, accumulate_grad_batches=1,
-            callbacks=[FinalWindowCheckpoint(keep=3, every_n_epochs=1)])
+            callbacks=callbacks)
+        if evaluate_run:
+            install_evaluation_rng(trainer, host, config)
         trainer.fit(host, ckpt_path=None if checkpoint is None else str(checkpoint))
         return host, trainer
 
@@ -438,8 +467,9 @@ def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, mon
     assert saved.is_file()
     # 故意换全局RNG种子；on_train_epoch_start必须恢复checkpoint的主流RNG。
     resumed, resumed_trainer = fit(tmp_path / 'split', 3, saved, seed=999)
-    assert first.events == [('complete', 1), ('save', 1)]
-    assert resumed.events == [('complete', 2), ('save', 2), ('complete', 3), ('save', 3)]
+    assert [e for e in first.events if e[0] != 'evaluate'] == [('complete', 1), ('save', 1)]
+    assert [e for e in resumed.events if e[0] != 'evaluate'] == [
+        ('complete', 2), ('save', 2), ('complete', 3), ('save', 3)]
     assert first.requests + resumed.requests == continuous.requests
     assert first.forward_values + resumed.forward_values == continuous.forward_values
     assert first.epoch_audits + resumed.epoch_audits == continuous.epoch_audits
@@ -467,3 +497,15 @@ def test_real_lightning_complete_dual_stream_checkpoint_and_resume(tmp_path, mon
     equal_tree(continuous_trainer.optimizers[0].state_dict(), resumed_trainer.optimizers[0].state_dict())
     equal_tree(continuous_trainer.lr_scheduler_configs[0].scheduler.state_dict(),
                resumed_trainer.lr_scheduler_configs[0].scheduler.state_dict())
+    if evaluate:
+        assert first.evaluation_draws + resumed.evaluation_draws == continuous.evaluation_draws
+        control, control_trainer = fit(tmp_path / 'without_evaluation', 3, evaluate_run=False)
+        assert control.requests == continuous.requests
+        assert control.forward_values == continuous.forward_values
+        equal_tree(control.state_dict(), continuous.state_dict())
+        equal_tree(control_trainer.optimizers[0].state_dict(), continuous_trainer.optimizers[0].state_dict())
+        import json
+        results = json.loads((tmp_path / 'split' / 'results.json').read_text(encoding='utf-8'))
+        assert results['best']['epoch'] == 1 and results['last']['epoch'] == 3
+        assert (tmp_path / 'split' / 'metrics.csv').is_file()
+        assert (tmp_path / 'split' / 'epochs' / 'epoch=003.json').is_file()

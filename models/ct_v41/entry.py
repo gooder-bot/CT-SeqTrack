@@ -1,4 +1,4 @@
-"""V41 Full 独立入口；KITTI两组协议与同 run 完整 epoch 恢复。"""
+"""V41 新运行入口；实际配置留档、逐轮评估与同 run 完整 epoch 恢复。"""
 from __future__ import annotations
 
 import argparse
@@ -31,9 +31,22 @@ def parse_config(argv=None):
     for key in TIME_MANIFEST_KEYS[1:]:
         parser.add_argument('--' + key, help='engineering-only manifest for its dataset role')
     parser.add_argument('--dynamics_fixed_delta_t', type=float, help='engineering-only fixed interval')
-    for key in ('batch_size', 'epoch', 'workers', 'seed', 'check_val_every_n_epoch', 'trainer_devices'):
+    for key in ('batch_size', 'epoch', 'workers', 'seed', 'check_val_every_n_epoch', 'trainer_devices',
+                'ct_pointcloud_cache_bytes', 'lr_decay_step', 'lr_warmup_steps', 'log_every_n_steps',
+                'checkpoint_every_n_epochs', 'report_last_k'):
         parser.add_argument('--' + key, type=int)
-    parser.add_argument('--lr', type=float)
+    for key in ('lr', 'wd', 'lr_decay_rate', 'progress_refresh_seconds', 'plain_log_interval_seconds'):
+        parser.add_argument('--' + key, type=float)
+    parser.add_argument('--lr_schedule', choices=('step', 'multistep', 'piecewise'))
+    parser.add_argument('--lr_milestones', nargs='*', type=int)
+    parser.add_argument('--lr_stage_values', nargs='+', type=float)
+    parser.add_argument('--console_mode', choices=('auto', 'bar', 'plain'))
+    parser.add_argument('--diagnostics_level', choices=('summary', 'full'))
+    parser.add_argument('--full_diagnostic_epochs', nargs='*', type=int)
+    parser.add_argument('--eval_split', choices=('test', 'dev'))
+    parser.add_argument('--report_checkpoint', choices=('best_precision', 'last'))
+    for key in ('tensorboard', 'v41_memory_logging'):
+        parser.add_argument('--' + key, action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--devices', type=int, help='single physical GPU ID; trainer_devices remains 1')
     parser.add_argument('--accelerator', choices=('auto', 'cpu', 'gpu'))
     parser.add_argument('--dynamics_time_mode', choices=('true', 'fixed', 'shuffled'))
@@ -45,7 +58,7 @@ def parse_config(argv=None):
     for key in ('limit_train_batches', 'limit_val_batches'):
         parser.add_argument('--' + key, type=batch_limit)
     parser.add_argument('--no_late3', dest='v31_evaluate_late3', action='store_false', default=None,
-                        help='skip automatic post-training final-window evaluation')
+                        help=argparse.SUPPRESS)  # v1 命令兼容；v2 直接复用逐轮结果，不再补跑 late3。
     supplied = vars(parser.parse_args(argv))
     path = supplied.pop('cfg')
     return load_config(path, {key: value for key, value in supplied.items() if value is not None})
@@ -66,9 +79,6 @@ def configure_numerics(config=None):
     # 必须在首次 CUDA context 前配置；原生 allocator 与 torch 2.0.1 兼容。
     from .identity import ALLOCATOR
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', ALLOCATOR)
-    if config is not None and not config.ct_engineering_check:
-        if os.environ['PYTORCH_CUDA_ALLOC_CONF'] != ALLOCATOR:
-            raise ValueError('formal V41 requires PYTORCH_CUDA_ALLOC_CONF=' + ALLOCATOR)
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import torch
     torch.set_float32_matmul_precision('highest')
@@ -148,7 +158,8 @@ def write_resume_event(config, root, manifest):
     with event_path.open('x', encoding='utf-8') as stream:
         json.dump(dict(schema=RESUME_SCHEMA, run_id=manifest['run_id'],
             checkpoint=str(Path(config.checkpoint).resolve()), source=manifest['source'],
-            config_sha256=config_identity(config)), stream, ensure_ascii=False, indent=2)
+            config_sha256=config_identity(config), resolved_config=dict(config),
+            command_line=manifest.get('command_line', [])), stream, ensure_ascii=False, indent=2)
     return event_path
 
 
@@ -188,16 +199,16 @@ def initialization_identity(tracker):
                 initial_parameter_hash=digest(state.items()))
 
 
-def run(config, *, loaders=None):
-    # 训练、逐轮validation、late-3、独立test及同run恢复共用登记的执行算法。
+def run(config, *, loaders=None, command_line=None):
+    # 新 run 自动记录实际配置；训练中的评估与独立评估使用同一执行算法。
     from .config import normalize_config
     from .config import recipe_scope
     config = normalize_config(config)
     with recipe_scope(config):
-        return _run(config, loaders=loaders)
+        return _run(config, loaders=loaders, command_line=command_line)
 
 
-def _run(config, *, loaders=None):
+def _run(config, *, loaders=None, command_line=None):
     """loaders 仅为工程集成测试注入原始帧；正式路径由数据集工厂构造。"""
     apply_device_selection(config)
     configure_numerics(config)
@@ -213,12 +224,14 @@ def _run(config, *, loaders=None):
         raise ValueError('v41 formal entry does not accept injected loaders')
     checkpoint_identity = {}
     preserve_metadata = validate_run_destination(config, root, checkpoint_identity=checkpoint_identity)
+    if config.test:
+        config.eval_checkpoint_epoch = checkpoint_identity['completed_epoch']
     import torch
     import pytorch_lightning as pl
-    from pytorch_lightning.callbacks import Callback, LearningRateMonitor
-    from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
+    from pytorch_lightning.callbacks import LearningRateMonitor
     from models.ctseqtrackv41 import CTSEQTRACKV41
-    from utils.lightning_runtime import FinalWindowCheckpoint
+    from .monitoring import AppendCSVLogger, EpochProgress
+    from .epoch_runtime import EpochCheckpoint, install_evaluation_rng, EVALUATION_RNG_POLICY
 
     pl.seed_everything(config.seed, workers=True)
     root.mkdir(parents=True, exist_ok=True)
@@ -241,9 +254,16 @@ def _run(config, *, loaders=None):
                     precision_policy='FP32 except BF16 QKV inside FA2 kernel',
                     calibration_required=False, source=source, registration_required=False,
                     run_type='engineering' if config.ct_engineering_check else 'formal',
-                    actual_recipe={key: config[key] for key in ('epoch', 'batch_size', 'seed', 'lr',
-                        'lr_milestones', 'lr_decay_rate', 'v41_arm', 'dataset', 'category_name')},
-                    evaluation_rng_policy='per_checkpoint_seed_v1')
+                    actual_recipe={key: config[key] for key in ('epoch', 'batch_size', 'workers', 'seed', 'lr',
+                        'wd', 'lr_schedule', 'lr_milestones', 'lr_decay_step', 'lr_decay_rate', 'lr_warmup_steps',
+                        'v41_arm', 'dataset', 'category_name')},
+                    command_line=list(command_line or []),
+                    evaluation_rng_policy=EVALUATION_RNG_POLICY,
+                    evaluation_protocol=dict(split=config.eval_split,
+                        every_n_epochs=config.check_val_every_n_epoch, always_final=True,
+                        selection=config.report_checkpoint, selection_metric='precision',
+                        tie_break='earliest', last_k=config.report_last_k,
+                        checkpoint_every_n_epochs=config.checkpoint_every_n_epochs))
     manifest.update(initialization_identity(model.tracker))
     if config.dataset == 'kitti_mf' and not config.ct_engineering_check:
         from datasets.kitti_v41 import build_v41_kitti_manifest, kitti_input_metadata_identity
@@ -271,118 +291,53 @@ def _run(config, *, loaders=None):
     if preserve_metadata:
         write_resume_event(config, root, manifest)
     write_run_metadata(config, root, manifest, preserve_existing=preserve_metadata)
-    console_manifest = {key: value for key, value in manifest.items()
-                        if key not in ('source', 'reference_protocol')}
-    console_manifest['source_sha256'] = manifest['source']['sha256']
-    print('[' + version + '] ' + json.dumps(console_manifest, ensure_ascii=False), flush=True)
-    validation_wall = [0.]
-    loggers = [CSVLogger(str(root), name='csv'), TensorBoardLogger(str(root), name='tensorboard')]
-    class ConsoleProgress(Callback):
-        def on_exception(self, trainer, module, exception):
-            module.clear_pending_materialization()
-
-        def on_train_batch_start(self, trainer, module, batch, batch_idx):
-            if config.lr_warmup_steps and batch_idx % 50 == 0:
-                lr = trainer.optimizers[0].param_groups[0]['lr']
-                print(f'[{version} lr] update={trainer.global_step + 1} lr={lr:.9g}', flush=True)
-
-        def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
-            if batch_idx % 50 == 0:
-                loss = outputs.get('loss') if isinstance(outputs, dict) else outputs
-                value = float(loss.detach()) if torch.is_tensor(loss) else loss
-                print(f'[{version} train] epoch={trainer.current_epoch + 1}/{trainer.max_epochs} '
-                      f'batch={batch_idx + 1}/{trainer.num_training_batches} '
-                      f'step={trainer.global_step} loss={value}', flush=True)
-
-        def on_validation_start(self, trainer, module):
-            self._validation_started = time.perf_counter()
-
-        def on_validation_end(self, trainer, module):
-            validation_wall[0] += time.perf_counter() - self._validation_started
-            print('[' + version + ' validation] epoch=' + str(trainer.current_epoch + 1) + ' ' +
-                  json.dumps(module.evaluation_results, ensure_ascii=False), flush=True)
-
-    callbacks = [LearningRateMonitor(logging_interval='step' if config.lr_warmup_steps else 'epoch'),
-                 ConsoleProgress()]
+    print(f'[{version}] run={model.run_id} split={config.eval_split} '
+          f'epochs={config.epoch} diagnostics={config.diagnostics_level} output={root}', flush=True)
+    scalar_logger = AppendCSVLogger(root)
+    loggers = [scalar_logger]
+    if config.tensorboard:
+        from pytorch_lightning.loggers import TensorBoardLogger
+        loggers.append(TensorBoardLogger(str(root), name='tensorboard'))
+    progress = EpochProgress(config, scalar_logger)
+    # progress 先切换 logger 的 epoch；LRMonitor 的直接日志没有 epoch 字段。
+    callbacks = [progress,
+                 LearningRateMonitor(logging_interval='step' if config.lr_warmup_steps else 'epoch')]
     if not config.test:
-        callbacks.append(FinalWindowCheckpoint(keep=3, every_n_epochs=2))
+        callbacks.append(EpochCheckpoint(config))
     trainer = pl.Trainer(default_root_dir=str(root), max_epochs=config.epoch,
         accelerator=config.accelerator, devices=config.trainer_devices, precision=32,
-        # PL 默认 inference_mode 会移除 tensor 的版本计数，使单事务规范化
-        # 缓存按保护合同拒绝复用。no_grad 仍禁反向图，并与工程评测一致。
+        # 事务缓存需要 tensor 版本计数；no_grad 足以禁止评估反向图。
         inference_mode=False,
         deterministic=True, benchmark=False, logger=loggers, callbacks=callbacks,
         enable_checkpointing=not config.test, reload_dataloaders_every_n_epochs=1,
-        check_val_every_n_epoch=config.check_val_every_n_epoch, num_sanity_val_steps=0,
-        accumulate_grad_batches=1, gradient_clip_val=0., log_every_n_steps=10,
+        check_val_every_n_epoch=1, val_check_interval=1.0, num_sanity_val_steps=0,
+        accumulate_grad_batches=1, gradient_clip_val=0., log_every_n_steps=config.log_every_n_steps,
         limit_train_batches=config.limit_train_batches, limit_val_batches=config.limit_val_batches,
-        enable_progress_bar=sys.stdout.isatty())
-    started = time.perf_counter()
-    fit_wall = 0.
+        enable_progress_bar=False, enable_model_summary=False)
+    install_evaluation_rng(trainer, model, config)
     if config.test:
-        checkpoints = [(config.eval_checkpoint_epoch, Path(config.checkpoint))]
+        started = time.perf_counter()
+        trainer.test(model, ckpt_path=config.checkpoint, verbose=False)
+        result = dict(model.evaluation_results, checkpoint=str(config.checkpoint),
+                      wall_seconds=time.perf_counter() - started)
+        write_json(root / 'results.json', result)
+        print(f'{config.eval_split.title()} E{model._completed_epoch} '
+              f'S={result["success"]:.4f} P={result["precision"]:.4f} '
+              f'frames={result["prediction_frames"]} | results={root / "results.json"}', flush=True)
     else:
-        fit_started = time.perf_counter()
         trainer.fit(model, ckpt_path=config.checkpoint)
-        fit_wall = time.perf_counter() - fit_started
         write_json(root / 'training_budget.json', dict(
             schema=model_schema(config), completed_epoch=model._completed_epoch,
             epoch_complete=model._epoch_complete, last_epoch_rows=model._epoch_rows,
             last_epoch_steps=model._epoch_steps, optimizer_steps=int(trainer.global_step),
             sampler=model._loaders['train'].batch_sampler.state_dict(),
             auxiliary=getattr(model, '_last_auxiliary_audit', None)))
-        checkpoints = [(epoch, root / 'formal_checkpoints' / f'epoch={epoch:03d}.ckpt')
-                       for epoch in range(max(1, config.epoch - 2), config.epoch + 1)]
-        if not config.v31_evaluate_late3:
-            return root
-    evaluation_started = time.perf_counter()
-    results = []
-    # 复用单个模型/Trainer，避免评测时叠加第二份 GPU 权重和训练优化器。
-    model.config.test = True
-    for epoch, checkpoint in checkpoints:
-        model.config.checkpoint = str(checkpoint)
-        model.config.eval_checkpoint_epoch = epoch
-        # 原SeqTrack历史点采样使用NumPy全局RNG。每次独立评测重置同一
-        # 起点，确保自动late-3与单独--test对同一权重具有一致采样身份。
-        pl.seed_everything(config.seed, workers=True)
-        from .data import stable_seed
-        model._loader('test').generator.manual_seed(stable_seed(config.seed, 'test'))
-        trainer.test(model, ckpt_path=str(checkpoint), verbose=False)
-        if epoch is None:
-            # 独立 --test 没有额外 epoch 参数；以已校验 checkpoint 的运行身份为准。
-            epoch = model._completed_epoch
-        result = dict(model.evaluation_results, checkpoint_epoch=epoch, checkpoint=str(checkpoint))
-        results.append(result)
-        label = f'epoch={epoch:03d}' if epoch is not None else checkpoint.stem
-        directory = root / 'evaluation' / label
-        if directory.exists() and any(directory.iterdir()):
-            raise FileExistsError('evaluation already exists: ' + str(directory))
-        directory.mkdir(parents=True, exist_ok=True)
-        write_json(directory / 'metrics.json', result)
-        with (directory / 'frames.jsonl').open('w', encoding='utf-8') as stream:
-            for row in model.evaluation.rows:
-                stream.write(json.dumps(row, ensure_ascii=False) + '\n')
-        print('[' + version + ' evaluation] ' + json.dumps(result, ensure_ascii=False), flush=True)
-    reporting_epochs = [row['checkpoint_epoch'] for row in results]
-    late3 = ({name: sum(row[name] for row in results) / 3 for name in ('success', 'precision')}
-             if reporting_epochs == [58, 59, 60] else None)
-    summary = dict(final=results[-1], late3=late3, checkpoint_epochs=reporting_epochs,
-                   wall_seconds=time.perf_counter() - started,
-                   fit_wall_seconds=fit_wall,
-                   train_wall_seconds=max(0., fit_wall - validation_wall[0]),
-                   validation_wall_seconds=validation_wall[0],
-                   evaluation_wall_seconds=time.perf_counter() - evaluation_started,
-                   timing_semantics='host_wall_includes_data_logging_checkpointing_no_cuda_sync',
-                   policy_activation='active_from_epoch1')
-    if torch.cuda.is_available():
-        summary['peak_gpu_allocated_mib'] = torch.cuda.max_memory_allocated() / 2 ** 20
-    write_json(root / 'results.json', summary)
-    print('[' + version + ' complete] ' + json.dumps(summary, ensure_ascii=False), flush=True)
     return root
 
 
 def main(argv=None):
-    return run(parse_config(argv))
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    return run(parse_config(arguments), command_line=['main.py', *arguments])
 
 
 if __name__ == '__main__':

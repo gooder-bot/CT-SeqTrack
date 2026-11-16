@@ -1,12 +1,22 @@
 # V41 服务器验收与两组KITTI Car
 
+## 2026-11-16：新 run 命令已移至 v2 运行页
+
+新 `exec v2` 的默认值、训练/恢复/独立 dev 命令、输出文件和待执行验收见 [V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)。默认每轮 test 与完整 checkpoint，best Precision/last 和最近 K 个评估轮取代新 run 的固定60轮报告约束。本轮只完成源码/文档与静态审阅，未部署、未访问服务器、未运行 pytest/compileall 或模型。
+
+下方保留 **v1 两组首次启动与历史快照**，不作为 v2 新 run 命令依据。旧 run 不改配方，旧 checkpoint 继续使用与其 manifest 匹配的原源码；v2 不能续训 v1。
+
+2026-11-08 文档整理。最新可引用运行快照为 **2026-11-04 10:46:53（北京时间）**，不是今日实时状态：Full完成9/60轮、第10轮2901/4771 batch；原始SeqTrack3D方法＋KITTI适配已完成60轮。Full第9轮dev为9.4719/7.7493；baseline dev final60为38.8072/50.7109、late3为35.7262/46.2808。尚未找到两组固定test19–20的最终结果。不同训练轮次不能据此宣布最终胜负。见 [项目状态](PROJECT_STATUS.md) 与 [原始审计](../artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。
+
+本页上传、验收与scratch命令保留原首次启动和复现用途，**不要求对已有run重新上传、重复scratch或补跑全部检查**。旧快照不能作为今天停止、恢复或重启的依据；已有checkpoint继续遵守同run、同源码/配置/数据和完整双流epoch规则。实际训练已发生也不能倒推每项独立工程验收都已单独留存通过记录。本次仅更新文档，不操作服务器。
+
 当前已取消CT启动/真实batch工具对预先登记的依赖。**不用生成、同步或刷新41_registration.json，也不需要先运行verify。** 训练自动保存本次配置与源码信息；源码指纹归一化CRLF/LF，避免上传换行转换导致误拦截。恢复链、损失及学习率不变。
 
-2026-11-02 21:39的两次失败均停在旧登记门：29个文件全部仅有CRLF→LF变化，代码内容相同，并非CUDA或模型错误。此次修复在本地完成，需覆盖上传下列6个文件：`models/ct_v41/entry.py`、`models/ct_v41/config.py`、新增`models/ct_v41/provenance.py`，以及 `tools/check_v41_server.py`、`tools/verify_ct_v41.py`、`tools/compare_ct_v41.py`。旧登记文件可保留作历史记录，不参与启动。真实batch尚未通过，不把旧版运行记录当作V41验收。
+2026-11-02 21:39历史失败：两次均停在旧登记门，29个文件全部仅有CRLF→LF变化，代码内容相同，并非CUDA或模型错误。当时修复涉及6个文件：`models/ct_v41/entry.py`、`models/ct_v41/config.py`、新增`models/ct_v41/provenance.py`，以及 `tools/check_v41_server.py`、`tools/verify_ct_v41.py`、`tools/compare_ct_v41.py`。旧登记文件保留历史但不参与启动。后续11月4日审计确认运行版本为`5c92b1c`，manifest的162个源码文件与服务器源码归一化后匹配；原“待上传、真实batch尚未通过”仅为21:39时的记录，不是当前部署结论，也不用于证明未单独核实的验收项已通过。
 
 2026-11-02 21:05上传前复核：服务器仅只读检查，baseline全部登记文件SHA仍吻合。两套环境均为torch2.0.1+cu118、Lightning2.0.2、numpy1.23.0；CT的FA2为2.5.8，nvidia-ml-py已安装。两张A40当时free分别44,159/43,757MiB，未发现main.py训练进程；这只是当时快照，不替代新Full实测。最新分卡为 **Full物理GPU0，SeqTrack物理GPU1**，线程上限均2。
 
-## 路径与上传范围
+## 路径与原首次上传范围
 
 - CT：`/home/lishengjie/study/lcyu/CT-SeqTrack`；Python：`/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python`。
 - baseline：`/home/lishengjie/study/lcyu/seqtrack`；Python：`/home/lishengjie/miniconda3/envs/seqtrack3d/bin/python`。
@@ -14,7 +24,7 @@
 
 上传CT时保留旧源码与output，并同步V41代码、数据适配、配置、工具和测试，以及共享 `main.py`、`utils/execution_profile.py`。CT启动不再要求`cfgs/seqtrack_baseline/`里的外部回执。不要以当前CT目录运行旧checkpoint；V40封存见 `artifacts/ct_checks/v41_implementation_20261102-201312/v40_frozen_source.zip` 与 `snapshot_manifest.json`。
 
-## 上传后验收
+## 原首次启动的验收入口
 
 上传后直接做一次实际Full batch检查；无需登记核对或重复旧V40的六阶段并发容量流程。本次两组分卡运行。
 
@@ -26,7 +36,7 @@ OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 PYTHONHASHSEED=42 \
   $PY tools/check_v41_server.py --path /home/lishengjie/data/cxtrack/training --devices 0 --steps 2
 ```
 
-成功后再使用下方scratch命令。其余计划验收保留以下工具入口；它们目前尚未执行，不将“代码已实现”解释为“验收全部完成”：
+原首次启动流程在成功后使用下方scratch命令。其余计划验收保留以下工具入口；本次未重新核实其独立执行记录，不将“代码已实现”或“已训练若干轮”解释为“验收全部完成”：
 
 ```bash
 $PY tools/audit_v41_kitti.py --path /home/lishengjie/data/cxtrack/training
@@ -44,9 +54,9 @@ smoke检查真实主/辅助前向、辅助梯度隔离、BN/mode/RNG保留、同
 3. 误trusted写入、大幅重定位后速度合法性、原云/GT缓存的预测ROI点集合一致。
 4. 实际wall time与显存峰值；两组配方不同，不把成本差异简单归于195参数。
 
-开发评估不用于挑选测试最佳轮。若验收发现错误，先修复并重新冻结未启动版本，再跑正式两组。
+开发评估不用于挑选测试最佳轮。原首次启动要求发现错误时先修复未启动版本再正式训练；已有运行的源码/配置与恢复身份仍保留，不能因本页更新覆盖运行中源码或改变配方。
 
-## 两组正式命令
+## 原两组scratch命令与固定评测
 
 启动器**只打印nohup、PID、日期目录与新终端tail命令**，不创建目录、不提交训练。分别生成：
 

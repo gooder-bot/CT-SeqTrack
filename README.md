@@ -1,17 +1,55 @@
-# 2026-11-02：V41 最小恢复优化与 KITTI Car
+# CT-SeqTrack
+
+**2026-11-16 新运行入口：** [V41 v2 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)已实现具名 CLI > YAML > 默认、实际配方自动记录、默认每轮 test/完整 checkpoint、追加 CSV 与 summary/full 诊断；本轮仅静态审阅，未部署或运行验收。新规则只覆盖 `exec v2` 新 run；下方运行数据与原 final60/late3 是历史证据，旧 checkpoint 仍用匹配的原源码。
+
+面向 3D 点云单目标跟踪，研究**物理时间运动先验、当前观测纠偏与可信状态更新的可靠闭环融合**。当前主线为 **V41**：B0 观测、B1 运动先验、训练侧 MTP、B3 选框/可信判断、当前点 XYZ 恢复 R 和双 ROI 搜索。旧 B2 身份记忆/vote/mode 已退出当前主线，V39 的 G/跳骨干也未移入 V41。
+
+**文档整理：2026-11-08。最新运行证据：北京时间 2026-11-04 10:46:53；本次没有重新访问服务器，不能据此判断今天的进程或完成状态。** 当前结构、创新边界、固定结果和研究优先级统一见 [项目现状与研究方向](docs/PROJECT_STATUS.md)。
+
+## 已确认进展
+
+| 版本 | 已有证据 | 能支持的结论 |
+|---|---|---|
+| V38 | 三组 scratch60 完成并验收 | Full 相对旧 Full 改善；相对强 B1 末轮较差、late3 略好，严重漂移仍增加 |
+| V39 | 两组各完成13轮，第14轮收到 SIGTERM | 没有 final60/late3；工程检查通过不代表完整训练成功或失败 |
+| V40 | 四组60轮完成，11/02已复算末三轮原帧 | B0 总体最佳；Full 运动端点有正信号，但总体和长尾未超过 B0；未执行完整官方比较器验收 |
+| V41 KITTI Full | 11/04快照完成9轮、进入第10轮；第9轮 dev S/P=9.4719/7.7493 | 早期在线失效已有诊断，尚无固定 final60/late3 测试结果 |
+| 原始 SeqTrack3D 方法＋KITTI适配 | 60轮完成；dev final60=38.8072/50.7109，late3=35.7262/46.2808 | 基线训练已完成；该快照未发现 test19–20 固定结果 |
+
+来源：[V38结果](docs/CTSEQTRACK_V38_RESULTS_PROFILE_20261026.md)、[V39完成状态](artifacts/ct_checks/20261029_v39_deep_diagnosis/REPORT.md)、[V40四组复盘](artifacts/ct_checks/20261102_v40_research_audit/results/REPORT.md)、[最新KITTI诊断](artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。不同数据集、不同训练轮次的成绩不作最终胜负比较。
+
+## 当前研究重点
+
+最新证据指向：**B0 在线定位/前景失配 → accepted 历史偏移 → 后续运动提议与裁剪失效 → trusted/R 难以恢复**。部分长轨在目标点仍在 crop 内时已经定位错误；不能把搜索丢目标当作所有失败的起点。
+
+下一步研究优先核查真实预测历史下的定位/分割、无速度首框启动及主训练 GT 速度种子分布，再处理预测到搜索的连接、可信支持与真正的恢复难例；执行侧并行核查重复整云处理、acquisition 标签、几何和同步成本。**这些是尚未实施的诊断/研究方向，不改变现有运行或自动追加实验。** 1/4/4/8 是状态重置窗口，不是8步BPTT；整轨辅助只训练B3/R，具体窗口配比未被证明最优。详见 [最新问题](最新问题.md)、[待办](need_to_do.md)、[窗口依据](artifacts/ct_checks/20261104_window_seqtrack_review/window_experiment_evidence.md)。
+
+## 当前入口与实验边界
+
+- 入口仍为 `main.py`，V41配置为 [41_full_kitti.yaml](cfgs/ct_seqtrack/41_full_kitti.yaml)，活动实现为 `models/ct_v41/`、`models/ctseqtrackv41.py`、`datasets/kitti_v41.py`。
+- [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)解释实现；[V41操作页](docs/CTSEQTRACK_V41_LAUNCH.md)保留检查、启动、恢复和比较命令。两组已有运行，不能照旧“待上传”段重复启动 scratch。
+- 正式范围仍为 Full 与原始 SeqTrack3D 方法＋KITTI适配两组，bs16/seed42/scratch60，固定 final60 与58/59/60均值。开发集17–18、测试集19–20分开；两组比较整体系统，不能单独归因B1/MTP/R，也不是等计算预算消融。
+- CT入口/smoke/比较不依赖预登记或刷新 `41_registration.json`；自动记录实际配置及LF归一化源码身份，同run完整双流epoch续训检查保留。旧登记与输出作为历史证据保留。
+- 当前工作约定见 [AGENTS](AGENTS.md)，正式规则见 [实验协议](docs/EXPERIMENT_PROTOCOL.md)，工具范围见 [FORMAL_TOOLING](docs/FORMAL_TOOLING.md)。本次仅更新文档，没有运行测试、模型、编译或服务器操作。
+
+## 历史记录
+
+以下保留各日期的实施、授权和实验记录；其中“当前”“尚未上传”“待启动”只描述当时状态。当前版本与最新证据以上文和 [项目现状](docs/PROJECT_STATUS.md) 为准，不由旧条目重新激活实验或旧服务器授权。
+
+### 2026-11-02：V41 最小恢复优化与 KITTI Car（实施时快照）
 
 最新简化：CT训练与smoke不再要求预登记或刷新源码清单；CRLF/LF变化不会阻挡启动。上传后直接运行真实batch检查，命令见[V41操作页](docs/CTSEQTRACK_V41_LAUNCH.md)。
 新增当前点XYZ恢复候选R，复用B3选框与可信更新；保留B1/MTP、骨干及主窗口1/4/4/8，增加独立完整轨迹辅助训练。新Full初始LR **1.5e-4，每20轮×0.2**。只比较Full与原始SeqTrack3D方法＋KITTI适配，两组bs16/60epoch/seed42，固定final60及late3。
 
 本地实现和静态审阅完成，服务器baseline必要适配已备份后部署；CT尚未上传。**未运行测试、模型、训练或性能验收，尚无V41涨分结论。** 使用 [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)、[上传后验收/启动/比较](docs/CTSEQTRACK_V41_LAUNCH.md)；配置为 `cfgs/ct_seqtrack/41_full_kitti.yaml`。旧源码/配置/登记/output保留，下方为历史记录。
 
-# 2026-10-29：V40 已实现，待服务器运行验收
+### 2026-10-29：V40 已实现，待服务器运行验收（历史快照）
 
 当前新主线为 **v38clean1 dense B0＋窄 FlashAttention＋B1 MTP＋Full 独立搜索保护**。四组 mini 配置：`40_b0_mini.yaml`、`40_b1_mini.yaml`、`40_b1_mtp_mini.yaml`、`40_full_mini.yaml`，统一经 `main.py --cfg cfgs/ct_seqtrack/40_..._mini.yaml` 运行。
 
 见 [设计及解释边界](docs/CTSEQTRACK_V40_DESIGN.md) 与 [服务器验收、独立日期启动命令](docs/CTSEQTRACK_V40_LAUNCH.md)。**本机按用户要求未运行环境检查、测试、编译或训练；没有V40成绩或性能结论。** 后续只读服务器检查确认V40未部署、并发检查缺pynvml；已修复验证inference模式导致事务缓存不复用的静态缺口。用户上传后先执行六类服务器验收，工程权重丢弃，最新安排先GPU0并行B1 MTP+Full，B0/B1以后补齐。下面带日期的旧版本安排和成绩保留为历史记录。
 
-# CT-SeqTrack
+### 2026-10-28及以前的历史记录
 
 **2026-10-28：v39 工程验收通过，可以开始两组正式实验。** 新主线为 E＋B1＋M＋G＋自适应跟踪，所有模块从epoch1启用；两份 Full 仅学习率配方不同。用户最新要求新环境名`ctseqtrack3d`、OMP/MKL/OPENBLAS均为2、两组同GPU0并行，workers4和其他训练配方不变。[最新配置说明](docs/CTSEQTRACK_V39_CONFIG.md)已汇总固定参数；分别启动及新终端tail命令见 [v39操作页](docs/CTSEQTRACK_V39_LAUNCH.md)。用户本次已授权备份服务器源码并更新匹配的最新代码；服务器相关测试72项（CUDA项无跳过）、连续batch、实际main训练/验证/checkpoint及A/B同卡并行短程均已通过；配对profile已完成，正式成绩和独占速度结论仍待实验。以下v38及更早记录保留为历史。
 

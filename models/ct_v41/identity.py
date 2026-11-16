@@ -1,6 +1,6 @@
 """V41 当前点恢复与 KITTI 两组协议；V40 仅为冻结源码基底。"""
 
-EXECUTION_REVISION = 'v1'
+EXECUTION_REVISION = 'v2'
 SCHEMA = 'ct_seqtrack.current_point_recovery.v41'
 RUNTIME_KEY = 'ct_v41_runtime'
 EPOCH_SCHEMA = 'ct_seqtrack.v41.epoch_boundary.v1'

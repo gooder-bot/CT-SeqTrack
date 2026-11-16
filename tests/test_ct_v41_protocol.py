@@ -29,10 +29,10 @@ def test_registered_full_recipe_and_epoch_learning_rates():
     assert observed[40:] == pytest.approx([6e-6] * 20)
 
 
-@pytest.mark.parametrize('patch', [dict(lr=1e-4), dict(epoch=59), dict(v41_arm='b1'),
+@pytest.mark.parametrize('patch', [dict(v41_arm='b1'),
     dict(v41_aux_fraction=.5), dict(v41_recovery_weight=.2), dict(v41_train_preload_offset=-1.),
     dict(v41_attention_backend='math'), dict(dataset='nuscenes_mf')])
-def test_unregistered_formal_changes_are_rejected(patch):
+def test_unsupported_algorithm_changes_are_rejected(patch):
     with pytest.raises(ValueError):
         normalize_config(patch)
 

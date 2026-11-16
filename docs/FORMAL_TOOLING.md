@@ -1,4 +1,40 @@
-# 2026-10-29 V40 工具面补充
+# CT-SeqTrack 当前工具范围：V41
+
+## 2026-11-16：exec v2 工具入口
+
+新 run 以 [V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)为准：`main.py` 使用具名 CLI + YAML，`tools/launch_ct_v41.py --arm full` 按实际配置打印命令，不强加旧 epoch/batch/LR；仍不执行训练。无 `--set`、参数别名、新调度器或预登记门。默认每轮 test/完整保存，日志和结果路径见新运行页。本轮仅静态实施，服务器运行验收待执行。
+
+下表中的 baseline 固定测试和 `tools/compare_ct_v41.py` 保留 **v1 final60/late3** 用途，不是任意 v2 新配方的比较门；旧 checkpoint 使用原 run 对应源码。
+
+整理日期：**2026-11-08**。现行实验规则见 [实验协议](EXPERIMENT_PROTOCOL.md)，状态及证据索引见 [当前状态](PROJECT_STATUS.md)。本节按当前源码说明工具职责，不表示本次执行了工具或补齐运行验收。下方旧工具面只服务其对应源码/实验，不将v24或V40登记要求套到V41。
+
+## 现行入口与工具
+
+| 工具 | 职责与边界 |
+|---|---|
+| `main.py --cfg cfgs/ct_seqtrack/41_full_kitti.yaml` | 分派 `models/ct_v41/entry.py`，运行V41 scratch训练、同run完整epoch续训或评测；具体CLI及路径见[V41操作页](CTSEQTRACK_V41_LAUNCH.md)。 |
+| `tools/launch_ct_v41.py` | **只打印**两组独立nohup、日期目录、PID和tail命令，不创建目录、不执行训练。`--arm full`默认GPU0，`--arm seqtrack`默认GPU1；`--gpu`仅可覆盖单组。实际执行打印命令才会启动。 |
+| `tools/check_v41_server.py` | 服务器真实KITTI Full主/辅助forward、梯度隔离、BN/mode/RNG、FA2、同次Adam和两流commit检查；报告写新目录，不保存工程权重。smoke按每主batch插入一辅助batch，不是正式稀疏辅助流的速度测量，也不替代完整epoch/续训检查。 |
+| `tools/audit_v41_kitti.py` | 检查Car输入metadata与文件清单，识别四个已知缺失bin并保留空观测政策；报告写新的ct_checks目录。不运行模型，不证明点框几何或跟踪正确。 |
+| `tools/verify_ct_v41.py verify [--resolved]` | **可选**静态语法和实际源码身份读取；`--resolved`另读取当前Full配置。只支持verify，无register动作，不依赖旧登记，不是训练/smoke前置，也不替代运行验收。 |
+| 原始SeqTrack工程的 `tools/evaluate_kitti_v41_baseline.py` | 对该run固定58/59/60权重独立评测test，生成 `fixed-test/fixed_comparison.json`。属于已适配的服务器baseline工程，不是本地CT工具；不要用CT专有CLI调用baseline入口。 |
+| `tools/compare_ct_v41.py` | 读取Full运行与baseline固定test目录，核对约定配方、Full60轮及辅助流完成、固定权重轮次/同run目录、共同数据身份/原帧集合和初始化计分，重算final60/late3。默认stdout；`--output`只接受ct_checks下不存在的新JSON文件。 |
+
+比较器只接受0019/0020测试帧，开发集汇总不能替代输入。它检查baseline三个评测记录的实际源码一致性，并报告两组源码身份；**不依赖预登记，也不等于重新执行模型、重建全部几何或证明模块因果贡献**。Full同run源码/配置/数据/主辅采样/RNG的恢复身份由运行入口和checkpoint恢复逻辑核验，不能笼统写成比较器重新执行了这些检查。
+
+## 当前身份与操作约束
+
+V41由 `models/ct_v41/provenance.py` 在运行时自动记录实际Python源码等身份，CRLF/LF归一化。`41_registration.json`与外部baseline receipt保留历史但不作为CT启动、smoke或比较依赖；不刷新历史登记，不引入原始字节上传门。取消预登记没有取消同run完整主辅epoch恢复、有限数值与输入完整性检查。
+
+本轮为本地文档同步，只做文本/链接/diff静态核对，**不运行环境检查、pytest、compileall、模型或CUDA smoke**，不访问或修改服务器、不启停训练。`output/`、旧artifacts、源码、正式YAML和冻结基线保持。文档中的启动命令是复现入口，不是新增运行授权。
+
+最新已读取运行快照是 **2026-11-04 10:46:53（北京时间）**：V41已完成9轮并进入第10轮，baseline60轮完成，该审计未找到固定test结果；这不是11月8日实时状态。见 [KITTI审计](../artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。因此不再把旧“未上传/未运行”当当前事实，也不能据训练启动反推所有专项验收已通过。
+
+V40四组60轮已完成并有 [保存结果复算](../artifacts/ct_checks/20261102_v40_research_audit/results/REPORT.md)，但当次未运行完整 `compare_ct_v40.py`。以下V40工具与六阶段要求保持其历史用途，不要求对V41重做原两波并发或登记流程；已有运行是否缺某项证据须按实际报告单独说明。
+
+---
+
+# 历史工具面：2026-10-29 V40 补充
 
 V40入口为 `main.py` + 四份 `cfgs/ct_seqtrack/40_*_mini.yaml`。新增：
 

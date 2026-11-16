@@ -232,7 +232,7 @@ def motion_slices(rows):
 
 class TrackingEvaluation:
     """benchmark_compat 逐帧积分含合法首帧；GT 几何只用于被动审计。"""
-    def __init__(self, config):
+    def __init__(self, config, *, row_sink=None):
         self.v41_config = normalize_config(config)
         self.optimized = optimized_execution(self.v41_config)
         self.schema = SCHEMA
@@ -243,6 +243,8 @@ class TrackingEvaluation:
         self._last_time = {}
         self._recoveries = []
         self._loss_events = 0
+        self._row_sink = row_sink
+        self._in_batch = False
 
     def add_initialization(self, key, *, scene='unknown', timestamp=None, raw_frame_id=None, track_id=None):
         if key not in self._initialized:
@@ -251,6 +253,8 @@ class TrackingEvaluation:
             self.rows.append(dict(tracklet=key, frame=0, success=1., precision=1.,
                                   iou=1., distance=0., initialization=True, scene_id=scene,
                                   timestamp=timestamp, raw_frame_id=raw_frame_id, track_id=track_id))
+            if self._row_sink is not None and not self._in_batch:
+                self._row_sink(self.rows[-1])
 
     def add_singleton_tracks(self, dataset):
         """长度一的合法轨迹只有首帧，仍属于官方逐帧分母。"""
@@ -371,7 +375,11 @@ class TrackingEvaluation:
     def add_batch(self, raw_rows, batch, output, commit_results=None):
         from .candidate_records import candidate_records
         first = len(self.rows)
-        self._add_batch_metrics(raw_rows, batch, output, commit_results)
+        self._in_batch = True
+        try:
+            self._add_batch_metrics(raw_rows, batch, output, commit_results)
+        finally:
+            self._in_batch = False
         records = candidate_records(batch, output, optimized=self.optimized)
         predictions = [row for row in self.rows[first:] if not row['initialization']]
         for row, record in zip(predictions, records):
@@ -381,6 +389,9 @@ class TrackingEvaluation:
                 q0_is_fallback=record['q0_is_fallback'], selected_source=record['selected_source'],
                 trusted_write=bool(row.get('supported')))
             record['mechanism']['actual_episode_recovery'] = row.get('recovery_seconds') is not None
+        if self._row_sink is not None:
+            for row in self.rows[first:]:
+                self._row_sink(row)
 
     def _metrics_summary(self):
         count = len(self.rows)
@@ -403,12 +414,17 @@ class TrackingEvaluation:
                     loss_episode_seconds_p90=episodes['all']['seconds']['p90'],
                     loss_episode_total_frames=episodes['total_lost_frames'],
                     loss_episode_unrecovered_rate=episodes['unrecovered_rate'])
+        diag.update(low_iou_frames=episodes['low_iou_frames'],
+                    max_loss_frames=max((item['frames'] for item in episodes['episodes']), default=0),
+                    max_loss_seconds=max((item['seconds'] for item in episodes['episodes']
+                                          if item['seconds'] is not None), default=0.))
         diag['moving_threshold_m'] = .15
         context_norms = [row['diagnostic_query_context_norm'] for row in predictions
                          if row.get('diagnostic_query_context_norm') is not None]
         diag['query_context_recorded_frames'] = len(context_norms)
         diag['query_context_norm_mean'] = float(np.mean(context_norms)) if context_norms else None
         return dict(schema=self.schema, metric_mode='benchmark_compat', frames=count,
+                    total_frames=count, initialization_frames=len(self._initialized),
                     prediction_frames=count - len(self._initialized), tracklets=len(self._initialized),
                     success=100 * sum(row['success'] for row in self.rows) / max(count, 1),
                     precision=100 * sum(row['precision'] for row in self.rows) / max(count, 1),
@@ -482,4 +498,212 @@ class TrackingEvaluation:
         result['same_state_oracle'] = dict(interpretation='passive_one_step_not_closed_loop',
             success=100 * (initial + sum(r['oracle']['success'] for r in records)) / max(count + initial, 1),
             precision=100 * (initial + sum(r['oracle']['precision'] for r in records)) / max(count + initial, 1))
+        result['detail_level'] = 'full'
+        result['stages'] = _full_stage_summary(rows)
         return result
+
+
+def _full_stage_summary(rows):
+    """只复用 full 已算几何；各来源用 raw_valid，不把去重误当缺失。"""
+    names = ('coarse', 'q0', 'prior', 'trusted_propagation', 'recovery_measurement', 'final')
+    accumulators = {name: dict(valid_frames=0, selectable_frames=0, selected_frames=0,
+        success_sum=0., precision_sum=0., center_sum=0., axis_yaw_sum=0.) for name in names}
+
+    def add(name, geometry, *, selectable=True, selected=False, metric=None):
+        item = accumulators[name]
+        success, precision = (metric if metric is not None else
+            metric_contributions(geometry['iou'], geometry['center_error_m']))
+        item['valid_frames'] += 1
+        item['selectable_frames'] += int(selectable)
+        item['selected_frames'] += int(selected)
+        item['success_sum'] += float(success)
+        item['precision_sum'] += float(precision)
+        item['center_sum'] += float(geometry['center_error_m'])
+        item['axis_yaw_sum'] += float(geometry['axis_yaw_error_rad'])
+
+    motion_valid = 0
+    for row in rows:
+        if row.get('coarse_valid') and row.get('coarse_geometry') is not None:
+            add('coarse', row['coarse_geometry'], selectable=False)
+        record = row['diagnostic_candidates']
+        motion_valid += bool(record['prior_motion_valid'])
+        for index, name in enumerate(names[1:5]):
+            if record['raw_valid'][index]:
+                add(name, record['geometry'][index], selectable=record['valid'][index],
+                    selected=record['selected_index'] == index)
+        add('final', record['selected_geometry'], selected=True,
+            metric=(row['success'], row['precision']))
+    table = {}
+    for name, item in accumulators.items():
+        count = item['valid_frames']
+        table[name] = dict(valid_frames=count, prediction_frames=len(rows),
+            coverage=count / len(rows) if rows else None,
+            selectable_frames=item['selectable_frames'], selected_frames=item['selected_frames'],
+            success=100 * item['success_sum'] / count if count else None,
+            precision=100 * item['precision_sum'] / count if count else None,
+            center_error_m=item['center_sum'] / count if count else None,
+            axis_yaw_error_deg=float(np.rad2deg(item['axis_yaw_sum'] / count)) if count else None)
+    return dict(interpretation='passive_same_state_not_closed_loop_ablation',
+        denominator='source_raw_valid_prediction_frames_only_initialization_excluded',
+        prior_motion_valid_frames=motion_valid, prediction_frames=len(rows), values=table)
+
+
+class CompactTrackingEvaluation:
+    """summary 只算最终框；逐帧写 sink，内存不保留 rows/候选/点集合。"""
+    NAMES = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')
+    add_singleton_tracks = TrackingEvaluation.add_singleton_tracks
+
+    def __init__(self, config, *, row_sink=None):
+        self.v41_config = normalize_config(config)
+        self.optimized = optimized_execution(self.v41_config)
+        self.schema = SCHEMA
+        self._row_sink = row_sink
+        self._initialized = set()
+        self._tracks = {}
+        self._frames = self._predictions = 0
+        self._success = self._precision = 0.
+        self._selection = {name: 0 for name in self.NAMES}
+        self._over5 = self._over10 = self._low_iou = self._lost_frames = 0
+        self._loss_events = 0
+        self._episodes = {name: self._empty_episodes() for name in ('all', 'recovered', 'unrecovered')}
+
+    @staticmethod
+    def _empty_episodes():
+        return dict(episodes=0, frames=dict(count=0, total=0, max=0),
+            seconds=dict(count=0, total=0., max=0.), seconds_complete=True)
+
+    @staticmethod
+    def _add_episode(group, frames, seconds):
+        group['episodes'] += 1
+        for name, value in (('frames', frames), ('seconds', seconds)):
+            target = group[name]
+            target['count'] += 1
+            target['total'] += value
+            target['max'] = max(target['max'], value)
+
+    def _emit(self, row):
+        if self._row_sink is not None:
+            self._row_sink(row)
+
+    def add_initialization(self, key, *, scene='unknown', timestamp=None, raw_frame_id=None, track_id=None):
+        if key in self._initialized:
+            return
+        self._initialized.add(key)
+        self._tracks[key] = dict(last_frame=0, last_time=timestamp, lost=None)
+        self._frames += 1
+        self._success += 1.
+        self._precision += 1.
+        self._emit(dict(tracklet=key, frame=0, success=1., precision=1., iou=1., distance=0.,
+            initialization=True, scene_id=scene, timestamp=timestamp,
+            raw_frame_id=raw_frame_id, track_id=track_id, selected_source=None))
+
+    def _finish_episode(self, state, *, recovered, now):
+        episode = state['lost']
+        seconds = now - episode['start_time']
+        if seconds < 0:
+            raise ValueError('evaluation timestamps must be causal')
+        for name in ('all', 'recovered' if recovered else 'unrecovered'):
+            self._add_episode(self._episodes[name], episode['frames'], seconds)
+        state['lost'] = None
+
+    def add_batch(self, raw_rows, batch, output, commit_results=None):
+        # commit_results/候选/分割纯度不参与 summary；真实状态更新已由 builder 完成。
+        del commit_results
+        from utils.diagnostic_transfer import tensors_to_numpy
+        arrays = tensors_to_numpy(dict(predictions=output.accepted_box, targets=batch['target_box'],
+            sizes=batch['box_size'], target_sizes=batch['target_box_size'],
+            selected=output.selected_index), optimized=self.optimized)
+        for index, raw in enumerate(raw_rows):
+            request, key = raw['request'], raw['tracklet_key']
+            if request.branch != 4:
+                raise ValueError('evaluation must use one uninterrupted rollout per tracklet')
+            if key not in self._initialized:
+                if request.frame != 1:
+                    raise ValueError('evaluation track must begin at its first prediction')
+                first = raw['first_frame']
+                self.add_initialization(key, scene=str(first.get('scene_id', 'unknown')),
+                    timestamp=float(first['timestamp']),
+                    raw_frame_id=first.get('raw_frame_id', first.get('frame_id')),
+                    track_id=first.get('meta', {}).get('track_id'))
+            if key not in self._tracks or request.frame != self._tracks[key]['last_frame'] + 1:
+                raise ValueError('evaluation endpoints must be complete and causal')
+            state = self._tracks[key]
+            frame = raw['frames'][request.frame]
+            now = float(frame['timestamp'])
+            if not np.isfinite(now) or (state['last_time'] is not None and now < state['last_time']):
+                raise ValueError('evaluation timestamps must be finite and causal')
+            overlap, distance = box_metrics(
+                LocalYawBox(arrays['predictions'][index], arrays['sizes'][index][[1, 0, 2]]),
+                LocalYawBox(arrays['targets'][index], arrays['target_sizes'][index][[1, 0, 2]]),
+                up_axis=(0, 0, 1), mode='benchmark_compat', dim=3)
+            success, precision = metric_contributions(overlap, distance)
+            selected = int(arrays['selected'][index])
+            if not 0 <= selected < len(self.NAMES):
+                raise ValueError('unknown v41 selected source')
+            source = self.NAMES[selected]
+            self._frames += 1
+            self._predictions += 1
+            self._success += float(success)
+            self._precision += float(precision)
+            self._selection[source] += 1
+            self._over5 += distance > 5
+            self._over10 += distance > 10
+            self._low_iou += overlap < .1
+            if state['lost'] is None and overlap < .1:
+                state['lost'] = dict(start_time=now, frames=0)
+                self._loss_events += 1
+            if state['lost'] is not None:
+                if overlap >= .5:
+                    self._finish_episode(state, recovered=True, now=now)
+                else:
+                    state['lost']['frames'] += 1
+                    self._lost_frames += 1
+            state['last_frame'], state['last_time'] = int(request.frame), now
+            self._emit(dict(tracklet=key, frame=int(request.frame), success=float(success),
+                precision=float(precision), iou=float(overlap), distance=float(distance),
+                initialization=False, timestamp=now, selected_source=source, selected_index=selected,
+                raw_frame_id=frame.get('raw_frame_id', frame.get('frame_id')),
+                track_id=frame.get('meta', {}).get('track_id'), scene_id=str(frame.get('scene_id', 'unknown'))))
+            if request.ends_window:
+                if state['lost'] is not None:
+                    self._finish_episode(state, recovered=False, now=now)
+                del self._tracks[key]
+
+    def summary(self):
+        # 未完成工程评测仍报告截至最后一帧的右删失；不修改累计器，重复summary稳定。
+        episodes = {name: dict(episodes=value['episodes'], frames=dict(value['frames']),
+            seconds=dict(value['seconds']), seconds_complete=True) for name, value in self._episodes.items()}
+        for state in self._tracks.values():
+            if state['lost'] is not None:
+                elapsed = state['last_time'] - state['lost']['start_time']
+                for name in ('all', 'unrecovered'):
+                    self._add_episode(episodes[name], state['lost']['frames'], elapsed)
+        for value in episodes.values():
+            for name in ('frames', 'seconds'):
+                stats = value[name]
+                stats['mean'] = stats['total'] / stats['count'] if stats['count'] else None
+        count = episodes['all']['episodes']
+        episodes.update(definition='start_iou_lt_0.1_end_iou_ge_0.5_recovery_frame_excluded',
+            total_lost_frames=self._lost_frames, low_iou_frames=self._low_iou,
+            unrecovered_rate=episodes['unrecovered']['episodes'] / count if count else None)
+        diagnostics = dict(over5m_frames=int(self._over5), over10m_frames=int(self._over10),
+            low_iou_frames=int(self._low_iou), loss_events=self._loss_events,
+            recovered_events=episodes['recovered']['episodes'], unrecovered_events=episodes['unrecovered']['episodes'],
+            mean_recovery_seconds=episodes['recovered']['seconds']['mean'],
+            unrecovered_elapsed_seconds=episodes['unrecovered']['seconds']['total'],
+            max_loss_frames=episodes['all']['frames']['max'], max_loss_seconds=episodes['all']['seconds']['max'],
+            loss_iou_threshold=.1, recovery_iou_threshold=.5)
+        return dict(schema=self.schema, detail_level='summary', metric_mode='benchmark_compat',
+            row_schema='ct_seqtrack.v41.compact_frame.v1', frames=self._frames, total_frames=self._frames,
+            initialization_frames=len(self._initialized), prediction_frames=self._predictions,
+            tracklets=len(self._initialized), success=100 * self._success / max(self._frames, 1),
+            precision=100 * self._precision / max(self._frames, 1), diagnostics=diagnostics,
+            selection={name: dict(count=count, rate=count / self._predictions if self._predictions else None)
+                       for name, count in self._selection.items()}, loss_episodes=episodes,
+            coordinate_mode=self.v41_config.ct_coordinate_mode, geometry_convention=self.v41_config.v41_kitti_geometry)
+
+
+def make_evaluation(config, *, full=False, row_sink=None):
+    """host 每轮明确选择档位；summary 不构造详细候选台账。"""
+    evaluator = TrackingEvaluation if full else CompactTrackingEvaluation
+    return evaluator(config, row_sink=row_sink)

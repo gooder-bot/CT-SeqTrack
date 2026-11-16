@@ -441,6 +441,9 @@ class BatchBuilder:
     def __init__(self, config):
         self.config = self.v41_config = normalize_config(config)
         self.train_diagnostics = bool(option(self.config, 'v35_train_diagnostics', True))
+        # host 按轮选择 summary/full；默认保留独立工具的历史详细行为。
+        # 只控制被动统计，不控制监督、搜索、候选或状态提交。
+        self.detailed_diagnostics = True
         self.states = {}
         self._pending = None
         self._raw_memo = None
@@ -591,7 +594,7 @@ class BatchBuilder:
         recovery_seed_local[:3] -= anchor[:3]
         points, valid, raw_ids, seg, bc, truth_boxes = [], [], [], [], [], []
         cache_used = []
-        record_training = self.train_diagnostics and r.branch != 4
+        record_training = self.detailed_diagnostics and self.train_diagnostics and r.branch != 4
         history_raw_counts, history_crop_counts = [], []
         b0_ids = None
         search_target_counts = {}
@@ -599,7 +602,11 @@ class BatchBuilder:
             frame = frames[frame_id]
             xyz, ids = self._points(frame)
             crop_box = history[slot] if slot < 3 else anchor
-            mask = inside_box(xyz, crop_box, state.size, scale=scale, offset=offset)
+            record_coverage = ((record_training and slot < 3) or
+                (slot == 3 and self.detailed_diagnostics and (self.train_diagnostics or r.branch == 4)))
+            # 全云mask只供覆盖日志；真实采样使用下方view/search，不依赖此遍历。
+            mask = (inside_box(xyz, crop_box, state.size, scale=scale, offset=offset)
+                    if record_coverage else None)
             view_xyz, view_ids, view_to_raw = xyz, ids, np.arange(len(ids), dtype=np.int64)
             used = False
             if str(option(self.config, 'dataset', '')) == 'kitti_mf' and 0 <= r.branch < 4:
@@ -660,7 +667,7 @@ class BatchBuilder:
                 history_crop_counts.append(int((full_target & mask).sum()) if history_valid[slot] else 0)
             label = np.full(n, -1, dtype=np.int64)
             label[:count] = inside_box(xyz[selected], target, target_size).astype(np.int64)
-            if slot == 3 and (self.train_diagnostics or r.branch == 4):
+            if slot == 3 and self.detailed_diagnostics and (self.train_diagnostics or r.branch == 4):
                 # GT 仅作被动搜索覆盖统计，不参与触发、quota 或采样。
                 full_target = (inside_box(xyz, target, target_size) if self._raw_memo is None
                                else self._raw_memo.target_mask(frame))
@@ -717,27 +724,28 @@ class BatchBuilder:
             if set(future) != {'future_displacement', 'future_dt', 'future_valid'}:
                 raise ValueError('future supervision may contain only the three M label fields')
             result.update(future)
-        result.update(diagnostic_search_triggered=np.bool_(search_plan.triggered),
-            diagnostic_train_cache_used=np.asarray(cache_used, dtype=bool),
-            diagnostic_recovery_seed_box_world=recovery_seed.astype(np.float32),
-            diagnostic_recovery_seed_elapsed=np.float32(recovery_seed_elapsed),
-            diagnostic_search_reason_id=np.int64({'policy_disabled': 0, 'initialization': 1,
-                'accepted_eligible': 2, 'accepted_untrusted': 3}[search_plan.reason]),
-            diagnostic_search_main_box_world=search_plan.main_box.astype(np.float32),
-            diagnostic_search_backup_box_world=(search_plan.main_box if search_plan.backup_box is None
-                                               else search_plan.backup_box).astype(np.float32),
-            diagnostic_search_backup_active=np.bool_(search_plan.backup_box is not None),
-            diagnostic_search_main_quota=np.int64(search_plan.main_quota),
-            diagnostic_search_backup_quota=np.int64(search_plan.backup_quota),
-            diagnostic_search_backup_elapsed=np.float32(search_plan.backup_elapsed),
-            diagnostic_search_trusted_age=np.float32(search_plan.trusted_age),
-            diagnostic_search_main_count=np.int64(search_sample.main_count),
-            diagnostic_search_backup_only_count=np.int64(search_sample.backup_only_count),
-            diagnostic_search_sampled_main=np.int64(search_sample.sampled_main),
-            diagnostic_search_sampled_backup=np.int64(search_sample.sampled_backup),
-            diagnostic_previous_measurement_eligible=np.int64(-1 if state.previous_measurement_eligible is None
-                                                             else int(state.previous_measurement_eligible)))
-        result.update(search_target_counts)
+        if self.detailed_diagnostics:
+            result.update(diagnostic_search_triggered=np.bool_(search_plan.triggered),
+                diagnostic_train_cache_used=np.asarray(cache_used, dtype=bool),
+                diagnostic_recovery_seed_box_world=recovery_seed.astype(np.float32),
+                diagnostic_recovery_seed_elapsed=np.float32(recovery_seed_elapsed),
+                diagnostic_search_reason_id=np.int64({'policy_disabled': 0, 'initialization': 1,
+                    'accepted_eligible': 2, 'accepted_untrusted': 3}[search_plan.reason]),
+                diagnostic_search_main_box_world=search_plan.main_box.astype(np.float32),
+                diagnostic_search_backup_box_world=(search_plan.main_box if search_plan.backup_box is None
+                                                   else search_plan.backup_box).astype(np.float32),
+                diagnostic_search_backup_active=np.bool_(search_plan.backup_box is not None),
+                diagnostic_search_main_quota=np.int64(search_plan.main_quota),
+                diagnostic_search_backup_quota=np.int64(search_plan.backup_quota),
+                diagnostic_search_backup_elapsed=np.float32(search_plan.backup_elapsed),
+                diagnostic_search_trusted_age=np.float32(search_plan.trusted_age),
+                diagnostic_search_main_count=np.int64(search_sample.main_count),
+                diagnostic_search_backup_only_count=np.int64(search_sample.backup_only_count),
+                diagnostic_search_sampled_main=np.int64(search_sample.sampled_main),
+                diagnostic_search_sampled_backup=np.int64(search_sample.sampled_backup),
+                diagnostic_previous_measurement_eligible=np.int64(-1 if state.previous_measurement_eligible is None
+                                                                 else int(state.previous_measurement_eligible)))
+            result.update(search_target_counts)
         if record_training:
             result.update(diagnostic_history_raw_target_count=np.asarray(history_raw_counts, dtype=np.int64),
                           diagnostic_history_crop_target_count=np.asarray(history_crop_counts, dtype=np.int64))
@@ -760,13 +768,14 @@ class BatchBuilder:
             raise RuntimeError('prior supervision requires prepared raw rows')
         optimized = optimized_execution(self.config)
         enable_b1 = bool(option(self.config, 'enable_b1', True))
+        record_diagnostics = self.detailed_diagnostics and (not training or self.train_diagnostics)
+        if (not training or not enable_b1) and not record_diagnostics:
+            return batch
         if enable_b1:
             transferred = tensors_to_numpy(dict(boxes=prior.box, directions=prior.direction_xy), optimized=optimized)
             boxes, directions = (transferred[key] for key in ('boxes', 'directions'))
-        if not enable_b1 and training and not self.train_diagnostics:
-            return batch
         row_diagnostics = {}
-        if optimized and (not training or self.train_diagnostics):
+        if optimized and record_diagnostics:
             for i in range(len(self._pending)):
                 row_diagnostics[i, 'targets'] = (batch['segmentation_labels'][i, -1] == 1).sum()
                 row_diagnostics[i, 'points'] = batch['point_valid'][i, -1].sum()
@@ -794,7 +803,7 @@ class BatchBuilder:
                 extra.update(acquisition_target=np.asarray(targets['acquisition_target'], dtype=np.float32),
                              acquisition_valid=np.bool_(targets['acquisition_valid']),
                              acquisition_demand=np.bool_(targets['acquisition_demand']))
-            if not training or self.train_diagnostics:
+            if record_diagnostics:
                 # 只用于离线诊断的 GT 计数；不改变实际 support、采样、候选或状态。
                 b0_target_count = int((np.isin(ids, context['b0_ids']) & target_mask).sum())
                 extra.update(diagnostic_target_count=np.int64(target_mask.sum()),
@@ -893,15 +902,18 @@ class BatchBuilder:
                 raise ValueError('v41 commit support differs from actual unique current-B0 set')
             if not torch.equal(output.commit_decision.source.detach().long(), selected):
                 raise ValueError('v41 commit source differs from selected candidate')
-        transferred = tensors_to_numpy(dict(boxes=output.accepted_box, quality=quality,
+        need_raw_support = not full or diagnostics
+        transfer = dict(boxes=output.accepted_box, quality=quality,
             trusted_score=trusted_score, selected=selected, propagation=propagation,
-            probabilities=output.observation.foreground_probability[:, -1],
-            point_ids=batch['point_ids'][:, -1], point_valid=batch['point_valid'][:, -1],
-            prior_boxes=output.prior.box), optimized=optimized_execution(self.config))
+            prior_boxes=output.prior.box)
+        if need_raw_support:
+            transfer.update(probabilities=output.observation.foreground_probability[:, -1],
+                point_ids=batch['point_ids'][:, -1], point_valid=batch['point_valid'][:, -1])
+        transferred = tensors_to_numpy(transfer, optimized=optimized_execution(self.config))
         if not np.isfinite(transferred['prior_boxes']).all():
             raise FloatingPointError('non-finite v41 prior box')
         eligible_cpu = None if expected_eligible is None else expected_eligible.cpu().numpy()
-        support_cpu = None if canonical_support is None else canonical_support.cpu().numpy()
+        support_counts = None if canonical_support is None else canonical_support.sum(-1).cpu().numpy()
         staged = []
         # 先独立复算全部授权支持与提交资格，任何不一致都不留下半个 batch 的状态。
         for i, context in enumerate(self._pending):
@@ -910,16 +922,18 @@ class BatchBuilder:
             box[:3] += context['anchor'][:3]
             if box.shape != (4,) or not np.isfinite(box).all():
                 raise FloatingPointError('non-finite v41 accepted box')
-            ids = transferred['point_ids'][i, transferred['point_valid'][i]]
-            probs = transferred['probabilities'][i, transferred['point_valid'][i]]
-            cloud, _ = self._points(row['frames'][row['request'].frame])
-            id_to_index = self._raw_index(row['frames'][row['request'].frame])
-            xyz = cloud[[id_to_index[int(value)] for value in ids]]
-            support = _unique_mask(ids) & np.isfinite(probs) & (probs >= .5) & inside_box(xyz, box, state.size)
-            raw_count = int(support.sum())
+            raw_count = None
+            if need_raw_support:
+                ids = transferred['point_ids'][i, transferred['point_valid'][i]]
+                probs = transferred['probabilities'][i, transferred['point_valid'][i]]
+                cloud, _ = self._points(row['frames'][row['request'].frame])
+                id_to_index = self._raw_index(row['frames'][row['request'].frame])
+                xyz = cloud[[id_to_index[int(value)] for value in ids]]
+                support = _unique_mask(ids) & np.isfinite(probs) & (probs >= .5) & inside_box(xyz, box, state.size)
+                raw_count = int(support.sum())
             # Full 的 T 标签、硬门与提交共用同一 float32 公开点集合，避免
             # raw-world double 与 anchor-local float 的边界差异偷偷改提交资格。
-            count = int(support_cpu[i].sum()) if full else raw_count
+            count = int(support_counts[i]) if full else raw_count
             prop = bool(transferred['propagation'][i])
             # B1 原状态数学不读新 T；Full 的传播输出没有当前测量资格。
             strong = count >= self.v41_config.v41_min_support and (not prop if full else True)

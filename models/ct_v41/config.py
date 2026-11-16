@@ -1,4 +1,4 @@
-"""V41 Full KITTI 固定 scratch 配方；恢复链与独立长轨迹辅助训练。"""
+"""V41 Full KITTI 配置；训练执行参数可调，恢复链算法合同保持。"""
 import hashlib
 import json
 import math
@@ -73,9 +73,13 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_search_main_quota=768, v41_search_backup_quota=256, v41_search_max_age=1.5,
     v41_m_weight=.05, v41_m_horizons=[2, 4], v41_m_horizon_weights=[1., .5],
     v41_attention_backend='fa2_varlen', v41_attention_precision='qkv_bf16_only',
-    v41_cpu_acquisition='chunked_exact_v1', v41_memory_logging=True,
+    v41_cpu_acquisition='chunked_exact_v1', v41_memory_logging=False,
     v41_recovery_weight=.1, v41_aux_fraction=.25, v41_aux_loss_weight=.25,
-    v41_train_preload_offset=10., v41_kitti_geometry='open3dsot_velodyne_v1')
+    v41_train_preload_offset=10., v41_kitti_geometry='open3dsot_velodyne_v1',
+    console_mode='auto', progress_refresh_seconds=1., plain_log_interval_seconds=30.,
+    log_every_n_steps=50, diagnostics_level='summary', full_diagnostic_epochs=[],
+    tensorboard=False, eval_split='test', checkpoint_every_n_epochs=1,
+    report_checkpoint='best_precision', report_last_k=3)
 POLICY_KEYS = tuple(key for key in DEFAULTS if key.startswith('v41_') and key.endswith('_policy'))
 FIXED_B3_KEYS = ('v41_gain_margin', 'v41_trust_threshold', 'v41_min_support',
                 'v41_duplicate_xyz_tolerance', 'v41_duplicate_yaw_tolerance')
@@ -89,7 +93,10 @@ def recipe_identity(config):
     return dict(recipe=name, implementation_id='v41_current_point_xyz_recovery_v1',
         execution_revision=EXECUTION_REVISION,
         projection='concat', options=options, prior_read_applicable=False,
-        arm=RECIPES[name]['arm'], lr_milestones=list(RECIPES[name]['lr_milestones']),
+        arm=RECIPES[name]['arm'], lr_milestones=list(config.get('lr_milestones', ())),
+        optimization={key: config.get(key) for key in (
+            'epoch', 'batch_size', 'seed', 'lr', 'wd', 'lr_schedule',
+            'lr_decay_step', 'lr_decay_rate', 'lr_warmup_steps', 'lr_stage_values')},
         enabled={key: RECIPES[name][key] for key in ('enable_b1', 'enable_m', 'enable_b3')},
         search_policy=RECIPES[name]['search_policy'],
         attention_backend=config.get('v41_attention_backend', 'fa2_varlen'),
@@ -146,7 +153,7 @@ def normalize_config(config=None):
             raise ValueError('v41 arm-derived field cannot be overridden: ' + key)
         cfg[key] = value
     if 'lr_milestones' not in supplied:
-        cfg.lr_milestones = list(spec['lr_milestones'])
+        cfg.lr_milestones = [] if cfg.lr_schedule == 'step' else list(spec['lr_milestones'])
     if cfg.net_model != 'ctseqtrackv41' or cfg.experiment_family != 'ct_seqtrack_v41':
         raise ValueError('v41 model/family identity mismatch')
     if cfg.v41_execution_revision != EXECUTION_REVISION:
@@ -158,7 +165,8 @@ def normalize_config(config=None):
         raise ValueError('v41 scratch_only forbids --init_checkpoint')
     if cfg.test and not cfg.checkpoint:
         raise ValueError('v41 evaluation requires --checkpoint')
-    for key in ('ct_engineering_check', 'v41_diagnostics', 'v35_train_diagnostics', 'v31_evaluate_late3', 'test', 'v41_memory_logging'):
+    for key in ('ct_engineering_check', 'v41_diagnostics', 'v35_train_diagnostics',
+                'v31_evaluate_late3', 'test', 'v41_memory_logging', 'tensorboard'):
         if type(cfg[key]) is not bool:
             raise ValueError(key + ' must be bool')
     if cfg.devices is not None and (type(cfg.devices) is not int or cfg.devices < 0):
@@ -179,13 +187,8 @@ def normalize_config(config=None):
     if not cfg.ct_engineering_check and cfg.v41_attention_backend != 'fa2_varlen':
         raise ValueError('formal v41 requires actual FA2; math fallback is forbidden')
     _validate_shared_configuration(cfg)
+    _validate_reporting_configuration(cfg)
     validate_time_config(cfg)
-    if (not cfg.test and cfg.v31_evaluate_late3
-            and not (type(cfg.limit_train_batches) is float and cfg.limit_train_batches == 1.)):
-        raise ValueError('partial/integer train limits require --no_late3; automatic evaluation requires complete epochs')
-    if not cfg.ct_engineering_check and (cfg.lr_schedule != 'multistep' or list(cfg.lr_milestones) != spec['lr_milestones']
-            or cfg.lr_warmup_steps != 0):
-        raise ValueError('v41 requires registered 20/40 decay without warmup')
     cfg.lr_milestones = list(cfg.lr_milestones)
     for key in ('time_scale', 'lr', 'bb_scale', 'bb_offset', 'wd'):
         if not math.isfinite(float(cfg[key])):
@@ -195,21 +198,19 @@ def normalize_config(config=None):
     if type(cfg.check_val_every_n_epoch) is not int or cfg.check_val_every_n_epoch < 1:
         raise ValueError('check_val_every_n_epoch must be a positive integer')
     if not cfg.ct_engineering_check:
-        fixed = dict(epoch=60, batch_size=16, workers=4, seed=42, lr=.00015, wd=0.,
-            lr_decay_step=20, lr_decay_rate=.2, point_sample_size=1024,
+        fixed = dict(point_sample_size=1024,
             v31_short_window=4, v31_long_window=8, v31_curriculum_epochs=10,
             v32_reserve_windows=112, v32_seed_translation=.3, v32_seed_yaw_degrees=1.5,
             dataset='kitti_mf', version='kitti_tracking', category_name='Car',
             ct_coordinate_mode='sensor_relative', v41_arm='full', v41_training_recipe='full',
             ct_partition_seed=42, ct_frame_stride=1, time_scale=.5,
-            bb_scale=1.25, bb_offset=2., check_val_every_n_epoch=1,
+            bb_scale=1.25, bb_offset=2.,
             v31_temporal_backend='cfc', dynamics_time_mode='true',
-            v31_evaluate_late3=True, v35_train_diagnostics=True, v41_diagnostics=True, v41_memory_logging=True,
             precision=32, trainer_devices=1, limit_train_batches=1., limit_val_batches=1.)
         bad = [key for key, value in fixed.items() if cfg[key] != value
                or (key.startswith('limit_') and type(cfg[key]) is not float)]
         if bad:
-            raise ValueError('V41 experiment recipe differs from the agreed configuration: ' + ', '.join(bad))
+            raise ValueError('V41 algorithm/data contract mismatch: ' + ', '.join(bad))
     elif cfg.log_dir:
         root = (Path(__file__).resolve().parents[2] / 'artifacts/ct_checks').resolve()
         dest = Path(cfg.log_dir).resolve()
@@ -219,7 +220,7 @@ def normalize_config(config=None):
 
 
 def _validate_shared_configuration(cfg):
-    """当前数据、时间、结构和可复用工程能力的校验；正式配方另做精确匹配。"""
+    """检查有效输入与当前已实现的数据、时间和结构约束。"""
     if cfg.v31_temporal_backend not in ('cfc', 'gru'):
         raise ValueError('v31_temporal_backend must be cfc or gru')
     if cfg.dataset not in ('nuscenes_mf', 'kitti_mf'):
@@ -290,6 +291,28 @@ def _validate_shared_configuration(cfg):
             raise ValueError('strong B1 fixed architecture identity mismatch: ' + key)
 
 
+def _validate_reporting_configuration(cfg):
+    for key, choices in (
+            ('console_mode', ('auto', 'bar', 'plain')),
+            ('diagnostics_level', ('summary', 'full')),
+            ('eval_split', ('dev', 'test')),
+            ('report_checkpoint', ('best_precision', 'last'))):
+        if cfg[key] not in choices:
+            raise ValueError(key + ' must be one of ' + ', '.join(choices))
+    for key in ('progress_refresh_seconds', 'plain_log_interval_seconds'):
+        value = cfg[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(key + ' must be a positive finite number')
+    for key in ('log_every_n_steps', 'checkpoint_every_n_epochs', 'report_last_k'):
+        if type(cfg[key]) is not int or cfg[key] < 1:
+            raise ValueError(key + ' must be a positive integer')
+    epochs = cfg.full_diagnostic_epochs
+    if (not isinstance(epochs, (list, tuple))
+            or any(type(value) is not int or value < 1 for value in epochs)):
+        raise ValueError('full_diagnostic_epochs must contain positive integer epochs')
+    cfg.full_diagnostic_epochs = sorted(set(epochs))
+
+
 def load_config(path, overrides=None):
     values = load_yaml_config(path)
     values.update(overrides or {})
@@ -300,10 +323,14 @@ def load_config(path, overrides=None):
 def config_identity(config):
     cfg = normalize_config(config)
     excluded = {'cfg', 'path', 'log_dir', 'tag', 'checkpoint', 'init_checkpoint',
-        'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3', 'devices'}
+        'test', 'eval_checkpoint_epoch', 'accelerator', 'v31_evaluate_late3', 'devices',
+        'console_mode', 'progress_refresh_seconds', 'plain_log_interval_seconds',
+        'log_every_n_steps', 'diagnostics_level', 'full_diagnostic_epochs', 'tensorboard',
+        'v41_diagnostics', 'v35_train_diagnostics', 'v41_memory_logging',
+        'eval_split', 'checkpoint_every_n_epochs', 'report_checkpoint', 'report_last_k'}
     payload = {key: value for key, value in cfg.items() if key not in excluded}
     hash_time_manifest_paths(payload)
-    payload.update(schema=SCHEMA, evaluation_rng_policy='per_checkpoint_seed_v1',
+    payload.update(schema=SCHEMA, evaluation_rng_policy='isolated_split_seed_v2',
                    training_execution_recipe=recipe_identity(cfg))
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
                                      ensure_ascii=False).encode('utf-8')).hexdigest()

@@ -1,6 +1,25 @@
 # CT-SeqTrack 工作约定
 
-## 2026-11-02 当前：V41 KITTI Car 两组实施
+## 2026-11-16 当前：V41 exec v2 运行流程
+
+- 用户已授权本轮实施训练执行配置、日志、评估与保存流程；新 run 规则以 [V41 v2 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)为准，覆盖下方 v1 的固定配方/final60/late3 新启动限制。具名 CLI > YAML > 默认，无 `--set`、别名、新调度器或预登记。算法/结构合同不放开。
+- 默认每轮 test、每轮完整 checkpoint，报告 best Precision/last 与最近 K 个已评估轮；test 选轮须明确来源。summary/full 诊断、追加式 `metrics.csv`、epoch JSON 与唯一逐帧流；TensorBoard/内存日志默认关闭。独立 dev 使用 `--test --eval_split dev` 和新的空目录。
+- 执行身份已切到 v2，旧 v1 checkpoint 必须用原 run 对应源码；同 run 训练恢复仍核对完整双流 epoch、源码、训练配置与数据。变更前源码封存于 `artifacts/ct_checks/v41_run_workflow_20261116-c1065b45/source_before/`，不覆盖旧 output/artifacts 或兄弟 baseline。
+- 本轮仅代码、测试用例、文档与静态检查；**不在本机运行环境检查、pytest、compileall、模型或 CUDA smoke，不访问或部署服务器**。实现完成不表示运行验收通过；不更新旧运行数据或宣称新研究收益。下方 11/08、11/02 与更早阶段均保留为历史，旧运行证据日期不变。
+
+## 2026-11-08 当前：V41 文档与证据同步
+
+- 当前结构、实验状态和研究边界统一从 [项目现状](docs/PROJECT_STATUS.md) 进入；[实验协议](docs/EXPERIMENT_PROTOCOL.md)和[工具范围](docs/FORMAL_TOOLING.md)顶部为V41现行规则。根目录旧v24说明及本文件下方旧“当前”段不代表活动架构。
+- 文档更新时间为11/08，最新运行快照仅到北京时间 **11/04 10:46:53**：V41 Full完成9轮、进入第10轮，原始SeqTrack KITTI适配基线完成60轮；两组固定test结果尚无记录。V40四组60轮已完成并复算，但完整官方compare验收未执行。来源见[最新KITTI审计](artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)及[V40结果](artifacts/ct_checks/20261102_v40_research_audit/results/REPORT.md)。不据旧快照推断今天已结束、仍运行或应恢复。
+- 活动入口仍为 `main.py`，核心为 `models/ct_v41/`、`models/ctseqtrackv41.py`、`datasets/kitti_v41.py`。B2退出当前主线；B0也已区别于原始SeqTrack。1/4/4/8是训练状态重置周期，不是历史输入长度或8步BPTT；完整轨迹辅助仅给B3/R梯度，不代表主训练冻结B0/B1。
+- V41无需 `41_registration.json` 或外部baseline receipt作为启动/比较前置，不刷新旧登记。运行自动记录配置、数据与LF归一化源码身份；同run、同配置/数据/源码、完整主/辅助双流epoch恢复要求继续保持。不得将这项简化推广为放宽历史版本恢复身份。
+- 两组KITTI计划、scratch、final60/late3和train/dev/test划分保持。未实施诊断及候选改法见[最新问题](最新问题.md)和[待办](need_to_do.md)，本次文档更新不授权新算法、配方搜索或额外训练；不能把V41早期dev分数与基线final/test混比，也不能从两组整包结果归因单模块。
+- 本地仍只做代码/文档静态工作，**不运行环境检查、pytest、compileall、模型或CUDA smoke**；本轮只更新文档，允许文档差异、链接和数字一致性检查。服务器既有范围仍为只读，本次未访问服务器，不上传、安装或启停任务。旧阶段部署授权不自动延续。
+- 仅维护本活动项目，兄弟baseline冻结；`output/`及既有`artifacts/`不得删除或覆盖，源码/YAML/登记/权重及已有运行身份不因文档整理而修改。后续工程产物仍写新的`artifacts/ct_checks/`目录，不用旧scratch命令重复启动已存在运行。
+
+## 2026-11-02 历史：V41 KITTI Car 两组实施
+
+以下是实施时记录，其“尚未上传/待验收”由11/04运行证据更新；保留原实现与操作边界，不作为今天的进程状态。
 
 - 最新用户明确取消多余预登记：CT训练、smoke和比较不再依赖`41_registration.json`/外部baseline receipt；旧文件保留历史但不再刷新。实际源码由`ct_v41/provenance.py`自动记录，CRLF/LF统一后仅用于同run续训身份。当前失败已证实29文件全部只是换行变化；不要重新引入原始字节上传门。用户要求源码修复先本地、由用户上传；环境问题可在其独立环境修复，不影响其他项目。
 - 最新上传前复核授权：服务器仅只读，不再修改baseline或上传CT；Full用物理GPU0，原始SeqTrack用GPU1，OMP/MKL/OPENBLAS各2。日期目录nohup与新终端tail命令见V41操作页。baseline日志/PID放日期父目录，模型 `--log_dir` 指向其空的 `run/` 子目录；原入口无 `--devices` 参数，使用 `CUDA_VISIBLE_DEVICES=1`。
@@ -9,7 +28,7 @@
 - 只登记 Full 与“原始SeqTrack3D方法＋KITTI适配”两组，bs16/60epoch/seed42/scratch，固定final60/late3。Full workers4；baseline workers10、原LR1e-4每20轮×0.1及原网络/loss/teacher/采样/优化器。
 - KITTI train0000–16/dev17–18/test19–20；几何open3dsot_velodyne_v1。正常CT训练GT10缓存需预测ROI完整包含，否则raw回退；辅助/开发/测试禁GT预裁剪。仅已确认四个缺失bin为空观测，其他缺失损坏报错。
 - 本地继续只实现代码、测试用例、文档与静态审阅，**不运行环境检查、pytest、compileall、模型或CUDA smoke**。用户特许服务器 `/home/lishengjie/study/lcyu/seqtrack` 必要适配，已备份后部署；本地冻结baseline不改。CT服务器代码尚未上传，不安装或启停任务。全部运行验收待服务器执行。
-- V40源码、配置、登记、checkpoint/output受保护。实施前封存在 `artifacts/ct_checks/v41_implementation_20261102-201312/`；共享入口改动后旧checkpoint用封存源码，不刷新旧登记或放宽恢复检查。V41新登记 `41_registration.json`；仅未启动版本可显式刷新。
+- V40源码、配置、登记、checkpoint/output受保护。实施前封存在 `artifacts/ct_checks/v41_implementation_20261102-201312/`；共享入口改动后旧checkpoint用封存源码，不刷新旧登记或放宽恢复检查。V41早期 `41_registration.json` 保留历史；当晚已取消预登记依赖，当前不再刷新。
 - [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)、[服务器验收与两组命令](docs/CTSEQTRACK_V41_LAUNCH.md)为当前入口。下方V40及更早安排均为历史，不代表V41运行验证或收益。
 
 ## 2026-10-29 当前：V40 实现，运行验收待上传服务器

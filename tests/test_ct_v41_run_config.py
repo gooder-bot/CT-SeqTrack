@@ -1,0 +1,83 @@
+"""V41 v2 新运行配置与恢复身份边界；仅编写，运行验收在服务器。"""
+import pytest
+
+from models.ct_v41.config import config_identity, load_config, normalize_config, recipe_identity
+
+
+def test_new_training_recipe_does_not_require_engineering_mode():
+    cfg = normalize_config(dict(epoch=12, batch_size=8, seed=7, workers=0,
+        lr=8e-5, wd=.001, lr_milestones=[4, 9], lr_decay_rate=.5,
+        lr_warmup_steps=20, check_val_every_n_epoch=2, ct_pointcloud_cache_bytes=0))
+    assert not cfg.ct_engineering_check
+    assert (cfg.epoch, cfg.batch_size, cfg.seed, cfg.workers) == (12, 8, 7, 0)
+    assert cfg.lr == 8e-5 and cfg.wd == .001
+    assert cfg.check_val_every_n_epoch == 2 and cfg.ct_pointcloud_cache_bytes == 0
+    identity = recipe_identity(cfg)
+    assert identity['lr_milestones'] == [4, 9]
+    assert identity['optimization']['lr'] == 8e-5
+    assert identity['optimization']['lr_warmup_steps'] == 20
+    assert cfg.v41_execution_revision == 'v2'
+
+
+def test_yaml_inheritance_and_explicit_overrides_keep_unsupplied_values(tmp_path):
+    (tmp_path / 'base.yaml').write_text(
+        'batch_size: 8\nseed: 7\nlr: 0.00008\nconsole_mode: bar\n', encoding='utf-8')
+    child = tmp_path / 'run.yaml'
+    child.write_text('_base_: base.yaml\nworkers: 0\nepoch: 12\n', encoding='utf-8')
+    cfg = load_config(child, dict(seed=9))
+    assert (cfg.batch_size, cfg.seed, cfg.workers, cfg.epoch) == (8, 9, 0, 12)
+    assert cfg.lr == 8e-5 and cfg.console_mode == 'bar'
+    assert cfg.diagnostics_level == 'summary' and not cfg.v41_memory_logging
+    assert cfg.full_diagnostic_epochs == []
+
+
+def test_existing_step_and_piecewise_schedules_remain_usable():
+    step = normalize_config(dict(lr_schedule='step', lr_decay_step=7))
+    assert step.lr_milestones == []
+    assert normalize_config(step) == step
+    piecewise = normalize_config(dict(lr=.0001, lr_schedule='piecewise',
+        lr_milestones=[5, 9], lr_stage_values=[.0001, .00005, .00001]))
+    assert recipe_identity(piecewise)['optimization']['lr_stage_values'] == [.0001, .00005, .00001]
+    with pytest.raises(ValueError, match='step uses no lr_milestones'):
+        normalize_config(dict(lr_schedule='step', lr_milestones=[20]))
+
+
+def test_reporting_overrides_do_not_invalidate_independent_checkpoint_evaluation():
+    training = normalize_config()
+    evaluation = normalize_config(dict(training, test=True, checkpoint='same-run.ckpt',
+        eval_split='dev', diagnostics_level='full', full_diagnostic_epochs=[9, 3, 9],
+        console_mode='plain', progress_refresh_seconds=2., plain_log_interval_seconds=60.,
+        log_every_n_steps=100, tensorboard=True, v41_memory_logging=True,
+        v35_train_diagnostics=False, v41_diagnostics=False, v31_evaluate_late3=False,
+        checkpoint_every_n_epochs=2, report_checkpoint='last', report_last_k=5))
+    assert evaluation.full_diagnostic_epochs == [3, 9]
+    assert config_identity(evaluation) == config_identity(training)
+    assert config_identity(normalize_config(evaluation)) == config_identity(evaluation)
+    assert config_identity(normalize_config(training)) == config_identity(training)
+
+
+@pytest.mark.parametrize('change', [dict(lr=1e-4), dict(epoch=59), dict(batch_size=8),
+    dict(seed=52), dict(lr_milestones=[15, 30]), dict(wd=.01)])
+def test_training_changes_still_change_resume_identity(change):
+    assert config_identity(normalize_config(change)) != config_identity(normalize_config())
+
+
+@pytest.mark.parametrize('change', [dict(v41_trust_threshold=.7), dict(v41_m_weight=.1),
+    dict(v41_aux_loss_weight=.5), dict(v31_long_window=16), dict(point_sample_size=2048),
+    dict(v41_execution_revision='v1')])
+def test_algorithm_and_old_execution_revision_are_not_silently_opened(change):
+    with pytest.raises(ValueError):
+        normalize_config(change)
+
+
+@pytest.mark.parametrize('change', [dict(console_mode='progress'), dict(diagnostics_level='off'),
+    dict(report_checkpoint='best_success'), dict(full_diagnostic_epochs=[0]),
+    dict(progress_refresh_seconds=0), dict(report_last_k=True), dict(tensorboard='false')])
+def test_invalid_reporting_inputs_are_rejected(change):
+    with pytest.raises(ValueError):
+        normalize_config(change)
+
+
+def test_legacy_late3_flag_no_longer_blocks_partial_engineering_runs():
+    cfg = normalize_config(dict(ct_engineering_check=True, limit_train_batches=2))
+    assert cfg.limit_train_batches == 2 and cfg.v31_evaluate_late3
