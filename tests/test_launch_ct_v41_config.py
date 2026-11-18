@@ -1,10 +1,63 @@
-"""启动器只打印命令，并保持具名 CLI > YAML > 默认值。"""
+"""V41 运行工具读取所选配方；启动器只打印命令。"""
+from datetime import datetime
+from pathlib import Path
 import shlex
+from types import SimpleNamespace
 
 import pytest
 
 from tools.launch_ct_v41 import (_ct_arguments, baseline_evaluation_commands,
                                 launch_commands, parse_args, tail_commands)
+
+
+def test_smoke_uses_selected_full_config_and_keeps_engineering_overrides(monkeypatch):
+    from tools import check_v41_server as smoke
+    directory = Path(__file__).resolve().parents[1] / 'cfgs/ct_seqtrack'
+    monkeypatch.chdir(directory)
+    for filename, options, weighting in (
+            ('41_full_kitti.yaml', [], 'uniform'),
+            ('41_full_kitti_q0_inverse_lwh.yaml', ['--cfg', '41_full_kitti_q0_inverse_lwh.yaml'], 'inverse_lwh')):
+        args = smoke.parse_args(['--path', 'kitti', '--devices', '1', *options])
+        assert Path(args.cfg) == directory / filename
+        config = smoke.smoke_config(args)
+        assert config.cfg == args.cfg and config.v41_q0_center_weighting == weighting
+        assert config.path == str(directory / 'kitti') and config.devices == 1
+        assert config.v41_arm == 'full' and config.v41_attention_backend == 'fa2_varlen'
+        assert config.ct_engineering_check and config.workers == 0 and config.log_dir is None
+
+
+def test_default_q0_arms_have_distinct_launch_and_tail_labels():
+    b_yaml = 'cfgs/ct_seqtrack/41_full_kitti_q0_inverse_lwh.yaml'
+    a = parse_args(['--arm', 'full'])
+    b = parse_args(['--arm', 'full', '--cfg', b_yaml])
+    tagged = parse_args(['--arm', 'full', '--cfg', b_yaml, '--tag', 'my_run'])
+    a_label = 'v41_full_kitti_car_seed42-seed42-60ep-bs16'
+    b_label = 'v41_full_kitti_car_seed42-q0-inverse-lwh-seed42-60ep-bs16'
+    for commands in (launch_commands, tail_commands):
+        assert a_label in commands(a, 'full') and b_label not in commands(a, 'full')
+        assert b_label in commands(b, 'full') and a_label not in commands(b, 'full')
+        assert 'my_run-seed42-60ep-bs16' in commands(tagged, 'full')
+
+
+def test_direct_run_directories_distinguish_q0_arms_at_same_timestamp(tmp_path, monkeypatch):
+    from models.ct_v41 import entry
+    directory = Path(__file__).resolve().parents[1] / 'cfgs/ct_seqtrack'
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(entry, 'datetime', SimpleNamespace(now=lambda: datetime(2026, 1, 2, 3, 4, 5)))
+
+    def destination(filename, *options):
+        argv = ['--cfg', str(directory / filename), *options]
+        return entry.resolve_run_directory(entry.parse_config(argv), command_line=argv)
+
+    a_yaml, b_yaml = '41_full_kitti.yaml', '41_full_kitti_q0_inverse_lwh.yaml'
+    stem = '20260102-030405-41_v3_full-'
+    default_tag = 'v41_full_kitti_car_seed42'
+    a = destination(a_yaml)
+    assert a == tmp_path / 'output' / (stem + default_tag)
+    assert destination(b_yaml) == tmp_path / 'output' / (a.name + '-q0-inverse-lwh')
+    assert destination(b_yaml, '--log_dir', 'custom') == tmp_path / 'custom'
+    assert destination(b_yaml, '--tag', 'mine') == tmp_path / 'output' / (stem + 'mine')
+    assert destination(b_yaml, '--tag=' + default_tag) == a
 
 
 def test_launcher_uses_yaml_recipe_in_label_without_overwriting_it(tmp_path):

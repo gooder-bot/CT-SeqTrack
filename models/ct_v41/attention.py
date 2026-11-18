@@ -42,19 +42,38 @@ class ValidityMask:
         query, key = allowed.any(-1), allowed.any(-2)
         if not torch.equal(allowed, query[:, :, None] & key[:, None, :]):
             raise ValueError('FA2 varlen requires separable query/key validity masks')
+        return cls._pack_valid(query, key)
+
+    @classmethod
+    def from_valid(cls, query: Tensor, key: Tensor):
+        """内部调用已知为可分离的掩码；一侧为空时整行不会进入 FA2。"""
+        if query.ndim != 2 or key.ndim != 2 or query.shape[0] != key.shape[0] or query.device != key.device:
+            raise ValueError('attention validity expects query[B,L] and key[B,S] on one device')
+        if query is key:
+            valid = query.bool()
+            return cls._pack_valid(valid, valid)
+        query, key = query.bool(), key.bool()
+        active = query.any(-1, keepdim=True) & key.any(-1, keepdim=True)
+        return cls._pack_valid(query & active, key & active)
+
+    @classmethod
+    def _pack_valid(cls, query, key):
         qindices = query.reshape(-1).nonzero(as_tuple=False).flatten()
+        qcounts = query.sum(-1)
+        active_rows = (qcounts > 0).nonzero(as_tuple=False).flatten()
+        qcounts = qcounts.index_select(0, active_rows)
+        zero = torch.zeros(1, dtype=torch.int32, device=query.device)
+        cuq = torch.cat((zero, qcounts.cumsum(0).to(torch.int32)))
+        maxq = qcounts.max() if qcounts.numel() else zero[0]
+        if query is key:
+            length = int(maxq.item())
+            return cls(query, key, qindices, qindices, cuq, cuq, length, length)
         kindices = key.reshape(-1).nonzero(as_tuple=False).flatten()
-        qcounts, kcounts = query.sum(-1), key.sum(-1)
-        active = (qcounts > 0) & (kcounts > 0)
-        qcounts, kcounts = qcounts[active], kcounts[active]
-        # 一次 stream 入口准备，三层共享；空 batch 使用 0 长度元数据。
-        maxima = torch.stack((qcounts.max() if qcounts.numel() else query.new_zeros((), dtype=torch.long),
-                              kcounts.max() if kcounts.numel() else key.new_zeros((), dtype=torch.long)))
-        maxq, maxk = maxima.cpu().tolist()
-        zero = torch.zeros(1, dtype=torch.int32, device=mask.device)
-        return cls(query, key, qindices, kindices,
-                   torch.cat((zero, qcounts.cumsum(0).to(torch.int32))),
-                   torch.cat((zero, kcounts.cumsum(0).to(torch.int32))), int(maxq), int(maxk))
+        kcounts = key.sum(-1).index_select(0, active_rows)
+        cuk = torch.cat((zero, kcounts.cumsum(0).to(torch.int32)))
+        maxk = kcounts.max() if kcounts.numel() else zero[0]
+        query_length, key_length = torch.stack((maxq, maxk)).cpu().tolist()
+        return cls(query, key, qindices, kindices, cuq, cuk, int(query_length), int(key_length))
 
     def dense(self):
         return self.query_valid[:, None, :, None] & self.key_valid[:, None, None, :]
@@ -75,11 +94,17 @@ def _flash_varlen():
     return flash_attn_varlen_func
 
 
+@lru_cache(maxsize=None)
+def _device_supports_bf16(device_index):
+    with torch.cuda.device(device_index):
+        return torch.cuda.is_bf16_supported()
+
+
 def validate_fa_runtime():
     """正式入口的依赖验收；不启动 kernel，不允许隐式 math 回退。"""
     if not torch.cuda.is_available():
         raise RuntimeError('v41 fa2_varlen requires an available CUDA device')
-    if not torch.cuda.is_bf16_supported():
+    if not _device_supports_bf16(torch.cuda.current_device()):
         raise RuntimeError('v41 fa2_varlen requires native CUDA BF16 support')
     _flash_varlen()
     import flash_attn
@@ -153,9 +178,8 @@ class EfficientAttention(nn.Module):
             raise RuntimeError('v41 fa2_varlen requires CUDA; math fallback is forbidden')
         if any(x.dtype != torch.float32 or x.device != q.device for x in (q, k, v)):
             raise RuntimeError('v41 fa2_varlen requires FP32 projected Q/K/V on the same CUDA device')
-        with torch.cuda.device(q.device):
-            if not torch.cuda.is_bf16_supported():
-                raise RuntimeError('v41 fa2_varlen requires native CUDA BF16 support')
+        if not _device_supports_bf16(q.device.index):
+            raise RuntimeError('v41 fa2_varlen requires native CUDA BF16 support')
         if q.shape[1] != 4 or q.shape[-1] != 64 or v.shape[-1] != 64:
             raise ValueError('v41 registered attention requires 4 heads of 64 dimensions')
         flash = _flash_varlen()  # 即使全空，正式环境仍须满足依赖合同。
@@ -226,4 +250,5 @@ def configure_attention_modules(decoder, *, backend='fa2_varlen', deterministic=
             module.forward = MethodType(_decoder_forward, module)
     if attention_count != 9:
         raise ValueError('v41 expects three local/global/cross layers each (nine attention cores)')
+    decoder.compact_attention_masks = True
     return decoder

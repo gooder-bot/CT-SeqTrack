@@ -14,14 +14,16 @@ from .observation import box_corners_xyz
 from .geometry import anchor_yaw, rotate_xy, transform_boxes
 from .history_context import history_descriptor
 from .local_observation import LocalObservationReader
+from .attention import ValidityMask
 
 
 def _masked_source(value: Tensor, valid: Tensor, name: str) -> Tensor:
     if value.shape[:-1] != valid.shape:
         raise ValueError(f"{name} feature and validity shapes disagree")
-    if not bool(torch.isfinite(value[valid]).all()):
+    masked = torch.where(valid[..., None], value, 0.)
+    if not bool(torch.isfinite(masked).all()):
         raise ValueError(f"valid {name} features must be finite")
-    return torch.where(valid[..., None], value, 0.)
+    return masked
 
 
 def _consume_removed_projection_rng(*, xavier: bool):
@@ -48,6 +50,7 @@ class SharedHypothesisDecoder(nn.Module):
                  initial_context: bool = False, local_observation: bool = False):
         super().__init__()
         self.execution_profile = 'legacy'
+        self.compact_attention_masks = False
         self.query_context = bool(query_context)
         self.initial_context = bool(initial_context)
         self.local_observation = bool(local_observation)
@@ -103,7 +106,7 @@ class SharedHypothesisDecoder(nn.Module):
                 self.local_reader = LocalObservationReader()
 
     def _query_context(self, observation: ObservationFeatures, batch: Mapping[str, Tensor],
-                       local_history: Tensor, history_valid: Tensor, size: Tensor) -> Tensor:
+                       local_history: Tensor, history_valid: Tensor, size: Tensor, descriptor=None) -> Tensor:
         """固定历史槽保留时间/几何配对；仅 pooled 语义允许同帧反传。"""
         b = len(size)
         pooled, support, current = (observation.coarse_features, observation.history_support,
@@ -113,8 +116,9 @@ class SharedHypothesisDecoder(nn.Module):
         if pooled.shape != (b, 256) or support.shape != (b, 3, 3) or current.shape != (b, 3):
             raise ValueError('v34 query context has invalid pooled/support shapes')
         # frame_times是真实物理时间；共用纯函数与coarse保持相同槽语义。
-        descriptor = history_descriptor(batch, local_history, history_valid, size, support,
-                                        self.context_time_scale, include_initial=self.initial_context)
+        if descriptor is None:
+            descriptor = history_descriptor(batch, local_history, history_valid, size, support,
+                                            self.context_time_scale, include_initial=self.initial_context)
         present = observation.sequence_valid.bool()
         current_input = torch.cat((pooled, current.detach()), dim=-1)
         current_input = torch.where(present[:, None], current_input, 0.)
@@ -141,6 +145,11 @@ class SharedHypothesisDecoder(nn.Module):
             raise ValueError("frame_times must be finite [B,4]")
         return times.detach()
 
+    def _attention_mask(self, query_valid, key_valid):
+        if self.compact_attention_masks:
+            return ValidityMask.from_valid(query_valid, key_valid)
+        return query_valid[:, :, None] & key_valid[:, None, :]
+
     def encode_sources(self, observation: ObservationFeatures, history_valid: Tensor):
         source, valid = observation.source_tokens, observation.source_valid.bool()
         if source.ndim != 4 or source.shape[1] != 4 or source.shape[-1] != 128:
@@ -157,11 +166,11 @@ class SharedHypothesisDecoder(nn.Module):
             source = torch.where(valid[..., None], source, 0.)
             local_valid = valid.reshape(batch * frames, tokens)
             local, = self.encoder(source.reshape(batch * frames, tokens, 64),
-                src_mask=local_valid[:, :, None] & local_valid[:, None, :],
+                src_mask=self._attention_mask(local_valid, local_valid),
                 query_valid=local_valid[..., None], zero_invalid_rows=True)
             flat_valid = valid.reshape(batch, frames * tokens)
             global_source, = self.encoder_global(source.reshape(batch, frames * tokens, 64),
-                src_mask=flat_valid[:, :, None] & flat_valid[:, None, :],
+                src_mask=self._attention_mask(flat_valid, flat_valid),
                 query_valid=flat_valid[..., None], zero_invalid_rows=True, global_feature=True)
         return (torch.cat((local.reshape(batch, frames * tokens, 64), global_source), dim=1),
                 torch.cat((flat_valid, flat_valid), dim=1))
@@ -204,7 +213,8 @@ class SharedHypothesisDecoder(nn.Module):
         adapter = self.prior_adapter(torch.cat((feature, summary), dim=-1))
         return torch.where(context_valid[:, None], adapter, 0.)
 
-    def forward(self, observation: ObservationFeatures, batch: Mapping[str, Tensor], prior: PriorContext) -> DecoderOutput:
+    def forward(self, observation: ObservationFeatures, batch: Mapping[str, Tensor], prior: PriorContext,
+                *, current_pool=None, shared_descriptor=None, include_local_diagnostics=True) -> DecoderOutput:
         reference = observation.coarse_box
         batch_size = len(reference)
         history_boxes = batch['history_boxes'].to(reference)
@@ -212,13 +222,13 @@ class SharedHypothesisDecoder(nn.Module):
         size = batch['box_size'].to(reference)
         if history_boxes.shape != (batch_size, 3, 4) or history_valid.shape != (batch_size, 3):
             raise ValueError("decoder needs three history boxes and their validity")
-        if size.shape != (batch_size, 3) or not bool(torch.isfinite(size).all()) or not bool((size > 0).all()):
+        if size.shape != (batch_size, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
             raise ValueError("box_size must be finite positive [B,3] L/W/H")
         if (observation.current_valid.shape != (batch_size,)
                 or observation.sequence_valid.shape != (batch_size,)
                 or observation.quality.shape != (batch_size, 4)):
             raise ValueError("observation current_valid/sequence_valid/quality shape mismatch")
-        if not bool(torch.isfinite(history_boxes[history_valid]).all()):
+        if not bool((torch.isfinite(history_boxes).all(-1) | ~history_valid).all()):
             raise ValueError("valid history boxes must be finite")
         times = self._frame_times(batch, reference)
         seeds, query_valid, prior_box = self._seeds(
@@ -226,14 +236,15 @@ class SharedHypothesisDecoder(nn.Module):
         # 几何视图使用 anchor-local 轴；公开输出仍为世界轴。
         yaw_anchor = anchor_yaw(batch, reference)
         local_seeds = transform_boxes(seeds, yaw_anchor)
-        local_corners = transform_boxes(seeds, yaw_anchor)
         # q0 直接预测 anchor-local 最终中心；历史框输出 seed 残差。
         output_reference = torch.cat((local_seeds[:, :3, :3],
             torch.zeros_like(local_seeds[:, 3:4, :3])), dim=1)
         local_prior = replace(prior,
             box=transform_boxes(prior.box.detach().to(reference), yaw_anchor),
             direction_xy=rotate_xy(prior.direction_xy.detach().to(reference), yaw_anchor))
-        corners = box_corners_xyz(local_corners, size[:, None])
+        # 主路两条可微路径独立累积，保留原梯度归约顺序。无图路径直接复用。
+        corners_input = transform_boxes(seeds, yaw_anchor) if local_seeds.requires_grad else local_seeds
+        corners = box_corners_xyz(corners_input, size[:, None])
         query_times = torch.cat((times[:, :3], times[:, -1:]), dim=1)
         corner_input = torch.cat((corners,
             query_times[:, :, None, None].expand(-1, -1, 8, -1),
@@ -245,22 +256,24 @@ class SharedHypothesisDecoder(nn.Module):
         queries = queries + prior_by_query.repeat_interleave(8, dim=1)
         context_norm = None
         if self.query_context:
-            context = self._query_context(observation, batch, local_seeds[:, :3], history_valid, size)
+            context = self._query_context(observation, batch, local_seeds[:, :3], history_valid, size,
+                                          descriptor=shared_descriptor)
             # 三个历史重建 query 不读当前上下文；q0 保持原上下文。
             context_by_query = torch.cat((torch.zeros_like(context[:, None]).expand(-1, 3, -1),
                                          context[:, None]), dim=1)
             queries = queries + context_by_query.repeat_interleave(8, dim=1)
-            context_norm = context.detach().norm(dim=-1)
+            if include_local_diagnostics:
+                context_norm = context.detach().norm(dim=-1)
         local_diagnostics = {}
         if self.local_observation:
             local_increment, local_diagnostics = self.local_reader(
-                observation, batch, seeds[:, 3:], query_valid[:, 3:])
+                observation, batch, seeds[:, 3:], query_valid[:, 3:], pool=current_pool,
+                diagnostics=include_local_diagnostics)
             history_increment = local_increment.new_zeros(batch_size, 3, 8, 64)
             queries = queries + torch.cat((history_increment, local_increment), dim=1).reshape(batch_size, 32, 64)
         kv, source_valid = self.encode_sources(observation, history_valid)
-        allowed = (source_valid[:, None].expand(-1, 4, -1)
-                   & query_valid[:, :, None]).repeat_interleave(8, dim=1)
         corner_valid = query_valid.repeat_interleave(8, dim=1)
+        allowed = self._attention_mask(corner_valid, source_valid)
         with torch.autocast(device_type=queries.device.type, enabled=False):
             decoded, _ = self.decoder(queries, None, kv, allowed,
                 query_valid=corner_valid[..., None], zero_invalid_rows=True)

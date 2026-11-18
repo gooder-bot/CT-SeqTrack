@@ -4,7 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from .acquisition_supervision import _unique_mask
+
+def _unique_mask(raw_ids):
+    ids = np.asarray(raw_ids, dtype=np.int64).reshape(-1)
+    good = ids >= 0
+    _, first = np.unique(ids[good], return_index=True)
+    result = np.zeros(len(ids), dtype=bool)
+    result[np.flatnonzero(good)[first]] = True
+    return result
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,7 @@ class SearchSample:
     backup_only_count: int
     sampled_main: int
     sampled_backup: int
+    main_indices: np.ndarray
 
 
 def make_search_plan(*, anchor, trusted_box, trusted_time, velocity, velocity_valid,
@@ -66,17 +74,28 @@ def make_search_plan(*, anchor, trusted_box, trusted_time, velocity, velocity_va
     return SearchPlan(main, trusted, True, elapsed, age, reason, main_quota, backup_quota)
 
 
-def _inside(points, box, size, scale, offset):
-    # 与 data.inside_box 使用完全相同的 membership 数学。
+def inside_box(points, box, size, *, scale=1., offset=0.):
+    """搜索、种子、监督和提交共用的闭区间框测试；保留原世界坐标精度。"""
     delta = np.asarray(points)[..., :3] - np.asarray(box)[:3]
     c, s = np.cos(box[3]), np.sin(box[3])
-    local = np.stack((c * delta[..., 0] + s * delta[..., 1],
-                      -s * delta[..., 0] + c * delta[..., 1], delta[..., 2]), -1)
-    return (np.abs(local) <= np.asarray(size) * (float(scale) / 2) + float(offset)).all(-1)
+    x = c * delta[..., 0] + s * delta[..., 1]
+    y = -s * delta[..., 0] + c * delta[..., 1]
+    limits = np.asarray(size) * (float(scale) / 2) + float(offset)
+    # 展开坐标轴时维持原 stack -> abs -> 与 limits 广播比较的 dtype 提升。
+    local_dtype = np.result_type(x.dtype, y.dtype, delta.dtype)
+    compare_dtype = np.result_type(local_dtype, limits.dtype)
+    limits = np.broadcast_to(limits, np.broadcast_shapes(limits.shape, (3,)))
+
+    def within(values, axis):
+        magnitude = np.abs(values.astype(local_dtype, copy=False))
+        return magnitude.astype(compare_dtype, copy=False) <= limits[..., axis]
+
+    mask = within(x, 0) & within(y, 1)
+    return mask & within(delta[..., 2], 2)
 
 
 def sample_search_points(points, raw_ids, plan, size, *, count=1024, main_quota=768,
-                         backup_quota=256, seed=0, scale=1.25, offset=2.):
+                         backup_quota=256, seed=0, scale=1.25, offset=2., known_unique_ids=False):
     """主域优先拥有重叠 ID；配额不足互相回填，不重复点，不连接两域之间背景。"""
     xyz, ids = np.asarray(points), np.asarray(raw_ids, dtype=np.int64)
     if xyz.shape != (len(ids), 3) or ids.ndim != 1:
@@ -85,18 +104,24 @@ def sample_search_points(points, raw_ids, plan, size, *, count=1024, main_quota=
         raise ValueError('search quotas must partition the fixed point budget')
     if (main_quota, backup_quota) != (plan.main_quota, plan.backup_quota):
         raise ValueError('sampling quotas differ from the immutable search plan')
-    unique = _unique_mask(ids)
-    main_mask = _inside(xyz, plan.main_box, size, scale, offset) & unique
+    # 内部 KITTI 视图来自 bin 行号的有序子集；公共入口保留首次出现去重规则。
+    unique = None if known_unique_ids else _unique_mask(ids)
+    main_mask = inside_box(xyz, plan.main_box, size, scale=scale, offset=offset)
+    if unique is not None:
+        main_mask &= unique
     main = np.flatnonzero(main_mask)
-    backup = (np.flatnonzero(_inside(xyz, plan.backup_box, size, scale, offset)
-                            & unique & ~main_mask)
-              if plan.backup_box is not None else np.empty(0, dtype=np.int64))
-    union = np.sort(np.concatenate((main, backup)))
+    backup = np.empty(0, dtype=np.int64)
+    if plan.backup_box is not None:
+        backup_mask = inside_box(xyz, plan.backup_box, size, scale=scale, offset=offset) & ~main_mask
+        if unique is not None:
+            backup_mask &= unique
+        backup = np.flatnonzero(backup_mask)
     if not len(backup):
         # 无新增备用点时连抽样顺序也保持原版，不因“触发过”改变正常输入。
         rng = np.random.default_rng(seed)
         selected = np.sort(rng.choice(main, count, replace=False)) if len(main) > count else main.copy()
-        return SearchSample(selected, union, len(main), 0, len(selected), 0)
+        return SearchSample(selected, main, len(main), 0, len(selected), 0, main)
+    union = np.sort(np.concatenate((main, backup)))
     # 双域独立随机命名空间（0x563430 = V41）；不消费原单域抽样流。
     rng = np.random.default_rng(np.random.SeedSequence([int(seed), 0x563430, 1]))
     take_main, take_backup = min(len(main), main_quota), min(len(backup), backup_quota)
@@ -109,4 +134,4 @@ def sample_search_points(points, raw_ids, plan, size, *, count=1024, main_quota=
     chosen_backup = (np.sort(rng.choice(backup, take_backup, replace=False))
                      if len(backup) > take_backup else backup.copy())
     return SearchSample(np.sort(np.concatenate((chosen_main, chosen_backup))), union,
-                        len(main), len(backup), len(chosen_main), len(chosen_backup))
+                        len(main), len(backup), len(chosen_main), len(chosen_backup), main)

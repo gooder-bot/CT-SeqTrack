@@ -14,8 +14,7 @@ from utils.diagnostic_transfer import tensors_to_numpy
 from utils.execution_profile import optimized_execution
 from utils.raw_frame_memo import RawFrameMemo, raw_transaction
 from .config import normalize_config, recipe_scope
-from .acquisition_supervision import _unique_mask, band_grid_target
-from .search import make_search_plan, sample_search_points
+from .search import _unique_mask, inside_box, make_search_plan, sample_search_points
 
 
 def option(config, name, default=None):
@@ -84,6 +83,7 @@ class ReadyQueueBatchSampler(Sampler):
         if self.reserve_windows < 0 or min(self.seed_translation, self.seed_yaw_degrees) < 0:
             raise ValueError('v32 reserve and seed perturbation must be nonnegative')
         self._plan = None
+        self._plan_sha256 = None
 
     @property
     def endpoint_count(self):
@@ -99,6 +99,7 @@ class ReadyQueueBatchSampler(Sampler):
             raise ValueError('epoch must be nonnegative')
         if epoch != self.epoch:
             self.epoch, self._plan = epoch, None
+            self._plan_sha256 = None
 
     def window_length(self, maximum):
         if self.curriculum_epochs == 1:
@@ -177,10 +178,12 @@ class ReadyQueueBatchSampler(Sampler):
         return len(self._materialized())
 
     def state_dict(self):
-        digest = hashlib.sha256()
-        for batch in self._materialized():
-            digest.update(repr(tuple((r.tracklet, r.branch, r.window_start,
-                                      r.window_end, r.frame, r.drain) for r in batch)).encode())
+        if self._plan_sha256 is None:
+            digest = hashlib.sha256()
+            for batch in self._materialized():
+                digest.update(repr(tuple((r.tracklet, r.branch, r.window_start,
+                                          r.window_end, r.frame, r.drain) for r in batch)).encode())
+            self._plan_sha256 = digest.hexdigest()
         payload = dict(schema=self.SCHEMA, epoch=self.epoch, lengths=list(self.lengths),
                        batch_size=self.batch_size, seed=self.seed, training=self.training,
                        short_window=self.short_window, long_window=self.long_window,
@@ -189,7 +192,7 @@ class ReadyQueueBatchSampler(Sampler):
                        reserve_policy=self.RESERVE_POLICY, drain_policy=self.DRAIN_POLICY,
                        seed_policy=self.SEED_POLICY, seed_translation=self.seed_translation,
                        seed_yaw_degrees=self.seed_yaw_degrees, batches=len(self._materialized()),
-                       plan_sha256=digest.hexdigest())
+                       plan_sha256=self._plan_sha256)
         # 旧版本不增加键，保持已有 manifest SHA；v35 只增加首测语义身份。
         if self.initial_seed_policy is not None:
             payload['initial_seed_policy'] = self.initial_seed_policy
@@ -220,27 +223,25 @@ def box_size(box, frame=None):
 
 
 def point_arrays(frame):
+    if '_v41_raw_ref' in frame:
+        # KITTI 内部帧只来自已检查的 bin；ID 在读取时按行号构造。
+        if 'pc' in frame:
+            return frame['pc'].points.T, frame['pc'].point_ids
+        points, ids = frame['_v41_raw_ref'].arrays()
+        return points.T, ids
     pc = frame['pc']
     if hasattr(pc, 'points'):
         xyz = np.asarray(pc.points, dtype=np.float64)[:3].T
         ids = np.asarray(pc.point_ids, dtype=np.int64)
     else:
         xyz = np.asarray(pc, dtype=np.float64)[:, :3]
-        ids = np.asarray(frame.get('point_ids', np.arange(len(xyz))), dtype=np.int64)
+        ids = (np.asarray(frame['point_ids'], dtype=np.int64) if 'point_ids' in frame
+               else np.arange(len(xyz), dtype=np.int64))
     if xyz.shape != (len(ids), 3) or not np.isfinite(xyz).all():
         raise ValueError('raw point geometry/identity must be finite and aligned')
     if len(np.unique(ids)) != len(ids) or (ids < 0).any():
         raise ValueError('raw frame IDs must be unique and nonnegative')
     return xyz, ids
-
-
-def inside_box(points, box, size, *, scale=1., offset=0.):
-    """只在 membership 中旋转；提供给模型的 XYZ 仍为世界轴。"""
-    delta = np.asarray(points)[..., :3] - np.asarray(box)[:3]
-    c, s = np.cos(box[3]), np.sin(box[3])
-    local = np.stack((c * delta[..., 0] + s * delta[..., 1],
-                      -s * delta[..., 0] + c * delta[..., 1], delta[..., 2]), -1)
-    return (np.abs(local) <= np.asarray(size) * (float(scale) / 2) + float(offset)).all(-1)
 
 
 def box_corners(box, size):
@@ -254,6 +255,8 @@ def box_corners(box, size):
 
 
 def metadata(source, tracklet, frame):
+    if hasattr(source, 'endpoint_metadata'):
+        return source.endpoint_metadata(tracklet, frame)
     if hasattr(source, 'get_frame_metadata'):
         return source.get_frame_metadata(tracklet, frame)
     return source.get_frames(tracklet, [frame])[0]
@@ -261,7 +264,7 @@ def metadata(source, tracklet, frame):
 
 def future_motion_targets(source, request, frames, track_length):
     """worker 仅读未来 annotation；第 h 个端点从 s=t−1 计，绝不读取未来点云。"""
-    getter = getattr(source, 'get_frame_metadata', None)
+    getter = getattr(source, 'endpoint_metadata', None) or getattr(source, 'get_frame_metadata', None)
     if getter is None:
         raise TypeError('v41 M requires get_frame_metadata; future point-cloud fallback is forbidden')
     r = request
@@ -298,7 +301,7 @@ def future_motion_targets(source, request, frames, track_length):
 
 
 class RawEndpointDataset(Dataset):
-    """无状态 raw 工厂。标签与 raw 帧一并传输，但不参与 worker 裁剪。"""
+    """按端点交付观测与标签。KITTI 主流可携带 GT10 视图，预测 ROI 由主进程决定。"""
     def __init__(self, source, *, training=False, enable_m=False):
         self.source = source
         self.training, self.enable_m = bool(training), bool(enable_m)
@@ -331,19 +334,36 @@ class RawEndpointDataset(Dataset):
         return sum(max(n - 1, 0) for n in self.lengths)
 
     def __getitem__(self, request):
+        return self._get_row(request, {})
+
+    def __getitems__(self, requests):
+        # 相同标注帧在一个 IPC 包内共享；不同 tracklet 的框绝不共用。
+        frames = {}
+        return [self._get_row(request, frames) for request in requests]
+
+    def _get_row(self, request, frame_cache):
         if not isinstance(request, EndpointRequest):
             raise TypeError('v31 raw dataset requires EndpointRequest')
         r = request
         history_ids = tuple(max(0, r.frame - 3 + i) for i in range(3))
         ids = sorted(set(history_ids + (r.frame,)))
-        if r.starts_window:
-            ids = sorted(set(ids + [0]))
-        frames = dict(zip(ids, self.source.get_frames(r.tracklet, ids)))
-        first = frames[0] if 0 in frames else metadata(self.source, r.tracklet, 0)
+        read = getattr(self.source, 'endpoint_frames', None) or self.source.get_frames
+        missing = [i for i in ids if (r.tracklet, i) not in frame_cache]
+        if missing:
+            for index, frame in zip(missing, read(r.tracklet, missing)):
+                frame_cache[r.tracklet, index] = frame
+        frames = {i: frame_cache[r.tracklet, i] for i in ids}
         key = (self.source.get_tracklet_key(r.tracklet)
                if hasattr(self.source, 'get_tracklet_key') else str(r.tracklet))
-        result = dict(request=r, frames=frames, first_frame=first,
-                      history_ids=history_ids, tracklet_key=str(key))
+        result = dict(request=r, frames=frames, history_ids=history_ids, tracklet_key=str(key))
+        if r.starts_window:
+            if 0 in frames:
+                result['first_frame'] = frames[0]
+            else:
+                first = (r.tracklet, 'first_metadata')
+                if first not in frame_cache:
+                    frame_cache[first] = metadata(self.source, r.tracklet, 0)
+                result['first_frame'] = frame_cache[first]
         if self.training and self.enable_m and 0 <= r.branch < 4:
             result['future_supervision'] = future_motion_targets(
                 self.source, r, frames, self.lengths[r.tracklet])
@@ -393,7 +413,7 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
         kwargs = dict(num_workers=workers, collate_fn=raw_collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
         if workers:
-            kwargs.update(prefetch_factor=2, persistent_workers=False)
+            kwargs.update(prefetch_factor=2, persistent_workers=True)
         loaders[role] = DataLoader(raw, batch_sampler=sampler, **kwargs)
     return loaders
 
@@ -417,11 +437,9 @@ class V41AcceptedState:
     transitions: dict
     trusted_velocity: np.ndarray
     trusted_velocity_valid: bool
-    previous_quality: float
     last_strong_time: float | None
     last_supported_time: float
     initialization_time: float
-    previous_innovation: float
     box_provenance: dict
     seed_offset: np.ndarray
     previous_is_propagation: bool = False
@@ -436,8 +454,16 @@ class V41AcceptedState:
 MISSING_BOX, KNOWN_GT_BOX, PERTURBED_BOX, PREDICTED_BOX = range(4)
 
 
+@dataclass(frozen=True)
+class _HistoryCrop:
+    signature: tuple
+    xyz: np.ndarray
+    ids: np.ndarray
+    gt10: bool
+
+
 class BatchBuilder:
-    """唯一状态所有者；prepare -> supervise_prior -> commit 是一次事务。"""
+    """唯一状态所有者；prepare -> commit 是一次事务。"""
     def __init__(self, config):
         self.config = self.v41_config = normalize_config(config)
         self.train_diagnostics = bool(option(self.config, 'v35_train_diagnostics', True))
@@ -447,24 +473,86 @@ class BatchBuilder:
         self.states = {}
         self._pending = None
         self._raw_memo = None
+        self._history_pools = {}
+        self._next_history_pools = {}
+
+    def __getstate__(self):
+        # 原始世界坐标点池只在本进程中复用，既不是跟踪状态也不是恢复数据。
+        state = vars(self).copy()
+        state.pop('_history_pools', None)
+        state.pop('_next_history_pools', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._history_pools = {}
+        self._next_history_pools = {}
 
     def _start_materialization_cache(self):
+        self._next_history_pools.clear()
+        self._coverage_cache = {}
         self._raw_memo = (RawFrameMemo(point_arrays, box_array, box_size, box_corners, inside_box)
                           if optimized_execution(self.config) else None)
 
     def clear_materialization_cache(self):
         self._raw_memo = None
+        self._coverage_cache = {}
+        self._next_history_pools.clear()
 
     def _points(self, frame):
         return self._raw_memo.points(frame) if self._raw_memo is not None else point_arrays(frame)
 
-    def _raw_index(self, frame):
-        if self._raw_memo is not None:
-            return self._raw_memo.index(frame)
-        return {int(value): j for j, value in enumerate(point_arrays(frame)[1])}
+    def _view(self, frame, rois, size, *, scale, offset, normal_train):
+        if normal_train and option(self.config, 'dataset', '') == 'kitti_mf':
+            from datasets.kitti_v41 import normal_train_point_view
+            view = normal_train_point_view(frame, rois, size, scale=scale, offset=offset)
+            if view['cache_used'] or '_v41_raw_ref' in frame:
+                return view['points'], view['ids'], bool(view['cache_used'])
+        xyz, ids = self._points(frame)
+        return xyz, ids, False
+
+    def _history_crop(self, frame, index, box, size, scale, offset, normal_train, previous, retain):
+        # 只有带物理文件身份的不可变 KITTI endpoint 可跨步复用。
+        # 其他数据源可能逐次增强或替换点，即使 tracklet/index 相同也重新裁剪。
+        ref = frame.get('_v41_raw_ref')
+        signature = None
+        if ref is not None and (index in previous or retain is not None):
+            gt10 = frame.get('_v41_normal_train_cache') if normal_train else None
+            bounds = None if gt10 is None else (gt10['lower'].tobytes(), gt10['upper'].tobytes())
+            signature = (ref, frame.get('input_metadata_sha256'), frame.get('v41_data_role'),
+                         bounds, box.tobytes(), size.tobytes(), scale, offset)
+            cached = previous.get(index)
+            if cached is not None and cached.signature == signature:
+                if retain is not None:
+                    retain[index] = cached
+                return cached.xyz, cached.ids, None, cached.gt10
+        xyz, ids, used = self._view(frame, [box], size, scale=scale, offset=offset,
+                                    normal_train=normal_train)
+        indices = np.flatnonzero(inside_box(xyz, box, size, scale=scale, offset=offset))
+        if signature is not None and retain is not None:
+            # 复制有序未抽样子集；不保留整云、GT10 数组或其视图的引用。
+            pool = _HistoryCrop(signature, xyz[indices], ids[indices], used)
+            retain[index] = pool
+            return pool.xyz, pool.ids, None, used
+        return xyz, ids, indices, used
+
+    def _target_coverage(self, frame, target, size):
+        """被动总数。若真实 GT 也严格在 GT10 内，该视图包含整帧所有正点。"""
+        key = id(frame), id(frame['3d_bbox']), id(frame.get('box_size'))
+        if key not in self._coverage_cache:
+            cache = frame.get('_v41_normal_train_cache')
+            if cache is not None and '_v41_raw_ref' in frame:
+                xyz, _, used = self._view(frame, [target], size, scale=1., offset=0., normal_train=True)
+            else:
+                xyz, _ = self._points(frame)
+                used = False
+            mask = inside_box(xyz, target, size)
+            self._coverage_cache[key] = (frame, cache['raw_count'] if used else len(xyz), mask, used)
+        return self._coverage_cache[key][1:]
 
     def reset(self):
         self.states.clear()
+        self._history_pools.clear()
         self._pending = None
         self.clear_materialization_cache()
 
@@ -502,14 +590,19 @@ class BatchBuilder:
                 raise ValueError('seed timestamps must strictly increase')
             velocity = (trusted[-1][0][:3] - trusted[-2][0][:3]) / gap
         last_time = times[r.frame - 1]
-        strong_times = [times[i] for i in seed_ids
-                       if int(inside_box(self._points(frames[i])[0], boxes[i], size).sum()) >= 3]
+        last_strong_time = None
+        for i in sorted(seed_ids, key=times.__getitem__, reverse=True):
+            xyz, _, _ = self._view(frames[i], [boxes[i]], size, scale=1., offset=0.,
+                                   normal_train=0 <= r.branch < 4)
+            if np.count_nonzero(inside_box(xyz, boxes[i], size)) >= 3:
+                last_strong_time = times[i]
+                break
         return V41AcceptedState(boxes=boxes, times=times, next_frame=r.frame, size=size,
             trusted=trusted, transitions={i: True for i in seed_ids},
             trusted_velocity=velocity, trusted_velocity_valid=len(trusted) == 2,
-            previous_quality=1., last_strong_time=max(strong_times) if strong_times else None,
+            last_strong_time=last_strong_time,
             last_supported_time=last_time, initialization_time=last_time,
-            previous_innovation=0., box_provenance={i: provenance for i in seed_ids},
+            box_provenance={i: provenance for i in seed_ids},
             seed_offset=seed_offset,
             last_velocity_update_time=last_time if len(trusted) == 2 else None)
 
@@ -540,14 +633,15 @@ class BatchBuilder:
             raise ValueError('adjacent endpoints of one window cannot share a batch')
         prepared, contexts = [], []
         for row in rows:
-            r, frames = row['request'], row['frames']
+            r = row['request']
             if r.starts_window:
                 if r.state_key in self.states:
                     raise RuntimeError('duplicate window initialization')
-                self.states[r.state_key] = self._new_state(row)
-            if r.state_key not in self.states:
+                state = self._new_state(row)
+            elif r.state_key not in self.states:
                 raise RuntimeError('missing accepted predecessor; no GT reseeding is allowed')
-            state = self.states[r.state_key]
+            else:
+                state = self.states[r.state_key]
             if state.next_frame != r.frame:
                 raise RuntimeError('out-of-order accepted state')
             data, context = self._prepare_row(row, state)
@@ -594,98 +688,119 @@ class BatchBuilder:
         recovery_seed_local[:3] -= anchor[:3]
         points, valid, raw_ids, seg, bc, truth_boxes = [], [], [], [], [], []
         cache_used = []
-        record_training = self.detailed_diagnostics and self.train_diagnostics and r.branch != 4
+        main_training = 0 <= r.branch < 4
+        previous_pools = {} if r.starts_window else self._history_pools.get(r.state_key, {})
+        next_pools = {}
+        record_training = self.detailed_diagnostics and self.train_diagnostics and main_training
+        record_current = record_training or (self.detailed_diagnostics and r.branch == 4)
         history_raw_counts, history_crop_counts = [], []
-        b0_ids = None
         search_target_counts = {}
         for slot, frame_id in enumerate(row['history_ids'] + (r.frame,)):
             frame = frames[frame_id]
-            xyz, ids = self._points(frame)
-            crop_box = history[slot] if slot < 3 else anchor
-            record_coverage = ((record_training and slot < 3) or
-                (slot == 3 and self.detailed_diagnostics and (self.train_diagnostics or r.branch == 4)))
-            # 全云mask只供覆盖日志；真实采样使用下方view/search，不依赖此遍历。
-            mask = (inside_box(xyz, crop_box, state.size, scale=scale, offset=offset)
-                    if record_coverage else None)
-            view_xyz, view_ids, view_to_raw = xyz, ids, np.arange(len(ids), dtype=np.int64)
-            used = False
-            if str(option(self.config, 'dataset', '')) == 'kitti_mf' and 0 <= r.branch < 4:
-                from datasets.kitti_v41 import normal_train_point_view
-                rois = ([search_plan.main_box] + ([search_plan.backup_box]
-                        if search_plan.backup_box is not None else [])) if slot == 3 else [crop_box]
-                view = normal_train_point_view(frame, rois, state.size,
-                    scale=scale, offset=offset, enabled=True, auxiliary=False)
-                view_xyz, view_ids, view_to_raw = view['points'], view['ids'], view['raw_indices']
-                used = bool(view['cache_used'])
-            cache_used.append(used)
-            selected = view_to_raw[np.flatnonzero(inside_box(
-                view_xyz, crop_box, state.size, scale=scale, offset=offset))]
-            if slot < 3 and not history_valid[slot]:
-                selected = selected[:0]
-            if slot == 3:
-                search_sample = sample_search_points(view_xyz, view_ids, search_plan, state.size,
-                    count=n, main_quota=int(option(self.config, 'v41_search_main_quota', 768)),
-                    backup_quota=int(option(self.config, 'v41_search_backup_quota', 256)),
+            is_current = slot == 3
+            exists = is_current or history_valid[slot]
+            crop_box = anchor if is_current else history[slot]
+            if is_current:
+                rois = [crop_box] if search_plan.backup_box is None else [crop_box, search_plan.backup_box]
+                xyz, ids, used = self._view(frame, rois, state.size, scale=scale, offset=offset,
+                                            normal_train=main_training)
+                search_sample = sample_search_points(xyz, ids, search_plan, state.size,
+                    count=n, main_quota=search_plan.main_quota, backup_quota=search_plan.backup_quota,
                     seed=stable_seed(option(self.config, 'seed', 42), r.epoch,
                                      row['tracklet_key'], r.branch, r.frame, slot),
-                    scale=scale, offset=offset)
-                search_sample = replace(search_sample,
-                    indices=view_to_raw[search_sample.indices],
-                    union_indices=view_to_raw[search_sample.union_indices])
+                    scale=scale, offset=offset, known_unique_ids='_v41_raw_ref' in frame)
                 selected = search_sample.indices
-                b0_ids = ids[search_sample.union_indices].copy()
-            elif len(selected) > n:
-                rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
-                    r.epoch, row['tracklet_key'], r.branch, r.frame, slot))
-                selected = np.sort(rng.choice(selected, n, replace=False))
-            count = len(selected)
-            point = np.zeros((n, 5), dtype=np.float32)
-            point[:count, :3] = xyz[selected] - anchor[:3]
-            point[:count, 3] = float(frame['timestamp']) - now
-            if slot < 3:
-                hint = inside_box(xyz[selected], crop_box, state.size).astype(np.float32)
-                point[:count, 4] = hint if history_provenance[slot] == KNOWN_GT_BOX else .2 + .6 * hint
+            elif exists:
+                # slot 0 在下一步已过期。只为同窗仍将读取的历史帧准备点池。
+                retain = next_pools if slot > 0 and not r.ends_window else None
+                xyz, ids, crop_indices, used = self._history_crop(frame, frame_id, crop_box, state.size,
+                    scale, offset, main_training, previous_pools, retain)
+                selected = crop_indices
+                pool_size = len(ids) if crop_indices is None else len(crop_indices)
+                if pool_size > n:
+                    rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
+                        r.epoch, row['tracklet_key'], r.branch, r.frame, slot))
+                    selected = np.sort(rng.choice(pool_size if crop_indices is None else crop_indices,
+                                                  n, replace=False))
             else:
+                used = False
+                if self.detailed_diagnostics:
+                    _, _, used = self._view(frame, [crop_box], state.size, scale=scale, offset=offset,
+                                             normal_train=main_training)
+                selected = np.empty(0, dtype=np.int64)
+            cache_used.append(used)
+            if selected is None:
+                sampled_xyz, sampled_ids = xyz, ids
+            elif len(selected):
+                sampled_xyz, sampled_ids = xyz[selected], ids[selected]
+            else:
+                sampled_xyz, sampled_ids = np.empty((0, 3), dtype=np.float64), np.empty(0, dtype=np.int64)
+            count = len(sampled_ids)
+            point = np.zeros((n, 5), dtype=np.float32)
+            point[:count, :3] = sampled_xyz - anchor[:3]
+            point[:count, 3] = float(frame['timestamp']) - now
+            if is_current:
                 point[:count, 4] = .5
-            point_valid = np.arange(n) < count
+            elif count:
+                hint = inside_box(sampled_xyz, crop_box, state.size).astype(np.float32)
+                point[:count, 4] = hint if history_provenance[slot] == KNOWN_GT_BOX else .2 + .6 * hint
             point_ids = np.full(n, -1, dtype=np.int64)
-            point_ids[:count] = ids[selected]
-            if self._raw_memo is None:
+            point_ids[:count] = sampled_ids
+            points.append(point)
+            valid.append(np.arange(n) < count)
+            raw_ids.append(point_ids)
+            if not main_training and not is_current:
+                continue
+            if main_training and self._raw_memo is not None:
+                target, target_size, centers_corners = self._raw_memo.geometry(frame)
+            else:
                 target = box_array(frame['3d_bbox'])
                 target_size = box_size(frame['3d_bbox'], frame)
-                centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
-                full_target = None
-            else:
-                target, target_size, centers_corners = self._raw_memo.geometry(frame)
-                full_target = None
-            if record_training and slot < 3:
-                # 仅被动日志；不存在的历史不借用复制槽的 GT 计数。
-                if full_target is None:
-                    full_target = (inside_box(xyz, target, target_size) if self._raw_memo is None
-                                   else self._raw_memo.target_mask(frame))
-                history_raw_counts.append(int(full_target.sum()) if history_valid[slot] else 0)
-                history_crop_counts.append(int((full_target & mask).sum()) if history_valid[slot] else 0)
-            label = np.full(n, -1, dtype=np.int64)
-            label[:count] = inside_box(xyz[selected], target, target_size).astype(np.int64)
-            if slot == 3 and self.detailed_diagnostics and (self.train_diagnostics or r.branch == 4):
-                # GT 仅作被动搜索覆盖统计，不参与触发、quota 或采样。
-                full_target = (inside_box(xyz, target, target_size) if self._raw_memo is None
-                               else self._raw_memo.target_mask(frame))
+                if main_training:
+                    centers_corners = np.vstack((target[:3], box_corners(target, target_size)))
+            label_needed = main_training or r.branch == 5 or record_current
+            if label_needed:
+                label = np.full(n, -1, dtype=np.int64)
+                label[:count] = inside_box(sampled_xyz, target, target_size)
+                seg.append(label)
+            if main_training:
+                distances = np.zeros((n, 9), dtype=np.float32)
+                distances[:count] = np.linalg.norm(sampled_xyz[:, None] - centers_corners[None], axis=-1)
+                bc.append(distances)
+            if is_current and record_current:
+                raw_count, target_mask, gt_view = self._target_coverage(frame, target, target_size)
+                target_count = int(target_mask.sum())
+                # 所有下标属于同一个搜索视图，不需要 raw-ID 哈希表或再次扫描裁剪区。
+                view_target = target_mask if gt_view == used else inside_box(xyz, target, target_size)
+                union = search_sample.union_indices
+                main = search_sample.main_indices
+                union_count = int(view_target[union].sum())
                 sampled_target = label[:count] == 1
-                sampled_main = mask[selected]
+                sampled_main = np.isin(selected[sampled_target], main, assume_unique=True).sum()
                 search_target_counts = dict(
-                    diagnostic_search_raw_target_count=np.int64(full_target.sum()),
-                    diagnostic_search_main_target_count=np.int64((full_target & mask).sum()),
-                    diagnostic_search_union_target_count=np.int64(full_target[search_sample.union_indices].sum()),
-                    diagnostic_search_sampled_main_target_count=np.int64((sampled_target & sampled_main).sum()),
-                    diagnostic_search_sampled_backup_target_count=np.int64((sampled_target & ~sampled_main).sum()))
-            distances = np.zeros((n, 9), dtype=np.float32)
-            distances[:count] = np.linalg.norm(xyz[selected, None] - centers_corners[None], axis=-1)
+                    diagnostic_search_raw_target_count=np.int64(target_count),
+                    diagnostic_search_main_target_count=np.int64(view_target[main].sum()),
+                    diagnostic_search_union_target_count=np.int64(union_count),
+                    diagnostic_search_sampled_main_target_count=np.int64(sampled_main),
+                    diagnostic_search_sampled_backup_target_count=np.int64(sampled_target.sum() - sampled_main),
+                    diagnostic_target_count=np.int64(target_count), diagnostic_raw_point_count=np.int64(raw_count),
+                    diagnostic_crop_target_count=np.int64(union_count), diagnostic_crop_point_count=np.int64(len(union)),
+                    diagnostic_sampled_target_count=np.int64(sampled_target.sum()), diagnostic_sampled_point_count=np.int64(count),
+                    diagnostic_novel_target_count=np.int64(target_count - union_count))
+            if not is_current and record_training:
+                if exists:
+                    _, target_mask, gt_view = self._target_coverage(frame, target, target_size)
+                    target_count = int(target_mask.sum())
+                    if crop_indices is None:
+                        crop_count = inside_box(xyz, target, target_size).sum()
+                    elif gt_view == used:
+                        crop_count = target_mask[crop_indices].sum()
+                    else:
+                        crop_count = inside_box(xyz[crop_indices], target, target_size).sum()
+                history_raw_counts.append(target_count if exists else 0)
+                history_crop_counts.append(int(crop_count) if exists else 0)
             target[:3] -= anchor[:3]
-            points.append(point); valid.append(point_valid); raw_ids.append(point_ids)
-            seg.append(label); bc.append(distances); truth_boxes.append(target)
-        current_gt = box_array(current['3d_bbox'])
-        previous_gt = box_array(frames[r.frame - 1]['3d_bbox'])
+            truth_boxes.append(target)
         recovery = state.trusted[-1][0].copy()
         recovery[:3] += state.trusted_velocity * (now - state.trusted[-1][1])
         fallback = recovery.copy()
@@ -704,17 +819,22 @@ class BatchBuilder:
             recovery_seed_box=recovery_seed_local.astype(np.float32),
             recovery_seed_valid=np.bool_(True),
             target_box=np.asarray(truth_boxes[-1], dtype=np.float32),
-            target_box_size=box_size(current['3d_bbox'], current).astype(np.float32),
-            history_target_boxes=np.asarray(truth_boxes[:3], dtype=np.float32),
-            segmentation_labels=np.stack(seg), bc_targets=np.stack(bc),
-            physical_displacement=(current_gt[:2] - previous_gt[:2]).astype(np.float32),
-            physical_valid=np.bool_(True), branch_id=np.int64(r.branch),
+            target_box_size=target_size.astype(np.float32),
+            branch_id=np.int64(r.branch),
             trusted_velocity=state.trusted_velocity.astype(np.float32),
             trusted_velocity_valid=np.bool_(state.trusted_velocity_valid),
-            previous_quality=np.float32(state.previous_quality),
             weak_age=np.float32(self._strong_age(state, now)),
-            supported_age=np.float32(max(0., now - state.last_supported_time)),
-            previous_innovation=np.float32(state.previous_innovation))
+            supported_age=np.float32(max(0., now - state.last_supported_time)))
+        if seg:
+            result['segmentation_labels'] = np.stack(seg)
+        if main_training:
+            result.update(history_target_boxes=np.asarray(truth_boxes[:3], dtype=np.float32),
+                          bc_targets=np.stack(bc), physical_valid=np.bool_(True))
+        if main_training or record_current:
+            previous_gt = box_array(frames[r.frame - 1]['3d_bbox'])
+            current_gt = box_array(current['3d_bbox'])
+            displacement = (current_gt[:2] - previous_gt[:2]).astype(np.float32)
+            result['physical_displacement'] = displacement
         result['history_is_initial'] = (history_valid
             & (np.asarray(row['history_ids']) == 0) & (history_provenance == KNOWN_GT_BOX))
         if option(self.config, 'enable_m', False) and 0 <= r.branch < 4:
@@ -749,82 +869,15 @@ class BatchBuilder:
         if record_training:
             result.update(diagnostic_history_raw_target_count=np.asarray(history_raw_counts, dtype=np.int64),
                           diagnostic_history_crop_target_count=np.asarray(history_crop_counts, dtype=np.int64))
-        context = dict(row=row, state=state, anchor=anchor, timestamp=now, recovery=recovery,
-                       b0_ids=b0_ids, current_gt=current_gt, search_plan=search_plan)
+        context = dict(row=row, state=state, anchor=anchor, timestamp=now, search_plan=search_plan,
+                       sampled_xyz=sampled_xyz, sampled_ids=sampled_ids)
+        if next_pools:
+            self._next_history_pools[r.state_key] = next_pools
         result.update(previous_is_propagation=np.bool_(state.previous_is_propagation),
             consecutive_propagations=np.int64(state.consecutive_propagations),
             consecutive_untrusted_outputs=np.int64(state.consecutive_untrusted_outputs),
             trusted_velocity_age=np.float32(self._velocity_age(state, now)))
         return result, context
-
-    @raw_transaction
-    def supervise_prior(self, batch, prior, *, training=True):
-        """仅生成原 B1 acquisition 监督与被动诊断，不获取扩展点。"""
-        with recipe_scope(self.config):
-            return self._supervise_prior(batch, prior, training=training)
-
-    def _supervise_prior(self, batch, prior, *, training=True):
-        if self._pending is None:
-            raise RuntimeError('prior supervision requires prepared raw rows')
-        optimized = optimized_execution(self.config)
-        enable_b1 = bool(option(self.config, 'enable_b1', True))
-        record_diagnostics = self.detailed_diagnostics and (not training or self.train_diagnostics)
-        if (not training or not enable_b1) and not record_diagnostics:
-            return batch
-        if enable_b1:
-            transferred = tensors_to_numpy(dict(boxes=prior.box, directions=prior.direction_xy), optimized=optimized)
-            boxes, directions = (transferred[key] for key in ('boxes', 'directions'))
-        row_diagnostics = {}
-        if optimized and record_diagnostics:
-            for i in range(len(self._pending)):
-                row_diagnostics[i, 'targets'] = (batch['segmentation_labels'][i, -1] == 1).sum()
-                row_diagnostics[i, 'points'] = batch['point_valid'][i, -1].sum()
-                row_diagnostics[i, 'displacement'] = torch.linalg.vector_norm(batch['physical_displacement'][i])
-            row_diagnostics = tensors_to_numpy(row_diagnostics, optimized=True)
-        values = []
-        for i, context in enumerate(self._pending):
-            row, state, anchor = context['row'], context['state'], context['anchor']
-            current = row['frames'][row['request'].frame]
-            xyz, ids = self._points(current)
-            target_mask = (inside_box(xyz, context['current_gt'], box_size(current['3d_bbox'], current))
-                           if self._raw_memo is None else self._raw_memo.target_mask(current))
-            extra = {}
-            if enable_b1:
-                # R 继续使用原未截断 recovery；search_plan.backup_box 不能进入此标签。
-                geometry = dict(b0_raw_ids=context['b0_ids'], b0_box=anchor, box_size=state.size,
-                    prior_center=boxes[i, :3] + anchor[:3], recovery_center=context['recovery'][:3],
-                    support_yaw=float(np.arctan2(directions[i, 1], directions[i, 0])),
-                    recovery_yaw=float(context['recovery'][3]),
-                    crop_scale=float(option(self.config, 'bb_scale', 1.25)),
-                    crop_offset=float(option(self.config, 'bb_offset', 2.)))
-                targets = (band_grid_target(xyz, ids, target_mask=target_mask, **geometry)
-                           if training else dict(acquisition_target=np.zeros(2, np.float32),
-                                                 acquisition_valid=False, acquisition_demand=False))
-                extra.update(acquisition_target=np.asarray(targets['acquisition_target'], dtype=np.float32),
-                             acquisition_valid=np.bool_(targets['acquisition_valid']),
-                             acquisition_demand=np.bool_(targets['acquisition_demand']))
-            if record_diagnostics:
-                # 只用于离线诊断的 GT 计数；不改变实际 support、采样、候选或状态。
-                b0_target_count = int((np.isin(ids, context['b0_ids']) & target_mask).sum())
-                extra.update(diagnostic_target_count=np.int64(target_mask.sum()),
-                             diagnostic_raw_point_count=np.int64(len(ids)),
-                             diagnostic_crop_target_count=np.int64(b0_target_count),
-                             diagnostic_sampled_target_count=np.int64(
-                                 row_diagnostics[i, 'targets'] if optimized else
-                                 (batch['segmentation_labels'][i, -1] == 1).sum().item()),
-                             diagnostic_crop_point_count=np.int64(len(context['b0_ids'])),
-                             diagnostic_sampled_point_count=np.int64(
-                                 row_diagnostics[i, 'points'] if optimized else
-                                 batch['point_valid'][i, -1].sum().item()),
-                             diagnostic_gt_xy_displacement=np.float32(
-                                 row_diagnostics[i, 'displacement'] if optimized else
-                                 torch.linalg.vector_norm(batch['physical_displacement'][i]).item()),
-                             diagnostic_novel_target_count=np.int64(target_mask.sum() - b0_target_count))
-            values.append(extra)
-        device = batch['points'].device
-        for key in values[0]:
-            batch[key] = torch.from_numpy(np.stack([x[key] for x in values])).to(device)
-        return batch
 
     @raw_transaction
     def commit(self, output, batch, *, diagnostics=False):
@@ -850,10 +903,8 @@ class BatchBuilder:
             raise ValueError('v41 selection/quality must match pending rows')
         invalid_selection = ((selected != 0) & (selected != 2) if b0_only
                              else (selected < 0) | (selected > (3 if full else 1)))
-        if bool(invalid_selection.any()):
-            raise ValueError('v41 selection must index q0/prior/trusted fallback/recovery')
-        if not bool(torch.isfinite(quality).all()):
-            raise ValueError('v41 previous quality must be finite')
+        checks = {'v41 selection must index q0/prior/trusted fallback/recovery': ~invalid_selection.any(),
+                  'v41 selected quality must be finite': torch.isfinite(quality).all()}
         fallback = getattr(output, 'q0_is_fallback', None)
         if fallback is None:
             sequence = getattr(output.observation, 'sequence_valid', None)
@@ -863,57 +914,58 @@ class BatchBuilder:
             raise ValueError('v41 fallback mask must match pending rows')
         propagation = (selected != 0) | fallback
         trusted_score = quality
-        expected_eligible = None
-        canonical_support = None
         if full:
             candidates = output.candidates
             row = torch.arange(b, device=selected.device)
             if candidates.boxes.shape != (b, 4, 4) or candidates.valid.shape != (b, 4):
                 raise ValueError('v41 Full requires exactly four candidate slots')
             measurement = candidates.measurement_candidate.detach().bool()
-            if measurement.shape != (b, 4) or bool(measurement[:, 1:3].any()):
-                raise ValueError('only real q0/recovery may be measurement candidates')
-            if bool((measurement[:, 0] & fallback).any()):
-                raise ValueError('propagation-alias q0 cannot be a measurement candidate')
-            propagation = ~measurement[row, selected]
-            if not bool(candidates.valid[row, selected].all()) or bool(((selected == 0) & fallback).any()):
-                raise ValueError('v41 cannot commit invalid or propagation-alias q0')
-            if not torch.equal(output.accepted_box.detach(), candidates.boxes.detach()[row, selected]):
-                raise ValueError('accepted box differs from unique selected candidate')
+            if measurement.shape != (b, 4):
+                raise ValueError('v41 measurement candidates must have four slots')
+            # 越界选择也会被拒绝；clamp 仅让异步检查完成前的 gather 安全。
+            safe_selected = selected.clamp(0, 3)
+            propagation = ~measurement[row, safe_selected]
+            checks['only real q0/recovery may be measurement candidates'] = ~measurement[:, 1:3].any()
+            checks['propagation-alias q0 cannot be a measurement candidate'] = ~(measurement[:, 0] & fallback).any()
+            checks['v41 cannot commit invalid or propagation-alias q0'] = (
+                candidates.valid[row, safe_selected].all() & ~((selected == 0) & fallback).any())
+            checks['accepted box differs from unique selected candidate'] = (
+                output.accepted_box.detach() == candidates.boxes.detach()[row, safe_selected]).all()
             legacy = output.legacy_q0_quality.detach()
             if legacy.shape != (b,):
                 raise ValueError('v41 requires separate legacy q0 quality')
             expected_quality = torch.where((selected == 0) & ~fallback, legacy, torch.zeros_like(legacy))
-            if not torch.equal(quality, expected_quality):
-                raise ValueError('previous quality must be legacy real-q0 quality and zero for every other source')
+            checks['only real q0 can carry legacy quality'] = (quality == expected_quality).all()
             trusted_score = output.commit_decision.trusted_score.detach()
             expected_eligible = output.commit_decision.eligible.detach().bool()
             if trusted_score.shape != (b,) or expected_eligible.shape != (b,):
                 raise ValueError('v41 commit decision must match pending rows')
-            if (not bool(torch.isfinite(trusted_score).all())
-                    or bool(((trusted_score < 0) | (trusted_score > 1)).any())
-                    or bool((trusted_score[propagation] != 0).any())):
-                raise ValueError('propagation cannot carry trusted quality')
-            from .verification import current_q0_support
-            canonical_support = current_q0_support(output.observation, batch,
-                                                  candidates.boxes[row, selected])['mask']
-            canonical_support = canonical_support & ~propagation[:, None]
-            if not torch.equal(output.commit_decision.support_mask.detach().bool(), canonical_support):
-                raise ValueError('v41 commit support differs from actual unique current-B0 set')
-            if not torch.equal(output.commit_decision.source.detach().long(), selected):
-                raise ValueError('v41 commit source differs from selected candidate')
+            checks['propagation cannot carry trusted quality'] = (
+                ((trusted_score >= 0) & (trusted_score <= 1) & ((trusted_score == 0) | ~propagation)).all())
+            from .verification import selected_commit_support
+            canonical_support = selected_commit_support(output, batch, safe_selected) & ~propagation[:, None]
+            support = output.commit_decision.support_mask.detach().bool()
+            source = output.commit_decision.source.detach().long()
+            if support.shape != canonical_support.shape or source.shape != selected.shape:
+                raise ValueError('v41 commit source/support has invalid shape')
+            checks['v41 commit support differs from actual unique current-B0 set'] = (support == canonical_support).all()
+            checks['v41 commit source differs from selected candidate'] = (source == selected).all()
         need_raw_support = not full or diagnostics
-        transfer = dict(boxes=output.accepted_box, quality=quality,
-            trusted_score=trusted_score, selected=selected, propagation=propagation,
-            prior_boxes=output.prior.box)
+        transfer = dict(boxes=output.accepted_box, checks=torch.stack(tuple(checks.values())),
+            trusted_score=trusted_score, propagation=propagation, prior_boxes=output.prior.box)
+        if diagnostics:
+            transfer['selected'] = selected
+        if full:
+            transfer.update(eligible=expected_eligible, support_count=canonical_support.sum(-1))
         if need_raw_support:
             transfer.update(probabilities=output.observation.foreground_probability[:, -1],
                 point_ids=batch['point_ids'][:, -1], point_valid=batch['point_valid'][:, -1])
         transferred = tensors_to_numpy(transfer, optimized=optimized_execution(self.config))
+        for message, passed in zip(checks, transferred['checks']):
+            if not passed:
+                raise ValueError(message)
         if not np.isfinite(transferred['prior_boxes']).all():
             raise FloatingPointError('non-finite v41 prior box')
-        eligible_cpu = None if expected_eligible is None else expected_eligible.cpu().numpy()
-        support_counts = None if canonical_support is None else canonical_support.sum(-1).cpu().numpy()
         staged = []
         # 先独立复算全部授权支持与提交资格，任何不一致都不留下半个 batch 的状态。
         for i, context in enumerate(self._pending):
@@ -926,20 +978,24 @@ class BatchBuilder:
             if need_raw_support:
                 ids = transferred['point_ids'][i, transferred['point_valid'][i]]
                 probs = transferred['probabilities'][i, transferred['point_valid'][i]]
-                cloud, _ = self._points(row['frames'][row['request'].frame])
-                id_to_index = self._raw_index(row['frames'][row['request'].frame])
-                xyz = cloud[[id_to_index[int(value)] for value in ids]]
-                support = _unique_mask(ids) & np.isfinite(probs) & (probs >= .5) & inside_box(xyz, box, state.size)
-                raw_count = int(support.sum())
+                xyz = context['sampled_xyz']
+                foreground = np.isfinite(probs) & (probs >= .5)
+                if not np.array_equal(ids, context['sampled_ids']):
+                    # 外部调用者提供子集或重排时仍按原帧物理 ID 取对应坐标。
+                    cloud, raw_ids = self._points(row['frames'][row['request'].frame])
+                    positions = {int(value): j for j, value in enumerate(raw_ids)}
+                    xyz = cloud[[positions[int(value)] for value in ids]]
+                    foreground &= _unique_mask(ids)
+                raw_count = int(np.count_nonzero(inside_box(xyz[foreground], box, state.size)))
             # Full 的 T 标签、硬门与提交共用同一 float32 公开点集合，避免
             # raw-world double 与 anchor-local float 的边界差异偷偷改提交资格。
-            count = int(support_counts[i]) if full else raw_count
+            count = int(transferred['support_count'][i]) if full else raw_count
             prop = bool(transferred['propagation'][i])
             # B1 原状态数学不读新 T；Full 的传播输出没有当前测量资格。
             strong = count >= self.v41_config.v41_min_support and (not prop if full else True)
             score = float(transferred['trusted_score'][i])
             supported = strong and bool(np.isfinite(score) and score >= self.v41_config.v41_trust_threshold)
-            if full and bool(eligible_cpu[i]) != supported:
+            if full and bool(transferred['eligible'][i]) != supported:
                 raise ValueError('v41 commit eligibility disagrees with unique current-B0 support')
             innovation = float(np.linalg.norm(transferred['boxes'][i, :2] - transferred['prior_boxes'][i, :2]))
             staged.append((context, box, count, raw_count, strong, supported, prop, score, innovation))
@@ -953,8 +1009,6 @@ class BatchBuilder:
             state.next_frame += 1
             pair_valid = innovation <= max(.5 * np.hypot(*state.size[:2]), 1e-3)
             state.transitions[r.frame] = pair_valid
-            state.previous_innovation = innovation
-            state.previous_quality = float(transferred['quality'][i])
             if strong:
                 state.last_strong_time = now
             velocity_updated = False
@@ -976,15 +1030,15 @@ class BatchBuilder:
                 state.trusted[:] = state.trusted[-2:]
                 state.last_supported_time = now
                 state.last_supported_quality = score
-            source = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')[int(transferred['selected'][i])]
-            if prop and source == 'q0':
-                source = 'prior'
             state.previous_is_propagation = prop
             # 记录真实提交资格，不由 T 分数或搜索位置推断；初始化仍为 None。
             state.previous_measurement_eligible = bool(supported and not prop)
             state.consecutive_propagations = state.consecutive_propagations + 1 if prop else 0
             state.consecutive_untrusted_outputs = 0 if supported else state.consecutive_untrusted_outputs + 1
             if diagnostics:
+                source = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')[int(transferred['selected'][i])]
+                if prop and source == 'q0':
+                    source = 'prior'
                 records.append(dict(strong=bool(strong), supported=bool(supported),
                     geometric_fg_count=count if not (full and prop) else 0,
                     raw_geometry_fg_count=raw_count,
@@ -1008,6 +1062,15 @@ class BatchBuilder:
                     state.transitions.pop(old, None)
                     state.box_provenance.pop(old, None)
             if r.ends_window:
-                self.states.pop(r.state_key)
+                self.states.pop(r.state_key, None)
+            elif r.starts_window:
+                self.states[r.state_key] = state
+        # 全批状态成功提交才发布。异常清理仅丢弃本步新建的池，保留前次提交。
+        for context in self._pending:
+            key = context['row']['request'].state_key
+            if key in self._next_history_pools:
+                self._history_pools[key] = self._next_history_pools[key]
+            else:
+                self._history_pools.pop(key, None)
         self._pending = None
         return records

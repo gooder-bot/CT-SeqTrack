@@ -1,6 +1,6 @@
 # CT-SeqTrack
 
-**2026-11-16 新运行入口：** [V41 v2 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)已实现具名 CLI > YAML > 默认、实际配方自动记录、默认每轮 test/完整 checkpoint、追加 CSV 与 summary/full 诊断；本轮仅静态审阅，未部署或运行验收。新规则只覆盖 `exec v2` 新 run；下方运行数据与原 final60/late3 是历史证据，旧 checkpoint 仍用匹配的原源码。
+**2026-11-18。** V41 v3 移除旧 acquisition，保留物理先验、整轨 B3/R 和主干，精简 GT10 传输与候选几何。新训练从头开始，各版本 checkpoint 使用匹配的源码。服务器首个 KITTI 主批的 16 个端点全部命中 GT10，单线程回放的主进程准备由 577.41 ms 降至 93.38 ms。v3 已在共享 A40 跑通实际训练；batch 2 粗测交换顺序后，两边的快慢排序反转。正式 batch 的整轮差距与最终跟踪精度待测。[V41 训练流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md) · [18 项复核及测速结果](docs/V41_TRAINING_PERF.md)
 
 面向 3D 点云单目标跟踪，研究**物理时间运动先验、当前观测纠偏与可信状态更新的可靠闭环融合**。当前主线为 **V41**：B0 观测、B1 运动先验、训练侧 MTP、B3 选框/可信判断、当前点 XYZ 恢复 R 和双 ROI 搜索。旧 B2 身份记忆/vote/mode 已退出当前主线，V39 的 G/跳骨干也未移入 V41。
 

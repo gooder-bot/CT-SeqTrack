@@ -24,6 +24,7 @@ from models.ct_v41.identity import model_schema, runtime_key, training_audit_sch
 from models.ct_v41.runtime import (move_tensors, make_evaluation, resume_payload,
                                   restore_rng_state, validate_resume_payload)
 from utils.bn_policy import running_batch_norm
+from utils.diagnostic_transfer import tensors_to_numpy
 from utils.execution_profile import optimized_execution
 from utils.batch_materialization import attach_materialization_cache, clear_materialization_cache
 
@@ -125,11 +126,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         device = next(self.tracker.parameters()).device
         batch = {}
         try:
-            batch = move_tensors(builder.prepare(rows), device)
+            batch = move_tensors(builder.prepare(rows), device, evaluation=not training,
+                                 retain_loss_geometry=training)
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
-            prior = self.tracker.plan_prior(batch)
-            if training or builder.detailed_diagnostics:
-                builder.supervise_prior(batch, prior, training=training)
             # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
             # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
             # teacher/单轨迹 EMA 覆盖；只切换 B0 BN，affine 和共享特征仍可学。
@@ -137,7 +136,11 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 or any(getattr(row['request'], 'drain', False) for row in rows))
             bn_scope = getattr(self.tracker, 'observation', self.tracker)
             with running_batch_norm(bn_scope, enabled=use_running):
-                output = self.tracker(batch, prior=prior)
+                if getattr(self.tracker, 'supports_local_diagnostics', False):
+                    output = self.tracker(batch, include_local_diagnostics=builder.detailed_diagnostics)
+                else:
+                    prior = self.tracker.plan_prior(batch)
+                    output = self.tracker(batch, prior=prior)
         except BaseException:
             self._release_materialization(batch, builder)
             builder._pending = None
@@ -149,12 +152,12 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         builder, batch = self.auxiliary_builder, {}
         device = next(self.tracker.parameters()).device
         try:
-            batch = move_tensors(builder.prepare(rows), device)
+            batch = move_tensors(builder.prepare(rows), device, retain_loss_geometry=True)
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
-            output = self.tracker.forward_aux(batch)
-            # forward之后仅补被动诊断；不计算acquisition或M辅助监督。
-            if builder.detailed_diagnostics:
-                builder.supervise_prior(batch, output.prior, training=False)
+            if getattr(self.tracker, 'supports_local_diagnostics', False):
+                output = self.tracker.forward_aux(batch, include_local_diagnostics=builder.detailed_diagnostics)
+            else:
+                output = self.tracker.forward_aux(batch)
         except BaseException:
             self._release_materialization(batch, builder)
             builder._pending = None
@@ -168,20 +171,19 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         exact = output.supervision_targets['exact_iou'].detach()
         selected_iou = exact.gather(1, selected[:, None]).squeeze(1)
         sampled = (batch['segmentation_labels'][:, -1] == 1).sum(-1)
-        packed = torch.stack((selected_iou, sampled.to(exact),
-            batch['diagnostic_search_trusted_age'].detach().to(exact),
-            batch['supported_age'].detach().to(exact)), -1).cpu().tolist()
+        values = tensors_to_numpy(dict(iou=selected_iou, points=sampled,
+            trusted_age=batch['diagnostic_search_trusted_age'], supported_age=batch['supported_age'],
+            supervised=losses['recovery_supervised_count']), optimized=True)
         records = []
-        for row, (iou, points, trusted_age, supported_age) in zip(rows, packed):
+        for i, row in enumerate(rows):
             request = row['request']
             records.append(dict(tracklet=row['tracklet_key'], frame=request.frame,
                 depth=request.frame - request.window_start,
                 timestamp=float(row['frames'][request.frame]['timestamp']),
-                ends_trajectory=request.ends_window, selected_exact_iou=iou,
-                sampled_target_count=int(points), trusted_age_seconds=trusted_age,
-                supported_age_seconds=supported_age))
-        supervised = int(losses['recovery_supervised_count'].detach().cpu().item())
-        return records, supervised
+                ends_trajectory=request.ends_window, selected_exact_iou=float(values['iou'][i]),
+                sampled_target_count=int(values['points'][i]), trusted_age_seconds=float(values['trusted_age'][i]),
+                supported_age_seconds=float(values['supported_age'][i])))
+        return records, int(values['supervised'])
 
     @staticmethod
     def _release_materialization(batch, builder):
@@ -245,7 +247,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 tokens = getattr(output.observation, 'source_valid', None)
                 if tokens is not None:
                     counts['valid_tokens'] = tokens.sum()
-            record.update(zip(counts, torch.stack(list(counts.values())).detach().cpu().tolist()))
+            record.update((name, int(value)) for name, value in tensors_to_numpy(counts, optimized=True).items())
         # 此处不显式 synchronize，不保存CUDA张量；完整阶段计时由服务器工程工具完成。
         self._memory_stream.write(json.dumps(record, ensure_ascii=False) + '\n')
 
@@ -307,7 +309,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         if self._full_epoch_diagnostics:
             from models.ct_v41.training_diagnostics import TrainingDiagnostics
             self.training_diagnostics = TrainingDiagnostics(self.config.seed,
-                optimized=optimized_execution(self.config))
+                optimized=optimized_execution(self.config), q0_center_weighting=self.config.v41_q0_center_weighting)
         else:
             self.training_diagnostics = None
         self.train_builder.reset()
@@ -374,8 +376,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 output.loss_statistics = {}
             losses = self.tracker.compute_losses(batch, output)
             total = losses['loss_total']
-            if total.ndim != 0 or not bool(torch.isfinite(total)):
-                raise FloatingPointError('v41 loss_total must be a finite scalar')
+            if total.ndim != 0:
+                raise ValueError('v41 loss_total must be a scalar')
             if self.training_diagnostics is not None:
                 self.training_diagnostics.add_batch(rows, batch, output, losses)
             self._pending_train = (output, batch, len(rows))
@@ -395,8 +397,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                         self._pending_auxiliary_diagnostics = self._auxiliary_diagnostic_records(
                             auxiliary_rows, auxiliary_batch, auxiliary_output, auxiliary_losses)
                     auxiliary_total = auxiliary_losses['loss_total']
-                    if auxiliary_total.ndim != 0 or not bool(torch.isfinite(auxiliary_total)):
-                        raise FloatingPointError('v41 auxiliary loss_total must be a finite scalar')
+                    if auxiliary_total.ndim != 0:
+                        raise ValueError('v41 auxiliary loss_total must be a scalar')
                     total = total + self.config.v41_aux_loss_weight * auxiliary_total
                     self._auxiliary_fetches += 1
                     for name, value in auxiliary_losses.items():

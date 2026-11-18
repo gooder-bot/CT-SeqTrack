@@ -146,6 +146,15 @@ def check_output(batch, output):
         candidate_slots=4, R_read_points=int(output.recovery.point_mask.sum().item()))
 
 
+def smoke_config(args):
+    from models.ct_v41.config import load_config, normalize_config
+    config = load_config(args.cfg, dict(path=args.path, devices=args.devices))
+    require(not config.ct_engineering_check and not config.test and not config.checkpoint,
+            '--cfg must select a formal scratch V41 KITTI Full training recipe')
+    return normalize_config(dict(config, ct_engineering_check=True, workers=0, log_dir=None,
+        diagnostics_level=args.diagnostics_level, full_diagnostic_epochs=[], v31_evaluate_late3=False))
+
+
 def run_smoke(args, report):
     # 直接检查实际代码/数据，不要求事先维护登记文件。
     from models.ct_v41.provenance import source_identity, text_hash
@@ -153,12 +162,9 @@ def run_smoke(args, report):
     report.update(source_sha256=source['sha256'], source_hash_policy=source['inventory_policy'],
                   registration_required=False, tool_sha256=text_hash(__file__))
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.devices)
-    from models.ct_v41.config import load_config
     from models.ct_v41.entry import configure_numerics, initialization_identity
-    config = load_config(ROOT / 'cfgs/ct_seqtrack/41_full_kitti.yaml', dict(
-        path=str(Path(args.path).expanduser().resolve()), devices=args.devices,
-        ct_engineering_check=True, workers=0, log_dir=None,
-        v31_evaluate_late3=False, v41_attention_backend='fa2_varlen'))
+    config = smoke_config(args)
+    report['v41_q0_center_weighting'] = config.v41_q0_center_weighting
     configure_numerics(config)
     import numpy as np
     import torch
@@ -206,7 +212,7 @@ def run_smoke(args, report):
             for step in range(args.steps):
                 optimizer.zero_grad(set_to_none=True)
                 main_batch = auxiliary_batch = main_output = auxiliary_output = None
-                main_losses = auxiliary_losses = combined = auxiliary_grads = None
+                main_losses = auxiliary_losses = combined = None
                 torch.cuda.synchronize()
                 started = time.perf_counter()
                 main_rows = next(main_iterator)
@@ -226,8 +232,9 @@ def run_smoke(args, report):
                     auxiliary_batch, auxiliary_output = host._forward_auxiliary_raw(auxiliary_rows)
                     host._pending_auxiliary = (auxiliary_output, auxiliary_batch, len(auxiliary_rows))
                     auxiliary_losses = tracker.compute_aux_losses(auxiliary_batch, auxiliary_output)
-                    host._pending_auxiliary_diagnostics = host._auxiliary_diagnostic_records(
-                        auxiliary_rows, auxiliary_batch, auxiliary_output, auxiliary_losses)
+                    if host._full_epoch_diagnostics:
+                        host._pending_auxiliary_diagnostics = host._auxiliary_diagnostic_records(
+                            auxiliary_rows, auxiliary_batch, auxiliary_output, auxiliary_losses)
                     host._auxiliary_fetches += 1
                     require(bool(torch.isfinite(auxiliary_losses['loss_total'])), 'nonfinite auxiliary loss')
                     auxiliary_grads = torch.autograd.grad(auxiliary_losses['loss_total'],
@@ -241,7 +248,6 @@ def run_smoke(args, report):
                     require(isolated_gradients['recovery_head']['connected'] > 0,
                             'auxiliary XYZ loss is disconnected from R')
                     del auxiliary_grads
-                    auxiliary_grads = None
                 require(rng_equal(rng_before, capture_rng_state()), 'auxiliary execution changed main RNG')
                 check_upstream_snapshot(tracker, before)
                 require(len(mtp_calls) == mtp_before, 'M executed in the auxiliary stream')
@@ -268,6 +274,7 @@ def run_smoke(args, report):
                 torch.cuda.synchronize()
                 report['steps'].append(dict(index=step, seconds=time.perf_counter()-started,
                     main_loss=float(main_losses['loss_total'].detach().cpu()),
+                    loss_main_center=float(main_losses['loss_main_center'].detach().cpu()),
                     auxiliary_loss=float(auxiliary_losses['loss_total'].detach().cpu()),
                     combined_loss=float(combined.detach().cpu()),
                     actual_fa_calls=dict(main=main_kernel_calls, auxiliary=auxiliary_kernel_calls),
@@ -289,7 +296,9 @@ def run_smoke(args, report):
         report.update(status='passed_lifecycle_smoke_only', optimizer_steps=host._epoch_steps,
             main_committed_rows=host._epoch_rows, auxiliary_committed_rows=host._auxiliary_rows,
             main_M_forward_calls=len(mtp_calls), saved_checkpoints=0,
-            auxiliary_diagnostics=host.auxiliary_diagnostics.state_dict(),
+            diagnostics_level=config.diagnostics_level,
+            auxiliary_diagnostics=(host.auxiliary_diagnostics.state_dict()
+                                   if host._full_epoch_diagnostics else None),
             remaining_main_states=len(host.train_builder.states),
             remaining_auxiliary_states=len(host.auxiliary_builder.states),
             complete_epoch_validated=False, formal_scores_validated=False)
@@ -302,21 +311,30 @@ def run_smoke(args, report):
         # 工程模型/优化器随进程丢弃；不得存checkpoint或转为正式初始化。
 
 
-def main(argv=None):
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('--cfg', type=Path, default=ROOT / 'cfgs/ct_seqtrack/41_full_kitti.yaml',
+                        help='V41 KITTI Full training YAML, default: uniform q0 center loss')
     parser.add_argument('--path', required=True, help='real KITTI training root')
     parser.add_argument('--devices', required=True, type=int, help='one physical CUDA GPU index')
     parser.add_argument('--steps', type=int, default=2)
+    parser.add_argument('--diagnostics-level', choices=('summary', 'full'), default='summary')
     parser.add_argument('--output-dir', help='new directory under this project artifacts/ct_checks')
     args = parser.parse_args(argv)
     if args.devices < 0 or args.steps < 1:
         parser.error('--devices must be nonnegative and --steps must be positive')
+    args.cfg = str(args.cfg.expanduser().resolve())
     args.path = str(Path(args.path).expanduser().resolve())
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
     destination = output_directory(args.output_dir)
     os.chdir(ROOT)
     report = dict(schema='ct_seqtrack.v41.server_lifecycle_smoke.v1', status='started',
         run_type='engineering_scratch_discard_weights', started_utc=datetime.now(timezone.utc).isoformat(),
-        requested_steps=args.steps, output_dir=str(destination),
+        requested_steps=args.steps, output_dir=str(destination), cfg=args.cfg,
         acceptance_scope='real KITTI main+aux forward/backward/single-Adam/dual-commit',
         pending=['server contract tests', 'complete-epoch main+aux coverage and resume acceptance'],
         interpretation=['Smoke pairs use one auxiliary batch per main batch, not the formal sparse insertion rate.',

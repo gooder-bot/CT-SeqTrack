@@ -33,7 +33,7 @@ def unique_valid_mask(valid: Tensor, point_ids: Tensor | None = None) -> Tensor:
         raise ValueError("raw point IDs must be integer tensors")
     ids = point_ids.to(device=valid.device, dtype=torch.long)
     valid = valid & (ids >= 0)
-    keys = ids.masked_fill(~valid, torch.iinfo(torch.long).max)
+    keys = ids.masked_fill(~valid, -1)
     order = torch.argsort(keys, dim=-1, stable=True)
     sorted_ids = keys.gather(-1, order)
     sorted_valid = valid.gather(-1, order)
@@ -88,7 +88,6 @@ def _pooled_tokens(value: Tensor, valid: Tensor, count: int):
         raise ValueError('ragged pooling requires positive point slots')
     valid = valid.bool()
     order = torch.argsort((~valid).long(), dim=-1, stable=True)
-    compact = value.gather(2, order[:, None].expand(-1, channels, -1))
     measured = valid.sum(-1)
     token_count = measured.clamp_max(count)
     token = torch.arange(count, device=value.device)[None]
@@ -99,8 +98,8 @@ def _pooled_tokens(value: Tensor, valid: Tensor, count: int):
     positions = start[..., None] + torch.arange(width, device=value.device)
     token_valid = token < token_count[:, None]
     member_valid = token_valid[..., None] & (positions < stop[..., None])
-    indices = positions.clamp(0, slots - 1).reshape(batch, 1, -1).expand(-1, channels, -1)
-    grouped = compact.gather(2, indices).reshape(batch, channels, count, width)
+    indices = order.gather(1, positions.clamp(0, slots - 1).reshape(batch, -1))
+    grouped = value.gather(2, indices[:, None].expand(-1, channels, -1)).reshape(batch, channels, count, width)
     pooled = grouped.masked_fill(~member_valid[:, None], -torch.inf).max(-1).values
     return mask_values(pooled, token_valid), token_valid
 
@@ -124,7 +123,7 @@ class SegPointNet(nn.Module):
             raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
@@ -135,9 +134,9 @@ class SegPointNet(nn.Module):
         else:
             value = torch.cat((point_features, pooled.expand(-1, -1, value.shape[-1])), dim=1)
             remaining_layers = self.seq_per_point2
-        for layer in remaining_layers:
+        for index, layer in enumerate(remaining_layers):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
         if feature_bf16:
             with torch.autocast(device_type=value.device.type, enabled=False):
                 return mask_values(self.fc(value.float()), valid), point_features.float()
@@ -156,17 +155,17 @@ class MiniPointNet(nn.Module):
 
     def forward(self, value: Tensor, valid: Tensor, foreground: Tensor, *, valid_count=None,
                 row_count=None, feature_bf16=False):
-        for layer in self.per_point:
+        for index, layer in enumerate(self.per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
         # value 已经过 ReLU；此处加权保持原始几何输入，不产生缩放后的伪坐标。
         value = value * foreground.detach()[:, None]
-        value, _ = masked_max_pool(value, valid)
+        value, row_valid = masked_max_pool(value, valid)
         value = value.squeeze(-1)
-        row_valid = valid.any(-1)
-        for layer in self.hidden:
+        row_valid = row_valid.squeeze(-1)
+        for index, layer in enumerate(self.hidden):
             value, _ = masked_sequence(layer, value, row_valid, valid_count=row_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
         return value.float() if feature_bf16 else value
 
 
@@ -186,18 +185,20 @@ class FeaturePointNet(nn.Module):
             _conv_block(i, o) for i, o in zip(widths[:-1], widths[1:]))
         self.fc = nn.Conv1d(128, 128, 1)
 
-    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
+    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, token_valid_count=None,
+                feature_bf16=False):
         factorized = execution_lab_enabled('factorized_projection')
         if factorized and feature_bf16:
             raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
         tokens, token_valid = _pooled_tokens(point_features, valid, self.token_count)
-        token_valid_count = int(token_valid.sum().item()) if valid_count is not None else None
+        if valid_count is not None and token_valid_count is None:
+            token_valid_count = int(token_valid.sum().item())
         if factorized:
             # 第一维为 B*frames：每帧的 pooled 独立投影，不跨帧共享全局值。
             value = factorized_global_block(self.seq_per_point2[0], tokens, pooled, token_valid,
@@ -206,9 +207,9 @@ class FeaturePointNet(nn.Module):
         else:
             value = torch.cat((tokens, pooled.expand(-1, -1, self.token_count)), dim=1)
             remaining_layers = self.seq_per_point2
-        for layer in remaining_layers:
+        for index, layer in enumerate(remaining_layers):
             value, _ = masked_sequence(layer, value, token_valid, valid_count=token_valid_count,
-                                       feature_bf16=feature_bf16)
+                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
         if feature_bf16:
             with feature_autocast(value, enabled=True):
                 source = self.fc(value)
@@ -273,14 +274,15 @@ class B0Observation(nn.Module):
     @staticmethod
     @torch.no_grad()
     def observation_support(clean: Tensor, valid: Tensor, foreground: Tensor,
-                            history_boxes: Tensor, box_size: Tensor):
+                            history_boxes: Tensor, box_size: Tensor, *, count=None):
         """当前参数重编码的预测支持；历史只计输入框内 FG，当前计全 crop。
 
         所有输入已换到 anchor-local；valid 是逐帧 raw-ID 去重后的真实测量。
         点量与 FG 量均以点槽容量归一化，无点熵为零，不读取 GT 标签。
         """
         probability = torch.where(valid, foreground.detach(), 0.)
-        count = valid.sum(-1).to(clean.dtype)
+        if count is None:
+            count = valid.sum(-1).to(clean.dtype)
         delta = clean[:, :3, :, :3] - history_boxes[:, :, None, :3]
         yaw = history_boxes[..., 3, None]
         sine, cosine = yaw.sin(), yaw.cos()
@@ -301,24 +303,29 @@ class B0Observation(nn.Module):
 
     def forward(self, batch: Mapping[str, Tensor]) -> ObservationFeatures:
         points = batch['points']
-        valid = self.measurement_mask(batch)
+        cache = materialization_cache(batch)
+        canonical = None if cache is None else cache.canonical_values(batch)
+        if canonical is None:
+            valid = self.measurement_mask(batch)
+            clean = torch.where(valid[..., None], points, 0.)
+            if not bool(torch.isfinite(clean).all()):
+                raise ValueError("valid measurements must be finite")
+        else:
+            valid, clean = canonical['point_valid'], canonical['points']
         batch_size, frames, count, _ = points.shape
         boxes = batch['history_boxes'].to(points)
         size = batch['box_size'].to(points)
         if boxes.shape != (batch_size, 3, 4) or size.shape != (batch_size, 3):
             raise ValueError("history_boxes/box_size must be [B,3,4]/[B,3]")
-        if not bool(torch.isfinite(points[valid]).all()):
-            raise ValueError("valid measurements must be finite")
-        if not bool(torch.isfinite(size).all()) or not bool((size > 0).all()):
+        if not bool((torch.isfinite(size) & (size > 0)).all()):
             raise ValueError("box_size must be finite positive L/W/H")
         history_valid = batch['history_valid'].to(points.device).bool()
-        if not bool(torch.isfinite(boxes[history_valid]).all()):
+        boxes = torch.where(history_valid[..., None], boxes, 0.).detach()
+        if not bool(torch.isfinite(boxes).all()):
             raise ValueError("valid history boxes must be finite")
         yaw_anchor = anchor_yaw(batch, points)
-        boxes = torch.where(history_valid[..., None], boxes, 0.).detach()
         boxes = transform_boxes(boxes, yaw_anchor)
         boxes = torch.where(history_valid[..., None], boxes, 0.)
-        clean = torch.where(valid[..., None], points, 0.)
         clean = torch.cat((rotate_xyz(clean[..., :3], yaw_anchor), clean[..., 3:]), dim=-1)
         # BC 的前向先验仅来自输入历史框；当前未知框没有 GT BC 输入。
         corners = box_corners_xyz(boxes, size[:, None])
@@ -330,10 +337,14 @@ class B0Observation(nn.Module):
         point_input = torch.cat((clean, candidate_bc), dim=-1)
         flat_valid = valid.reshape(batch_size, frames * count)
         flat_input = point_input.reshape(batch_size, frames * count, 14).transpose(1, 2)
-        point_count = row_count = None
+        frame_counts = valid.sum(-1)
+        sequence_valid = (frame_counts > 0).any(-1)
+        point_count = row_count = token_valid_count = None
         feature_bf16 = self.execution_profile == 'optimized_bf16'
         if self.execution_profile != 'legacy':
-            point_count, row_count = torch.stack((valid.sum(), flat_valid.any(-1).sum())).cpu().tolist()
+            token_counts = frame_counts.clamp_max(self.feature_pointnet.token_count)
+            point_count, row_count, token_valid_count = torch.stack((
+                frame_counts.sum(), sequence_valid.sum(), token_counts.sum())).cpu().tolist()
         segmentation, features = self.seg_pointnet(flat_input, flat_valid,
             valid_count=point_count, feature_bf16=feature_bf16)
         logits = segmentation[:, :2].transpose(1, 2).reshape(batch_size, frames, count, 2)
@@ -344,21 +355,25 @@ class B0Observation(nn.Module):
             mini_input.reshape(batch_size, frames * count, 13).transpose(1, 2),
             flat_valid, foreground.reshape(batch_size, frames * count),
             valid_count=point_count, row_count=row_count, feature_bf16=feature_bf16)
-        per_frame_count = valid.sum(-1).to(points.dtype)
+        per_frame_count = frame_counts.to(points.dtype)
         current_count = per_frame_count[:, -1]
         current_valid = current_count > 0
-        sequence_valid = flat_valid.any(-1)
-        probability = foreground[:, -1].detach().clamp(1e-6, 1. - 1e-6)
-        entropy = -(probability * probability.log() + (1. - probability) * (1. - probability).log())
-        entropy = (entropy * valid[:, -1]).sum(-1) / current_count.clamp_min(1.)
+        history_support, current_support = None, None
+        if self.coarse_condition or self.query_context:
+            history_support, current_support = self.observation_support(
+                clean, valid, foreground, boxes, size, count=per_frame_count)
+            current_entropy = current_support[:, 2]
+        else:
+            probability = foreground[:, -1].detach().clamp(1e-6, 1. - 1e-6)
+            entropy = -(probability * probability.log() + (1. - probability) * (1. - probability).log())
+            current_entropy = (entropy * valid[:, -1]).sum(-1) / current_count.clamp_min(1.) / math.log(2.)
         quality = torch.stack((
             torch.log1p(current_count) / math.log1p(count),
             torch.log1p(per_frame_count[:, :3].sum(-1)) / math.log1p(3 * count),
-            entropy / math.log(2.), history_valid.to(points.dtype).mean(-1)), dim=-1).detach()
-        history_support, current_support = None, None
+            current_entropy, history_valid.to(points.dtype).mean(-1)), dim=-1).detach()
+        descriptor = None
         coarse_input = pooled
         if self.coarse_condition:
-            history_support, current_support = self.observation_support(clean, valid, foreground, boxes, size)
             descriptor = history_descriptor(batch, boxes, history_valid, size, history_support,
                                             self.context_time_scale, include_initial=True)
             condition = self.coarse_history_condition(torch.cat((descriptor, current_support.detach()), dim=-1))
@@ -373,10 +388,8 @@ class B0Observation(nn.Module):
         coarse = torch.where(sequence_valid[:, None], coarse, 0.)
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
-            valid.reshape(batch_size * frames, count), valid_count=point_count,
+            valid.reshape(batch_size * frames, count), valid_count=point_count, token_valid_count=token_valid_count,
             feature_bf16=feature_bf16)
-        if self.query_context and not self.coarse_condition:
-            history_support, current_support = self.observation_support(clean, valid, foreground, boxes, size)
         return ObservationFeatures(
             coarse_box=coarse,
             point_features=features.transpose(1, 2).reshape(batch_size, frames, count, 64),
@@ -386,4 +399,4 @@ class B0Observation(nn.Module):
             foreground_probability=foreground, quality=quality, current_valid=current_valid,
             sequence_valid=sequence_valid,
             coarse_features=pooled if self.query_context else None,
-            history_support=history_support, current_support=current_support)
+            history_support=history_support, current_support=current_support, history_descriptor=descriptor)

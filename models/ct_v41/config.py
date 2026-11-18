@@ -65,6 +65,7 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_selection_policy='q0_recovery_prior_fallback_tie_v1',
     v41_state_policy='selected_current_measurement_trusted_v1',
     v41_main_policy='dense_b0_optional_concat_b1_v1',
+    v41_q0_center_weighting='uniform',
     v41_activation_policy='active_from_epoch1_v1',
     v41_gain_margin=0., v41_trust_threshold=.5, v41_min_support=3,
     v41_duplicate_xyz_tolerance=1e-4, v41_duplicate_yaw_tolerance=1e-5,
@@ -73,7 +74,7 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_search_main_quota=768, v41_search_backup_quota=256, v41_search_max_age=1.5,
     v41_m_weight=.05, v41_m_horizons=[2, 4], v41_m_horizon_weights=[1., .5],
     v41_attention_backend='fa2_varlen', v41_attention_precision='qkv_bf16_only',
-    v41_cpu_acquisition='chunked_exact_v1', v41_memory_logging=False,
+    v41_memory_logging=False,
     v41_recovery_weight=.1, v41_aux_fraction=.25, v41_aux_loss_weight=.25,
     v41_train_preload_offset=10., v41_kitti_geometry='open3dsot_velodyne_v1',
     console_mode='auto', progress_refresh_seconds=1., plain_log_interval_seconds=30.,
@@ -85,14 +86,23 @@ FIXED_B3_KEYS = ('v41_gain_margin', 'v41_trust_threshold', 'v41_min_support',
                 'v41_duplicate_xyz_tolerance', 'v41_duplicate_yaw_tolerance')
 
 
+def run_directory_tag(config, *, explicit_tag=False):
+    # B 继承 Full 的默认 tag，仅为自动目录区分这两组。
+    if (not explicit_tag and config.tag == DEFAULTS['tag']
+            and config.v41_q0_center_weighting == 'inverse_lwh'):
+        return config.tag + '-q0-inverse-lwh'
+    return config.tag
+
+
 def recipe_identity(config):
     name = config.get('v41_training_recipe')
     if not isinstance(name, str) or name not in RECIPES:
         raise ValueError('unknown v41 training recipe: ' + str(name))
     options = list(config.get('v41_engineering_options', ('unique_mask',)))
-    return dict(recipe=name, implementation_id='v41_current_point_xyz_recovery_v1',
+    return dict(recipe=name, implementation_id='v41_current_point_recovery_no_acquisition_v3',
         execution_revision=EXECUTION_REVISION,
         projection='concat', options=options, prior_read_applicable=False,
+        q0_center_weighting=config.get('v41_q0_center_weighting', 'uniform'),
         arm=RECIPES[name]['arm'], lr_milestones=list(config.get('lr_milestones', ())),
         optimization={key: config.get(key) for key in (
             'epoch', 'batch_size', 'seed', 'lr', 'wd', 'lr_schedule',
@@ -111,7 +121,9 @@ def recipe_identity(config):
 
 
 def recipe_scope(config):
-    recipe_identity(config)
+    name = config.get('v41_training_recipe')
+    if not isinstance(name, str) or name not in RECIPES:
+        raise ValueError('unknown v41 training recipe')
     # 新路径不继承环境/外层工程变量；共同 B1 仅启用已验证的唯一点去重。
     return execution_scope(config.get('v41_engineering_options', ('unique_mask',)),
                            registered_recipe=True)
@@ -158,6 +170,8 @@ def normalize_config(config=None):
         raise ValueError('v41 model/family identity mismatch')
     if cfg.v41_execution_revision != EXECUTION_REVISION:
         raise ValueError('v41 execution revision mismatch; use the original frozen source')
+    if cfg.v41_q0_center_weighting not in ('uniform', 'inverse_lwh'):
+        raise ValueError('v41_q0_center_weighting must be uniform or inverse_lwh')
     validate_execution_profile(cfg)
     if cfg.execution_profile != 'optimized_fp32':
         raise ValueError('v41 requires FP32 backbone/projections; only attention QKV may use BF16')
@@ -178,7 +192,7 @@ def normalize_config(config=None):
             raise ValueError('v41 fixed policy identity mismatch: ' + key)
     for key in ('v41_search_main_quota', 'v41_search_backup_quota', 'v41_search_max_age',
                 'v41_m_weight', 'v41_m_horizons', 'v41_m_horizon_weights',
-                'v41_attention_precision', 'v41_cpu_acquisition', 'v41_recovery_weight',
+                'v41_attention_precision', 'v41_recovery_weight',
                 'v41_aux_fraction', 'v41_aux_loss_weight', 'v41_train_preload_offset', 'v41_kitti_geometry'):
         if type(cfg[key]) is not type(DEFAULTS[key]) or cfg[key] != DEFAULTS[key]:
             raise ValueError('v41 fixed structural contract mismatch: ' + key)

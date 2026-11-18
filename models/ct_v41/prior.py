@@ -12,7 +12,7 @@ from .contracts import PriorContext
 
 
 def empty_prior(batch):
-    """B0 的无参数占位协议；只提供合法传播框，不运行 B1 或 acquisition。"""
+    """B0 的无参数占位协议；只提供合法传播框，跳过 B1。"""
     fallback = batch['fallback_box'].detach()
     if fallback.ndim != 2 or fallback.shape[-1] != 4 or not bool(torch.isfinite(fallback).all()):
         raise ValueError('B0 fallback_box must be finite [B,4]')
@@ -20,42 +20,9 @@ def empty_prior(batch):
     zero = fallback.new_zeros((b, 2))
     invalid = torch.zeros(b, dtype=torch.bool, device=fallback.device)
     return PriorContext(feature=fallback.new_zeros((b, 128)), mean_xy=zero,
-        log_sigma=zero.clone(), valid=invalid, acquisition_fraction=zero.clone(),
+        log_sigma=zero.clone(), valid=invalid,
         direction_xy=zero.clone(), kinematic_xy=zero.clone(), envelope=zero.clone(),
         unit_residual=zero.clone(), box=fallback, context_valid=invalid.clone())
-
-
-def _column(batch, key, reference, default=0.0):
-    value = batch.get(key)
-    if value is None:
-        return reference.new_full((reference.shape[0], 1), float(default))
-    return value.to(reference).reshape(reference.shape[0], 1)
-
-
-def acquisition_features(batch, pair_valid, time_scale):
-    """21 个因果统计，只看已获得的 B0 crop/历史，绝不读取 GT。"""
-    points, valid = batch['points'], batch['point_valid'].bool()
-    counts = valid.sum(-1).to(points.dtype)
-    xyz = points[:, -1, :, :2]
-    current = valid[:, -1, :, None]
-    low = xyz.masked_fill(~current, float('inf')).amin(1)
-    high = xyz.masked_fill(~current, -float('inf')).amax(1)
-    extent = torch.where(current.any(1), high - low, torch.zeros_like(low))
-    size = batch['box_size'].to(points).clamp_min(.1)
-    velocity = batch.get('trusted_velocity', points.new_zeros((points.shape[0], 3)))
-    stats = torch.cat((
-        torch.log1p(counts), torch.log1p(size),
-        batch['history_valid'].to(points), pair_valid.to(points),
-        torch.log1p(batch['current_dt'].to(points).reshape(-1, 1) / time_scale),
-        _column(batch, 'previous_quality', points),
-        torch.log1p(_column(batch, 'weak_age', points).clamp_min(0)),
-        torch.log1p(_column(batch, 'supported_age', points).clamp_min(0)),
-        velocity.to(points)[:, :2] / 10.,
-        _column(batch, 'previous_innovation', points), extent / size[:, :2],
-    ), -1)
-    if stats.shape[1] != 21:
-        raise ValueError('v31 acquisition statistics must have 21 columns')
-    return stats.detach()
 
 
 class PhysicalTimePrior(nn.Module):
@@ -78,15 +45,10 @@ class PhysicalTimePrior(nn.Module):
         self.context = nn.Sequential(nn.Linear(130, 128), nn.ReLU())
         self.mean_head = nn.Linear(128, 2)
         self.sigma_head = nn.Linear(128, 2)
-        self.acquisition_head = nn.Sequential(
-            nn.Linear(149, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64, 2))
         nn.init.zeros_(self.mean_head.weight)
         nn.init.zeros_(self.mean_head.bias)
         nn.init.zeros_(self.sigma_head.weight)
         nn.init.constant_(self.sigma_head.bias, math.log(math.expm1(.5 - .1)))
-        nn.init.zeros_(self.acquisition_head[-1].weight)
-        with torch.no_grad():
-            self.acquisition_head[-1].bias.copy_(torch.logit(torch.tensor((.5 / 3.75, .25 / 2.75))))
 
     def forward(self, batch):
         boxes = batch['history_boxes']
@@ -95,8 +57,8 @@ class PhysicalTimePrior(nn.Module):
         if boxes.ndim != 3 or boxes.shape[1:] != (3, 4) or times.shape != boxes.shape[:2]:
             raise ValueError('v31 B1 requires oldest-first history_boxes[B,3,4] and history_times[B,3]')
         raw_dt = batch['current_dt'].to(boxes).reshape(-1)
-        if (not torch.isfinite(boxes).all() or not torch.isfinite(times).all()
-                or not torch.isfinite(raw_dt).all() or bool((raw_dt <= 0).any())):
+        if not bool(torch.isfinite(boxes).all() & torch.isfinite(times).all()
+                    & (torch.isfinite(raw_dt) & (raw_dt > 0)).all()):
             raise ValueError('v31 physical history and positive dt must be finite')
         gap = times[:, 1:] - times[:, :-1]
         pair_valid = exists[:, :-1] & exists[:, 1:] & (gap > 0)
@@ -146,12 +108,9 @@ class PhysicalTimePrior(nn.Module):
         mean = kinematic + direction * unit[:, :1] * envelope[:, :1] + perpendicular * unit[:, 1:] * envelope[:, 1:]
         sigma = (.1 + F.softplus(self.sigma_head(context.detach()))).clamp_max(math.exp(2.5))
         uncertainty = motion_aligned_covariance(base_velocity, sigma.log(), direction_xy=direction)
-        # 获取 context 保持图；raw crop/状态统计不携带跨帧图。
-        fraction = torch.sigmoid(self.acquisition_head(torch.cat((
-            context, acquisition_features(batch, pair_valid, self.time_scale)), -1)))
         fallback = batch['fallback_box'].to(boxes).detach()
         endpoint = torch.cat((mean.detach(), fallback[:, 2:]), -1)
         endpoint = torch.where(valid[:, None], endpoint, fallback)
         return PriorContext(context, mean, uncertainty['log_sigma_parallel_perp'], valid,
-                            fraction, direction, kinematic, envelope, unit, endpoint,
+                            direction, kinematic, envelope, unit, endpoint,
                             context_valid=torch.ones_like(valid))

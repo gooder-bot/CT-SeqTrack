@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from pyquaternion import Quaternion
 
-from datasets.cache import DEFAULT_POINTCLOUD_CACHE_BYTES, load_pointcloud_arrays
+from datasets.cache import DEFAULT_POINTCLOUD_CACHE_BYTES, process_pointcloud_cache
 from datasets.data_classes import Box, PointCloud
 from datasets.kitti_mf import KITTIMFDataset
 
@@ -60,10 +62,58 @@ def _role(value):
     return role
 
 
-def _readonly(value):
-    value = np.asarray(value).copy()
-    value.flags.writeable = False
-    return value
+@dataclass(frozen=True)
+class KITTIRawFrame:
+    """跨 worker 的原始帧定位信息。命中训练视图时主进程无需访问 bin。"""
+    velo_dir: Path
+    scene: str
+    frame: int
+    cache_bytes: int
+
+    def coordinates(self):
+        key = (GEOMETRY, str(self.velo_dir), self.scene, self.frame)
+        return process_pointcloud_cache(self.cache_bytes).load_readonly(key, self._read)[0]
+
+    def arrays(self):
+        points = self.coordinates()
+        count = points.shape[1]
+        # KITTI 原始 ID 是 bin 行号。只在实际读取整云视图时建立全长数组；
+        # 相同点数的原帧共享这一只读编号。
+        ids, = process_pointcloud_cache(self.cache_bytes).load_readonly(
+            ('v41_raw_row_ids', count), lambda: (np.arange(count, dtype=np.int64),))
+        return points, ids
+
+    def _read(self):
+        path = self.velo_dir / self.scene / f'{self.frame:06d}.bin'
+        if not path.is_file():
+            if (self.scene, self.frame) in KNOWN_MISSING:
+                return (np.empty((3, 0), np.float32),)
+            raise FileNotFoundError(f'Unexpected missing KITTI point cloud: {path}')
+        if path.stat().st_size % 16:
+            raise ValueError(f'Malformed KITTI point cloud byte length: {path}')
+        raw = np.fromfile(path, dtype=np.float32).reshape(-1, 4)
+        if not np.isfinite(raw).all():
+            raise ValueError(f'Nonfinite KITTI point cloud: {path}')
+        return (raw[:, :3].T.copy(),)
+
+
+def _full_view(frame):
+    ref = frame.get('_v41_raw_ref')
+    if ref is not None:
+        if 'pc' in frame:
+            xyz, ids = frame['pc'].points.T, frame['pc'].point_ids
+        else:
+            points, ids = ref.arrays()
+            xyz = points.T
+        # KITTI 原始点 ID 正是 bin 内的行号。
+        return dict(points=xyz, ids=ids, raw_indices=ids, cache_used=False)
+    pc = frame['pc']
+    if hasattr(pc, 'points'):
+        points, ids = pc.points[:3].T, pc.point_ids
+    else:
+        points, ids = np.asarray(pc)[:, :3], frame.get('point_ids')
+    indices = np.arange(len(points), dtype=np.int64)
+    return dict(points=points, ids=indices if ids is None else ids, raw_indices=indices, cache_used=False)
 
 
 def normal_train_point_view(frame, roi_boxes, box_size, *, scale=1.25, offset=2.,
@@ -73,14 +123,9 @@ def normal_train_point_view(frame, roi_boxes, box_size, *, scale=1.25, offset=2.
     frame['pc'] 永不替换。候选不完整落入训练 GT10 AABB 时直接回原云；
     auxiliary/dev/test 永远原云。训练 GT 只决定可证明等价的存储视图。
     """
-    pc = frame['pc']
-    points = np.asarray(pc.points[:3].T)
-    ids = np.asarray(pc.point_ids, dtype=np.int64)
-    indices = np.arange(len(points), dtype=np.int64)
-    result = dict(points=points, ids=ids, raw_indices=indices, cache_used=False)
     cache = frame.get('_v41_normal_train_cache')
     if not enabled or auxiliary or frame.get('v41_data_role') != 'train' or cache is None:
-        return result
+        return _full_view(frame)
     boxes = np.asarray(roi_boxes, dtype=np.float64).reshape(-1, 4)
     size = np.asarray(box_size, dtype=np.float64)
     if (not len(boxes) or size.shape != (3,) or not np.isfinite(size).all()
@@ -96,7 +141,7 @@ def normal_train_point_view(frame, roi_boxes, box_size, *, scale=1.25, offset=2.
         # 保守收紧边界；浮点接近边界时回 raw，不增加 GT 依赖的漏点风险。
         if not ((corners >= cache['lower'] + 1e-7).all()
                 and (corners <= cache['upper'] - 1e-7).all()):
-            return result
+            return _full_view(frame)
     return dict(points=cache['points'], ids=cache['ids'],
                 raw_indices=cache['raw_indices'], cache_used=True)
 
@@ -131,6 +176,7 @@ class KITTIV41Dataset(KITTIMFDataset):
                          allow_missing_pointcloud=False, **kwargs)
         self.ct_scene_manifest = self.v41_manifest
         self.preload_offset = -1.  # 原云永不按 GT 裁掉；缓存单独挂载在 train 帧。
+        self._endpoint_metadata = OrderedDict()
 
     def _configure_temporal_protocol(self, kwargs, **parameters):
         parameters['dataset_name'] = 'kitti_v41'
@@ -166,24 +212,9 @@ class KITTIV41Dataset(KITTIMFDataset):
         return self.calibs[scene_id]
 
     def _pointcloud_for_frame(self, scene_id, frame_id):
-        scene_id, frame_id = str(scene_id), int(frame_id)
-        path = self.KITTI_velo / scene_id / f'{frame_id:06d}.bin'
-
-        def read():
-            if not path.is_file():
-                if (scene_id, frame_id) in KNOWN_MISSING:
-                    return np.empty((3, 0), np.float32), np.empty(0, np.int64)
-                raise FileNotFoundError(f'Unexpected missing KITTI point cloud: {path}')
-            if path.stat().st_size % 16:
-                raise ValueError(f'Malformed KITTI point cloud byte length: {path}')
-            raw = np.fromfile(path, dtype=np.float32).reshape(-1, 4)
-            if not np.isfinite(raw).all():
-                raise ValueError(f'Nonfinite KITTI point cloud: {path}')
-            return raw[:, :3].T.copy(), np.arange(len(raw), dtype=np.int64)
-
-        key = ('kitti_v41', str(self.data_root), GEOMETRY, scene_id, frame_id)
-        points, ids = load_pointcloud_arrays(key, read, self.ct_pointcloud_cache_bytes)
-        return PointCloud(points, point_ids=ids)
+        ref = KITTIRawFrame(self.KITTI_velo, str(scene_id), int(frame_id), self.ct_pointcloud_cache_bytes)
+        points, ids = ref.arrays()
+        return PointCloud(points.copy(), point_ids=ids.copy())
 
     def _frame_metadata_from_anno(self, anno):
         scene_id, frame_id = str(anno['scene']), int(anno['frame'])
@@ -208,19 +239,61 @@ class KITTIV41Dataset(KITTIMFDataset):
                     pointcloud_missing=(scene_id, frame_id) in KNOWN_MISSING
                     and not (self.KITTI_velo / scene_id / f'{frame_id:06d}.bin').is_file())
 
+    def _train_view(self, frame, ref, cloud=None):
+        def read():
+            corners = frame['3d_bbox'].corners()
+            lower, upper = corners.min(axis=1) - 10., corners.max(axis=1) + 10.
+            raw = ref.coordinates() if cloud is None else cloud.points
+            # float64 长度一数组保持原来的广播比较精度。直接沿连续 XYZ 各轴
+            # 扫描，避免同时构造多份 [N,3] 掩码。
+            mask = raw[0] > lower[:1]
+            mask &= raw[0] < upper[:1]
+            for axis in (1, 2):
+                mask &= raw[axis] > lower[axis:axis + 1]
+                mask &= raw[axis] < upper[axis:axis + 1]
+            selected = np.flatnonzero(mask)
+            return raw.T[selected], selected, lower, upper, np.asarray(raw.shape[1], dtype=np.int64)
+        # 同一物理帧/目标可由公开 adapter 配合修改过的 annotation 调用。
+        # 内部 endpoint 帧来自固定 manifest；公开帧的选区另按实际边界区分。
+        key = ('v41_gt10', ref, self.input_metadata_sha256, int(frame['meta']['track_id']))
+        if cloud is not None:
+            box = frame['3d_bbox']
+            key += (tuple(box.center), tuple(box.wlh), tuple(box.orientation.elements))
+        xyz, indices, lower, upper, count = process_pointcloud_cache(ref.cache_bytes).load_readonly(key, read)
+        return dict(points=xyz, ids=indices, raw_indices=indices, lower=lower, upper=upper, raw_count=int(count))
+
     def _get_frame_from_anno(self, anno):
+        # 保持公开接口的独立可写整云；内部 endpoint loader 有自己的只读路径。
         frame = self._frame_metadata_from_anno(anno)
         frame['pc'] = self._pointcloud_for_frame(anno['scene'], anno['frame'])
         if self.v41_data_role == 'train':
-            # 与文献 crop_pc_axis_aligned(scale=1, offset=10) 相同的宽 AABB。
-            corners = frame['3d_bbox'].corners()
-            lower, upper = corners.min(axis=1) - 10., corners.max(axis=1) + 10.
-            points, ids = frame['pc'].points[:3].T, frame['pc'].point_ids
-            selected = np.flatnonzero(((points > lower) & (points < upper)).all(-1))
-            frame['_v41_normal_train_cache'] = dict(
-                points=_readonly(points[selected]), ids=_readonly(ids[selected]),
-                raw_indices=_readonly(selected), lower=_readonly(lower), upper=_readonly(upper))
+            ref = KITTIRawFrame(self.KITTI_velo, str(anno['scene']), int(anno['frame']), self.ct_pointcloud_cache_bytes)
+            frame['_v41_normal_train_cache'] = self._train_view(frame, ref, frame['pc'])
         return frame
+
+    def endpoint_metadata(self, tracklet, index):
+        key = int(tracklet), int(index)
+        if key not in self._endpoint_metadata:
+            if len(self._endpoint_metadata) >= 1024:
+                self._endpoint_metadata.popitem(last=False)
+            self._endpoint_metadata[key] = self.get_frame_metadata(*key)
+        else:
+            self._endpoint_metadata.move_to_end(key)
+        return self._endpoint_metadata[key]
+
+    def endpoint_frames(self, tracklet, indices):
+        frames = []
+        for index in indices:
+            frame = dict(self.endpoint_metadata(tracklet, index))
+            ref = KITTIRawFrame(self.KITTI_velo, frame['scene_id'], frame['frame_id'], self.ct_pointcloud_cache_bytes)
+            frame['_v41_raw_ref'] = ref
+            if self.v41_data_role == 'train':
+                frame['_v41_normal_train_cache'] = self._train_view(frame, ref)
+            else:
+                points, ids = ref.arrays()
+                frame['pc'] = PointCloud(points, point_ids=ids)
+            frames.append(frame)
+        return frames
 
 
 def get_v41_raw_dataset(config, role):

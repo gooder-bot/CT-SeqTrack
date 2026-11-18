@@ -28,8 +28,9 @@ class FutureMotionHead(nn.Module):
         with torch.autocast(device_type=context.device.type, enabled=False):
             context, query_dt = context.float(), query_dt.to(context.device, torch.float32)
             current_dt = current_dt.to(context.device, torch.float32).reshape(-1)
-            if (not bool(torch.isfinite(query_dt).all()) or bool((query_dt < 0).any())
-                    or not bool(torch.isfinite(current_dt).all()) or bool((current_dt <= 0).any())):
+            valid_query = (torch.isfinite(query_dt) & (query_dt >= 0)).all()
+            valid_current = (torch.isfinite(current_dt) & (current_dt > 0)).all()
+            if not bool(valid_query & valid_current):
                 raise ValueError('M requires finite nonnegative query_dt and positive current_dt')
             q = torch.stack((torch.log1p(query_dt / self.time_scale),
                              torch.log1p(query_dt / current_dt[:, None])), -1)
@@ -47,9 +48,10 @@ def multistep_loss(predicted, target, valid, box_size, prior_valid=None, weights
         if prior_valid.shape != (len(predicted),):
             raise ValueError('M prior validity must be [B]')
         mask = mask & prior_valid[:, None].bool()
-    weights = predicted.new_tensor(weights, dtype=torch.float32)
-    if weights.shape != (2,) or not bool(torch.isfinite(weights).all()) or bool((weights <= 0).any()):
+    weights = torch.as_tensor(weights, dtype=torch.float32).detach()
+    if weights.shape != (2,) or not bool((torch.isfinite(weights) & (weights > 0)).all()):
         raise ValueError('M requires two finite positive horizon weights')
+    weights = weights.to(predicted.device, non_blocking=True)
     # 无效尾部允许未填充/NaN 标签，但它们不能污染损失及梯度。
     truth = torch.where(mask[..., None], target.detach().to(predicted), 0.)
     prediction = torch.where(mask[..., None], predicted, 0.)
@@ -68,7 +70,7 @@ def compute_multistep_loss(batch, prior, head, *, weight=.05, horizon_weights=(1
     """仅训练 loss 调用；主先验从不读取此处的未来标签或查询时间。"""
     valid = batch['future_valid'].bool() & prior.valid[:, None].bool()
     query_dt = torch.where(valid, batch['future_dt'], 0.)
-    if bool((query_dt[valid] <= 0).any()):
+    if bool((valid & (query_dt <= 0)).any()):
         raise ValueError('valid M future_dt must be positive')
     predicted = head(prior.feature, batch['current_dt'], query_dt, batch['box_size'])
     loss = multistep_loss(predicted, batch['future_displacement'], valid, batch['box_size'],

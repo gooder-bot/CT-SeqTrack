@@ -127,7 +127,7 @@ class FullTrackAuxiliarySampler:
             raise ValueError('auxiliary lengths and batch size must be nonnegative/positive')
         if not math.isfinite(self.fraction) or not 0 <= self.fraction <= .25:
             raise ValueError('auxiliary endpoint fraction must be between zero and one quarter')
-        self._plan = self._selected = None
+        self._plan = self._selected = self._plan_digest = None
 
     @property
     def endpoint_count(self):
@@ -142,7 +142,8 @@ class FullTrackAuxiliarySampler:
         if epoch < 0:
             raise ValueError('epoch must be nonnegative')
         if self.epoch != epoch:
-            self.epoch, self._plan, self._selected = epoch, None, None
+            self.epoch = epoch
+            self._plan = self._selected = self._plan_digest = None
 
     @property
     def selected_tracklets(self):
@@ -185,16 +186,18 @@ class FullTrackAuxiliarySampler:
         return len(self._materialized())
 
     def state_dict(self):
-        digest = hashlib.sha256()
-        for batch in self._materialized():
-            digest.update(repr(tuple((r.tracklet, r.branch, r.window_start,
-                                      r.window_end, r.frame, r.drain) for r in batch)).encode())
+        if self._plan_digest is None:
+            digest = hashlib.sha256()
+            for batch in self._materialized():
+                digest.update(repr(tuple((r.tracklet, r.branch, r.window_start,
+                                          r.window_end, r.frame, r.drain) for r in batch)).encode())
+            self._plan_digest = digest.hexdigest()
         payload = dict(schema=self.SCHEMA, epoch=self.epoch, lengths=list(self.lengths),
             source_sha256=self.source_sha256, seed=self.seed, batch_size=self.batch_size,
             endpoint_count=self.endpoint_count, fraction=self.fraction, budget=self.budget,
             selected_tracklets=list(self.selected_tracklets), rows=self.row_count,
             batches=len(self), selection_policy=self.SELECTION_POLICY,
-            initial_seed_policy=self.INITIAL_SEED_POLICY, plan_sha256=digest.hexdigest())
+            initial_seed_policy=self.INITIAL_SEED_POLICY, plan_sha256=self._plan_digest)
         payload['manifest_sha256'] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         return payload

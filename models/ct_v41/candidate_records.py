@@ -3,36 +3,39 @@ import numpy as np
 import torch
 
 from utils.diagnostic_transfer import tensors_to_numpy
-from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
+from utils.tracking_metrics import BoxMetricsTarget, LocalYawBox, metric_contributions
 from .identity import CANDIDATE_SCHEMA
 
 CANDIDATE_RECORD_SCHEMA = CANDIDATE_SCHEMA
 NAMES = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')
 
 
-def _geometry(prediction, target, size, target_size):
-    overlap, distance = box_metrics(LocalYawBox(prediction, size[[1, 0, 2]]),
-        LocalYawBox(target, target_size[[1, 0, 2]]), up_axis=(0, 0, 1),
-        mode='benchmark_compat', dim=3)
-    yaw = float(abs(np.arctan2(np.sin(prediction[3] - target[3]),
-                              np.cos(prediction[3] - target[3]))))
-    return dict(iou=overlap, center_error_m=distance,
-                center_xy_error_m=float(np.linalg.norm(prediction[:2] - target[:2])),
-                yaw_error_rad=yaw, axis_yaw_error_rad=min(yaw, np.pi - yaw))
+def _candidate_geometry(boxes, target, size, target_size):
+    truth = BoxMetricsTarget(LocalYawBox(target, target_size[[1, 0, 2]]), up_axis=(0, 0, 1))
+    wlh = size[[1, 0, 2]]
+    metrics = truth.local_yaw_metrics(boxes, wlh)
+    exact, compat, distance = np.asarray(metrics).T
+    success, precision = metric_contributions(compat, distance)
+    records = []
+    for k, prediction in enumerate(boxes):
+        yaw = float(abs(np.arctan2(np.sin(prediction[3] - target[3]),
+                                  np.cos(prediction[3] - target[3]))))
+        records.append(dict(iou=float(compat[k]), exact_iou=float(exact[k]), center_error_m=float(distance[k]),
+            center_xy_error_m=float(np.linalg.norm(prediction[:2] - target[:2])),
+            yaw_error_rad=yaw, axis_yaw_error_rad=min(yaw, np.pi - yaw),
+            success=success[k], precision=precision[k]))
+    return records
 
-def _geometry_both(box, target, size, target_size):
-    result = _geometry(box, target, size, target_size)
-    result['exact_iou'] = box_metrics(LocalYawBox(box, size[[1, 0, 2]]),
-        LocalYawBox(target, target_size[[1, 0, 2]]), up_axis=(0, 0, 1), mode='geometry_exact', dim=3)[0]
-    result['success'], result['precision'] = metric_contributions(result['iou'], result['center_error_m'])
-    return result
+
+def _geometry_both(prediction, target, size, target_size):
+    return _candidate_geometry([prediction], target, size, target_size)[0]
 
 
 @torch.no_grad()
 def candidate_records(batch, output, *, optimized=True):
     candidates, verification, commit = output.candidates, output.verification, output.commit_decision
-    from .verification import current_candidate_support
-    all_support = current_candidate_support(output.observation, batch, candidates.boxes)['mask']
+    from .verification import final_candidate_support
+    all_support = final_candidate_support(output.observation, batch, candidates.boxes)['mask']
     all_support = all_support & candidates.measurement_candidate[..., None]
     values = dict(boxes=candidates.boxes, valid=candidates.valid, raw_valid=candidates.raw_valid,
         alias_of=candidates.alias_of, target=batch['target_box'], size=batch['box_size'],
@@ -46,12 +49,14 @@ def candidate_records(batch, output, *, optimized=True):
                       recovery_delta=output.recovery.normalized_delta,
                       recovery_read_mask=output.recovery.point_mask)
     if verification is not None:
-        values.update(utility=verification.utility, logits=verification.logits)
+        values.update(utility=verification.utility, trust_logits=verification.logits[..., 2])
     arrays = tensors_to_numpy(values, optimized=optimized)
+    if verification is not None:
+        arrays['trust'] = torch.as_tensor(arrays.pop('trust_logits'), dtype=torch.get_default_dtype()).sigmoid().numpy()
     result = []
     for i in range(len(output.accepted_box)):
-        geometry = [_geometry_both(arrays['boxes'][i, k], arrays['target'][i],
-            arrays['size'][i], arrays['target_size'][i]) for k in range(len(NAMES))]
+        geometry = _candidate_geometry(arrays['boxes'][i], arrays['target'][i],
+                                       arrays['size'][i], arrays['target_size'][i])
         valid = arrays['valid'][i].astype(bool)
         support = arrays['support'][i, 0].astype(bool)
         support_count = int(support.sum())
@@ -62,7 +67,7 @@ def candidate_records(batch, output, *, optimized=True):
                               and support_count >= 3 and purity >= .5)
         selected = int(arrays['selected'][i])
         utility = [float(arrays['utility'][i, k]) for k in range(len(NAMES))] if verification is not None else None
-        trusted_score = (float(torch.sigmoid(torch.tensor(float(arrays['logits'][i, 0, 2]))))
+        trusted_score = (float(arrays['trust'][i, 0])
                          if verification is not None and real_q0 else None)
         true_utility = [(item['success'] + item['precision']) / 2 for item in geometry]
         oracle = max((k for k in (0, 3, 1, 2) if valid[k]), key=lambda k: true_utility[k])
@@ -73,7 +78,7 @@ def candidate_records(batch, output, *, optimized=True):
             foreground = int((mask & (arrays['labels'][i] > .5)).sum())
             target_purity = foreground/count if count else 0.
             measurement_valid = bool(arrays['measurement'][i, k] and arrays['raw_valid'][i, k])
-            score = (float(torch.sigmoid(torch.tensor(float(arrays['logits'][i, k, 2]))))
+            score = (float(arrays['trust'][i, k])
                      if verification is not None and measurement_valid else None)
             target_trusted = bool(measurement_valid and geometry[k]['exact_iou'] >= .5
                                   and count >= 3 and target_purity >= .5)

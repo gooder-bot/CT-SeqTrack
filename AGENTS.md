@@ -1,6 +1,10 @@
 # CT-SeqTrack 工作约定
 
-## 2026-11-16 当前：V41 exec v2 运行流程
+## 2026-11-18 当前：V41 exec v3
+
+当前源码使用 [V41 v3 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)。本次移除旧 acquisition 辅助训练，保留整轨 B3/R 训练。exec v2 的基点为 `25345a5`，继续使用原执行身份读取旧 run。
+
+## 2026-11-16：V41 exec v2 运行流程
 
 - 用户已授权本轮实施训练执行配置、日志、评估与保存流程；新 run 规则以 [V41 v2 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)为准，覆盖下方 v1 的固定配方/final60/late3 新启动限制。具名 CLI > YAML > 默认，无 `--set`、别名、新调度器或预登记。算法/结构合同不放开。
 - 默认每轮 test、每轮完整 checkpoint，报告 best Precision/last 与最近 K 个已评估轮；test 选轮须明确来源。summary/full 诊断、追加式 `metrics.csv`、epoch JSON 与唯一逐帧流；TensorBoard/内存日志默认关闭。独立 dev 使用 `--test --eval_split dev` 和新的空目录。

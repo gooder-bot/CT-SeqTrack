@@ -67,10 +67,12 @@ def masked_max_pool(value, valid, output_size=1):
     return mask_values(pooled, token_valid), token_valid
 
 
-def masked_sequence(module, value, valid, *, valid_count=None, feature_bf16=False):
+def masked_sequence(module, value, valid, *, valid_count=None, feature_bf16=False,
+                    input_is_masked=False):
     """运行已有 Sequential，保留 state_dict 键和全有效普通 BN 路径。"""
-    # 输入只清理一次。Conv 后紧跟 masked BN，后者负责清理 bias；ReLU 保持零。
-    value = mask_values(value, valid)
+    # 相邻块沿用同一掩码时，前一块 masked BN + ReLU 已使无效值与梯度为零。
+    if not input_is_masked:
+        value = mask_values(value, valid)
     layers = list(module)
     for index, layer in enumerate(layers):
         if isinstance(layer, nn.BatchNorm1d):

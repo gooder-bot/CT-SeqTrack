@@ -40,17 +40,26 @@ def masked_mean(value, valid):
     return torch.where(valid.bool(), value, torch.zeros_like(value)).sum() / valid.sum().clamp_min(1)
 
 
-def balanced_mean(value, foreground, valid):
-    """仅对实际存在的前/背景组等权，不把零个前景当一个假样本。"""
-    positive = valid.bool() & foreground.bool()
-    negative = valid.bool() & ~foreground.bool()
-    p_exists, n_exists = positive.any().to(value), negative.any().to(value)
-    return (masked_mean(value, positive) * p_exists + masked_mean(value, negative) * n_exists) / (p_exists + n_exists).clamp_min(1)
+def _q0_axis_weights(box_size, weighting):
+    if weighting == 'uniform':
+        return None
+    if weighting != 'inverse_lwh':
+        raise ValueError('unknown v41 q0 center weighting: ' + str(weighting))
+    inverse = box_size.detach().clamp_min(1e-3).reciprocal()
+    return inverse / inverse.mean(-1, keepdim=True)
+
+
+def _center_loss_per_box(predicted, target, axis_weights):
+    # 仍在米制坐标下计算 Smooth L1，权重只改变各轴对中心损失的贡献。
+    terms = F.smooth_l1_loss(predicted[..., :3], target[..., :3], reduction='none')
+    if axis_weights is not None:
+        terms = terms * axis_weights.to(terms)
+    return terms.mean(-1)
 
 
 def _box_loss_terms(predicted, target, valid, center_weight=2., angle_weight=10.,
-                    *, endpoint_mean=False):
-    xyz = F.smooth_l1_loss(predicted[..., :3], target[..., :3], reduction='none').mean(-1)
+                    *, endpoint_mean=False, axis_weights=None):
+    xyz = _center_loss_per_box(predicted, target, axis_weights)
     yaw = 1. - torch.cos(predicted[..., 3] - target[..., 3])
     reduce = frame_endpoint_mean if endpoint_mean else masked_mean
     return center_weight * reduce(xyz, valid), angle_weight * reduce(yaw, valid)
@@ -62,14 +71,15 @@ def box_loss(predicted, target, valid, center_weight=2., angle_weight=10.):
 
 
 def local_observation_box_terms(predicted, target, valid, yaw_anchor,
-                                center_weight=2., angle_weight=10., *, endpoint_mean=False):
+                                center_weight=2., angle_weight=10., *, endpoint_mean=False,
+                                axis_weights=None):
     """仅 B0 的 coarse/main/history 使用 anchor 局部定位目标。"""
     valid = valid.to(device=predicted.device).bool()
     predicted = torch.where(valid[..., None], predicted, 0.)
     target = torch.where(valid[..., None], target, 0.)
     return _box_loss_terms(transform_boxes(predicted, yaw_anchor),
         transform_boxes(target, yaw_anchor), valid, center_weight, angle_weight,
-        endpoint_mean=endpoint_mean)
+        endpoint_mean=endpoint_mean, axis_weights=axis_weights)
 
 
 def local_observation_box_loss(predicted, target, valid, yaw_anchor,
@@ -153,7 +163,7 @@ def quality_targets(boxes, target, size, purity, iou):
 
 
 @torch.no_grad()
-def observation_loss_statistics(batch, output):
+def observation_loss_statistics(batch, output, *, q0_center_weighting='uniform'):
     """被动逐端点观测损失；不改变训练损失，也不额外计算全量 IoU。
 
     numerator/denominator 是端点值与有效端点数；batch_contribution 使用
@@ -167,6 +177,7 @@ def observation_loss_statistics(batch, output):
     yaw_anchor = anchor_yaw(batch, target)
     observation, decoder = output.observation, output.decoder
     result = {}
+    q0_weights = _q0_axis_weights(batch['box_size'], q0_center_weighting)
 
     def record(name, value, exists, weight=1.):
         denominator = exists.to(value)
@@ -181,7 +192,7 @@ def observation_loss_statistics(batch, output):
         exists = exists.bool()
         predicted = transform_boxes(torch.where(exists[..., None], predicted.detach(), 0.), yaw_anchor)
         truth = transform_boxes(torch.where(exists[..., None], truth.detach(), 0.), yaw_anchor)
-        center = F.smooth_l1_loss(predicted[..., :3], truth[..., :3], reduction='none').mean(-1) * cw
+        center = _center_loss_per_box(predicted, truth, q0_weights if name == 'main' else None) * cw
         angle = (1. - torch.cos(predicted[..., 3] - truth[..., 3])) * aw
         if name == 'history':
             count = exists.sum(-1).clamp_min(1)
@@ -215,7 +226,7 @@ def observation_loss_statistics(batch, output):
     return result
 
 
-def compute_losses(batch, output, *, enable_b1=True):
+def compute_losses(batch, output, *, enable_b1=True, q0_exact_iou=None, q0_center_weighting='uniform'):
     target = batch['target_box']
     size = batch['box_size'].to(target).clamp_min(1e-3)
     observation, prior, decoder = output.observation, output.prior, output.decoder
@@ -223,13 +234,15 @@ def compute_losses(batch, output, *, enable_b1=True):
     labels = batch['segmentation_labels'].long()
     losses = {}
     yaw_anchor = anchor_yaw(batch, target)
+    q0_weights = _q0_axis_weights(batch['box_size'], q0_center_weighting)
     for name, predicted, truth, valid, center_weight, angle_weight, endpoint_mean in (
         ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10., False),
         ('main', decoder.q0_box, target, observation.sequence_valid, 2., 10., False),
         ('history', decoder.history_boxes, batch['history_target_boxes'],
          batch['history_valid'].bool(), .2, 1., True)):
         center, angle = local_observation_box_terms(predicted, truth, valid, yaw_anchor,
-            center_weight, angle_weight, endpoint_mean=endpoint_mean)
+            center_weight, angle_weight, endpoint_mean=endpoint_mean,
+            axis_weights=q0_weights if name == 'main' else None)
         losses['loss_' + name] = center + angle
         # 已加权分项仅供日志，不重复进入 loss_total。
         losses['loss_' + name + '_center'] = center.detach()
@@ -249,19 +262,19 @@ def compute_losses(batch, output, *, enable_b1=True):
             residual_unit_parallel_perp=prior.unit_residual)
         losses['loss_physical'] = masked_mean(terms['mean_per_sample'], terms['valid'])
         losses['loss_sigma'] = masked_mean(terms['nll_per_sample'], terms['valid'])
-        error = batch['acquisition_target'].detach() - prior.acquisition_fraction
-        pinball = torch.maximum(.9 * error, -.1 * error).mean(-1)
-        valid = batch['acquisition_valid'].bool()
-        demand = batch.get('acquisition_demand', valid).bool()
-        losses['loss_acquisition'] = balanced_mean(pinball, demand, valid)
     else:
-        # B0 无 B1 参数/前向，也不读取物理或 acquisition 标签。
-        for name in ('physical', 'sigma', 'acquisition'):
+        # B0 无 B1 参数/前向，也不读取物理标签。
+        for name in ('physical', 'sigma'):
             losses['loss_' + name] = target.new_zeros(())
 
     # 原 q0 query 始终存在，空 sequence 同样保留旧 quality 监督。
     q0 = decoder.q0_box[:, None]
-    iou = oriented_iou_labels(q0, target, size, batch.get('target_box_size'))
+    if q0_exact_iou is None:
+        iou = oriented_iou_labels(q0, target, size, batch.get('target_box_size'))
+    else:
+        if q0_exact_iou.shape != q0.shape[:2]:
+            raise ValueError('q0 exact IoU labels must have shape [B,1]')
+        iou = q0_exact_iou.detach().to(q0)
     quality_target = quality_targets(q0, target, size, target.new_ones((len(target), 1)), iou)[:, 0]
     quality_error = F.binary_cross_entropy_with_logits(
         decoder.q0_quality_logits, quality_target, reduction='none')
@@ -276,7 +289,7 @@ def compute_losses(batch, output, *, enable_b1=True):
     losses['loss_total'] = (
         losses['loss_coarse'] + losses['loss_main'] + losses['loss_history']
         + .1 * losses['loss_seg'] + losses['loss_bc']
-        + .1 * losses['loss_physical'] + .05 * losses['loss_sigma'] + .05 * losses['loss_acquisition']
+        + .1 * losses['loss_physical'] + .05 * losses['loss_sigma']
         + .5 * losses['loss_quality'])
     losses['loss_contribution_seg'] = (.1 * losses['loss_seg']).detach()
     losses['loss_contribution_quality'] = (.5 * losses['loss_quality']).detach()

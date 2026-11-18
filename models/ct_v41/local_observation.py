@@ -8,7 +8,14 @@ import torch
 from torch import Tensor, nn
 
 from .contracts import ObservationFeatures
-from .observation import B0Observation, box_corners_xyz
+from .observation import box_corners_xyz
+from .verification import build_current_pool
+
+
+def _gather_corner_features(features, selected):
+    """直接从 [B,N,C] 读取，反向无需为每个角各建一份全点梯度。"""
+    indices = selected.flatten(1)[..., None].expand(-1, -1, features.shape[-1])
+    return features.gather(1, indices).reshape(*selected.shape, features.shape[-1])
 
 
 class LocalObservationReader(nn.Module):
@@ -27,7 +34,7 @@ class LocalObservationReader(nn.Module):
         nn.init.zeros_(self.output.bias)
 
     def forward(self, observation: ObservationFeatures, batch: Mapping[str, Tensor],
-                seeds: Tensor, query_valid: Tensor):
+                seeds: Tensor, query_valid: Tensor, *, pool=None, diagnostics=True):
         """只读取当前 B0 点；seeds 为公开世界轴的单个 q0。"""
         points = batch['points']
         b = points.shape[0]
@@ -36,32 +43,15 @@ class LocalObservationReader(nn.Module):
         ids = batch.get('point_ids')
         if ids is None or ids.shape != points.shape[:-1]:
             raise ValueError('v41 local observation requires raw point IDs')
-        pool_valid = B0Observation.measurement_mask(batch)[:, -1]
-        pool_ids = ids[:, -1]
-        xyz = points[:, -1, :, :3].detach()
-        features = observation.point_features[:, -1]
-        support = observation.foreground_probability[:, -1].detach()
-        if (features.shape != (*pool_valid.shape, 64) or xyz.shape != (*pool_valid.shape, 3)
-                or support.shape != pool_valid.shape):
-            raise ValueError('local observation real point fields must align')
-        if not all(bool(torch.isfinite(value[pool_valid]).all()) for value in (xyz, features, support)):
-            raise ValueError('valid local observation measurements must be finite')
-        xyz = torch.where(pool_valid[..., None], xyz, 0.)
-        features = torch.where(pool_valid[..., None], features, 0.)
-        support = torch.where(pool_valid, support, 0.)
-        # 保留原69维输入中的来源通道；当前全部是 B0，因此恒为0。
-        source_type = torch.zeros_like(pool_valid)
-        allowed = pool_valid[:, None] & query_valid.detach().bool()[..., None]
-        # 先按raw ID排，再稳定按距离排；等距邻居不取决于点槽排列。
-        id_order = torch.argsort(pool_ids.masked_fill(~pool_valid, torch.iinfo(torch.long).max),
-                                 dim=-1, stable=True)
-        xyz = xyz.gather(1, id_order[..., None].expand(-1, -1, 3))
-        features = features.gather(1, id_order[..., None].expand(-1, -1, 64))
-        support = support.gather(1, id_order)
-        source_type = source_type.gather(1, id_order).to(features)
+        if pool is None:
+            pool = build_current_pool(observation, batch, live_features=True)
+        ordered = pool['ordered']
+        id_order, xyz, features = ordered['order'], ordered['xyz'], ordered['features']
+        support, source_type = ordered['probability'], ordered['source'].to(features)
+        allowed = pool['valid'][:, None] & query_valid.detach().bool()[..., None]
         allowed = allowed.gather(2, id_order[:, None].expand(-1, 1, -1))
         size = batch['box_size'].detach().to(points)
-        if size.shape != (b, 3) or not bool(torch.isfinite(size).all()) or not bool((size > 0).all()):
+        if size.shape != (b, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
             raise ValueError('local observation requires positive first-frame L/W/H')
         # 新增几何分支全detach；旧q0角点query仍按原图向coarse反传。
         seed = seeds.detach()
@@ -81,8 +71,7 @@ class LocalObservationReader(nn.Module):
         selected = ordered[..., :min(16, id_order.shape[1])]
         selected_valid = neighborhood.gather(-1, selected)
         selected_count = selected_valid.sum(-1)
-        selected_features = features[:, None, None].expand(-1, 1, 8, -1, -1).gather(
-            3, selected[..., None].expand(-1, -1, -1, -1, 64))
+        selected_features = _gather_corner_features(features, selected)
         selected_relative = relative.gather(3, selected[..., None].expand(-1, -1, -1, -1, 3))
         selected_support = support[:, None, None].expand(-1, 1, 8, -1).gather(3, selected)
         selected_type = source_type[:, None, None].expand(-1, 1, 8, -1).gather(3, selected)
@@ -99,6 +88,8 @@ class LocalObservationReader(nn.Module):
                                   mean_support), dim=-1)
         increment = self.output(torch.cat((maximum, mean, statistics), dim=-1))
         increment = torch.where(present[..., None], increment, 0.)
+        if not diagnostics:
+            return increment, {}
         return increment, dict(local_neighbor_count=neighbor_count[:, 0].detach(),
             local_selected_count=selected_count[:, 0].detach(), local_mean_support=mean_support[:, 0].detach(),
             local_delta_norm=increment[:, 0].detach().norm(dim=-1))

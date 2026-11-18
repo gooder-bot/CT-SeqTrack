@@ -26,8 +26,16 @@ def restore_rng_state(state):
             raise RuntimeError('CUDA training RNG cannot resume on CPU')
         torch.cuda.set_rng_state_all([value.cpu() for value in state['cuda']])
 
-def move_tensors(batch, device):
-    return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
+def move_tensors(batch, device, *, evaluation=False, retain_loss_geometry=False):
+    # 评估的 GT 框与前景标签只在 CPU 打分。其余字段在同一流上依次拷贝、消费。
+    metric_fields = ('target_box', 'target_box_size', 'segmentation_labels') if evaluation else ()
+    moved = {key: value.to(device, non_blocking=True)
+             if torch.is_tensor(value) and key not in metric_fields and not key.startswith('diagnostic_')
+             else value for key, value in batch.items()}
+    if retain_loss_geometry and not evaluation and torch.device(device).type != 'cpu':
+        from .input import retain_geometry_sources
+        retain_geometry_sources(batch, moved)
+    return moved
 
 def loss_episode_summary(rows):
     """IoU<.1 开始、IoU>=.5 结束；恢复帧不计入失跟长度。
@@ -269,36 +277,45 @@ class TrackingEvaluation:
                                         raw_frame_id=first.get('raw_frame_id', first.get('frame_id')),
                                         track_id=first.get('meta', {}).get('track_id'))
 
-    def _add_batch_metrics(self, raw_rows, batch, output, commit_results=None):
-        predictions = output.accepted_box.detach().cpu().numpy()
-        targets = batch['target_box'].detach().cpu().numpy()
-        sizes = batch['box_size'].detach().cpu().numpy()
-        target_sizes = batch['target_box_size'].detach().cpu().numpy()
-        qualities = output.selected_quality.detach().cpu().numpy()
-        indices = output.selected_index.detach().cpu().numpy()
-        observation = getattr(output, 'observation', None)
-        coarse = getattr(observation, 'coarse_box', None)
-        coarse = coarse.detach().cpu().numpy() if coarse is not None else None
-        sequence_valid = getattr(observation, 'sequence_valid', None)
-        coarse_valid = (sequence_valid.detach().bool().cpu().numpy() if sequence_valid is not None
-                        else np.full(len(raw_rows), coarse is not None, dtype=bool))
-        fine = output.decoder.q0_box.detach().cpu().numpy()
-        diagnostics = {key: value.detach().cpu().numpy() for key, value in batch.items()
-                       if key.startswith('diagnostic_') and torch.is_tensor(value)}
-        # 仅记录实际前向已产生的摘要；不读取 GT，不影响候选或 accepted 提交。
-        decoder = getattr(output, 'decoder', None)
-        for name, owner, field, shape in (
-                ('diagnostic_history_support', observation, 'history_support', (len(raw_rows), 3, 3)),
-                ('diagnostic_current_support', observation, 'current_support', (len(raw_rows), 3)),
-                ('diagnostic_query_context_norm', decoder, 'query_context_norm', (len(raw_rows),))):
+    def _add_batch_metrics(self, raw_rows, batch, output, commit_results=None, candidate_rows=None):
+        from utils.diagnostic_transfer import tensors_to_numpy
+        observation, decoder = getattr(output, 'observation', None), output.decoder
+        packet = dict(predictions=output.accepted_box, targets=batch['target_box'],
+            sizes=batch['box_size'], target_sizes=batch['target_box_size'],
+            qualities=output.selected_quality, indices=output.selected_index,
+            fine=decoder.q0_box, anchors=batch['anchor_box'])
+        packet.update((k, v) for k, v in batch.items() if k.startswith('diagnostic_') and torch.is_tensor(v))
+        if 'physical_displacement' in batch:
+            packet['diagnostic_gt_xy_displacement'] = batch['physical_displacement'].detach().norm(dim=-1)
+        for name, field in (('coarse', 'coarse_box'), ('coarse_valid', 'sequence_valid')):
+            value = getattr(observation, field, None)
+            if value is not None:
+                packet[name] = value
+        for owner, field, shape in (
+                (observation, 'history_support', (len(raw_rows), 3, 3)),
+                (observation, 'current_support', (len(raw_rows), 3)),
+                (decoder, 'query_context_norm', (len(raw_rows),)),
+                *((decoder, field, (len(raw_rows), 8)) for field in
+                  ('local_neighbor_count', 'local_selected_count', 'local_mean_support', 'local_delta_norm'))):
             value = getattr(owner, field, None)
             if value is not None:
-                if tuple(value.shape) != shape or not bool(torch.isfinite(value).all()):
+                if tuple(value.shape) != shape:
                     raise ValueError('invalid v41 passive diagnostic: ' + field)
-                diagnostics[name] = value.detach().cpu().numpy()
+                packet['diagnostic_' + field] = value
+        arrays = tensors_to_numpy(packet, optimized=self.optimized)
+        predictions, targets = arrays['predictions'], arrays['targets']
+        sizes, target_sizes = arrays['sizes'], arrays['target_sizes']
+        indices, qualities, fine = arrays['indices'], arrays['qualities'], arrays['fine']
+        coarse = arrays.get('coarse')
+        coarse_valid = arrays.get('coarse_valid', np.full(len(raw_rows), coarse is not None))
+        diagnostics = {k: v for k, v in arrays.items() if k.startswith('diagnostic_')}
+        for key in ('history_support', 'current_support', 'query_context_norm', 'local_neighbor_count',
+                    'local_selected_count', 'local_mean_support', 'local_delta_norm'):
+            if 'diagnostic_' + key in diagnostics and not np.isfinite(diagnostics['diagnostic_' + key]).all():
+                raise ValueError('invalid v41 passive diagnostic: ' + key)
         # 记录有符号世界坐标与尺寸，允许离线分解 XYZ/yaw/IoU。
         # 只作 detach 后的导出，不把 GT 几何送回 forward 或 commit。
-        anchors = batch['anchor_box'].detach().cpu().double().numpy()
+        anchors = arrays['anchors'].astype(np.float64, copy=False)
         for name, value in (('coarse', coarse), ('fine', fine),
                             ('accepted', predictions), ('target', targets)):
             if value is not None:
@@ -308,14 +325,6 @@ class TrackingEvaluation:
         diagnostics['diagnostic_anchor_box_world'] = anchors
         diagnostics['diagnostic_first_frame_size_lwh'] = sizes
         diagnostics['diagnostic_target_size_lwh'] = target_sizes
-        decoder = getattr(output, 'decoder', None)
-        for field in ('local_neighbor_count', 'local_selected_count',
-                      'local_mean_support', 'local_delta_norm'):
-            value = getattr(decoder, field, None)
-            if value is not None:
-                if tuple(value.shape) != (len(raw_rows), 8) or not bool(torch.isfinite(value).all()):
-                    raise ValueError('invalid v41 passive diagnostic: ' + field)
-                diagnostics['diagnostic_' + field] = value.detach().cpu().numpy()
         for index, raw in enumerate(raw_rows):
             request = raw['request']
             if request.branch != 4:
@@ -331,10 +340,16 @@ class TrackingEvaluation:
             if request.frame != self._last_frame[key] + 1:
                 raise ValueError('evaluation endpoints must be complete and causal')
             self._last_frame[key] = request.frame
-            overlap, distance = box_metrics(LocalYawBox(predictions[index], sizes[index][[1, 0, 2]]),
-                LocalYawBox(targets[index], target_sizes[index][[1, 0, 2]]),
-                up_axis=(0, 0, 1), mode='benchmark_compat', dim=3)
-            success, precision = metric_contributions(overlap, distance)
+            record = candidate_rows[index] if candidate_rows is not None else None
+            if record is None:
+                overlap, distance = box_metrics(LocalYawBox(predictions[index], sizes[index][[1, 0, 2]]),
+                    LocalYawBox(targets[index], target_sizes[index][[1, 0, 2]]),
+                    up_axis=(0, 0, 1), mode='benchmark_compat', dim=3)
+                success, precision = metric_contributions(overlap, distance)
+            else:
+                geometry = record['selected_geometry']
+                overlap, distance = geometry['iou'], geometry['center_error_m']
+                success, precision = geometry['success'], geometry['precision']
             now = float(raw['frames'][request.frame]['timestamp'])
             self._last_time[key] = now
             if overlap < .1 and key not in self._lost_since:
@@ -350,12 +365,14 @@ class TrackingEvaluation:
                 sizes[index], target_sizes[index]) if coarse is not None else None)
             # 全序列无点时 coarse 清零只是占位，不能作为真实预测参与精修统计。
             diagnostic['coarse_valid'] = bool(coarse is not None and coarse_valid[index])
-            diagnostic['fine_geometry'] = _box_diagnostics(fine[index], targets[index],
-                                                          sizes[index], target_sizes[index])
-            if 'physical_displacement' in batch:
-                displacement = float(batch['physical_displacement'][index].detach().norm().cpu())
-                diagnostic['diagnostic_gt_xy_displacement'] = displacement
-                diagnostic['diagnostic_moving'] = displacement >= .15
+            if record is None:
+                diagnostic['fine_geometry'] = _box_diagnostics(fine[index], targets[index],
+                                                              sizes[index], target_sizes[index])
+            else:
+                diagnostic['fine_geometry'] = {key: record['q0_geometry'][key] for key in
+                    ('iou', 'center_error_m', 'center_xy_error_m', 'yaw_error_rad', 'axis_yaw_error_rad')}
+            if 'diagnostic_gt_xy_displacement' in diagnostic:
+                diagnostic['diagnostic_moving'] = diagnostic['diagnostic_gt_xy_displacement'] >= .15
             crop_count = diagnostic.get('diagnostic_crop_point_count')
             crop_fg = diagnostic.get('diagnostic_crop_target_count')
             if crop_count is not None and crop_fg is not None:
@@ -374,13 +391,13 @@ class TrackingEvaluation:
 
     def add_batch(self, raw_rows, batch, output, commit_results=None):
         from .candidate_records import candidate_records
+        records = candidate_records(batch, output, optimized=self.optimized)
         first = len(self.rows)
         self._in_batch = True
         try:
-            self._add_batch_metrics(raw_rows, batch, output, commit_results)
+            self._add_batch_metrics(raw_rows, batch, output, commit_results, records)
         finally:
             self._in_batch = False
-        records = candidate_records(batch, output, optimized=self.optimized)
         predictions = [row for row in self.rows[first:] if not row['initialization']]
         for row, record in zip(predictions, records):
             row.update(diagnostic_candidates=record, output_utility=record['selected_utility'],

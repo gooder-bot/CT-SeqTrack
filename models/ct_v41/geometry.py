@@ -9,12 +9,14 @@ from typing import Mapping
 
 import torch
 from torch import Tensor
+from utils.batch_materialization import require_finite
 
 
 def anchor_yaw(batch: Mapping[str, Tensor], reference: Tensor) -> Tensor:
     anchor = batch['anchor_box'].to(reference)
-    if anchor.shape != (len(reference), 4) or not bool(torch.isfinite(anchor).all()):
+    if anchor.shape != (len(reference), 4):
         raise ValueError('anchor_box must be finite [B,4] world XYZ/yaw')
+    require_finite(batch, 'anchor_box', anchor, 'anchor_box must be finite [B,4] world XYZ/yaw')
     return anchor[:, 3].detach()
 
 

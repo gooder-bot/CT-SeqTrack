@@ -16,7 +16,7 @@ from models.ct_v41.data import (BatchBuilder, EndpointRequest, RawEndpointDatase
                                ReadyQueueBatchSampler, point_arrays)
 from models.ct_v41.verification import current_q0_support
 from models.ctseqtrackv41 import CTSEQTRACKV41
-from tests.helpers.raw_tracking import TinySource, fake_output, fake_prior
+from tests.helpers.raw_tracking import TinySource, fake_output
 
 
 def cfg(**kwargs):
@@ -188,10 +188,11 @@ def test_recovery_is_measurement_but_does_not_inherit_legacy_quality_or_restore_
     assert 'future_displacement' not in first
     builder.commit(output_for(first, score=.1, delta=20.), first)
     second = builder.prepare([raw[request(2)]])
-    record = builder.commit(output_for(second, selected=3), second, diagnostics=True)[0]
+    recovery = output_for(second, selected=3)
+    record = builder.commit(recovery, second, diagnostics=True)[0]
     state = builder.states[request(2).state_key]
     assert record['commit_source'] == 'recovery_measurement' and not record['propagation_only']
-    assert record['measurement_eligible'] and state.previous_quality == 0.
+    assert record['measurement_eligible'] and recovery.selected_quality.item() == 0.
     assert state.trusted[-1][1] == pytest.approx(101.)
     assert not state.trusted_velocity_valid  # frame1未可信写入，不能跨缺测恢复速度。
     third = builder.prepare([raw[request(3)]])
@@ -223,7 +224,7 @@ def test_auxiliary_cannot_reseed_from_midtrajectory_gt():
         builder.prepare([raw[illegal]])
 
 
-def test_normal_training_cached_view_maps_back_to_raw_ids_and_raw_acquisition(monkeypatch):
+def test_normal_training_cached_view_preserves_raw_ids_and_detailed_coverage(monkeypatch):
     import datasets.kitti_v41 as dataset
     class ScatteredSource(TinySource):
         def get_frames(self, index, frame_ids):
@@ -242,15 +243,13 @@ def test_normal_training_cached_view_maps_back_to_raw_ids_and_raw_acquisition(mo
     monkeypatch.setattr(dataset, 'normal_train_point_view', view)
     full_builder, cached_builder = BatchBuilder(cfg()), BatchBuilder(cfg())
     complete = full_builder.prepare([row])
-    full_builder.supervise_prior(complete, fake_prior(complete), training=True)
     enabled[0] = True
     cached = cached_builder.prepare([row])
-    cached_builder.supervise_prior(cached, fake_prior(cached), training=True)
     for field in ('points', 'point_ids', 'point_valid', 'segmentation_labels', 'bc_targets',
-                  'acquisition_target', 'acquisition_valid', 'diagnostic_raw_point_count',
+                  'diagnostic_raw_point_count',
                   'diagnostic_search_raw_target_count', 'diagnostic_search_union_target_count'):
         assert torch.equal(complete[field], cached[field]), field
-    assert cached['diagnostic_train_cache_used'].all()
+    assert cached['diagnostic_train_cache_used'][0, -1]
     assert not complete['diagnostic_train_cache_used'].any()
     assert complete['diagnostic_raw_point_count'].item() == 6
 

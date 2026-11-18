@@ -3,6 +3,7 @@ import math
 
 import torch
 from torch import nn
+from utils.batch_materialization import materialization_cache
 
 from .observation import B0Observation, box_corners_xyz
 from .geometry import inside_final_boxes
@@ -11,23 +12,46 @@ from .contracts import VerificationOutput
 
 def _current_measurements(observation, batch):
     """支持集合无需复制64维特征；与核验点池共用同一有效性定义。"""
-    valid = B0Observation.measurement_mask(batch)[:, -1].detach()
-    ids = batch['point_ids'][:, -1].detach()
+    cache = materialization_cache(batch)
+    canonical = None if cache is None else cache.canonical_values(batch)
+    valid = (B0Observation.measurement_mask(batch) if canonical is None
+             else canonical['point_valid'])[:, -1].detach()
     xyz = batch['points'][:, -1, :, :3].detach()
+    ids = batch['point_ids'][:, -1].detach()
     probability = observation.foreground_probability[:, -1].detach()
-    if not all(bool(torch.isfinite(value[valid]).all()) for value in (xyz, probability)):
+    if xyz.shape != (*valid.shape, 3) or ids.shape != valid.shape or probability.shape != valid.shape:
+        raise ValueError('local observation real point fields must align')
+    xyz = torch.where(valid[..., None], xyz, 0.)
+    probability = torch.where(valid, probability, 0.)
+    finite = torch.isfinite(probability).all()
+    if canonical is None:
+        finite = finite & torch.isfinite(xyz).all()
+    if not bool(finite):
         raise ValueError('v41 current B0 evidence must be finite')
-    return dict(ids=ids, valid=valid, xyz=torch.where(valid[..., None], xyz, 0.),
-        probability=torch.where(valid, probability, 0.),
+    return dict(ids=ids, valid=valid, xyz=xyz, probability=probability,
         source=torch.zeros_like(probability), base_count=valid.shape[1])
 
 
-def build_current_pool(observation, batch):
+def ordered_current_points(pool):
+    keys = pool['ids'].to(torch.long).masked_fill(~pool['valid'], torch.iinfo(torch.long).max)
+    order = torch.argsort(keys, stable=True)
+    return dict(order=order, xyz=pool['xyz'].gather(1, order[..., None].expand(-1, -1, 3)),
+        features=pool['features'].gather(1, order[..., None].expand(-1, -1, 64)),
+        probability=pool['probability'].gather(1, order), source=pool['source'].gather(1, order))
+
+
+def build_current_pool(observation, batch, *, live_features=False):
     pool = _current_measurements(observation, batch)
-    features = observation.point_features[:, -1].detach()
-    if not bool(torch.isfinite(features[pool['valid']]).all()):
+    features = observation.point_features[:, -1]
+    if features.shape != (*pool['valid'].shape, 64):
+        raise ValueError('local observation real point fields must align')
+    if not live_features:
+        features = features.detach()
+    features = torch.where(pool['valid'][..., None], features, 0.)
+    if not bool(torch.isfinite(features).all()):
         raise ValueError('v41 current B0 features must be finite')
-    pool['features'] = torch.where(pool['valid'][..., None], features, 0.)
+    pool['features'] = features
+    pool['ordered'] = ordered_current_points(pool)
     return pool
 
 
@@ -48,6 +72,52 @@ def current_q0_support(observation, batch, q0_box):
     return result
 
 
+def _versions(values):
+    try:
+        return tuple(value._version for value in values)
+    except RuntimeError:  # inference tensors 没有版本号，走独立计算。
+        return None
+
+
+def _remember_final_support(observation, batch, boxes, mask, count):
+    cache = materialization_cache(batch)
+    if cache is None or cache.canonical_values(batch) is None:
+        return
+    values = (boxes, observation.foreground_probability, batch['box_size'], mask, count)
+    versions = _versions(values)
+    if versions is not None:
+        cache.final_support = (cache.point, values, versions)
+
+
+def _cached_final_support(observation, batch, boxes):
+    cache = materialization_cache(batch)
+    if cache is not None and cache.final_support is not None:
+        point, values, versions = cache.final_support
+        if (cache.canonical_values(batch) is not None and point is cache.point
+                and values[0] is boxes and values[1] is observation.foreground_probability
+                and values[2] is batch['box_size'] and versions == _versions(values)):
+            return dict(mask=values[3], count=values[4])
+    return None
+
+
+def final_candidate_support(observation, batch, boxes):
+    """未按候选来源筛选的最终框成员和计数，可由原始或 canonical batch 读取。"""
+    cached = _cached_final_support(observation, batch, boxes)
+    if cached is not None:
+        return cached
+    result = current_candidate_support(observation, batch, boxes)
+    return dict(mask=result['mask'], count=result['count'])
+
+
+def selected_commit_support(output, batch, selected):
+    boxes = output.candidates.boxes
+    row = torch.arange(len(selected), device=selected.device)
+    cached = _cached_final_support(output.observation, batch, boxes)
+    if cached is not None:
+        return cached['mask'][row, selected]
+    return current_q0_support(output.observation, batch, boxes[row, selected])['mask']
+
+
 class LocalBoxReader(nn.Module):
     def __init__(self):
         super().__init__()
@@ -59,18 +129,19 @@ class LocalBoxReader(nn.Module):
             nn.init.xavier_uniform_(layer.weight)
             nn.init.zeros_(layer.bias)
 
-    def forward(self, pool, boxes, allowed, size):
+    def forward(self, pool, boxes, allowed, size, *, diagnostics=True, return_point_mask=True):
         b, q, _ = boxes.shape
-        if size.shape != (b, 3) or not bool(torch.isfinite(size).all()) or not bool((size > 0).all()):
+        if size.shape != (b, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
             raise ValueError('v41 local reader requires positive finite LWH')
-        ids, valid = pool['ids'], pool['valid']
+        ids = pool['ids']
         if allowed.shape != (b, q, ids.shape[1]):
             raise ValueError('v41 local permissions do not align')
-        order = torch.argsort(ids.masked_fill(~valid, torch.iinfo(torch.long).max), stable=True)
-        xyz = pool['xyz'].gather(1, order[..., None].expand(-1, -1, 3)).detach()
-        features = pool['features'].gather(1, order[..., None].expand(-1, -1, 64)).detach()
-        probability = pool['probability'].gather(1, order).detach()
-        source = pool['source'].gather(1, order).detach()
+        ordered = pool.get('ordered')
+        if ordered is None:
+            ordered = ordered_current_points(pool)
+        order = ordered['order']
+        xyz, features = ordered['xyz'].detach(), ordered['features'].detach()
+        probability, source = ordered['probability'].detach(), ordered['source'].detach()
         allowed = allowed.detach().bool().gather(2, order[:, None].expand(-1, q, -1))
         boxes = boxes.detach()
         corners = box_corners_xyz(boxes, size.detach()[:, None])
@@ -102,12 +173,15 @@ class LocalBoxReader(nn.Module):
         value = self.norm(self.output(torch.cat((maximum, mean, statistics), -1)))
         value = torch.where(present[..., None], value, 0.)
         # 返回实际 8×16 读取点的唯一并集，并还原成 batch 原始点顺序。
-        selected_mask = torch.zeros_like(neighborhood).scatter(-1, selected, mask)
-        point_mask = torch.zeros_like(allowed).scatter(
-            -1, order[:, None].expand(-1, q, -1), selected_mask.any(-2))
-        return value, dict(local_neighbor_count=count.detach(), local_selected_count=selected_count.detach(),
-            local_mean_support=support.detach(), local_delta_norm=value.detach().norm(dim=-1),
-            local_point_mask=point_mask.detach())
+        records = {}
+        if diagnostics:
+            records.update(local_neighbor_count=count.detach(), local_selected_count=selected_count.detach(),
+                           local_mean_support=support.detach(), local_delta_norm=value.detach().norm(dim=-1))
+        if return_point_mask:
+            selected_mask = torch.zeros_like(neighborhood).scatter(-1, selected, mask)
+            records['local_point_mask'] = torch.zeros_like(allowed).scatter(
+                -1, order[:, None].expand(-1, q, -1), selected_mask.any(-2)).detach()
+        return value, records
 
 
 class FinalBoxVerifier(nn.Module):
@@ -171,18 +245,22 @@ class FinalBoxVerifier(nn.Module):
             raise ValueError('v41 verifier requires finite [B,4,46] metadata')
         return result.detach()
 
-    def read_local(self, pool, boxes, valid, size):
+    def read_local(self, pool, boxes, valid, size, *, diagnostics=True, return_point_mask=True):
         authorized = pool['valid'][:, None] & valid.detach()[..., None]
-        local, statistics = self.local_reader(pool, boxes.detach(), authorized, size.detach())
+        local, statistics = self.local_reader(pool, boxes.detach(), authorized, size.detach(),
+            diagnostics=diagnostics, return_point_mask=return_point_mask)
         feature = self.box_encoder(local.reshape(len(boxes), boxes.shape[1], 512))
         return feature, statistics
 
-    def forward(self, candidates, observation, batch, prior, *, pool=None):
+    def forward(self, candidates, observation, batch, prior, *, pool=None, include_local_diagnostics=True):
         pool = build_current_pool(observation, batch) if pool is None else pool
-        authorized = pool['valid'][:, None] & candidates.valid.detach()[..., None]
-        inside = authorized & inside_final_boxes(pool['xyz'], candidates.boxes.detach(), batch['box_size'].detach())
-        support = inside & (pool['probability'][:, None] >= .5)
-        feature, statistics = self.read_local(pool, candidates.boxes, candidates.valid, batch['box_size'])
+        membership = pool['valid'][:, None] & inside_final_boxes(pool['xyz'], candidates.boxes, batch['box_size'])
+        raw_support = membership & (pool['probability'][:, None] >= .5)
+        _remember_final_support(observation, batch, candidates.boxes, raw_support, raw_support.sum(-1))
+        allowed = candidates.valid.detach()[..., None]
+        inside, support = membership & allowed, raw_support & allowed
+        options = {} if include_local_diagnostics else dict(diagnostics=False, return_point_mask=False)
+        feature, statistics = self.read_local(pool, candidates.boxes, candidates.valid, batch['box_size'], **options)
         metadata = self.metadata(candidates, pool, inside, support, observation, batch, prior)
         logits = self.output(self.fusion(torch.cat((feature, metadata), -1)))
         return VerificationOutput(logits=logits, support_mask=support.detach(),

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from .config import load_config, config_identity, normalize_config
+from .config import load_config, config_identity, normalize_config, run_directory_tag
 from .identity import model_schema, model_version, runtime_key, RESUME_SCHEMA
 from utils.execution_profile import (EXECUTION_PROFILES, execution_identity,
                                      validate_execution_identity)
@@ -89,7 +89,7 @@ def configure_numerics(config=None):
     torch.use_deterministic_algorithms(True, warn_only=False)
 
 
-def resolve_run_directory(config):
+def resolve_run_directory(config, *, command_line=None):
     if config.log_dir:
         return Path(config.log_dir).resolve()
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -97,7 +97,9 @@ def resolve_run_directory(config):
     parent = Path('artifacts/ct_checks') if config.ct_engineering_check else Path('output')
     suffix = '-test' if config.test else ''
     version = model_version(config).removeprefix('v')
-    return (parent / f'{stamp}-{version}_{config.v41_execution_revision}_{arm}-{config.tag}{suffix}').resolve()
+    explicit_tag = any(arg.partition('=')[0] == '--tag' for arg in command_line or ())
+    tag = run_directory_tag(config, explicit_tag=explicit_tag)
+    return (parent / f'{stamp}-{version}_{config.v41_execution_revision}_{arm}-{tag}{suffix}').resolve()
 
 
 def write_json(path, value):
@@ -159,6 +161,8 @@ def write_resume_event(config, root, manifest):
         json.dump(dict(schema=RESUME_SCHEMA, run_id=manifest['run_id'],
             checkpoint=str(Path(config.checkpoint).resolve()), source=manifest['source'],
             config_sha256=config_identity(config), resolved_config=dict(config),
+            torch=manifest['torch'], lightning=manifest['lightning'],
+            precision_policy=manifest['precision_policy'], flash_attention=manifest['flash_attention'],
             command_line=manifest.get('command_line', [])), stream, ensure_ascii=False, indent=2)
     return event_path
 
@@ -217,7 +221,7 @@ def _run(config, *, loaders=None, command_line=None):
         from .attention import validate_fa_runtime
         fa_runtime = validate_fa_runtime()
     version = model_version(config)
-    root = resolve_run_directory(config)
+    root = resolve_run_directory(config, command_line=command_line)
     config.log_dir = str(root)
     source = source_identity()
     if loaders is not None and not config.ct_engineering_check:
@@ -256,7 +260,7 @@ def _run(config, *, loaders=None, command_line=None):
                     run_type='engineering' if config.ct_engineering_check else 'formal',
                     actual_recipe={key: config[key] for key in ('epoch', 'batch_size', 'workers', 'seed', 'lr',
                         'wd', 'lr_schedule', 'lr_milestones', 'lr_decay_step', 'lr_decay_rate', 'lr_warmup_steps',
-                        'v41_arm', 'dataset', 'category_name')},
+                        'v41_arm', 'v41_q0_center_weighting', 'dataset', 'category_name')},
                     command_line=list(command_line or []),
                     evaluation_rng_policy=EVALUATION_RNG_POLICY,
                     evaluation_protocol=dict(split=config.eval_split,

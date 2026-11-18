@@ -9,9 +9,9 @@ import torch
 from models.ct_v41.config import normalize_config
 from models.ct_v41.data import BatchBuilder, EndpointRequest, RawEndpointDataset
 from models.ct_v41.runtime import (CompactTrackingEvaluation, TrackingEvaluation,
-                                  _full_stage_summary, loss_episode_summary, make_evaluation)
+                                  _full_stage_summary, loss_episode_summary, make_evaluation, move_tensors)
 from models.ct_v41.verification import current_q0_support
-from tests.helpers.raw_tracking import TinySource, fake_output, fake_prior
+from tests.helpers.raw_tracking import TinySource, fake_output
 from utils.batch_materialization import attach_materialization_cache, clear_materialization_cache
 from utils.raw_frame_memo import RawFrameMemo
 
@@ -19,6 +19,16 @@ from utils.raw_frame_memo import RawFrameMemo
 def cfg():
     return normalize_config(dict(ct_engineering_check=True, v41_attention_backend='math',
         batch_size=2, workers=0, epoch=2, v32_reserve_windows=0))
+
+
+def test_evaluation_transfers_only_fields_consumed_on_device():
+    fields = {key: torch.ones(1) for key in (
+        'points', 'box_size', 'target_box', 'target_box_size', 'segmentation_labels', 'diagnostic_age')}
+    evaluation = move_tensors(fields, 'meta', evaluation=True)
+    training = move_tensors(fields, 'meta')
+    for key, value in fields.items():
+        assert (evaluation[key] is value) == (key not in ('points', 'box_size'))
+        assert (training[key] is value) == (key == 'diagnostic_age')
 
 
 def metric_batch(track, frame, *, x, source=0, last=False):
@@ -145,11 +155,10 @@ def test_detail_gate_preserves_inputs_supervision_and_full_state_but_skips_raw_c
     assert not any(key.startswith('diagnostic_') for key in summary_batch)
     for key in summary_batch:
         assert torch.equal(summary_batch[key], full_batch[key]), key
-    # summary不会删除B1真实训练获取标签。
-    detailed.supervise_prior(full_batch, fake_prior(full_batch), training=True)
-    compact.supervise_prior(summary_batch, fake_prior(summary_batch), training=True)
-    for key in ('acquisition_target', 'acquisition_valid', 'acquisition_demand'):
-        assert torch.equal(summary_batch[key], full_batch[key]), key
+    assert all(not key.startswith('acquisition_') for batch in (full_batch, summary_batch) for key in batch)
+    assert 'diagnostic_search_trusted_age' in full_batch
+    assert 'diagnostic_raw_point_count' not in full_batch  # 辅助轨迹无需整云覆盖
+    assert 'bc_targets' not in full_batch and 'bc_targets' not in summary_batch
     full_output, summary_output = measurement_output(full_batch), measurement_output(summary_batch)
     detailed.commit(full_output, full_batch, diagnostics=True)
 
@@ -157,24 +166,14 @@ def test_detail_gate_preserves_inputs_supervision_and_full_state_but_skips_raw_c
         raise AssertionError('Full summary commit must not reconstruct raw support')
 
     monkeypatch.setattr(compact, '_points', forbidden)
-    monkeypatch.setattr(compact, '_raw_index', forbidden)
     assert compact.commit(summary_output, summary_batch, diagnostics=False) == []
     left, right = detailed.states[request.state_key], compact.states[request.state_key]
     for key in ('next_frame', 'trusted_velocity_valid', 'previous_measurement_eligible',
-                'previous_quality', 'previous_innovation', 'last_supported_time'):
+                'last_supported_time', 'last_strong_time'):
         assert getattr(left, key) == getattr(right, key), key
     np.testing.assert_array_equal(left.trusted_velocity, right.trusted_velocity)
     for frame in left.boxes:
         np.testing.assert_array_equal(left.boxes[frame], right.boxes[frame])
-
-
-def test_summary_eval_prior_supervision_returns_without_geometry_or_transfer():
-    builder = BatchBuilder(cfg())
-    builder.detailed_diagnostics = False
-    builder._pending = [object()]
-    batch = {}
-    # 不提供prior.box或raw context；早返路径不应读取它们。
-    assert builder.supervise_prior(batch, object(), training=False) is batch
 
 
 @pytest.mark.parametrize('auxiliary', [False, True], ids=['main', 'auxiliary'])
@@ -202,7 +201,7 @@ def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(aux
         torch.set_num_threads(1)
         with torch.random.fork_rng(devices=[]):
             torch.random.default_generator.manual_seed(714)
-            full_config = normalize_config(dict(cfg(), point_sample_size=16, diagnostics_level='full'))
+            full_config = normalize_config(dict(cfg(), diagnostics_level='full'))
             summary_config = normalize_config(dict(full_config, diagnostics_level='summary'))
             full_model = JointTracker(full_config).train()
             summary_model = deepcopy(full_model)
@@ -223,14 +222,12 @@ def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(aux
                 builder.detailed_diagnostics = detailed
                 batch = attach_materialization_cache(builder.prepare(rows), enabled=True)
                 if auxiliary:
-                    output = model.forward_aux(batch)
-                    if detailed:
-                        builder.supervise_prior(batch, output.prior, training=False)
+                    output = model.forward_aux(batch, include_local_diagnostics=detailed)
                     losses = model.compute_aux_losses(batch, output)
                 else:
-                    prior = model.plan_prior(batch)
-                    builder.supervise_prior(batch, prior, training=True)
-                    output = model(batch, prior=prior)
+                    # 用原先独立准备 prior 的调用方式对照 host 现在的单次前向。
+                    prior = model.plan_prior(batch) if detailed else None
+                    output = model(batch, prior=prior, include_local_diagnostics=detailed)
                     if detailed:
                         output.loss_statistics = {}
                     losses = model.compute_losses(batch, output)

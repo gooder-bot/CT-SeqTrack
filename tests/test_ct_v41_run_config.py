@@ -1,4 +1,7 @@
-"""V41 v2 新运行配置与恢复身份边界；仅编写，运行验收在服务器。"""
+"""V41 v3 新运行配置与恢复身份边界；仅编写，运行验收在服务器。"""
+import json
+from pathlib import Path
+
 import pytest
 
 from models.ct_v41.config import config_identity, load_config, normalize_config, recipe_identity
@@ -16,7 +19,7 @@ def test_new_training_recipe_does_not_require_engineering_mode():
     assert identity['lr_milestones'] == [4, 9]
     assert identity['optimization']['lr'] == 8e-5
     assert identity['optimization']['lr_warmup_steps'] == 20
-    assert cfg.v41_execution_revision == 'v2'
+    assert cfg.v41_execution_revision == 'v3'
 
 
 def test_yaml_inheritance_and_explicit_overrides_keep_unsupplied_values(tmp_path):
@@ -42,6 +45,39 @@ def test_existing_step_and_piecewise_schedules_remain_usable():
         normalize_config(dict(lr_schedule='step', lr_milestones=[20]))
 
 
+def test_inverse_lwh_recipe_changes_only_q0_center_weighting():
+    directory = Path(__file__).resolve().parents[1] / 'cfgs' / 'ct_seqtrack'
+    uniform = load_config(directory / '41_full_kitti.yaml')
+    inverse = load_config(directory / '41_full_kitti_q0_inverse_lwh.yaml')
+    assert uniform.v41_q0_center_weighting == 'uniform'
+    assert inverse == dict(uniform, cfg=inverse.cfg, v41_q0_center_weighting='inverse_lwh')
+    assert recipe_identity(uniform)['q0_center_weighting'] == 'uniform'
+    assert recipe_identity(inverse) == dict(recipe_identity(uniform), q0_center_weighting='inverse_lwh')
+    assert config_identity(uniform) != config_identity(inverse)
+
+
+def test_resume_records_current_numeric_environment_and_preserves_initial_manifest(tmp_path):
+    from models.ct_v41.entry import write_resume_event, write_run_metadata
+
+    config = normalize_config()
+    initial = dict(run_id='q0-run', source={'sha256': 'same-source'}, torch='2.0.1+cu118',
+                   lightning='2.0.2', precision_policy='FP32 except BF16 QKV inside FA2 kernel',
+                   flash_attention=dict(backend='fa2_varlen', flash_attn='2.5.8', device=0))
+    write_run_metadata(config, tmp_path, initial, preserve_existing=False)
+    config.checkpoint = str(tmp_path / 'epoch=020.ckpt')
+    resumed = dict(initial, flash_attention=dict(initial['flash_attention'], device=1))
+    event = json.loads(write_resume_event(config, tmp_path, resumed).read_text(encoding='utf-8'))
+    for key in ('torch', 'lightning', 'precision_policy', 'flash_attention'):
+        assert event[key] == resumed[key]
+    assert json.loads((tmp_path / 'run_manifest.json').read_text(encoding='utf-8')) == initial
+
+
+@pytest.mark.parametrize('value', ['inverse', None, False])
+def test_invalid_q0_center_weighting_is_rejected(value):
+    with pytest.raises(ValueError, match='v41_q0_center_weighting'):
+        normalize_config(dict(v41_q0_center_weighting=value))
+
+
 def test_reporting_overrides_do_not_invalidate_independent_checkpoint_evaluation():
     training = normalize_config()
     evaluation = normalize_config(dict(training, test=True, checkpoint='same-run.ckpt',
@@ -64,7 +100,7 @@ def test_training_changes_still_change_resume_identity(change):
 
 @pytest.mark.parametrize('change', [dict(v41_trust_threshold=.7), dict(v41_m_weight=.1),
     dict(v41_aux_loss_weight=.5), dict(v31_long_window=16), dict(point_sample_size=2048),
-    dict(v41_execution_revision='v1')])
+    dict(v41_execution_revision='v1'), dict(v41_execution_revision='v2')])
 def test_algorithm_and_old_execution_revision_are_not_silently_opened(change):
     with pytest.raises(ValueError):
         normalize_config(change)

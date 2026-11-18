@@ -1,6 +1,6 @@
 """当前四帧观测的唯一 raw-ID 输入合同。"""
 import torch
-from utils.batch_materialization import materialization_cache
+from utils.batch_materialization import materialization_cache, require_finite
 from .observation import B0Observation
 
 
@@ -13,16 +13,39 @@ ONLINE_FIELDS = frozenset((
     'recovery_seed_box', 'recovery_seed_valid',
     'history_is_initial', 'window_seed_offset', 'branch_id',
     'trusted_velocity', 'trusted_velocity_valid', 'trusted_velocity_age',
-    'previous_quality', 'weak_age', 'supported_age', 'previous_innovation',
+    'weak_age', 'supported_age',
     'previous_is_propagation', 'consecutive_propagations',
     'consecutive_untrusted_outputs', '_ct_materialization_cache',
 ))
+HOST_GEOMETRY = '_ct_loss_geometry_host'
+_GEOMETRY_FIELDS = ('target_box', 'box_size', 'target_box_size')
 LOSS_FIELDS = frozenset((
     'target_box', 'target_box_size', 'history_target_boxes',
     'segmentation_labels', 'bc_targets', 'physical_displacement', 'physical_valid',
-    'acquisition_target', 'acquisition_valid', 'acquisition_demand',
-    'future_displacement', 'future_dt', 'future_valid',
+    'future_displacement', 'future_dt', 'future_valid', HOST_GEOMETRY,
 ))
+
+
+def retain_geometry_sources(cpu, moved):
+    if any(key not in cpu or not torch.is_tensor(cpu[key]) or cpu[key].device.type != 'cpu'
+           or moved[key].device.type == 'cpu' or cpu[key].requires_grad for key in _GEOMETRY_FIELDS):
+        return
+    try:
+        moved[HOST_GEOMETRY] = tuple((cpu[key], cpu[key]._version, moved[key], moved[key]._version)
+                                    for key in _GEOMETRY_FIELDS)
+    except RuntimeError:  # inference tensors 没有版本；按设备实况取值。
+        return
+
+
+def retained_geometry_sources(batch, boxes):
+    saved = batch.get(HOST_GEOMETRY)
+    if saved is not None:
+        for key, (cpu, before, device, after) in zip(_GEOMETRY_FIELDS, saved):
+            if (batch.get(key) is not device or device.dtype != boxes.dtype or device.device != boxes.device
+                    or cpu._version != before or device._version != after):
+                return None
+        return [row[0] for row in saved]
+    return None
 
 
 def online_batch(batch):
@@ -45,8 +68,9 @@ def canonicalize_batch(batch):
             raise ValueError('v41 recovery seed geometry and validity must be supplied together')
         seed, seed_valid = batch['recovery_seed_box'], batch['recovery_seed_valid']
         if (seed.shape != (len(points), 4) or seed_valid.shape != (len(points),)
-                or seed_valid.dtype != torch.bool or not bool(torch.isfinite(seed).all())):
+                or seed_valid.dtype != torch.bool):
             raise ValueError('v41 recovery requires finite seed [B,4] and bool validity [B]')
+        require_finite(batch, 'recovery_seed_box', seed, 'v41 recovery seed must be finite')
     cache = materialization_cache(batch)
     cached = None if cache is None else cache.canonical_values(batch)
     # 历史不存在时其点槽也不存在；先合并存在性再去重，使 B0/B1/损失
@@ -55,10 +79,11 @@ def canonicalize_batch(batch):
         valid = B0Observation.measurement_mask(batch)
         if valid.shape != points.shape[:-1]:
             raise ValueError('point_valid must align with points')
-        if not bool(torch.isfinite(points.masked_select(valid[..., None].expand_as(points))).all()):
+        clean = points.masked_fill(~valid[..., None], 0.)
+        if not bool(torch.isfinite(clean).all()):
             raise ValueError('real v41 point observations must be finite')
         result['point_valid'] = valid
-        result['points'] = points.masked_fill(~valid[..., None], 0.)
+        result['points'] = clean
         if cache is not None:
             cache.remember_canonical(batch, result)
     else:

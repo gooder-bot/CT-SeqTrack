@@ -60,9 +60,13 @@ class BatchMaterializationCache:
     """每类仅一条记录；原输入与 canonical 输出同时登记别名及版本。"""
     def __init__(self):
         self.point = None
+        self.final_support = None
+        self.finite_fields = {}
 
     def clear(self):
         self.point = None
+        self.final_support = None
+        self.finite_fields.clear()
 
     def _get(self, name, batch):
         record = getattr(self, name)
@@ -99,6 +103,24 @@ class BatchMaterializationCache:
 def materialization_cache(batch):
     cache = batch.get(_CACHE_KEY)
     return cache if isinstance(cache, BatchMaterializationCache) else None
+
+
+def require_finite(batch, key, tensor, message):
+    """同一事务内复用未修改张量的检查；替换或原地更新后重新验证。"""
+    cache = materialization_cache(batch)
+    version = None
+    if cache is not None:
+        try:
+            version = tensor._version
+        except RuntimeError:  # inference tensor 没有版本号
+            pass
+        record = cache.finite_fields.get(key)
+        if version is not None and record is not None and record[0] is tensor and record[1] == version:
+            return
+    if not bool(torch.isfinite(tensor).all()):
+        raise ValueError(message)
+    if cache is not None and version is not None:
+        cache.finite_fields[key] = (tensor, version)
 
 
 def attach_materialization_cache(batch, *, enabled):

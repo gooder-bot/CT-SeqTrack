@@ -11,7 +11,6 @@ class PriorContext:
     mean_xy: Tensor                 # [B,2] 物理位移，非锚点纠偏
     log_sigma: Tensor               # [B,2] 平行/垂直 log std
     valid: Tensor                   # [B] 合法物理速度对
-    acquisition_fraction: Tensor    # [B,2] 共用获取控制 u in [0,1]
     direction_xy: Tensor            # [B,2]
     kinematic_xy: Tensor            # [B,2]
     envelope: Tensor                # [B,2]
@@ -34,6 +33,7 @@ class ObservationFeatures:
     coarse_features: Optional[Tensor] = None  # v34 [B,256] live Mini pooled 语义
     history_support: Optional[Tensor] = None  # v34 [B,3,3] detached 点量/框内软 FG 量/熵
     current_support: Optional[Tensor] = None  # v34 [B,3] detached 点量/全 crop 软 FG 量/熵
+    history_descriptor: Optional[Tensor] = None  # 同次 forward 供 decoder 共用
 
 
 @dataclass

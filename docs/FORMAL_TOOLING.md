@@ -1,5 +1,7 @@
 # CT-SeqTrack 当前工具范围：V41
 
+当前新运行使用 [V41 exec v3](CTSEQTRACK_V41_RUN_WORKFLOW.md)。v2 命令与产物按对应源码解释。
+
 ## 2026-11-16：exec v2 工具入口
 
 新 run 以 [V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)为准：`main.py` 使用具名 CLI + YAML，`tools/launch_ct_v41.py --arm full` 按实际配置打印命令，不强加旧 epoch/batch/LR；仍不执行训练。无 `--set`、参数别名、新调度器或预登记门。默认每轮 test/完整保存，日志和结果路径见新运行页。本轮仅静态实施，服务器运行验收待执行。
@@ -14,7 +16,8 @@
 |---|---|
 | `main.py --cfg cfgs/ct_seqtrack/41_full_kitti.yaml` | 分派 `models/ct_v41/entry.py`，运行V41 scratch训练、同run完整epoch续训或评测；具体CLI及路径见[V41操作页](CTSEQTRACK_V41_LAUNCH.md)。 |
 | `tools/launch_ct_v41.py` | **只打印**两组独立nohup、日期目录、PID和tail命令，不创建目录、不执行训练。`--arm full`默认GPU0，`--arm seqtrack`默认GPU1；`--gpu`仅可覆盖单组。实际执行打印命令才会启动。 |
-| `tools/check_v41_server.py` | 服务器真实KITTI Full主/辅助forward、梯度隔离、BN/mode/RNG、FA2、同次Adam和两流commit检查；报告写新目录，不保存工程权重。smoke按每主batch插入一辅助batch，不是正式稀疏辅助流的速度测量，也不替代完整epoch/续训检查。 |
+| `tools/compare_v41_q0.py A_RUN B_RUN` | 核对同预算、同初始化、数值环境和固定 dev 逐帧结果。输出三轴 q0 MAE、最终框 S/P、长轨表现和独立 seed 复核判据。 |
+| `tools/check_v41_server.py [--cfg FULL_YAML]` | 默认使用 A 配置。可指定 B 配置执行真实 KITTI Full 主辅 forward、梯度隔离、BN/mode/RNG、FA2、同次 Adam 和两流 commit 检查。报告记录所选策略和逐步 q0 中心损失。每个主 batch 插入一个辅助 batch，检查产物写入新的工程目录。 |
 | `tools/audit_v41_kitti.py` | 检查Car输入metadata与文件清单，识别四个已知缺失bin并保留空观测政策；报告写新的ct_checks目录。不运行模型，不证明点框几何或跟踪正确。 |
 | `tools/verify_ct_v41.py verify [--resolved]` | **可选**静态语法和实际源码身份读取；`--resolved`另读取当前Full配置。只支持verify，无register动作，不依赖旧登记，不是训练/smoke前置，也不替代运行验收。 |
 | 原始SeqTrack工程的 `tools/evaluate_kitti_v41_baseline.py` | 对该run固定58/59/60权重独立评测test，生成 `fixed-test/fixed_comparison.json`。属于已适配的服务器baseline工程，不是本地CT工具；不要用CT专有CLI调用baseline入口。 |

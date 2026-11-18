@@ -25,9 +25,10 @@ LOCAL_FIELDS = ('local_neighbor_count', 'local_selected_count',
 class TrainingDiagnostics:
     SCHEMA = TRAINING_DIAGNOSTICS_SCHEMA
 
-    def __init__(self, seed=42, *, optimized=False):
+    def __init__(self, seed=42, *, optimized=False, q0_center_weighting='uniform'):
         self.seed = int(seed)
         self.optimized = bool(optimized)
+        self.q0_center_weighting = q0_center_weighting
         self.reset(0)
 
     def reset(self, epoch):
@@ -66,6 +67,8 @@ class TrainingDiagnostics:
         boxes = dict(coarse=observation.coarse_box.detach(), fine=decoder.q0_box.detach())
         arrays = {key: value for key, value in batch.items()
                   if key.startswith('diagnostic_') and torch.is_tensor(value)}
+        if 'diagnostic_target_count' in arrays and 'physical_displacement' in batch:
+            arrays['diagnostic_gt_xy_displacement'] = batch['physical_displacement'].detach().norm(dim=-1)
         valid = batch['point_valid'].bool()
         labels = batch['segmentation_labels']
         arrays.update(point_count=valid.sum(-1),
@@ -90,7 +93,7 @@ class TrainingDiagnostics:
             arrays[name + '_absolute_z_error_m'] = error[:, 2].abs()
             angle = box[:, 3] - target[:, 3]
             arrays[name + '_yaw_error_rad'] = torch.atan2(angle.sin(), angle.cos()).abs()
-        detached_losses = observation_loss_statistics(batch, output)
+        detached_losses = observation_loss_statistics(batch, output, q0_center_weighting=self.q0_center_weighting)
         detached_losses.update(getattr(output, 'loss_statistics', {}))
         scalar_losses = {name: value for name, value in losses.items()
                          if name.startswith('loss_') and torch.is_tensor(value) and value.ndim == 0}
@@ -103,11 +106,6 @@ class TrainingDiagnostics:
             history_observed_frames=valid[:, :-1].any(-1).sum())
         if 'physical_valid' in batch:
             valid_counts['physical_and_sigma_endpoints'] = (batch['physical_valid'].bool() & output.prior.valid).sum()
-        if 'acquisition_valid' in batch:
-            acquisition = batch['acquisition_valid'].bool()
-            demand = batch.get('acquisition_demand', acquisition).bool()
-            valid_counts.update(acquisition_demand_endpoints=(acquisition & demand).sum(),
-                                acquisition_no_demand_endpoints=(acquisition & ~demand).sum())
         packet = {('array', name): value for name, value in arrays.items()}
         packet.update({('active',): observation.sequence_valid.bool(),
                        ('provenance',): batch['history_box_provenance']})

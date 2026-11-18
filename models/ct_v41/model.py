@@ -12,7 +12,7 @@ from .multistep import FutureMotionHead, compute_multistep_loss
 from .base_losses import compute_losses as base_losses
 from .config import normalize_config, recipe_scope
 from .contracts import CandidateSet, SelectionDecision, CommitDecision, TrackOutput
-from .verification import FinalBoxVerifier, current_candidate_support, build_current_pool
+from .verification import FinalBoxVerifier, final_candidate_support, build_current_pool
 from .recovery import RecoveryResidualHead
 
 
@@ -80,7 +80,7 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
         candidate_trust[:, 0] = torch.where(candidates.raw_valid[:, 0], legacy, 0.)
     selected_real = (selected == 0) & candidates.raw_valid[:, 0]
     selected_measurement = candidates.measurement_candidate[row, selected]
-    support = current_candidate_support(observation, batch, candidates.boxes)
+    support = final_candidate_support(observation, batch, candidates.boxes)
     support_mask = support['mask'][row, selected] & selected_measurement[:, None]
     trusted_score = candidate_trust[row, selected]
     eligible = selected_measurement & (support['count'][row, selected] >= 3) & (trusted_score >= .5)
@@ -94,6 +94,8 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
 
 
 class JointTracker(nn.Module):
+    supports_local_diagnostics = True
+
     def __init__(self, config=None):
         super().__init__()
         self.config = normalize_config(config)
@@ -137,20 +139,21 @@ class JointTracker(nn.Module):
             with torch.autocast(device_type=prepared['points'].device.type, enabled=False):
                 return self.prior(prepared) if self.enable_b1 else empty_prior(prepared)
 
-    def _finish_forward(self, prepared, prior, observation, decoder):
-        recovery, pool = None, None
+    def _finish_forward(self, prepared, prior, observation, decoder, pool, include_local_diagnostics):
+        recovery = None
         if self.enable_b3:
             seed = prepared['recovery_seed_box']
             seed_valid = prepared['recovery_seed_valid']
-            pool = build_current_pool(observation, prepared)
+            options = {} if include_local_diagnostics else dict(diagnostics=False)
             feature, statistics = self.verifier.read_local(
-                pool, seed[:, None], seed_valid[:, None], prepared['box_size'])
+                pool, seed[:, None], seed_valid[:, None], prepared['box_size'], **options)
             recovery = self.recovery_head(feature[:, 0], seed, prepared['box_size'],
                 statistics['local_point_mask'][:, 0], seed_valid)
         candidates = build_candidates(decoder, observation, prepared, prior,
             enable_b1=self.enable_b1, recovery=recovery)
         # 修正后的 R 重新读取最终几何；不把 seed 支持错当成最终框支持。
-        verification = self.verifier(candidates, observation, prepared, prior, pool=pool) if self.enable_b3 else None
+        verification = (self.verifier(candidates, observation, prepared, prior, pool=pool,
+            include_local_diagnostics=include_local_diagnostics) if self.enable_b3 else None)
         decision, commit, quality, candidate_trust = select_candidates(
             candidates, verification, observation, prepared, apply_policy=self.enable_b3)
         return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
@@ -158,7 +161,13 @@ class JointTracker(nn.Module):
             candidates.q0_quality_logits.sigmoid(), decision.output_utility,
             candidate_trust, candidates.q0_is_fallback, recovery)
 
-    def forward(self, batch, prior=None):
+    def _decode(self, prepared, prior, observation, pool, include_local_diagnostics):
+        descriptor = (observation.history_descriptor if self.decoder.initial_context
+                      and self.decoder.context_time_scale == self.observation.context_time_scale else None)
+        return self.decoder(observation, prepared, prior, current_pool=pool, shared_descriptor=descriptor,
+                            include_local_diagnostics=include_local_diagnostics)
+
+    def forward(self, batch, prior=None, *, include_local_diagnostics=True):
         with recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
             prepared = online_batch(batch)
             if not self.enable_b1:
@@ -167,10 +176,11 @@ class JointTracker(nn.Module):
             elif prior is None:
                 prior = self.prior(prepared)
             observation = self.observation(prepared)
-            decoder = self.decoder(observation, prepared, prior)
-            return self._finish_forward(prepared, prior, observation, decoder)
+            pool = build_current_pool(observation, prepared, live_features=True) if self.enable_b3 else None
+            decoder = self._decode(prepared, prior, observation, pool, include_local_diagnostics)
+            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics)
 
-    def forward_aux(self, batch):
+    def forward_aux(self, batch, *, include_local_diagnostics=True):
         """全轨迹辅助流：上游用推理统计且无图，只有 B3/R 可微。
 
         host 隔离 RNG、管理独立状态事务；此处精确恢复每个子模块原模式，
@@ -189,11 +199,12 @@ class JointTracker(nn.Module):
                 with torch.no_grad():
                     prior = self.prior(prepared)
                     observation = self.observation(prepared)
-                    decoder = self.decoder(observation, prepared, prior)
+                    pool = build_current_pool(observation, prepared)
+                    decoder = self._decode(prepared, prior, observation, pool, include_local_diagnostics)
             finally:
                 for module, training in modes:
                     module.training = training
-            return self._finish_forward(prepared, prior, observation, decoder)
+            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics)
 
     def compute_aux_losses(self, batch, output):
         if not self.enable_b3:
@@ -206,12 +217,13 @@ class JointTracker(nn.Module):
     def compute_losses(self, batch, output):
         with recipe_scope(self.config):
             prepared = loss_batch(batch)
+            weighting = self.config.v41_q0_center_weighting
             if not self.enable_b3:
-                losses = base_losses(prepared, output, enable_b1=self.enable_b1)
+                losses = base_losses(prepared, output, enable_b1=self.enable_b1, q0_center_weighting=weighting)
             else:
                 from .losses import compute_losses
                 losses = compute_losses(prepared, output, enable_b1=self.enable_b1,
-                    recovery_weight=float(self.config.get('v41_recovery_weight', .1)))
+                    recovery_weight=float(self.config.get('v41_recovery_weight', .1)), q0_center_weighting=weighting)
             # M 只属于训练损失。评测即使主动请求基础 loss，也不读取未来标签。
             if self.enable_m and self.training:
                 motion = compute_multistep_loss(prepared, output.prior, self.multistep,

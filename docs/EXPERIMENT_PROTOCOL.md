@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前实验协议：V41 KITTI Car
 
+当前新运行使用 [V41 exec v3](CTSEQTRACK_V41_RUN_WORKFLOW.md)。v2 命令与产物按对应源码解释。
+
+q0 中心监督的单变量实验使用 KITTI Car 开发集。A 为现有等权 Full，B 按首框长宽高的归一化倒数加权。固定第 60 轮和第 58–60 轮均值，保留判据采用末三轮均值。逐帧配对口径与两组命令见 [q0 开发集 A/B](CTSEQTRACK_V41_RUN_WORKFLOW.md#q0-车宽与高度定位-ab)。
+
 ## 2026-11-16：新 run 使用 exec v2
 
 [V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)覆盖新 run 的训练执行参数、评估、日志和保存规则：具名 CLI > YAML > 默认，取消普通配方精确预锁与预登记，结构/算法合同保持。默认每轮 test、每轮完整 checkpoint，按 best Precision 或 last 报告，并保留最近 K 个已评估轮；test 选出的 best 必须标明选择来源。独立 dev 用 `--test --eval_split dev` 写新目录。已实现不等于已验收，本轮未执行训练或测试。

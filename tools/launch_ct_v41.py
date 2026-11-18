@@ -38,8 +38,10 @@ def _ct_configuration(args):
 def _label(args, arm):
     if arm != 'full':
         return 'seqtrack_original_kitti_car_seed42_60ep_bs16'
+    from models.ct_v41.config import run_directory_tag
     config = _ct_configuration(args)
-    tag = re.sub(r'[^A-Za-z0-9_.-]+', '_', config.tag).strip('._-') or 'v41'
+    tag = run_directory_tag(config, explicit_tag=getattr(args, 'tag', None) is not None)
+    tag = re.sub(r'[^A-Za-z0-9_.-]+', '_', tag).strip('._-') or 'v41'
     return f'{tag}-seed{config.seed}-{config.epoch}ep-bs{config.batch_size}'
 
 
