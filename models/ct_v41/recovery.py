@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .contracts import RecoveryOutput
+from .input_checks import positive_finite_size
 from .base_losses import frame_endpoint_mean
 
 
@@ -21,8 +22,7 @@ class RecoveryResidualHead(nn.Module):
                 or size.shape != (b, 3) or point_mask.ndim != 2
                 or point_mask.shape[0] != b or seed_valid.shape != (b,)):
             raise ValueError('v41 recovery feature/seed/size/point-mask shape mismatch')
-        if (not bool(torch.isfinite(seed_box).all())
-                or not bool(torch.isfinite(size).all()) or not bool((size > 0).all())):
+        if not bool(torch.isfinite(seed_box).all()) or not positive_finite_size(size):
             raise ValueError('v41 recovery requires finite seed and positive LWH')
         seed = seed_box.detach().to(feature)
         valid = seed_valid.detach().bool() & point_mask.detach().bool().any(-1)

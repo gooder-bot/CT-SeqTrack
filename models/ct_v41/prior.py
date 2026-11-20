@@ -7,7 +7,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .cfc import FullGatedCfCCell
-from .motion import motion_aligned_axes, motion_aligned_covariance
+from .motion import motion_aligned_axes, motion_frame_log_sigma
 from .contracts import PriorContext
 
 
@@ -103,14 +103,14 @@ class PhysicalTimePrior(nn.Module):
         spread = (velocity[:, 1] - velocity[:, 0]).norm(dim=1) * both
         envelope = torch.stack(((.25 + .25 * dt + .5 * spread * dt).clamp_max(4),
                                 (.20 + .15 * dt + .25 * spread * dt).clamp_max(3)), -1)
-        direction, perpendicular, _ = motion_aligned_axes(base_velocity)
+        direction, perpendicular, speed = motion_aligned_axes(base_velocity)
         unit = torch.tanh(self.mean_head(context)) * valid[:, None]
         mean = kinematic + direction * unit[:, :1] * envelope[:, :1] + perpendicular * unit[:, 1:] * envelope[:, 1:]
         sigma = (.1 + F.softplus(self.sigma_head(context.detach()))).clamp_max(math.exp(2.5))
-        uncertainty = motion_aligned_covariance(base_velocity, sigma.log(), direction_xy=direction)
+        log_sigma = motion_frame_log_sigma(sigma.log(), speed)
         fallback = batch['fallback_box'].to(boxes).detach()
         endpoint = torch.cat((mean.detach(), fallback[:, 2:]), -1)
         endpoint = torch.where(valid[:, None], endpoint, fallback)
-        return PriorContext(context, mean, uncertainty['log_sigma_parallel_perp'], valid,
+        return PriorContext(context, mean, log_sigma, valid,
                             direction, kinematic, envelope, unit, endpoint,
                             context_valid=torch.ones_like(valid))

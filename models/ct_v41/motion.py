@@ -20,6 +20,12 @@ def motion_aligned_axes(velocity_xy, min_speed=0.2, eps=1e-6):
     return direction, perpendicular, speed.squeeze(1)
 
 
+def motion_frame_log_sigma(log_sigma, speed, min_speed=0.2):
+    """低速时使用两轴 log σ 的均值；恰好达到阈值时保留各轴值。"""
+    isotropic = log_sigma.mean(dim=1, keepdim=True).expand_as(log_sigma)
+    return torch.where((speed < float(min_speed)).unsqueeze(1), isotropic, log_sigma)
+
+
 def motion_aligned_covariance(
         velocity_xy, log_sigma_parallel_perp, min_speed=0.2, eps=1e-6,
         direction_xy=None):
@@ -43,10 +49,7 @@ def motion_aligned_covariance(
         )
     perpendicular = torch.stack(
         (-direction[:, 1], direction[:, 0]), dim=1)
-    log_sigma = log_sigma_parallel_perp
-    low_speed = speed < float(min_speed)
-    isotropic = log_sigma.mean(dim=1, keepdim=True).expand_as(log_sigma)
-    log_sigma = torch.where(low_speed.unsqueeze(1), isotropic, log_sigma)
+    log_sigma = motion_frame_log_sigma(log_sigma_parallel_perp, speed, min_speed)
     variance = torch.exp(2.0 * log_sigma)
     covariance = (
         variance[:, 0, None, None]
@@ -71,11 +74,11 @@ def physical_motion_uncertainty_loss(
         kinematic_xy=None, envelope_parallel_perp=None,
         residual_unit_parallel_perp=None, beta=0.5,
         tail_direction_weight=0.25, tail_direction_margin=0.9,
-        sigma_error_cap=12.0, mean_huber_beta=0.25):
+        sigma_error_cap=12.0, mean_huber_beta=0.25, include_diagnostics=True):
     """Masked robust residual learning and isolated beta-NLL sigma terms.
 
     Returned losses are per sample.  Callers own weighting and masked
-    reduction so this helper can also be used by calibration diagnostics.
+    reduction. Calibration diagnostics use the complete default result.
     Sigma targets are detached by construction: uncertainty must not steer
     the temporal backbone or the learned mean.
     """
@@ -140,9 +143,6 @@ def physical_motion_uncertainty_loss(
         mean_per_axis = torch.nn.functional.smooth_l1_loss(
             predicted_unit, torch.clamp(target_unit, min=-1.0, max=1.0),
             reduction="none", beta=float(mean_huber_beta))
-        recoverable_count = recoverable_axis.to(mean_xy.dtype).sum(dim=1)
-        tail_axis = ~recoverable_axis
-        tail_count = tail_axis.to(mean_xy.dtype).sum(dim=1)
         tail_hinge = torch.relu(
             float(tail_direction_margin)
             - torch.sign(target_unit) * predicted_unit)
@@ -151,16 +151,9 @@ def physical_motion_uncertainty_loss(
             mean_per_axis,
             float(tail_direction_weight) * tail_hinge,
         ).mean(dim=1)
-        recoverable_saturation = (
-            ((torch.abs(predicted_unit) >= 0.95) & recoverable_axis)
-            .to(mean_xy.dtype).sum(dim=1)
-            / torch.clamp(recoverable_count, min=1.0))
-        tail_axis_fraction = tail_count / float(mean_xy.shape[1])
     else:
         robust_mean = torch.nn.functional.smooth_l1_loss(
             mean_xy, target_xy, reduction="none").mean(dim=1)
-        recoverable_saturation = torch.zeros_like(robust_mean)
-        tail_axis_fraction = torch.zeros_like(robust_mean)
     valid = valid.to(device=mean_xy.device, dtype=mean_xy.dtype).reshape(-1)
     finite = (
         torch.isfinite(aligned_error).all(dim=1)
@@ -168,12 +161,23 @@ def physical_motion_uncertainty_loss(
         & torch.isfinite(beta_nll_per_axis).all(dim=1)
         & torch.isfinite(robust_mean)
     ).to(mean_xy.dtype)
-    return {
+    terms = {
         "mean_per_sample": robust_mean,
         "nll_per_sample": beta_nll_per_axis.sum(dim=1),
-        "gaussian_nll_per_sample": raw_nll_per_axis.sum(dim=1),
-        "aligned_error": aligned_error,
-        "recoverable_saturation_per_sample": recoverable_saturation,
-        "tail_axis_fraction_per_sample": tail_axis_fraction,
         "valid": valid * finite,
     }
+    if include_diagnostics:
+        if use_normalized_residual:
+            recoverable_count = recoverable_axis.to(mean_xy.dtype).sum(dim=1)
+            recoverable_saturation = (
+                ((torch.abs(predicted_unit) >= 0.95) & recoverable_axis)
+                .to(mean_xy.dtype).sum(dim=1)
+                / torch.clamp(recoverable_count, min=1.0))
+            tail_axis_fraction = (~recoverable_axis).to(mean_xy.dtype).sum(dim=1) / float(mean_xy.shape[1])
+        else:
+            recoverable_saturation = torch.zeros_like(robust_mean)
+            tail_axis_fraction = torch.zeros_like(robust_mean)
+        terms.update(gaussian_nll_per_sample=raw_nll_per_axis.sum(dim=1), aligned_error=aligned_error,
+                     recoverable_saturation_per_sample=recoverable_saturation,
+                     tail_axis_fraction_per_sample=tail_axis_fraction)
+    return terms

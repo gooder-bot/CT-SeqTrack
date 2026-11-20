@@ -4,7 +4,8 @@ import torch
 from torch.nn import functional as F
 
 from .base_losses import compute_losses as base_losses, frame_endpoint_mean
-from utils.tracking_metrics import BoxMetricsTarget, LocalYawBox, metric_contributions
+from utils.tracking_metrics import metric_contributions
+from .cpu_geometry import training_box_metrics
 from .verification import final_candidate_support
 from .recovery import recovery_loss_terms
 from .input import retained_geometry_sources
@@ -31,16 +32,13 @@ def pairwise_gap_loss(utility, target, valid):
 
 
 @torch.no_grad()
-def _supervision_targets(batch, output, *, include_q0=False):
+def _supervision_targets(batch, output, *, include_q0=False, reference_geometry=None):
     boxes = output.candidates.boxes.detach()
     target = batch['target_box'].detach().to(boxes)
     size = batch['box_size'].detach().to(boxes)
     target_size = batch.get('target_box_size', size).detach().to(boxes)
     # T 是 >=.5 的离散事件，必须保留与候选台账相同的 double 几何精度。
     # 原强 B1 的 quality_labels 仍由原 loss 原样计算，不能修改其数学。
-    exact_values = np.empty(boxes.shape[:2], np.float64)
-    compat_values = np.empty_like(exact_values)
-    distances = np.empty_like(exact_values)
     # 旧 quality 的框可以是空观测的 q0，且 size 的下限只属于这一个标签。
     # 非标准混合 dtype 交回旧 quality 实现，保留各输入独立转 double 的规则。
     reuse_q0 = include_q0 and all(value.dtype == boxes.dtype for value in (
@@ -69,23 +67,12 @@ def _supervision_targets(batch, output, *, include_q0=False):
     real = output.candidates.measurement_candidate.detach() & output.candidates.raw_valid.detach()
     bxs = arrays['boxes'].reshape(boxes.shape)
     gts, szs, gszs = arrays['target'], arrays['size'], arrays['target_size']
-    q0_labels = np.empty((len(boxes), 1), np.float32) if reuse_q0 else None
-    for row in range(len(boxes)):
-        truth = BoxMetricsTarget(LocalYawBox(gts[row], gszs[row][[1, 0, 2]]), up_axis=(0, 0, 1))
-        wlh = szs[row][[1, 0, 2]]
-        row_metrics = truth.local_yaw_metrics(bxs[row], wlh)
-        exact_values[row], compat_values[row], distances[row] = np.asarray(row_metrics).reshape(-1, 3).T
-        if reuse_q0:
-            q0, quality_size = arrays['q0'][row], arrays['quality_size'][row]
-            if np.array_equal(q0, bxs[row, 0]) and np.array_equal(quality_size, szs[row]):
-                q0_labels[row, 0] = exact_values[row, 0]
-            else:
-                prediction = LocalYawBox(q0, quality_size[[1, 0, 2]])
-                quality_truth = truth
-                if 'target_box_size' not in batch and not np.array_equal(quality_size, szs[row]):
-                    quality_truth = BoxMetricsTarget(LocalYawBox(gts[row], quality_size[[1, 0, 2]]),
-                                                     up_axis=(0, 0, 1))
-                q0_labels[row, 0] = quality_truth.metrics_3d(prediction)[0]
+    if reference_geometry is None:
+        reference_geometry = getattr(output, 'reference_geometry', True)
+    geometry, q0_labels = training_box_metrics(bxs, gts, szs, gszs, q0=arrays.get('q0'),
+        quality_sizes=arrays.get('quality_size'), explicit_target_size='target_box_size' in batch,
+        reference=reference_geometry)
+    exact_values, compat_values, distances = geometry.transpose(2, 0, 1)
     metrics = np.stack(metric_contributions(compat_values, distances), axis=-1).astype(np.float32)
     # 一个连续回包保留 exact 的双精度和旧 S/P、quality 的 float32 舍入。
     fields = [exact_values, metrics]

@@ -1,18 +1,24 @@
 # CT-SeqTrack 当前实验协议：V41 KITTI Car
 
-当前新运行使用 [V41 exec v3](CTSEQTRACK_V41_RUN_WORKFLOW.md)。v2 命令与产物按对应源码解释。
+## 2026-11-20 起：新训练逐轮评估 test
 
-q0 中心监督的单变量实验使用 KITTI Car 开发集。A 为现有等权 Full，B 按首框长宽高的归一化倒数加权。固定第 60 轮和第 58–60 轮均值，保留判据采用末三轮均值。逐帧配对口径与两组命令见 [q0 开发集 A/B](CTSEQTRACK_V41_RUN_WORKFLOW.md#q0-车宽与高度定位-ab)。
+新启动的 V41 KITTI Car 训练在每个完整 epoch 后只评估 test（0019–0020），不跑 dev（0017–0018）。评估不参与梯度更新。若报告测试曲线的峰值，须注明按 test 选轮，不能将其写成固定轮成绩。
 
-## 2026-11-16：新 run 使用 exec v2
+## 2026-11-18 已启动的 q0 A/B：保留原协议
 
-[V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)覆盖新 run 的训练执行参数、评估、日志和保存规则：具名 CLI > YAML > 默认，取消普通配方精确预锁与预登记，结构/算法合同保持。默认每轮 test、每轮完整 checkpoint，按 best Precision 或 last 报告，并保留最近 K 个已评估轮；test 选出的 best 必须标明选择来源。独立 dev 用 `--test --eval_split dev` 写新目录。已实现不等于已验收，本轮未执行训练或测试。
+**V41 exec v3 的 q0 A/B 使用 dev 0017–0018。** 两臂已在源码 `b819e76` 上开始训练，均为 scratch、seed42、batch 16、60 轮。运行显式设置逐轮 dev 与 `report_checkpoint=last`，按配置将在第 58、59、60 轮保存完整诊断。在共同可见帧比较 q0 三轴 MAE，另报所有帧的最终框 S/P 和长轨结果。具体判据与训练入口见 [V41 v3 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)。
+
+A 沿用等权中心监督，B 按首框长宽高的归一化倒数加权。固定第 60 轮单列，是否值得独立 seed 复核按第 58–60 轮均值与六项判据判断。11 月 18 日北京时间 18:26:18 的记录只覆盖两臂首轮。此前 v1 Full 与适配 SeqTrack 的固定 test 0019–0020 比较已完成，成绩归于 v1 对应的配方。各版 checkpoint 使用原运行身份匹配的源码。[首轮记录](../artifacts/ct_checks/20261118_v41_live_speed_1814/REPORT.md) · [v1 固定测试结果](../artifacts/ct_checks/20261117_kitti_final_research_review/test_review_overview.md)
+
+## 历史协议 · 2026-11-16 exec v2
+
+当时的 v2 运行流程覆盖新 run 的训练执行参数、评估、日志和保存规则：具名 CLI > YAML > 默认，取消普通配方精确预锁与预登记，结构/算法合同保持。默认每轮 test、每轮完整 checkpoint，按 best Precision 或 last 报告，并保留最近 K 个已评估轮；test 选出的 best 必须标明选择来源。独立 dev 用 `--test --eval_split dev` 写新目录。已实现不等于已验收，本轮未执行训练或测试。
 
 下方 11/08 的两组固定配方、final60/late3 与 dev/test 规则属于 **v1 历史实验**，不能用来否定已授权的 v2 新 run，也不能以 v2 best/lateK 替换其结果。旧 checkpoint 使用与原 run 匹配的原源码；跨执行版本不续训。
 
 整理日期：**2026-11-08**。本节归并已确定的 V41 协议，不改模型、配方、实验预算或历史结果。项目进展与研究问题统一见 [当前状态](PROJECT_STATUS.md)，机制见 [V41设计](CTSEQTRACK_V41_DESIGN.md)，具体命令见 [V41操作页](CTSEQTRACK_V41_LAUNCH.md)。下方按日期保留旧版本协议，仅用于对应实验复现。
 
-## 证据日期与当前阶段
+## 历史快照 · 2026-11-08 V41 v1
 
 最新已读取运行证据为 **2026-11-04 10:46:53（北京时间）** 的 [KITTI只读审计](../artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)：Full 完成9轮、进入第10轮；原始 SeqTrack3D 方法＋KITTI适配已完成60轮并保存末三轮权重与开发集结果；该次审计尚未找到固定测试集19–20的最终结果。这不是11月8日实时服务器状态，也不能据此认定任务仍在运行、已停止或最终失败。
 

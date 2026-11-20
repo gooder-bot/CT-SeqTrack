@@ -69,18 +69,114 @@ def test_shared_weights_buffers_and_rng_before_optimizer(tmp_path, monkeypatch):
         old.tail.weight.fill_(2)
         old.tail.running_mean.fill_(4)
     path = tmp_path / 'scratch.pt'
-    reference = align_initialization(old, path, reference=True)
+    reference = align_initialization(old, path, reference=True, revision_pair='v2-v3')
     random_draw = torch.rand(3)
     new = torch.nn.Module()
     new.tail = torch.nn.BatchNorm1d(3)
-    candidate = align_initialization(new, path, reference=False)
+    with pytest.raises(ValueError, match='inventory'):
+        align_initialization(new, path, reference=False)
+    candidate = align_initialization(new, path, reference=False, revision_pair='v2-v3')
     assert torch.equal(new.tail.weight, old.tail.weight)
     assert torch.equal(new.tail.running_mean, old.tail.running_mean)
     assert torch.equal(torch.rand(3), random_draw)
     assert candidate['shared_initialization_sha256'] == reference['shared_initialization_sha256']
     new.tail = torch.nn.BatchNorm1d(4)
     with pytest.raises(ValueError, match='changed owner'):
-        align_initialization(new, path, reference=False)
+        align_initialization(new, path, reference=False, revision_pair='v2-v3')
+
+
+def test_v4_rejects_initial_value_drift_before_loading_weights(tmp_path, monkeypatch):
+    from models.ct_v41 import runtime
+    monkeypatch.setattr(runtime, 'capture_rng_state', torch.get_rng_state)
+    monkeypatch.setattr(runtime, 'restore_rng_state', torch.set_rng_state)
+    net = torch.nn.Linear(2, 2)
+    path = tmp_path / 'initial.pt'
+    reference = align_initialization(net, path, reference=True)
+    assert align_initialization(net, path, reference=False) == reference
+    with torch.no_grad():
+        net.bias.add_(1)
+    with pytest.raises(ValueError, match='different scratch initialization'):
+        align_initialization(net, path, reference=False)
+
+
+def test_payload_counts_prepared_fields_and_cached_history_once():
+    from dataclasses import dataclass
+    @dataclass
+    class Pool:
+        ids: np.ndarray
+    xyz = np.ones((5, 3), dtype=np.float32)
+    pool = Pool(np.array([0, 2]))
+    packet = ({'points': xyz}, [pool], {0: xyz})
+    seen = point_payload([{'frames': {}, '_prepared_start': packet}] * 2)
+    assert seen['prepared_start_array_bytes'] == xyz.nbytes + pool.ids.nbytes
+
+
+def test_v4_reports_drift_but_enforces_workload_and_fresh_inputs():
+    from copy import deepcopy
+    from tools.v41_equivalence_probe import EquivalenceProbe
+    probe = EquivalenceProbe(SimpleNamespace(revision_pair='v3-v4'), WindowComplete)
+    expected = dict(main_requests=[dict(frame=3, window_start=3), dict(frame=4, window_start=3)],
+        main=dict(point_ids=torch.tensor([[1, 2], [2, 3]]),
+                  losses=dict(loss_total=torch.tensor(1.))), optimization_loss=torch.tensor(1.),
+        common_gradients_before_adam={'weight': torch.ones(2)}, BN_after_step={}, state_after_commit={},
+        committed=(2, 0, 0, 1))
+    current = deepcopy(expected)
+    current['main']['point_ids'][1, 0] += 1  # 递归裁点允许随模型变化
+    current['main']['losses']['loss_total'] += 1e-6
+    current['common_gradients_before_adam']['weight'] += .25
+    probe.compare_step(10, current, expected)
+    assert probe.first_difference['path'] == 'step_10/main/point_ids'
+    assert probe.differences['main/losses']['outside_tolerance'] == 0
+    assert probe.differences['common_gradients_before_adam']['outside_tolerance'] == 1
+    assert 'committed' in probe.compared_groups
+    current['main']['point_ids'][0, 1] += 1
+    with pytest.raises(AssertionError, match='fresh_inputs/point_ids'):
+        probe.compare_step(10, current, expected)
+    current['main_requests'][0]['frame'] += 1
+    with pytest.raises(AssertionError, match='main_requests'):
+        probe.compare_step(10, current, expected)
+
+
+def test_v4_pair_rejects_even_one_ulp_in_sampled_gradients():
+    from copy import deepcopy
+    from tools.v41_equivalence_probe import EquivalenceProbe
+    probe = EquivalenceProbe(SimpleNamespace(revision_pair='v4-v4'), WindowComplete)
+    expected = dict(main_requests=[dict(frame=4, window_start=3)],
+        main=dict(point_ids=torch.tensor([[5]])), optimization_loss=torch.tensor(1.),
+        common_gradients_before_adam={'weight': torch.ones(2)}, BN_after_step={},
+        state_after_commit={}, committed=(1, 0, 0, 1))
+    current = deepcopy(expected)
+    probe.compare_step(1, current, expected)
+    assert not probe.differences and 'common_gradients_before_adam' in probe.compared_groups
+    grad = current['common_gradients_before_adam']['weight']
+    grad[0] = torch.nextafter(grad[0], torch.tensor(2.))
+    with pytest.raises(AssertionError, match='step_1/common_gradients_before_adam/weight'):
+        probe.compare_step(1, current, expected)
+
+
+@pytest.mark.parametrize('pair,reference,corrected', [
+    ('v2-v3', True, True), ('v2-v3', False, False), ('v3-v4', True, False), ('v3-v4', False, False),
+    ('v4-v4', True, False), ('v4-v4', False, False)])
+def test_probe_changes_only_historical_reference_main_loss(pair, reference, corrected):
+    from contextlib import ExitStack
+    from tools.v41_equivalence_probe import EquivalenceProbe
+    value = torch.tensor(2., requires_grad=True)
+    def main(batch, output):
+        losses = {'loss_total': 3 * value}
+        if corrected:
+            losses['loss_acquisition'] = value
+        return losses
+    model = SimpleNamespace(_auxiliary_insertions=(1, 2), _epoch_steps=3,
+        _forward_auxiliary_raw=lambda rows: rows, training_step=lambda *a: None,
+        on_before_optimizer_step=lambda *a: None,
+        tracker=SimpleNamespace(compute_losses=main, compute_aux_losses=lambda *a: {'loss_total': value}))
+    probe = EquivalenceProbe(SimpleNamespace(revision_pair=pair, reference=reference), WindowComplete)
+    with ExitStack() as hooks:
+        probe.install(hooks, model)
+        loss = model.tracker.compute_losses({}, None)['loss_total']
+        assert model.tracker.compute_aux_losses({}, None)['loss_total'] is value
+        (gradient,) = torch.autograd.grad(loss, value)
+        assert gradient.item() == pytest.approx(2.95 if corrected else 3.)
 
 
 def test_equivalence_accepts_float_tolerance_and_rejects_one_raw_id():

@@ -163,6 +163,7 @@ def write_resume_event(config, root, manifest):
             config_sha256=config_identity(config), resolved_config=dict(config),
             torch=manifest['torch'], lightning=manifest['lightning'],
             precision_policy=manifest['precision_policy'], flash_attention=manifest['flash_attention'],
+            training_execution_recipe=manifest['training_execution_recipe'],
             command_line=manifest.get('command_line', [])), stream, ensure_ascii=False, indent=2)
     return event_path
 

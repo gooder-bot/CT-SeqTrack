@@ -50,7 +50,7 @@ def test_direct_run_directories_distinguish_q0_arms_at_same_timestamp(tmp_path, 
         return entry.resolve_run_directory(entry.parse_config(argv), command_line=argv)
 
     a_yaml, b_yaml = '41_full_kitti.yaml', '41_full_kitti_q0_inverse_lwh.yaml'
-    stem = '20260102-030405-41_v3_full-'
+    stem = '20260102-030405-41_v4_full-'
     default_tag = 'v41_full_kitti_car_seed42'
     a = destination(a_yaml)
     assert a == tmp_path / 'output' / (stem + default_tag)

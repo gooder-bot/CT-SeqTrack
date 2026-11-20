@@ -6,6 +6,8 @@ from typing import Mapping
 import torch
 from torch import Tensor
 
+from .input_checks import remember_finite_times
+
 
 def history_descriptor(batch: Mapping[str, Tensor], local_history: Tensor,
                        history_valid: Tensor, size: Tensor, support: Tensor,
@@ -15,13 +17,17 @@ def history_descriptor(batch: Mapping[str, Tensor], local_history: Tensor,
     if (local_history.shape != (b, 3, 4) or history_valid.shape != (b, 3)
             or support.shape != (b, 3, 3)):
         raise ValueError('history context requires three aligned history slots')
-    times = batch.get('frame_times')
-    if times is None or times.shape != (b, 4):
+    frame_times = batch.get('frame_times')
+    if frame_times is None or frame_times.shape != (b, 4):
         raise ValueError('history context requires physical frame_times[B,4]')
-    times = times.detach().to(size)
+    times = frame_times.detach().to(size)
     age = times[:, -1:] - times[:, :3]
-    if time_scale <= 0 or not bool(torch.isfinite(times).all()) or bool((age[history_valid] <= 0).any()):
+    valid_times = torch.isfinite(times).all() & ((age > 0) | history_valid.logical_not()).all()
+    if time_scale <= 0 or not bool(valid_times):
         raise ValueError('history ages and time_scale must be finite and positive')
+    # 仅同 dtype、同设备的 detach 别名共享检查；显式转换后由各消费者自行校验。
+    if times.dtype == frame_times.dtype and times.device == frame_times.device:
+        remember_finite_times(frame_times)
     history = local_history.detach()
     angle = history[..., 3]
     descriptor = torch.cat((history[..., :3] / size.detach()[:, None],

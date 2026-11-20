@@ -1,4 +1,4 @@
-"""按固定 dev 58/59/60 轮比较 V41 v3 两种 q0 中心损失。只读取训练产物。"""
+"""按固定 dev 58/59/60 轮比较同一 V41 执行版本的两种 q0 中心损失。"""
 import argparse
 import json
 import math
@@ -57,8 +57,9 @@ def identity(root, mode):
     config = yaml.safe_load((root / 'resolved_config.yaml').read_text(encoding='utf-8-sig'))
     recipe = dict(manifest['training_execution_recipe'])
     require(manifest['model'] == 'ctseqtrackv41' and manifest['run_type'] == 'formal'
-            and recipe['execution_revision'] == 'v3' and manifest['arm'] == 'full'
-            and 'source_run_id' not in manifest, 'expected a formal V41 v3 Full training run')
+            and recipe['execution_revision'] in ('v3', 'v4') and manifest['arm'] == 'full'
+            and recipe['execution_revision'] == config['v41_execution_revision']
+            and 'source_run_id' not in manifest, 'expected a formal V41 v3/v4 Full run with consistent execution revision')
     require(recipe.pop('q0_center_weighting') == mode and config['v41_q0_center_weighting'] == mode,
             f'expected q0 center weighting {mode}')
     require(not config.get('init_checkpoint') and not config.get('checkpoint')
@@ -223,6 +224,8 @@ def difference(a, b):
 def compare(run_a, run_b):
     roots = [Path(run_a), Path(run_b)]
     manifests, configs, evidence = zip(*(identity(root, mode) for root, mode in zip(roots, MODES)))
+    revision = configs[0]['v41_execution_revision']
+    require(revision == configs[1]['v41_execution_revision'], 'q0 arms differ in execution revision')
     require(manifests[0]['run_id'] != manifests[1]['run_id'] and configs[0] == configs[1]
             and evidence[0] == evidence[1], 'arms differ in training settings, source, initialization or data identity')
     require(all(configs[0].get(k) == v for k, v in REFERENCE_TRAINING.items()),
@@ -250,7 +253,7 @@ def compare(run_a, run_b):
         epochs[str(epoch)] = dict(A=metrics_a, B=metrics_b, B_minus_A=difference(metrics_a, metrics_b))
     late = average_tree(list(epochs.values()))
     return dict(epochs=epochs, final60=epochs['60'], late3=late, retention=retention(late, environment['status']),
-                budget=budgets[0][1],
+                budget=budgets[0][1], execution_revision=revision,
                 arms={arm: dict(run_id=m['run_id'], weighting=mode, config_sha256=m['config_sha256'])
                       for arm, m, mode in zip(('A', 'B'), manifests, MODES)},
                 source_sha256=evidence[0]['source_sha256'], initial_parameter_hash=evidence[0]['initial_parameter_hash'],

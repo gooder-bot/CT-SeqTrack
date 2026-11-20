@@ -1,4 +1,10 @@
-# 2026-11-02 V41 KITTI Car 当前安排
+# CT-SeqTrack 服务器路径
+
+V41 的活动项目为 `/home/lishengjie/study/lcyu/CT-SeqTrack`，Python 为 `/home/lishengjie/miniconda3/envs/ctseqtrack3d/bin/python`，KITTI 输入目录为 `/home/lishengjie/data/cxtrack/training`。11 月 18 日 v3 的两组 q0 训练使用同一张物理 A40 GPU 0。查找既有运行时，可从快照的 `server_run_root` 和两组 `run_id` 定位各自的清单与日志。[运行快照](../artifacts/ct_checks/20261118_v41_live_speed_1814/measurements.json) · [V41 v3 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)
+
+以下按日期保留旧版路径、部署排障和设备占用记录。11 月 2 日条目对应 v1 首次部署。该版本后续完成的固定测试见[项目现状](PROJECT_STATUS.md)。
+
+## 2026-11-02 V41 v1 KITTI Car 部署记录
 
 21:39后排障：CT已上传，但旧登记因29文件仅CRLF→LF而拒绝启动；两次失败均在模型运行前。已在本地移除CT预登记依赖，待用户覆盖上传6个修复文件，随后直接重跑smoke。服务器Torch/Lightning/FA2/pointnet2_ops/nuScenes导入与Full配置解析正常，本次没有修改环境或服务器源码。
 21:05只读复核：两套Python路径和KITTI目录存在，baseline全部文件SHA与V41回执一致，CT的V41尚未上传。两环境均torch2.0.1+cu118/Lightning2.0.2/numpy1.23.0；CT为FA2 2.5.8，nvidia-ml-py12.560.30已安装。GPU0/1当时free为44,159/43,757MiB，未发现main.py训练进程。最新安排Full GPU0、SeqTrack GPU1，各2线程；这是状态快照，不代表真实batch、整轮或峰值验收。本次服务器没有写入。
@@ -13,7 +19,7 @@ Full项目 `/home/lishengjie/study/lcyu/CT-SeqTrack`，Python `/home/lishengjie/
 
 用户最新顺序为先GPU0并行B1 MTP+Full，其余配方不变，B0/B1对照以后补齐；具体独立命令及验收见 [V40操作](CTSEQTRACK_V40_LAUNCH.md)。旧版本“验收通过”和显存数字不代表V40状态。
 
-# CT-SeqTrack 当前服务器路径
+## 2026-10-28 及以前的服务器路径
 
 2026-10-28 当前为 [v39 两组 Full](CTSEQTRACK_V39_LAUNCH.md)，详细参数见[最新配置说明](CTSEQTRACK_V39_CONFIG.md)。项目仍为 `/home/lishengjie/study/lcyu/CT-SeqTrack`，mini 数据仍为 `/home/lishengjie/data/nuscenes-mini`。两组按用户要求同时使用物理 GPU0，OMP/MKL/OPENBLAS 各2、workers4、每轮验证，独立日期输出目录。
 

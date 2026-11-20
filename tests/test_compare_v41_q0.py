@@ -144,6 +144,29 @@ def test_two_matching_but_off_recipe_runs_are_rejected(tmp_path):
         compare(a, b)
 
 
+def test_q0_accepts_each_historical_revision_but_rejects_mixed_versions(tmp_path):
+    import yaml
+    a = make_run(tmp_path / 'A', 'uniform')
+    b = make_run(tmp_path / 'B', 'inverse_lwh')
+    def set_revision(root, revision):
+        path = root / 'run_manifest.json'
+        record = json.loads(path.read_text(encoding='utf-8'))
+        record['training_execution_recipe']['execution_revision'] = revision
+        write_json(path, record)
+        path = root / 'resolved_config.yaml'
+        values = yaml.safe_load(path.read_text(encoding='utf-8'))
+        values['v41_execution_revision'] = revision
+        path.write_text(yaml.safe_dump(values), encoding='utf-8')
+    for root in (a, b):
+        set_revision(root, 'v3')
+    assert compare(a, b)['execution_revision'] == 'v3'
+    set_revision(b, 'v4')
+    with pytest.raises(ValueError, match='execution revision'):
+        compare(a, b)
+    set_revision(a, 'v4')
+    assert compare(a, b)['execution_revision'] == 'v4'
+
+
 def test_numeric_environment_checks_kernels_and_allows_different_device_ordinals(tmp_path):
     a = make_run(tmp_path / 'A', 'uniform')
     b = make_run(tmp_path / 'B', 'inverse_lwh', devices=1, accelerator='gpu',

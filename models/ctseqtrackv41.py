@@ -16,7 +16,7 @@ except ModuleNotFoundError as error:
     pl = None
 
 from models.ct_v41.config import normalize_config, config_identity
-from models.ct_v41.data import BatchBuilder, build_loaders, stable_seed
+from models.ct_v41.data import BatchBuilder, build_loaders, full_epoch_diagnostics, stable_seed
 from models.ct_v41.auxiliary import (AuxiliaryDiagnostics, insertion_indices, insertion_identity,
                                     isolated_auxiliary_rng)
 from models.ct_v41.lr_schedule import AbsolutePiecewiseLR, WarmupMultiStepLR
@@ -112,8 +112,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             return self._loader(role)
 
     def _full_diagnostics(self, epoch):
-        return (self.config.diagnostics_level == 'full'
-                or int(epoch) in self.config.full_diagnostic_epochs)
+        return full_epoch_diagnostics(self.config, epoch)
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         # raw NumPy frames remain on CPU; only prepared tensors enter the GPU.
@@ -214,7 +213,16 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
     def on_before_optimizer_step(self, optimizer):
         """在 Adam 写入前拒绝非有限梯度，不增加梯度裁剪或改变优化器数学。"""
         gradients = [p.grad for group in optimizer.param_groups for p in group['params'] if p.grad is not None]
-        if gradients and not bool(torch.stack([torch.isfinite(g).all() for g in gradients]).all()):
+        if not gradients:
+            return
+        device = gradients[0].device
+        if device.type == 'cuda' and all(g.device == device and g.layout == torch.strided
+                                         and g.dtype == torch.float32 for g in gradients):
+            # 正式单卡的实数梯度只读拼接，保留 NaN/±Inf 判定及原梯度对象。
+            finite = torch.isfinite(torch.cat([g.reshape(-1) for g in gradients])).all()
+        else:
+            finite = torch.stack([torch.isfinite(g).all() for g in gradients]).all()
+        if not bool(finite):
             self.clear_pending_materialization()
             raise FloatingPointError('V41 nonfinite gradient; Adam update and accepted commit aborted')
 

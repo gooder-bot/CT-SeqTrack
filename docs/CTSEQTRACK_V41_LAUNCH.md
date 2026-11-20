@@ -1,12 +1,20 @@
-# V41 服务器验收与两组KITTI Car
+# V41 KITTI Car 运行入口与历史操作记录
 
-## 2026-11-16：新 run 命令已移至 v2 运行页
+## 2026-11-18 当前运行
 
-新 `exec v2` 的默认值、训练/恢复/独立 dev 命令、输出文件和待执行验收见 [V41 v2 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)。默认每轮 test 与完整 checkpoint，best Precision/last 和最近 K 个评估轮取代新 run 的固定60轮报告约束。本轮只完成源码/文档与静态审阅，未部署、未访问服务器、未运行 pytest/compileall 或模型。
+v3 的训练、同 run 恢复和 q0 开发集比较使用 [V41 v3 运行流程](CTSEQTRACK_V41_RUN_WORKFLOW.md)。`uniform` 与 `inverse_lwh` 两组已分别从头启动。北京时间 11 月 18 日 18:26:18 的日志记录首轮 1,880/4,771 和 1,913/4,771 步。两臂的固定 dev 结果待齐备后配对。[正式运行快照](../artifacts/ct_checks/20261118_v41_live_speed_1814/REPORT.md)
+
+下方命令供复现 v1 Full 与原始 SeqTrack3D 方法的 KITTI 适配基线。该次两系统比较已完成，固定 58/59/60 轮使用同一组 test 0019–0020 原始帧。读取旧 checkpoint 时使用其原 run 的源码和配置。[v1 固定测试结果](../artifacts/ct_checks/20261117_kitti_final_research_review/test_review_overview.md)
+
+## 历史操作 · 2026-11-16 exec v2
+
+当时的 `exec v2` 引入新的训练、恢复、独立 dev 评估和输出规则。默认每轮 test 与完整 checkpoint，best Precision/last 和最近 K 个评估轮取代新 run 的固定60轮报告约束。本轮只完成源码/文档与静态审阅，未部署、未访问服务器、未运行 pytest/compileall 或模型。
 
 下方保留 **v1 两组首次启动与历史快照**，不作为 v2 新 run 命令依据。旧 run 不改配方，旧 checkpoint 继续使用与其 manifest 匹配的原源码；v2 不能续训 v1。
 
-2026-11-08 文档整理。最新可引用运行快照为 **2026-11-04 10:46:53（北京时间）**，不是今日实时状态：Full完成9/60轮、第10轮2901/4771 batch；原始SeqTrack3D方法＋KITTI适配已完成60轮。Full第9轮dev为9.4719/7.7493；baseline dev final60为38.8072/50.7109、late3为35.7262/46.2808。尚未找到两组固定test19–20的最终结果。不同训练轮次不能据此宣布最终胜负。见 [项目状态](PROJECT_STATUS.md) 与 [原始审计](../artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。
+## 历史操作 · 2026-11-08 V41 v1
+
+当时可引用的运行快照为 **2026-11-04 10:46:53（北京时间）**，不是今日实时状态：Full完成9/60轮、第10轮2901/4771 batch；原始SeqTrack3D方法＋KITTI适配已完成60轮。Full第9轮dev为9.4719/7.7493；baseline dev final60为38.8072/50.7109、late3为35.7262/46.2808。尚未找到两组固定test19–20的最终结果。不同训练轮次不能据此宣布最终胜负。见 [项目状态](PROJECT_STATUS.md) 与 [原始审计](../artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。
 
 本页上传、验收与scratch命令保留原首次启动和复现用途，**不要求对已有run重新上传、重复scratch或补跑全部检查**。旧快照不能作为今天停止、恢复或重启的依据；已有checkpoint继续遵守同run、同源码/配置/数据和完整双流epoch规则。实际训练已发生也不能倒推每项独立工程验收都已单独留存通过记录。本次仅更新文档，不操作服务器。
 

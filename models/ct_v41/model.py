@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from .input import online_batch, loss_batch
+from .input_checks import input_check_scope
 from .observation import B0Observation
 from .decoder import SharedHypothesisDecoder
 from .prior import PhysicalTimePrior, empty_prior
@@ -159,7 +160,7 @@ class JointTracker(nn.Module):
         return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
             decoder, candidates, verification, decision, commit,
             candidates.q0_quality_logits.sigmoid(), decision.output_utility,
-            candidate_trust, candidates.q0_is_fallback, recovery)
+            candidate_trust, candidates.q0_is_fallback, recovery, reference_geometry=include_local_diagnostics)
 
     def _decode(self, prepared, prior, observation, pool, include_local_diagnostics):
         descriptor = (observation.history_descriptor if self.decoder.initial_context
@@ -168,7 +169,7 @@ class JointTracker(nn.Module):
                             include_local_diagnostics=include_local_diagnostics)
 
     def forward(self, batch, prior=None, *, include_local_diagnostics=True):
-        with recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
+        with input_check_scope(), recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
             prepared = online_batch(batch)
             if not self.enable_b1:
                 # 外部传入的 learned prior 也不能绕过 B0 消融。
@@ -188,7 +189,7 @@ class JointTracker(nn.Module):
         """
         if not self.enable_b3:
             raise ValueError('v41 recovery auxiliary stream requires Full')
-        with recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
+        with input_check_scope(), recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
             prepared = online_batch(batch)
             upstream = (self.observation, self.decoder, self.prior)
             modes = [(module, module.training) for root in upstream if root is not None for module in root.modules()]

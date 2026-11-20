@@ -118,3 +118,4 @@ class TrackOutput:
     commit_quality: Tensor           # [B,4] Tq0 / 0 / 0 / TR
     q0_is_fallback: Tensor
     recovery: Optional[RecoveryOutput] = None
+    reference_geometry: bool = True

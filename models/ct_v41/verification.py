@@ -7,6 +7,7 @@ from utils.batch_materialization import materialization_cache
 
 from .observation import B0Observation, box_corners_xyz
 from .geometry import inside_final_boxes
+from .input_checks import detached_size, positive_finite_size
 from .contracts import VerificationOutput
 
 
@@ -131,7 +132,7 @@ class LocalBoxReader(nn.Module):
 
     def forward(self, pool, boxes, allowed, size, *, diagnostics=True, return_point_mask=True):
         b, q, _ = boxes.shape
-        if size.shape != (b, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
+        if size.shape != (b, 3) or not positive_finite_size(size):
             raise ValueError('v41 local reader requires positive finite LWH')
         ids = pool['ids']
         if allowed.shape != (b, q, ids.shape[1]):
@@ -247,7 +248,7 @@ class FinalBoxVerifier(nn.Module):
 
     def read_local(self, pool, boxes, valid, size, *, diagnostics=True, return_point_mask=True):
         authorized = pool['valid'][:, None] & valid.detach()[..., None]
-        local, statistics = self.local_reader(pool, boxes.detach(), authorized, size.detach(),
+        local, statistics = self.local_reader(pool, boxes.detach(), authorized, detached_size(size),
             diagnostics=diagnostics, return_point_mask=return_point_mask)
         feature = self.box_encoder(local.reshape(len(boxes), boxes.shape[1], 512))
         return feature, statistics

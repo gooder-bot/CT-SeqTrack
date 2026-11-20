@@ -116,6 +116,33 @@ def _full_view(frame):
     return dict(points=points, ids=indices if ids is None else ids, raw_indices=indices, cache_used=False)
 
 
+def _train_bounds(frame):
+    corners = frame['3d_bbox'].corners()
+    return corners.min(axis=1) - 10., corners.max(axis=1) + 10.
+
+
+def _train_view(frame, ref, metadata_sha, cloud=None):
+    def read():
+        lower, upper = _train_bounds(frame)
+        raw = ref.coordinates() if cloud is None else cloud.points
+        # float64 长度一数组保持原来的广播比较精度。直接沿连续 XYZ 各轴
+        # 扫描，避免同时构造多份 [N,3] 掩码。
+        mask = raw[0] > lower[:1]
+        mask &= raw[0] < upper[:1]
+        for axis in (1, 2):
+            mask &= raw[axis] > lower[axis:axis + 1]
+            mask &= raw[axis] < upper[axis:axis + 1]
+        selected = np.flatnonzero(mask)
+        return raw.T[selected], selected, lower, upper, np.asarray(raw.shape[1], dtype=np.int64)
+    # 同一物理帧/目标可由公开 adapter 配合修改过的 annotation 调用。
+    # 内部 endpoint 帧来自固定 manifest；公开帧的选区另按实际边界区分。
+    key = ('v41_gt10', ref, metadata_sha, int(frame['meta']['track_id']))
+    if cloud is not None:
+        box = frame['3d_bbox']
+        key += (tuple(box.center), tuple(box.wlh), tuple(box.orientation.elements))
+    xyz, indices, lower, upper, count = process_pointcloud_cache(ref.cache_bytes).load_readonly(key, read)
+    return dict(points=xyz, ids=indices, raw_indices=indices, lower=lower, upper=upper, raw_count=int(count))
+
 def normal_train_point_view(frame, roi_boxes, box_size, *, scale=1.25, offset=2.,
                             enabled=True, auxiliary=False):
     """返回完整包含实际 ROI 的缓存视图；raw_indices 必须映射回完整原云。
@@ -142,8 +169,11 @@ def normal_train_point_view(frame, roi_boxes, box_size, *, scale=1.25, offset=2.
         if not ((corners >= cache['lower'] + 1e-7).all()
                 and (corners <= cache['upper'] - 1e-7).all()):
             return _full_view(frame)
+    if 'points' not in cache:
+        # 历史池未命中且 ROI 完全落入 GT10 时才在主进程重建该视图。
+        cache = _train_view(frame, frame['_v41_raw_ref'], frame['input_metadata_sha256'])
     return dict(points=cache['points'], ids=cache['ids'],
-                raw_indices=cache['raw_indices'], cache_used=True)
+                raw_indices=cache['raw_indices'], cache_used=True, raw_count=cache.get('raw_count'))
 
 
 class KITTIV41Dataset(KITTIMFDataset):
@@ -240,27 +270,7 @@ class KITTIV41Dataset(KITTIMFDataset):
                     and not (self.KITTI_velo / scene_id / f'{frame_id:06d}.bin').is_file())
 
     def _train_view(self, frame, ref, cloud=None):
-        def read():
-            corners = frame['3d_bbox'].corners()
-            lower, upper = corners.min(axis=1) - 10., corners.max(axis=1) + 10.
-            raw = ref.coordinates() if cloud is None else cloud.points
-            # float64 长度一数组保持原来的广播比较精度。直接沿连续 XYZ 各轴
-            # 扫描，避免同时构造多份 [N,3] 掩码。
-            mask = raw[0] > lower[:1]
-            mask &= raw[0] < upper[:1]
-            for axis in (1, 2):
-                mask &= raw[axis] > lower[axis:axis + 1]
-                mask &= raw[axis] < upper[axis:axis + 1]
-            selected = np.flatnonzero(mask)
-            return raw.T[selected], selected, lower, upper, np.asarray(raw.shape[1], dtype=np.int64)
-        # 同一物理帧/目标可由公开 adapter 配合修改过的 annotation 调用。
-        # 内部 endpoint 帧来自固定 manifest；公开帧的选区另按实际边界区分。
-        key = ('v41_gt10', ref, self.input_metadata_sha256, int(frame['meta']['track_id']))
-        if cloud is not None:
-            box = frame['3d_bbox']
-            key += (tuple(box.center), tuple(box.wlh), tuple(box.orientation.elements))
-        xyz, indices, lower, upper, count = process_pointcloud_cache(ref.cache_bytes).load_readonly(key, read)
-        return dict(points=xyz, ids=indices, raw_indices=indices, lower=lower, upper=upper, raw_count=int(count))
+        return _train_view(frame, ref, self.input_metadata_sha256, cloud)
 
     def _get_frame_from_anno(self, anno):
         # 保持公开接口的独立可写整云；内部 endpoint loader 有自己的只读路径。
@@ -281,15 +291,20 @@ class KITTIV41Dataset(KITTIMFDataset):
             self._endpoint_metadata.move_to_end(key)
         return self._endpoint_metadata[key]
 
-    def endpoint_frames(self, tracklet, indices):
+    def endpoint_frames(self, tracklet, indices, *, worker_required=None):
         frames = []
         for index in indices:
             frame = dict(self.endpoint_metadata(tracklet, index))
             ref = KITTIRawFrame(self.KITTI_velo, frame['scene_id'], frame['frame_id'], self.ct_pointcloud_cache_bytes)
             frame['_v41_raw_ref'] = ref
             if self.v41_data_role == 'train':
-                frame['_v41_normal_train_cache'] = self._train_view(frame, ref)
-            else:
+                if worker_required is None or (tracklet, index) in worker_required:
+                    frame['_v41_normal_train_cache'] = self._train_view(frame, ref)
+                else:
+                    lower, upper = _train_bounds(frame)
+                    frame['_v41_normal_train_cache'] = dict(lower=lower, upper=upper)
+                frame.setdefault('input_metadata_sha256', self.input_metadata_sha256)
+            elif worker_required is None:
                 points, ids = ref.arrays()
                 frame['pc'] = PointCloud(points, point_ids=ids)
             frames.append(frame)

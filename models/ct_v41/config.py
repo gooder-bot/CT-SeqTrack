@@ -8,6 +8,7 @@ from utils.config import load_yaml_config
 from utils.execution_lab import execution_scope
 from utils.execution_profile import validate_execution_profile
 from utils.time_config import engineering_time_defaults, validate_time_config, hash_time_manifest_paths
+from .cpu_geometry import backend_identity
 from .identity import SCHEMA, EXECUTION_REVISION
 
 
@@ -99,7 +100,8 @@ def recipe_identity(config):
     if not isinstance(name, str) or name not in RECIPES:
         raise ValueError('unknown v41 training recipe: ' + str(name))
     options = list(config.get('v41_engineering_options', ('unique_mask',)))
-    return dict(recipe=name, implementation_id='v41_current_point_recovery_no_acquisition_v3',
+    return dict(recipe=name, implementation_id='v41_current_point_recovery_packed_v4',
+        cpu_geometry=backend_identity(),
         execution_revision=EXECUTION_REVISION,
         projection='concat', options=options, prior_read_applicable=False,
         q0_center_weighting=config.get('v41_q0_center_weighting', 'uniform'),

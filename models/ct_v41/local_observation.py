@@ -10,6 +10,7 @@ from torch import Tensor, nn
 from .contracts import ObservationFeatures
 from .observation import box_corners_xyz
 from .verification import build_current_pool
+from .input_checks import detached_size, positive_finite_size
 
 
 def _gather_corner_features(features, selected):
@@ -50,8 +51,8 @@ class LocalObservationReader(nn.Module):
         support, source_type = ordered['probability'], ordered['source'].to(features)
         allowed = pool['valid'][:, None] & query_valid.detach().bool()[..., None]
         allowed = allowed.gather(2, id_order[:, None].expand(-1, 1, -1))
-        size = batch['box_size'].detach().to(points)
-        if size.shape != (b, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
+        size = detached_size(batch['box_size']).to(points)
+        if size.shape != (b, 3) or not positive_finite_size(size):
             raise ValueError('local observation requires positive first-frame L/W/H')
         # 新增几何分支全detach；旧q0角点query仍按原图向coarse反传。
         seed = seeds.detach()

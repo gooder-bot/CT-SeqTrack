@@ -238,17 +238,20 @@ class TrainingDiagnostics:
     def add_batch(self, rows, batch, output, losses):
         self._add_observation_batch(rows, batch, output, losses)
         from .verification import current_q0_support
-        q0_support = current_q0_support(output.observation, batch, output.candidates.boxes[:, 0])
+        targets = getattr(output, 'supervision_targets', {})
+        # 同批 Full 损失已保留全部候选的原始支持计数；独立 B0/B1 调用仍可重建 q0。
+        support_count = (targets['support_count'][:, 0] if 'support_count' in targets
+                         else current_q0_support(output.observation, batch, output.candidates.boxes[:, 0])['count'])
         values = dict(v41_selected_index=output.selected_index,
                       v41_q0_real=output.candidates.raw_valid[:, 0],
-                      v41_q0_support_count=q0_support['count'],
+                      v41_q0_support_count=support_count,
                       v41_selected_commit_support_count=output.commit_decision.support_mask.sum(-1),
                       v41_trusted_eligible=output.commit_decision.eligible,
                       history_box_provenance=batch['history_box_provenance'])
         if output.verification is not None:
             values['v41_utility'] = output.verification.utility
             values['v41_q0_trusted_score'] = output.verification.logits[:, 0, 2].sigmoid()
-        for name, value in getattr(output, 'supervision_targets', {}).items():
+        for name, value in targets.items():
             if torch.is_tensor(value) and value.shape[:1] == output.selected_index.shape:
                 values['v41_target_' + name] = value
         values = tensors_to_numpy(values, optimized=self.optimized)

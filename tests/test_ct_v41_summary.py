@@ -177,7 +177,7 @@ def test_detail_gate_preserves_inputs_supervision_and_full_state_but_skips_raw_c
 
 
 @pytest.mark.parametrize('auxiliary', [False, True], ids=['main', 'auxiliary'])
-def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(auxiliary):
+def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(auxiliary, monkeypatch):
     """真实主/辅前向对照；控制同权重/dropout，不用假输出代替梯度验收。"""
     from models.ct_v41.model import JointTracker
     from models.ct_v41.training_diagnostics import TrainingDiagnostics
@@ -233,7 +233,13 @@ def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(aux
                     losses = model.compute_losses(batch, output)
                     assert losses['m_valid_endpoints'] > 0
                     if detailed:
-                        TrainingDiagnostics(config.seed, optimized=True).add_batch(rows, batch, output, losses)
+                        q0 = current_q0_support(output.observation, batch, output.candidates.boxes[:, 0])
+                        diagnostics = TrainingDiagnostics(config.seed, optimized=True)
+                        with monkeypatch.context() as patch:
+                            patch.setattr('models.ct_v41.verification.current_q0_support',
+                                          lambda *args: pytest.fail('Full loss already measured q0 support'))
+                            diagnostics.add_batch(rows, batch, output, losses)
+                        assert diagnostics.totals['statistics']['v41_q0_support_count']['sum'] == q0['count'].sum().item()
                 losses['loss_total'].backward()
                 gradients = {name: None if parameter.grad is None else parameter.grad.detach().clone()
                              for name, parameter in model.named_parameters()}
@@ -273,3 +279,25 @@ def test_real_math_tracker_summary_full_preserve_losses_gradients_and_commit(aux
                 torch.testing.assert_close(buffer, dict(summary_model.named_buffers())[name], rtol=0, atol=0)
     finally:
         torch.set_num_threads(threads)
+
+
+@pytest.mark.parametrize('normalized', [False, True])
+def test_b1_training_only_terms_preserve_values_and_gradients(normalized):
+    from models.ct_v41.motion import physical_motion_uncertainty_loss
+
+    mean = torch.tensor([[.1, .2], [.3, -.1]], requires_grad=True)
+    sigma = torch.tensor([[.05, .7], [-.1, .3]], requires_grad=True)
+    residual = torch.tensor([[.96, .25], [-.42, .33]], requires_grad=True)
+    options = (dict(kinematic_xy=torch.zeros_like(mean), envelope_parallel_perp=torch.ones_like(mean),
+                    residual_unit_parallel_perp=residual) if normalized else {})
+    args = (mean, torch.tensor([[.5, .3], [70., -70.]]), sigma,
+            torch.tensor([[1., 0.], [0., 1.]]), torch.tensor([True, True]))
+    expected = physical_motion_uncertainty_loss(*args, **options)
+    actual = physical_motion_uncertainty_loss(*args, **options, include_diagnostics=False)
+    assert set(actual) == {'mean_per_sample', 'nll_per_sample', 'valid'}
+    assert all(torch.equal(value, expected[key]) for key, value in actual.items())
+    def gradients(terms):
+        loss = ((terms['mean_per_sample'] + terms['nll_per_sample']) * terms['valid']).sum()
+        return torch.autograd.grad(loss, (mean, sigma, residual), allow_unused=True)
+    for left, right in zip(gradients(actual), gradients(expected)):
+        assert (left is None and right is None) or torch.equal(left, right)

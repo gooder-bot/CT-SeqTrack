@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import numpy as np
+from .cpu_geometry import compiled_backend
 
 
 def _unique_mask(raw_ids):
@@ -76,6 +77,18 @@ def make_search_plan(*, anchor, trusted_box, trusted_time, velocity, velocity_va
 
 def inside_box(points, box, size, *, scale=1., offset=0.):
     """搜索、种子、监督和提交共用的闭区间框测试；保留原世界坐标精度。"""
+    if (type(points) is np.ndarray and points.ndim == 2 and points.shape[1] == 3
+            and points.dtype in (np.float32, np.float64)
+            and type(box) is np.ndarray and box.shape == (4,) and box.dtype == np.float64
+            and type(size) is np.ndarray and size.shape == (3,) and size.dtype == np.float64):
+        backend = compiled_backend()
+        if backend is not None:
+            limits = size * (float(scale) / 2) + float(offset)
+            return backend.inside_box(points, box, np.cos(box[3]), np.sin(box[3]), limits)
+    return _inside_box_numpy(points, box, size, scale=scale, offset=offset)
+
+
+def _inside_box_numpy(points, box, size, *, scale=1., offset=0.):
     delta = np.asarray(points)[..., :3] - np.asarray(box)[:3]
     c, s = np.cos(box[3]), np.sin(box[3])
     x = c * delta[..., 0] + s * delta[..., 1]

@@ -19,6 +19,29 @@ from models.ctseqtrackv41 import CTSEQTRACKV41
 from tests.helpers.raw_tracking import TinySource, fake_output
 
 
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='requires CUDA'))])
+def test_gradient_guard_reads_values_before_adam_without_mutation(device):
+    first = nn.Parameter(torch.ones(2, 3, device=device))
+    second = nn.Parameter(torch.ones(1, device=device))
+    optimizer = torch.optim.Adam([first, second])
+    aborted = []
+    host = SimpleNamespace(clear_pending_materialization=lambda: aborted.append(True))
+    check = CTSEQTRACKV41.on_before_optimizer_step
+    check(host, optimizer)
+    first.grad = torch.arange(6., device=device).reshape(3, 2).T
+    second.grad = torch.full_like(second, torch.finfo(torch.float32).max)
+    before = first.grad.clone()
+    original = first.grad
+    check(host, optimizer)
+    assert not aborted and torch.equal(first.grad, before) and first.grad is original
+    for bad in (float('nan'), float('inf'), -float('inf')):
+        second.grad.fill_(bad)
+        with pytest.raises(FloatingPointError, match='nonfinite gradient'):
+            check(host, optimizer)
+    assert len(aborted) == 3 and not optimizer.state
+
+
 def cfg(**kwargs):
     values = dict(ct_engineering_check=True, v41_attention_backend='math',
         batch_size=2, workers=0, epoch=11, v32_reserve_windows=0,

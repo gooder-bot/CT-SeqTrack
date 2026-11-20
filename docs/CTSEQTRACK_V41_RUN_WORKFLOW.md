@@ -1,6 +1,16 @@
-# V41 v3 运行流程
+# V41 v4 运行流程
 
-2026-11-18。当前 Full 使用 `v41_execution_revision: v3`。B1 仅保留运动与不确定度监督，原权重 0.05 的 acquisition 损失和全云标签已退役。主训练 GT10 以实际 ROI 完整包含为条件，辅助整轨与评估仍以真实点云搜索。已完成的 KITTI 结果属于旧版本，新版的整轮速度与 S/P 待服务器验证。
+同一 exec v4 的工程修订由运行清单中的源码 SHA 区分。复测两个 v4 工作树时可用 `tools/benchmark_v41_training.py --revision-pair v4-v4`；`--equivalence only` 会逐值核验采样到的主辅步骤、损失、梯度、BN 和提交状态。同 run 的恢复和评估使用该 run 原始 SHA 对应的源码。[二次复核和 GPU 1 实测](../artifacts/ct_checks/20261120_v41_v4_recheck/REPORT.md)
+
+2026-11-20 起，两个 Full YAML 从头启动都使用 `v41_execution_revision: v4`。v4 在 KITTI 多 worker 主流提前准备独立窗口首行，后续帧消费主进程的实际预测。三路 PointNet 以 FP32 有效行执行，归一化仍使用真实点。运行清单记录 CPU 几何后端及 NumPy、Numba 版本；这些信息进入恢复身份。已有 v3 训练和评估请使用对应清单的原始源码。
+
+本次 v4 修订沿用现有启动命令。Linux、NVIDIA SM 8.x、Triton 2.0.x 的 FP32 路径按需编译 B0 分组 max 与回填算子，首次使用包含 JIT 耗时。节点仅有版本化驱动库时，进程可从 CUDA toolkit 的 `lib64/stubs` 补充编译器的链接搜索路径。CPU、未支持的工具链和外部提供的点槽索引继续使用 PyTorch 实现。主流和辅助流各自创建一次前向校验作用域，尺寸与帧时间的校验记录在前向结束时释放。[实现及组合验收](V41_TRAINING_PERF.md)
+
+**新训练（2026-11-20 起）：** 启动时显式传 `--eval_split test --check_val_every_n_epoch 1`，每轮只评 KITTI test 0019–0020，不跑 dev。下方 q0 A/B 的 `dev_args` 仅用于复现 11 月 18 日已启动的实验，不用于后续新实验。
+
+**2026-11-18。当前 q0 两组均已从头启动。** 北京时间 18:26:18 的留档显示，`uniform` 和 `inverse_lwh` 同用物理 A40 GPU 0，分别完成首轮的 1,880/4,771 和 1,913/4,771 个主步。两份 manifest 记录相同的源码 `b819e76`、执行身份与初始参数。该快照只覆盖首轮训练，v3 的整轮耗时与固定开发集 S/P 仍待后续产物。[运行父目录、清单及日志快照](../artifacts/ct_checks/20261118_v41_live_speed_1814/measurements.json) · [吞吐计时边界](../artifacts/ct_checks/20261118_v41_live_speed_1814/REPORT.md)
+
+11 月 18 日启动的 Full 使用 `v41_execution_revision: v3`。B1 保留物理时间运动、不确定度及训练侧多步位移监督，原权重 0.05 的 acquisition 损失和全云标签已退役。主训练 GT10 以实际 ROI 完整包含为条件，辅助整轨与评估以真实点云搜索。已完成的 KITTI 固定 test 结果属于 v1。其第 60 轮 CT 和原始 SeqTrack3D 方法＋本地 KITTI 适配分别取得 S/P 69.7712/81.9497 和 37.6767/48.2966。[v1 固定测试与官方比较器](../artifacts/ct_checks/20261117_kitti_final_research_review/REPORT.md)
 
 服务器配对测速的命令、计时边界和结果字段见 [V41 训练测速](V41_TRAINING_PERF.md)。
 
@@ -8,9 +18,9 @@
 
 A 使用原 Full 的 `uniform`。B 的 `inverse_lwh` 对首框长、宽、高取倒数，再除以三个倒数的均值。在已有锚点车体轴内，先计算逐轴米制 Smooth L1（β = 1 m），再逐轴乘权重、取均值，并沿用中心系数 2。该选项控制主训练 q0 的直接中心监督和相应日志。权重与配方一起写入 manifest。默认 Full 仍为 A。
 
-上传时请使用完整的当前 v3 工作树，包含新 B 配置和比较工具。服务器原正式目录在 2026-11-18 只读检查时仍为 v1。下列命令应在上传后的 v3 项目目录执行。可在本地及服务器各运行一次 `python tools/verify_ct_v41.py verify --resolved`，比对 `source_sha256`。该摘要覆盖运行时 Python 源码和依赖清单，两个 YAML 的实际选项可通过下面的冒烟检查核对。
+已有正式运行由两份 manifest 和训练日志标识。检查现有进度时可按快照中的 `server_run_root` 与两个 `run_id` 定位原目录。两组取得第 58–60 轮完整产物后，将各自的运行目录传给 `tools/compare_v41_q0.py`。[现有运行身份](../artifacts/ct_checks/20261118_v41_live_speed_1814/measurements.json)
 
-在 KITTI、CUDA 与 FA2 环境下，可通过同一服务器脚本分别检查 A、B 的主辅训练步骤。两个报告的 `v41_q0_center_weighting` 应分别为 `uniform` 和 `inverse_lwh`。
+以下命令用于在匹配的 v3 工作树中独立复现。可选的 `python tools/verify_ct_v41.py verify --resolved` 读取运行源码和依赖摘要。KITTI、CUDA 与 FA2 环境下的主辅训练步骤可按下例检查，两个报告的 `v41_q0_center_weighting` 应分别为 `uniform` 和 `inverse_lwh`。
 
 ```bash
 (
@@ -23,7 +33,7 @@ done
 )
 ```
 
-以下两组使用相同的 dev、固定轮次、seed42、batch 16、60 轮和主辅采样预算，各从随机初始化开始。命令默认沿用环境已分配的单张 GPU。
+下面的串行示例会为一次独立复现创建新目录，并从随机初始化训练两个 Full。两组共用 dev、固定轮次、seed42、batch 16、60 轮及主辅采样预算。现有正式运行采用同卡并行，轮次结果由各自的原目录读取。
 
 ```bash
 (
@@ -67,9 +77,9 @@ dev_args=(--eval_split dev --check_val_every_n_epoch 1 --report_checkpoint last
 
 运行自动保存 `resolved_config.yaml`、`run_manifest.json`，记录实际配方、命令、源码/数据身份及评估政策；无需 `41_registration.json` 或 baseline receipt。启动器 `tools/launch_ct_v41.py --arm full` 只打印命令，按实际 tag、seed、epoch、batch 命名并仅转发显式覆盖项；兄弟 baseline 配方保持原状。
 
-v3 只接受同执行版本的 checkpoint。训练续跑必须使用原目录、run_id、源码、训练配置/数据及完整主辅双流 epoch；不把改 LR、epoch、seed 的新配方当作续训。纯显示/诊断项不参与训练配置摘要；独立 `--test` 可改 `eval_split` 与诊断档位，但必须使用新的空输出目录。训练恢复继续核对原评估/选择政策。
+v4 只接受执行身份和源码匹配的 checkpoint。训练续跑必须使用原目录、run_id、源码、训练配置/数据及完整主辅双流 epoch；不把改 LR、epoch、seed 的新配方当作续训。纯显示/诊断项不参与训练配置摘要；独立 `--test` 可改 `eval_split` 与诊断档位，但必须使用新的空输出目录。训练恢复继续核对原评估/选择政策。
 
-v1 的 final60/late3 协议、checkpoint 和结果仍按原源码解释，exec v2 的源码基点为 `25345a5`。11 月 16 日 exec v2 变更前的源码在 [source_before](../artifacts/ct_checks/v41_run_workflow_20261116-c1065b45/source_before/)；旧 run 应使用与其 manifest 匹配的原源码，不能假定任意快照都匹配。
+v1 固定两组对照使用与各自 manifest 匹配的冻结源码。CT 的源码为 `5c92b1c`，exec v2 的源码基点为 `25345a5`。11 月 16 日变更前的源码保存在 [source_before](../artifacts/ct_checks/v41_run_workflow_20261116-c1065b45/source_before/)。
 
 ## 输出与结果含义
 
@@ -96,9 +106,9 @@ Time train=<时长> eval=<时长> save=<时长> | ckpt=<轮号> | remaining=~<�
 
 评估使用 `isolated_split_seed_v2`，按公开 split 固定种子并在结束/异常时还原训练 RNG、loader generator 与各层 train/eval 状态；dev 对应内部 val loader。该隔离机制已实现，运行一致性仍待验收。
 
-## 服务器命令与待验收项
+## 独立复现、整轮核验与恢复
 
-以下供用户后续在服务器执行，本轮未执行。先在正确源码与独立环境中运行针对性测试和实际 batch 检查：
+在匹配的 v3 源码和独立环境中复核实现时，可使用下列针对性测试与真实 batch 检查。
 
 ```bash
 # 在上传后的 V41 v3 项目根目录运行。

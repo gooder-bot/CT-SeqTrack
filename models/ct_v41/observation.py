@@ -20,6 +20,8 @@ from utils.factorized_observation import factorized_global_block
 from .contracts import ObservationFeatures
 from .geometry import anchor_yaw, rotate_xyz, transform_boxes
 from .history_context import history_descriptor
+from .input_checks import positive_finite_size
+from .packed_points import PointSlotLayout, point_blocks, project_rows
 
 
 def unique_valid_mask(valid: Tensor, point_ids: Tensor | None = None) -> Tensor:
@@ -74,7 +76,13 @@ def _linear_block(in_channels: int, out_channels: int) -> nn.Sequential:
                          nn.BatchNorm1d(out_channels), nn.ReLU())
 
 
-def _pooled_tokens(value: Tensor, valid: Tensor, count: int):
+def _use_packed_points(value, valid, valid_count, feature_bf16):
+    # 外层从最终去重掩码得到计数；0/1 样本继续使用原 BN running stats 途径。
+    return (value.dtype == torch.float32 and not feature_bf16
+            and type(valid_count) is int and 2 <= valid_count <= valid.numel())
+
+
+def _pooled_tokens(value: Tensor, valid: Tensor, count: int, *, measured=None):
     """真实点压紧后做不重叠 ragged max；稀疏帧一真实点对应一 token。
 
     按原始有效槽顺序分桶，不复制点；floor 边界避免 AdaptiveMaxPool
@@ -88,7 +96,8 @@ def _pooled_tokens(value: Tensor, valid: Tensor, count: int):
         raise ValueError('ragged pooling requires positive point slots')
     valid = valid.bool()
     order = torch.argsort((~valid).long(), dim=-1, stable=True)
-    measured = valid.sum(-1)
+    if measured is None:
+        measured = valid.sum(-1)
     token_count = measured.clamp_max(count)
     token = torch.arange(count, device=value.device)[None]
     denominator = token_count.clamp_min(1)[:, None]
@@ -117,10 +126,21 @@ class SegPointNet(nn.Module):
             _conv_block(i, o) for i, o in zip(widths[:-1], widths[1:]))
         self.fc = nn.Conv1d(128, 11, 1)
 
-    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False):
+    def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, feature_bf16=False,
+                layout=None, packed_input=None):
         factorized = execution_lab_enabled('factorized_projection')
         if factorized and feature_bf16:
             raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
+        if not factorized and _use_packed_points(value, valid, valid_count, feature_bf16):
+            if layout is None:
+                layout = PointSlotLayout(valid)
+            rows = layout.pack(value) if packed_input is None else packed_input
+            high, low = point_blocks(self.seq_per_point, rows, retain_second=True)
+            pooled = layout.max_per_group(high)
+            fused = torch.cat((low, pooled.index_select(0, layout.group_indices)), dim=1)
+            output, _ = point_blocks(self.seq_per_point2, fused)
+            return (layout.restore(project_rows(self.fc, output)).transpose(1, 2),
+                    layout.restore(low).transpose(1, 2))
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
                                        feature_bf16=feature_bf16, input_is_masked=index > 0)
@@ -154,15 +174,22 @@ class MiniPointNet(nn.Module):
         self.hidden = nn.ModuleList((_linear_block(512, 512), _linear_block(512, 256)))
 
     def forward(self, value: Tensor, valid: Tensor, foreground: Tensor, *, valid_count=None,
-                row_count=None, feature_bf16=False):
-        for index, layer in enumerate(self.per_point):
-            value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
-                                       feature_bf16=feature_bf16, input_is_masked=index > 0)
-        # value 已经过 ReLU；此处加权保持原始几何输入，不产生缩放后的伪坐标。
-        value = value * foreground.detach()[:, None]
-        value, row_valid = masked_max_pool(value, valid)
-        value = value.squeeze(-1)
-        row_valid = row_valid.squeeze(-1)
+                row_count=None, feature_bf16=False, layout=None):
+        if _use_packed_points(value, valid, valid_count, feature_bf16):
+            if layout is None:
+                layout = PointSlotLayout(valid)
+            features, _ = point_blocks(self.per_point, layout.pack(value))
+            weights = foreground.detach()[layout.group_indices, layout.slot_indices, None]
+            value = layout.max_per_group(features * weights)
+            row_valid = layout.present
+        else:
+            for index, layer in enumerate(self.per_point):
+                value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
+                                           feature_bf16=feature_bf16, input_is_masked=index > 0)
+            value = value * foreground.detach()[:, None]
+            value, row_valid = masked_max_pool(value, valid)
+            value = value.squeeze(-1)
+            row_valid = row_valid.squeeze(-1)
         for index, layer in enumerate(self.hidden):
             value, _ = masked_sequence(layer, value, row_valid, valid_count=row_count,
                                        feature_bf16=feature_bf16, input_is_masked=index > 0)
@@ -186,17 +213,29 @@ class FeaturePointNet(nn.Module):
         self.fc = nn.Conv1d(128, 128, 1)
 
     def forward(self, value: Tensor, valid: Tensor, *, valid_count=None, token_valid_count=None,
-                feature_bf16=False):
+                feature_bf16=False, layout=None, packed_input=None, frame_counts=None):
         factorized = execution_lab_enabled('factorized_projection')
         if factorized and feature_bf16:
             raise ValueError('factorized_projection is FP32 engineering only; BF16 is not supported')
+        if (not factorized and _use_packed_points(value, valid, valid_count, feature_bf16)
+                and type(token_valid_count) is int and 2 <= token_valid_count <= len(valid) * self.token_count):
+            points = PointSlotLayout(valid) if layout is None else layout
+            rows = points.pack(value) if packed_input is None else packed_input
+            high, low = point_blocks(self.seq_per_point, rows, retain_second=True)
+            pooled = points.max_per_group(high)
+            tokens, token_valid = _pooled_tokens(points.restore(low).transpose(1, 2),
+                                                valid, self.token_count, measured=frame_counts)
+            token_slots = PointSlotLayout(token_valid, present=points.present)
+            fused = torch.cat((token_slots.pack(tokens), pooled.index_select(0, token_slots.group_indices)), dim=1)
+            output, _ = point_blocks(self.seq_per_point2, fused)
+            return token_slots.restore(project_rows(self.fc, output)).transpose(1, 2), token_valid
         for index, layer in enumerate(self.seq_per_point):
             value, _ = masked_sequence(layer, value, valid, valid_count=valid_count,
                                        feature_bf16=feature_bf16, input_is_masked=index > 0)
             if index == 1:
                 point_features = value
         pooled, _ = masked_max_pool(value, valid)
-        tokens, token_valid = _pooled_tokens(point_features, valid, self.token_count)
+        tokens, token_valid = _pooled_tokens(point_features, valid, self.token_count, measured=frame_counts)
         if valid_count is not None and token_valid_count is None:
             token_valid_count = int(token_valid.sum().item())
         if factorized:
@@ -317,7 +356,7 @@ class B0Observation(nn.Module):
         size = batch['box_size'].to(points)
         if boxes.shape != (batch_size, 3, 4) or size.shape != (batch_size, 3):
             raise ValueError("history_boxes/box_size must be [B,3,4]/[B,3]")
-        if not bool((torch.isfinite(size) & (size > 0)).all()):
+        if not positive_finite_size(size):
             raise ValueError("box_size must be finite positive L/W/H")
         history_valid = batch['history_valid'].to(points.device).bool()
         boxes = torch.where(history_valid[..., None], boxes, 0.).detach()
@@ -336,17 +375,29 @@ class B0Observation(nn.Module):
         candidate_bc = torch.where(valid[..., None], candidate_bc, 0.)
         point_input = torch.cat((clean, candidate_bc), dim=-1)
         flat_valid = valid.reshape(batch_size, frames * count)
+        frame_valid = valid.reshape(batch_size * frames, count)
         flat_input = point_input.reshape(batch_size, frames * count, 14).transpose(1, 2)
         frame_counts = valid.sum(-1)
-        sequence_valid = (frame_counts > 0).any(-1)
+        frame_present = frame_counts > 0
+        sequence_valid = frame_present.any(-1)
         point_count = row_count = token_valid_count = None
         feature_bf16 = self.execution_profile == 'optimized_bf16'
         if self.execution_profile != 'legacy':
             token_counts = frame_counts.clamp_max(self.feature_pointnet.token_count)
             point_count, row_count, token_valid_count = torch.stack((
                 frame_counts.sum(), sequence_valid.sum(), token_counts.sum())).cpu().tolist()
+        endpoint_layout = frame_layout = packed_input = None
+        if (_use_packed_points(flat_input, flat_valid, point_count, feature_bf16)
+                and not execution_lab_enabled('factorized_projection')):
+            # 两种分组只改变行边界；三路共享本次 forward 的有效点次序。
+            endpoint_layout = PointSlotLayout(flat_valid, present=sequence_valid)
+            if token_valid_count >= 2:
+                frame_layout = endpoint_layout.regroup(frame_valid, present=frame_present.flatten())
+                # 求输入梯度时保留两个原始 gather 节点及其累加顺序。
+                if not flat_input.requires_grad:
+                    packed_input = endpoint_layout.pack(flat_input)
         segmentation, features = self.seg_pointnet(flat_input, flat_valid,
-            valid_count=point_count, feature_bf16=feature_bf16)
+            valid_count=point_count, feature_bf16=feature_bf16, layout=endpoint_layout, packed_input=packed_input)
         logits = segmentation[:, :2].transpose(1, 2).reshape(batch_size, frames, count, 2)
         bc = segmentation[:, 2:].transpose(1, 2).reshape(batch_size, frames, count, 9)
         foreground = logits.softmax(-1)[..., 1] * valid.to(points.dtype)
@@ -354,7 +405,8 @@ class B0Observation(nn.Module):
         pooled = self.mini_pointnet(
             mini_input.reshape(batch_size, frames * count, 13).transpose(1, 2),
             flat_valid, foreground.reshape(batch_size, frames * count),
-            valid_count=point_count, row_count=row_count, feature_bf16=feature_bf16)
+            valid_count=point_count, row_count=row_count, feature_bf16=feature_bf16,
+            layout=endpoint_layout)
         per_frame_count = frame_counts.to(points.dtype)
         current_count = per_frame_count[:, -1]
         current_valid = current_count > 0
@@ -388,8 +440,9 @@ class B0Observation(nn.Module):
         coarse = torch.where(sequence_valid[:, None], coarse, 0.)
         source, source_valid = self.feature_pointnet(
             point_input.reshape(batch_size * frames, count, 14).transpose(1, 2),
-            valid.reshape(batch_size * frames, count), valid_count=point_count, token_valid_count=token_valid_count,
-            feature_bf16=feature_bf16)
+            frame_valid, valid_count=point_count, token_valid_count=token_valid_count,
+            feature_bf16=feature_bf16, layout=frame_layout, packed_input=packed_input,
+            frame_counts=frame_counts.flatten())
         return ObservationFeatures(
             coarse_box=coarse,
             point_features=features.transpose(1, 2).reshape(batch_size, frames, count, 64),

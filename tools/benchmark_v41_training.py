@@ -5,6 +5,7 @@ import argparse
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
+from dataclasses import fields, is_dataclass
 from functools import wraps
 import hashlib
 from importlib import import_module
@@ -59,7 +60,7 @@ def counts(model):
             int(model._auxiliary_batches), int(model._auxiliary_rows))
 
 
-def align_initialization(tracker, path, *, reference):
+def align_initialization(tracker, path, *, reference, revision_pair='v3-v4'):
     """只交换工程随机初值及构造后的 RNG；在 Lightning 建立优化器前调用。"""
     import torch
     from models.ct_v41.runtime import capture_rng_state, restore_rng_state
@@ -77,16 +78,20 @@ def align_initialization(tracker, path, *, reference):
     bundle = torch.load(path, map_location='cpu', weights_only=False)
     original = bundle['state']
     removed = sorted(original.keys() - state.keys())
+    historical = revision_pair == 'v2-v3'
     if (state.keys() - original.keys() or (reference and removed)
+            or (removed and not historical)
             or any(not key.startswith('prior.acquisition_head.') for key in removed)):
         raise ValueError('unrecognized change to random initialization parameter/buffer inventory')
     for name in state:
         if owners[name] != bundle['owners'][name]:
             raise ValueError('changed owner, shape, dtype, buffer/parameter or trainability: ' + name)
+        if not historical and not torch.equal(state[name].detach().cpu(), original[name]):
+            raise ValueError('different scratch initialization before alignment: ' + name)
     tracker.load_state_dict({name: original[name] for name in state}, strict=True)
     digest = hashlib.sha256()
     for name, value in sorted(tracker.state_dict().items()):
-        if not name.startswith('prior.acquisition_head.'):
+        if not historical or not name.startswith('prior.acquisition_head.'):
             digest.update(json.dumps((name, owners[name]), separators=(',', ':')).encode())
             digest.update(value.detach().cpu().contiguous().numpy().tobytes())
     restore_rng_state(bundle['rng'])
@@ -244,14 +249,33 @@ def gpu_activity(events):
 
 
 def point_payload(rows):
-    """统计实际交付的整云和 GT10 NumPy 对象；同一批内相同对象只计一次。"""
+    """按交付对象统计点云、GT10 与首帧准备包的数组字节；队列字节另行实测。"""
     seen = set()
     total = Counter(raw_array_bytes=0, gt10_array_bytes=0)
 
     def add(group, array):
-        if hasattr(array, 'nbytes') and id(array) not in seen:
+        if id(array) in seen:
+            return
+        if hasattr(array, 'nbytes'):
             total[group] += array.nbytes
-            seen.add(id(array))
+        elif hasattr(array, 'element_size') and hasattr(array, 'numel'):
+            total[group] += array.element_size() * array.numel()
+        else:
+            return
+        seen.add(id(array))
+
+    def prepared(value):
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                prepared(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                prepared(item)
+        elif is_dataclass(value):
+            for field in fields(value):
+                prepared(getattr(value, field.name))
+        else:
+            add('prepared_start_array_bytes', value)
 
     for row in rows:
         for frame in [*row['frames'].values(), row.get('first_frame', {})]:
@@ -260,6 +284,9 @@ def point_payload(rows):
             add('raw_array_bytes', getattr(pc, 'point_ids', frame.get('point_ids')))
             for array in frame.get('_v41_normal_train_cache', {}).values():
                 add('gt10_array_bytes', array)
+    for row in rows:
+        if '_prepared_start' in row:
+            prepared(row['_prepared_start'])
     return total
 
 
@@ -330,6 +357,8 @@ class Window:
         aux_plan = model._loaders['auxiliary'].batch_sampler
         main_digest, planned_main_rows = workload_digest(main_plan, first, steps)
         aux_digest, planned_aux_rows = workload_digest(aux_plan, self.before[2], aux_steps)
+        main_prefix, _ = workload_digest(main_plan, 0, completed)
+        aux_prefix, _ = workload_digest(aux_plan, 0, self.before[2] + aux_steps)
         if (planned_main_rows, planned_aux_rows, len(indices)) != (main_rows, aux_rows, aux_steps):
             raise RuntimeError('observed commit counts differ from the same epoch sampler plan')
         all_steps = host_interval_summary(self.step_intervals)
@@ -350,7 +379,8 @@ class Window:
             peak_gpu_allocated_bytes=torch.cuda.max_memory_allocated(),
             peak_gpu_reserved_bytes=torch.cuda.max_memory_reserved(),
             training_source_sha256=main_plan.source_sha256, main_window_sha256=main_digest,
-            auxiliary_window_sha256=aux_digest, auxiliary_step_indices=indices, trace_diagnostics=diagnostics)
+            auxiliary_window_sha256=aux_digest, main_prefix_sha256=main_prefix,
+            auxiliary_prefix_sha256=aux_prefix, auxiliary_step_indices=indices, trace_diagnostics=diagnostics)
         if self.report:
             self.report['attribution_window'] = result
         else:
@@ -394,7 +424,8 @@ def measured_fit(args, config, window, command, *, loaders=None):
     @wraps(original_model_init)
     def construct(model, *a, **kw):
         original_model_init(model, *a, **kw)
-        initialization.update(align_initialization(model.tracker, args.initial_state, reference=args.reference))
+        initialization.update(align_initialization(model.tracker, args.initial_state,
+                              reference=args.reference, revision_pair=args.revision_pair))
         if args.equivalence == 'only':
             window.install(hooks, model)
 
@@ -435,7 +466,7 @@ def worker(args):
     if Path(entry.__file__).resolve().parents[2] != root:
         raise RuntimeError('loaded a different repository than the requested source root')
     from models.ct_v41.identity import EXECUTION_REVISION
-    expected_revision = 'v2' if args.reference else 'v3'
+    expected_revision = args.revision_pair.split('-')[0 if args.reference else 1]
     if EXECUTION_REVISION != expected_revision:
         raise ValueError(f'expected execution revision {expected_revision}, found {EXECUTION_REVISION} in {root}')
     import torch
@@ -458,8 +489,10 @@ def worker(args):
                 'lr_decay_step', 'lr_decay_rate', 'dataset', 'category_name', 'point_sample_size',
                 'dynamics_time_mode', 'v41_arm', 'v41_attention_backend', 'v41_aux_fraction',
                 'v41_aux_loss_weight', 'log_every_n_steps', 'tensorboard', 'v41_memory_logging')
+    if args.revision_pair != 'v2-v3':
+        controls += ('v41_q0_center_weighting',)
     window.report.update(source_root=str(root), source_sha256=manifest['source']['sha256'],
-        execution_revision=EXECUTION_REVISION,
+        execution_revision=EXECUTION_REVISION, revision_pair=args.revision_pair,
         git_head=manifest['git_head'], tool_sha256=hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
         device=torch.cuda.get_device_name(), physical_device=args.devices,
         torch_version=str(torch.__version__), lightning_version=pl.__version__, seed=config.seed,
@@ -472,6 +505,7 @@ def worker(args):
 
 
 PAIR_FIELDS = ('training_source_sha256', 'main_window_sha256', 'auxiliary_window_sha256',
+               'main_prefix_sha256', 'auxiliary_prefix_sha256',
                'auxiliary_step_indices', 'main_endpoints', 'auxiliary_endpoints', 'warmup_steps',
                'measured_steps', 'batch_size', 'workers', 'recipe', 'seed', 'tool_sha256', 'device',
                'physical_device', 'torch_version', 'lightning_version', 'diagnostics_level', 'dataset_root', 'controlled_recipe',
@@ -498,7 +532,7 @@ def run_pair(args, destination, initial_state, index, *, equivalence=False):
         command = [sys.executable, str(SCRIPT), '--worker', '--source-root', str(root),
                    '--path', str(args.path), '--devices', str(args.devices), '--destination', str(work),
                    '--cfg', args.cfg, '--diagnostics-level', args.diagnostics_level,
-                   '--initial-state', str(initial_state)]
+                   '--initial-state', str(initial_state), '--revision-pair', args.revision_pair]
         if label == 'reference':
             command.append('--reference')
         if args.workers is not None:
@@ -511,20 +545,32 @@ def run_pair(args, destination, initial_state, index, *, equivalence=False):
         measurements[label] = json.loads((work / 'measurement.json').read_text(encoding='utf-8'))
     if equivalence:
         reference, candidate = measurements['reference'], measurements['candidate']
-        fields = ('first_aux_step', 'continued_auxiliary_endpoints', 'steps_compared', 'training_source_sha256', 'shared_initialization_sha256',
-                  'reference_initialization_bundle_sha256', 'controlled_recipe', 'seed', 'batch_size', 'workers')
-        if any(reference[key] != candidate[key] for key in fields) or candidate['status'] != 'passed':
-            raise ValueError('equivalence steps, inputs or shared initialization differ')
-        return dict(status='passed', steps_compared=candidate['steps_compared'],
-                    continued_auxiliary_endpoints=candidate['continued_auxiliary_endpoints'],
-                    checked_tensors=candidate['checked_tensors'], rtol=candidate['rtol'], atol=candidate['atol'])
+        fields = ('first_aux_step', 'continued_auxiliary_endpoints', 'steps_compared', 'training_source_sha256',
+                  'observed_workload_sha256', 'shared_initialization_sha256', 'revision_pair',
+                  'reference_initialization_bundle_sha256', 'controlled_recipe', 'seed', 'batch_size', 'workers',
+                  'recipe', 'physical_device', 'device', 'torch_version', 'lightning_version', 'dataset_root', 'diagnostics_level')
+        for key in fields:
+            if reference[key] != candidate[key]:
+                raise ValueError('incomparable probe: ' + key)
+        status = {'v2-v3': 'passed', 'v3-v4': 'trajectory_compared', 'v4-v4': 'observations_exact'}[args.revision_pair]
+        if reference['status'] != 'reference_recorded' or candidate['status'] != status:
+            raise ValueError('probe did not complete the requested comparison')
+        result = {key: candidate[key] for key in (
+            *fields, 'status', 'checked_tensors', 'rtol', 'atol', 'reference_objective',
+            'first_observed_difference', 'compared_groups', 'differing_groups')}
+        if args.revision_pair == 'v4-v4':
+            result.update(reference_source_sha256=reference['source_sha256'],
+                          candidate_source_sha256=candidate['source_sha256'])
+        return result
     return paired_result(**measurements)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--source-root', type=Path, default=ROOT, help='candidate checkout')
-    parser.add_argument('--reference-root', type=Path, help='original V41 v2 checkout')
+    parser.add_argument('--reference-root', type=Path, help='reference checkout matching the selected revision pair')
+    parser.add_argument('--revision-pair', choices=('v3-v4', 'v2-v3', 'v4-v4'), default='v3-v4',
+                        help='v4/v4 requires exact sampled observations; v3/v4 records drift; v2/v3 compares corrected losses')
     parser.add_argument('--cfg', default='cfgs/ct_seqtrack/41_full_kitti.yaml', help='relative to each checkout')
     parser.add_argument('--path', type=Path, required=True, help='shared real KITTI training root')
     parser.add_argument('--devices', type=int, required=True, help='one physical CUDA GPU index')
@@ -534,7 +580,7 @@ def main():
     parser.add_argument('--trace-mode', choices=('torch', 'nvtx'), help='short attribution window after throughput')
     parser.add_argument('--trace-steps', type=int, default=4)
     parser.add_argument('--equivalence', choices=('off', 'after', 'only'), default='off',
-                        help='short real-data corrected-loss comparison after both measurements or on its own')
+                        help='short real-data trajectory probe after both measurements or on its own')
     parser.add_argument('--output-dir', type=Path, help='new child of this tool checkout artifacts/ct_checks')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--destination', type=Path, help=argparse.SUPPRESS)
@@ -566,7 +612,7 @@ def main():
         result = {}
         if args.equivalence != 'only':
             ratios = [run_pair(args, destination, initial_state, n) for n in range(1, args.repeats + 1)]
-            result.update(schema='ct_v41.paired_training_prefix.v1', paired_speedup=ratios,
+            result.update(schema='ct_v41.paired_training_prefix.v1', revision_pair=args.revision_pair, paired_speedup=ratios,
                           median_speedup=statistics.median(ratios), repeats=len(ratios),
                           definition='candidate / reference main committed endpoints per wall second')
             write_report(destination / 'comparison.json', result)

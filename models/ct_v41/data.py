@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -302,9 +303,10 @@ def future_motion_targets(source, request, frames, track_length):
 
 class RawEndpointDataset(Dataset):
     """按端点交付观测与标签。KITTI 主流可携带 GT10 视图，预测 ROI 由主进程决定。"""
-    def __init__(self, source, *, training=False, enable_m=False):
+    def __init__(self, source, *, training=False, enable_m=False, worker_transport=False):
         self.source = source
         self.training, self.enable_m = bool(training), bool(enable_m)
+        self.worker_transport = worker_transport
         self.lengths = tuple(source.get_num_frames_tracklet(i)
                              for i in range(source.get_num_tracklets()))
         self.source_sha256 = self._source_digest()
@@ -334,14 +336,19 @@ class RawEndpointDataset(Dataset):
         return sum(max(n - 1, 0) for n in self.lengths)
 
     def __getitem__(self, request):
-        return self._get_row(request, {})
+        return self.__getitems__([request])[0]
 
     def __getitems__(self, requests):
         # 相同标注帧在一个 IPC 包内共享；不同 tracklet 的框绝不共用。
         frames = {}
-        return [self._get_row(request, frames) for request in requests]
+        required = None
+        if self.worker_transport:
+            # 先取全批并集。别的分支可能需要同一标注帧的完整 GT10。
+            required = {(r.tracklet, index) for r in requests if 0 <= r.branch < 4
+                        for index in range(max(0, r.frame - (3 if r.starts_window else 1)), r.frame + 1)}
+        return [self._get_row(request, frames, required) for request in requests]
 
-    def _get_row(self, request, frame_cache):
+    def _get_row(self, request, frame_cache, required):
         if not isinstance(request, EndpointRequest):
             raise TypeError('v31 raw dataset requires EndpointRequest')
         r = request
@@ -350,7 +357,9 @@ class RawEndpointDataset(Dataset):
         read = getattr(self.source, 'endpoint_frames', None) or self.source.get_frames
         missing = [i for i in ids if (r.tracklet, i) not in frame_cache]
         if missing:
-            for index, frame in zip(missing, read(r.tracklet, missing)):
+            values = (read(r.tracklet, missing) if required is None
+                      else read(r.tracklet, missing, worker_required=required))
+            for index, frame in zip(missing, values):
                 frame_cache[r.tracklet, index] = frame
         frames = {i: frame_cache[r.tracklet, i] for i in ids}
         key = (self.source.get_tracklet_key(r.tracklet)
@@ -374,6 +383,83 @@ def raw_collate(rows):
     return rows
 
 
+def full_epoch_diagnostics(config, epoch):
+    return config.diagnostics_level == 'full' or int(epoch) in config.full_diagnostic_epochs
+
+
+def _worker_transport_enabled(config, source):
+    if not option(config, 'workers', 4) or option(config, 'dataset') != 'kitti_mf':
+        return False
+    from datasets.kitti_v41 import KITTIV41Dataset
+    return isinstance(source, KITTIV41Dataset)
+
+
+# _prepare_row 将有效点按原顺序放在每帧前缀；以下是对应字段的尾部填充值。
+_POINT_PADDING = dict(points=0., point_ids=-1, point_valid=False, segmentation_labels=-1, bc_targets=0.)
+
+
+class _WindowStartCollator:
+    """只物化无预测前驱的训练首行；可被 spawn 序列化，常驻 worker 仅读请求的 epoch。"""
+    def __init__(self, config):
+        self.config = config
+        self.builder = None
+
+    def __getstate__(self):
+        return dict(config=self.config, builder=None)
+
+    def __call__(self, rows):
+        starts = [row for row in rows if row['request'].starts_window
+                  and 0 <= row['request'].branch < 4
+                  and not full_epoch_diagnostics(self.config, row['request'].epoch + 1)]
+        if not starts:
+            return rows
+        if self.builder is None:
+            self.builder = BatchBuilder(self.config)
+            self.builder.detailed_diagnostics = False
+        builder = self.builder
+        packets = {}
+        # 保留轻量帧定位信息。独立工具切换诊断、重排采样 ID 时可原样回读。
+        light_frames = {}
+        builder._start_materialization_cache()
+        try:
+            with recipe_scope(builder.v41_config):
+                for row in starts:
+                    r = row['request']
+                    fields, context = builder._prepare_row(row, builder._new_state(row))
+                    valid = fields['point_valid']
+                    width = int(valid.sum(axis=1).max())
+                    if width < valid.shape[1]:
+                        for key in _POINT_PADDING:
+                            fields[key] = fields[key][:, :width]
+                    del context['row']
+                    frame_map = {}
+                    for index, frame in row['frames'].items():
+                        if id(frame) not in light_frames:
+                            cache = frame['_v41_normal_train_cache']
+                            light_frames[id(frame)] = dict(frame, _v41_normal_train_cache={
+                                'lower': cache['lower'], 'upper': cache['upper']})
+                        frame_map[index] = light_frames[id(frame)]
+                    packet = (builder._preparation_id, r, fields, context,
+                              builder._next_history_pools.pop(r.state_key, None))
+                    first = frame_map[0] if 0 in frame_map else row['first_frame']
+                    packets[id(row)] = dict(row, frames=frame_map, first_frame=first, _prepared_start=packet)
+            # 已经由首行消费、且仅作为其他行较老历史的 GT10 也不必随队列搬运。
+            current = {id(frame) for row in rows if id(row) not in packets
+                       for i, frame in row['frames'].items()
+                       if row['request'].starts_window or i >= row['request'].frame - 1}
+            result = []
+            for row in rows:
+                if id(row) in packets:
+                    result.append(packets[id(row)])
+                else:
+                    frames = {i: light_frames.get(id(f), f) if id(f) not in current else f
+                              for i, f in row['frames'].items()}
+                    result.append(dict(row, frames=frames))
+            return result
+        finally:
+            builder.clear_materialization_cache()
+
+
 def raw_dataset_factory(config, role):
     """只加载原始数据适配器，不构造历史 sampler。"""
     if str(option(config, 'dataset', '')) == 'kitti_mf':
@@ -391,8 +477,9 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
         dataset_role = (('auxiliary' if kitti else 'train') if role == 'auxiliary' else
                         ('dev' if kitti else 'test') if role == 'val' else role)
         source = sources[role] if sources is not None else raw_dataset_factory(config, dataset_role)
+        transport = _worker_transport_enabled(config, source)
         raw = RawEndpointDataset(source, training=role == 'train',
-                                 enable_m=option(config, 'enable_m', False))
+                                 enable_m=option(config, 'enable_m', False), worker_transport=transport)
         if role == 'auxiliary':
             from .auxiliary import FullTrackAuxiliarySampler
             sampler = FullTrackAuxiliarySampler(raw.lengths, int(option(config, 'batch_size', 16)),
@@ -410,7 +497,9 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
                 seed_yaw_degrees=float(option(config, 'v32_seed_yaw_degrees', 1.5)),
                 initial_seed_policy=option(config, 'v35_seed_policy', ReadyQueueBatchSampler.INITIAL_SEED_POLICY))
         workers = int(option(config, 'workers', 4))
-        kwargs = dict(num_workers=workers, collate_fn=raw_collate, pin_memory=False,
+        prepare_starts = transport and role == 'train' and source.v41_data_role == 'train'
+        collate = _WindowStartCollator(config) if prepare_starts else raw_collate
+        kwargs = dict(num_workers=workers, collate_fn=collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
         if workers:
             kwargs.update(prefetch_factor=2, persistent_workers=True)
@@ -466,6 +555,7 @@ class BatchBuilder:
     """唯一状态所有者；prepare -> commit 是一次事务。"""
     def __init__(self, config):
         self.config = self.v41_config = normalize_config(config)
+        self._preparation_id = hashlib.sha256(repr(sorted(self.config.items())).encode()).digest()
         self.train_diagnostics = bool(option(self.config, 'v35_train_diagnostics', True))
         # host 按轮选择 summary/full；默认保留独立工具的历史详细行为。
         # 只控制被动统计，不控制监督、搜索、候选或状态提交。
@@ -541,13 +631,17 @@ class BatchBuilder:
         key = id(frame), id(frame['3d_bbox']), id(frame.get('box_size'))
         if key not in self._coverage_cache:
             cache = frame.get('_v41_normal_train_cache')
-            if cache is not None and '_v41_raw_ref' in frame:
-                xyz, _, used = self._view(frame, [target], size, scale=1., offset=0., normal_train=True)
+            if cache is not None and '_v41_raw_ref' in frame and self.config.dataset == 'kitti_mf':
+                from datasets.kitti_v41 import normal_train_point_view
+                view = normal_train_point_view(frame, [target], size, scale=1., offset=0.)
+                xyz, used = view['points'], view['cache_used']
+                count = view['raw_count'] if used else len(xyz)
             else:
                 xyz, _ = self._points(frame)
                 used = False
+                count = len(xyz)
             mask = inside_box(xyz, target, size)
-            self._coverage_cache[key] = (frame, cache['raw_count'] if used else len(xyz), mask, used)
+            self._coverage_cache[key] = (frame, count, mask, used)
         return self._coverage_cache[key][1:]
 
     def reset(self):
@@ -634,20 +728,44 @@ class BatchBuilder:
         prepared, contexts = [], []
         for row in rows:
             r = row['request']
+            packet = row.get('_prepared_start')
+            if (packet is not None and (packet[0] != self._preparation_id or packet[1] != r
+                                        or self.detailed_diagnostics or not r.starts_window)):
+                packet = None
             if r.starts_window:
                 if r.state_key in self.states:
                     raise RuntimeError('duplicate window initialization')
-                state = self._new_state(row)
+                state = self._new_state(row) if packet is None else deepcopy(packet[3]['state'])
             elif r.state_key not in self.states:
                 raise RuntimeError('missing accepted predecessor; no GT reseeding is allowed')
             else:
                 state = self.states[r.state_key]
             if state.next_frame != r.frame:
                 raise RuntimeError('out-of-order accepted state')
-            data, context = self._prepare_row(row, state)
+            if packet is None:
+                data, context = self._prepare_row(row, state)
+            else:
+                _, _, data, seed_context, pools = packet
+                context = dict(seed_context, row=row, state=state)
+                if pools:
+                    self._next_history_pools[r.state_key] = pools
             prepared.append(data)
             contexts.append(context)
-        batch = {key: torch.from_numpy(np.stack([x[key] for x in prepared])) for key in prepared[0]}
+        slots = int(option(self.config, 'point_sample_size', 1024))
+        compact = any(row['point_valid'].shape[1] < slots for row in prepared)
+        batch = {}
+        for key in prepared[0]:
+            arrays = [row[key] for row in prepared]
+            if compact and key in _POINT_PADDING:
+                # 直接写最终批，混排的续行、稠密首行与零点首行都保留同一输入形状。
+                sample = arrays[0]
+                values = np.full((len(arrays), sample.shape[0], slots, *sample.shape[2:]),
+                                 _POINT_PADDING[key], dtype=sample.dtype)
+                for dest, src in zip(values, arrays):
+                    dest[:, :src.shape[1]] = src
+            else:
+                values = np.stack(arrays)
+            batch[key] = torch.from_numpy(values)
         self._pending = contexts
         return batch
 

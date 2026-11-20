@@ -13,6 +13,7 @@ from .contracts import DecoderOutput, ObservationFeatures, PriorContext
 from .observation import box_corners_xyz
 from .geometry import anchor_yaw, rotate_xy, transform_boxes
 from .history_context import history_descriptor
+from .input_checks import positive_finite_size, finite_times
 from .local_observation import LocalObservationReader
 from .attention import ValidityMask
 
@@ -141,7 +142,7 @@ class SharedHypothesisDecoder(nn.Module):
                 raise ValueError("history_times must be [B,3]")
             times = torch.cat((history_times, reference.new_zeros(len(reference), 1)), dim=1)
         times = torch.as_tensor(times, device=reference.device, dtype=reference.dtype)
-        if times.shape != (len(reference), 4) or not bool(torch.isfinite(times).all()):
+        if times.shape != (len(reference), 4) or not finite_times(times):
             raise ValueError("frame_times must be finite [B,4]")
         return times.detach()
 
@@ -222,7 +223,7 @@ class SharedHypothesisDecoder(nn.Module):
         size = batch['box_size'].to(reference)
         if history_boxes.shape != (batch_size, 3, 4) or history_valid.shape != (batch_size, 3):
             raise ValueError("decoder needs three history boxes and their validity")
-        if size.shape != (batch_size, 3) or not bool((torch.isfinite(size) & (size > 0)).all()):
+        if size.shape != (batch_size, 3) or not positive_finite_size(size):
             raise ValueError("box_size must be finite positive [B,3] L/W/H")
         if (observation.current_valid.shape != (batch_size,)
                 or observation.sequence_valid.shape != (batch_size,)

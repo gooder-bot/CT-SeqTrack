@@ -1,6 +1,10 @@
 # CT-SeqTrack 工作约定
 
-## 2026-11-18 当前：V41 exec v3
+## 2026-11-20 当前：V41 exec v4
+
+两份 Full 配置默认使用 v4。独立窗口首行可以在 KITTI worker 预处理；真实预测的后续端点、状态提交及辅助流仍归主进程。候选标签与 B0 执行验收见 [训练测速](docs/V41_TRAINING_PERF.md)。历史训练与评估按各自清单中的源码恢复。
+
+## 2026-11-18：V41 exec v3
 
 当前源码使用 [V41 v3 运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md)。本次移除旧 acquisition 辅助训练，保留整轨 B3/R 训练。exec v2 的基点为 `25345a5`，继续使用原执行身份读取旧 run。
 

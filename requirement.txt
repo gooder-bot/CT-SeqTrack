@@ -1,6 +1,7 @@
 # Install PyTorch separately for the target hardware (server baseline: 2.0.1+cu118).
 # v31 uses native PyTorch operators; pointnet2_ops is not required.
 numpy>=1.20.0
+numba==0.60.0; python_version >= "3.9" and python_version < "3.13"
 pyquaternion>=0.9.9
 pytorch-lightning==2.0.2
 PyYAML>=5.4.1

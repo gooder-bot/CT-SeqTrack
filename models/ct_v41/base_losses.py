@@ -259,7 +259,7 @@ def compute_losses(batch, output, *, enable_b1=True, q0_exact_iou=None, q0_cente
             prior.mean_xy, batch['physical_displacement'], prior.log_sigma,
             prior.direction_xy.detach(), physical_valid,
             kinematic_xy=prior.kinematic_xy.detach(), envelope_parallel_perp=prior.envelope.detach(),
-            residual_unit_parallel_perp=prior.unit_residual)
+            residual_unit_parallel_perp=prior.unit_residual, include_diagnostics=False)
         losses['loss_physical'] = masked_mean(terms['mean_per_sample'], terms['valid'])
         losses['loss_sigma'] = masked_mean(terms['nll_per_sample'], terms['valid'])
     else:

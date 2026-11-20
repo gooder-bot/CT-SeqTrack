@@ -1,36 +1,30 @@
 # CT-SeqTrack
 
-**2026-11-18。** V41 v3 移除旧 acquisition，保留物理先验、整轨 B3/R 和主干，精简 GT10 传输与候选几何。新训练从头开始，各版本 checkpoint 使用匹配的源码。服务器首个 KITTI 主批的 16 个端点全部命中 GT10，单线程回放的主进程准备由 577.41 ms 降至 93.38 ms。v3 已在共享 A40 跑通实际训练；batch 2 粗测交换顺序后，两边的快慢排序反转。正式 batch 的整轮差距与最终跟踪精度待测。[V41 训练流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md) · [18 项复核及测速结果](docs/V41_TRAINING_PERF.md)
+CT-SeqTrack 研究激光雷达点云中的三维单目标跟踪。给定首帧车辆框，跟踪器用自己上一帧输出的位置裁剪下一帧点云。**一次定位误差既会影响当前框，也会改变下一帧能看到哪些点。** V41 因此把每帧输出、可信位置和速度估计分开更新，并用当前实测点检验运动预测。[方法与研究方向](docs/PROJECT_STATUS.md) · [V41 结构](docs/CTSEQTRACK_V41_DESIGN.md)
 
-面向 3D 点云单目标跟踪，研究**物理时间运动先验、当前观测纠偏与可信状态更新的可靠闭环融合**。当前主线为 **V41**：B0 观测、B1 运动先验、训练侧 MTP、B3 选框/可信判断、当前点 XYZ 恢复 R 和双 ROI 搜索。旧 B2 身份记忆/vote/mode 已退出当前主线，V39 的 G/跳骨干也未移入 V41。
+## V41 训练执行版本 · 2026-11-20
 
-**文档整理：2026-11-08。最新运行证据：北京时间 2026-11-04 10:46:53；本次没有重新访问服务器，不能据此判断今天的进程或完成状态。** 当前结构、创新边界、固定结果和研究优先级统一见 [项目现状与研究方向](docs/PROJECT_STATUS.md)。
+新启动的 `uniform` 和 `inverse_lwh` 都使用 exec v4。B0 在支持的 CUDA 环境中直接对有效点做分组最大池化，并按原槽位回填特征。主、辅分支各自在一次前向内复用已通过的框尺寸和帧时间校验。已有实验按各自运行清单的源码指纹恢复。[运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md) · [训练测速](docs/V41_TRAINING_PERF.md)
 
-## 已确认进展
+## 实验进展 · 2026-11-18
 
-| 版本 | 已有证据 | 能支持的结论 |
+| 实验 | 数据与口径 | 已取得的结果 |
 |---|---|---|
-| V38 | 三组 scratch60 完成并验收 | Full 相对旧 Full 改善；相对强 B1 末轮较差、late3 略好，严重漂移仍增加 |
-| V39 | 两组各完成13轮，第14轮收到 SIGTERM | 没有 final60/late3；工程检查通过不代表完整训练成功或失败 |
-| V40 | 四组60轮完成，11/02已复算末三轮原帧 | B0 总体最佳；Full 运动端点有正信号，但总体和长尾未超过 B0；未执行完整官方比较器验收 |
-| V41 KITTI Full | 11/04快照完成9轮、进入第10轮；第9轮 dev S/P=9.4719/7.7493 | 早期在线失效已有诊断，尚无固定 final60/late3 测试结果 |
-| 原始 SeqTrack3D 方法＋KITTI适配 | 60轮完成；dev final60=38.8072/50.7109，late3=35.7262/46.2808 | 基线训练已完成；该快照未发现 test19–20 固定结果 |
+| V41 v1 Full 对原始 SeqTrack3D 方法＋本地 KITTI 适配 | KITTI Car test 0019–0020，双方 seed42、从头训练 60 轮，固定权重逐帧配对 | 第 60 轮 Success / Precision 为 **69.77 / 81.95 对 37.68 / 48.30**。第 58–60 轮均值为 **68.83 / 81.05 对 36.22 / 46.59**。[固定测试结果](artifacts/ct_checks/20261117_kitti_final_research_review/official_comparison.json) |
+| V41 v3 主观测框 q0 中心损失 A/B | KITTI Car dev 0017–0018，两组只改 q0 中心监督的轴权重 | 11 月 18 日 18:26:18（北京时间）首轮共 4,771 步，等权组已到 1,880 步，首框长宽高倒数加权组到 1,913 步。该次存档尚无两组的评估成绩。[运行快照](artifacts/ct_checks/20261118_v41_live_speed_1814/REPORT.md) |
 
-来源：[V38结果](docs/CTSEQTRACK_V38_RESULTS_PROFILE_20261026.md)、[V39完成状态](artifacts/ct_checks/20261029_v39_deep_diagnosis/REPORT.md)、[V40四组复盘](artifacts/ct_checks/20261102_v40_research_audit/results/REPORT.md)、[最新KITTI诊断](artifacts/ct_checks/20261104_kitti_readonly_audit/REPORT.md)。不同数据集、不同训练轮次的成绩不作最终胜负比较。
+v1 的比较覆盖 120 条轨迹、6,424 帧。末轮在 6,304 个预测帧中，中心误差超过 10 米的帧数为 CT 406、基线 1,702。两组使用各自的观测实现与训练配方，这些结果支持单种子下的整体系统比较。B1、MTP、B3、R 的独立作用以及跨种子稳定性仍需受控实验。[逐轨与长尾分析](artifacts/ct_checks/20261117_kitti_final_research_review/REPORT.md)
 
-## 当前研究重点
+## 当前研究方向
 
-最新证据指向：**B0 在线定位/前景失配 → accepted 历史偏移 → 后续运动提议与裁剪失效 → trusted/R 难以恢复**。部分长轨在目标点仍在 crop 内时已经定位错误；不能把搜索丢目标当作所有失败的起点。
+- **目标仍可见时，改善中心定位。** 在 v1 末轮开发集中，对实际采到至少 10 个目标点的预测帧，离线仅校正车宽方向或高度，层内 Success 分别增加 6.70、6.03 个百分点。v3 的 q0 A/B 检验训练能否取得实际改善，同时检查整体 Precision 与长轨漂移。[分轴诊断](artifacts/ct_checks/20261118_independent_review/REPORT.md) · [A/B 判据](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md#q0-车宽与高度定位-ab)
+- **缺测或重现时，判断哪些测量值得影响后续运动。** v1 末轮的 406 个严重漂移帧集中在四条轨迹，末三轮 R 仅被选中 0、1、0 次。下一步在 train/dev 从同一历史状态分叉，分别跟踪一次可信写入、测速或搜索调整之后，能否继续取到目标点、生成好框并持续跟住。[长尾与 R 候选统计](artifacts/ct_checks/20261117_kitti_final_research_review/REPORT.md) · [已做的测速与搜索干预](artifacts/ct_checks/20261118_server_counterfactual/REPORT.md) · [当前问题与待办](need_to_do.md)
 
-下一步研究优先核查真实预测历史下的定位/分割、无速度首框启动及主训练 GT 速度种子分布，再处理预测到搜索的连接、可信支持与真正的恢复难例；执行侧并行核查重复整云处理、acquisition 标签、几何和同步成本。**这些是尚未实施的诊断/研究方向，不改变现有运行或自动追加实验。** 1/4/4/8 是状态重置窗口，不是8步BPTT；整轨辅助只训练B3/R，具体窗口配比未被证明最优。详见 [最新问题](最新问题.md)、[待办](need_to_do.md)、[窗口依据](artifacts/ct_checks/20261104_window_seqtrack_review/window_experiment_evidence.md)。
+## 代码与运行入口
 
-## 当前入口与实验边界
-
-- 入口仍为 `main.py`，V41配置为 [41_full_kitti.yaml](cfgs/ct_seqtrack/41_full_kitti.yaml)，活动实现为 `models/ct_v41/`、`models/ctseqtrackv41.py`、`datasets/kitti_v41.py`。
-- [V41设计](docs/CTSEQTRACK_V41_DESIGN.md)解释实现；[V41操作页](docs/CTSEQTRACK_V41_LAUNCH.md)保留检查、启动、恢复和比较命令。两组已有运行，不能照旧“待上传”段重复启动 scratch。
-- 正式范围仍为 Full 与原始 SeqTrack3D 方法＋KITTI适配两组，bs16/seed42/scratch60，固定 final60 与58/59/60均值。开发集17–18、测试集19–20分开；两组比较整体系统，不能单独归因B1/MTP/R，也不是等计算预算消融。
-- CT入口/smoke/比较不依赖预登记或刷新 `41_registration.json`；自动记录实际配置及LF归一化源码身份，同run完整双流epoch续训检查保留。旧登记与输出作为历史证据保留。
-- 当前工作约定见 [AGENTS](AGENTS.md)，正式规则见 [实验协议](docs/EXPERIMENT_PROTOCOL.md)，工具范围见 [FORMAL_TOOLING](docs/FORMAL_TOOLING.md)。本次仅更新文档，没有运行测试、模型、编译或服务器操作。
+- 统一入口为 `main.py`。B1 根据历史框与真实时间间隔提供先验，B0 读取当前点，B3 在观测、运动与恢复候选中选择输出。旧 B2 身份记忆、投票与模式生成已在 v38 退出主线。[V41 训练与评估](models/ctseqtrackv41.py) · [在线选框](models/ct_v41/model.py) · [状态提交](models/ct_v41/data.py)
+- v3 已移除旧 acquisition 辅助监督，保留训练侧多步位移预测（MTP）和仅给 B3/R 梯度的整轨辅助流。当前 A/B 配置、训练与比较命令均有记录。[A 组 uniform](cfgs/ct_seqtrack/41_full_kitti.yaml) · [B 组 inverse_lwh](cfgs/ct_seqtrack/41_full_kitti_q0_inverse_lwh.yaml) · [运行流程](docs/CTSEQTRACK_V41_RUN_WORKFLOW.md) · [实验协议](docs/EXPERIMENT_PROTOCOL.md)
+- 11 月 20 日起，新启动的 V41 KITTI Car 训练每轮只评 test 0019–0020，不跑 dev；默认报告的最佳 Precision 是按 test 选出的峰值。11 月 18 日已启动的 q0 A/B 保留原 dev 协议。[实验协议](docs/EXPERIMENT_PROTOCOL.md) · [工具范围](docs/FORMAL_TOOLING.md) · [训练速度实测](docs/V41_TRAINING_PERF.md) · [服务器路径](docs/SERVER_PATHS.md)
 
 ## 历史记录
 
@@ -150,7 +144,7 @@ v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被�
 
 **C 是已测最佳 B0，仍未达到 SeqTrack。** 后续采用 C 的 5e-5、20/50 轮衰减、无 warmup；不继续扩大 LR。C 相对旧 v32 B0 的 Success 略升、Precision 下降，不能登记综合修订全面有效。主要剩余问题是缺测时历史利用、fine 无稳定定位增益，以及完整预测历史的训练覆盖；具体建议尚未实施。完整结果、曲线与代码依据见 [六组复盘](artifacts/ct_checks/20260926_v33_six_recipe_review/REPORT.md)。
 
-## 已完成运行的配置
+### v33 已完成运行的配置
 
 以下为已完成运行的配置与物理 GPU 安排，保留用于复现：
 
@@ -169,7 +163,7 @@ v33 整合中心回归、BC 与历史监督归一化、可信状态修复及被�
 
 2026-09-25追加E：继承B，峰值学习率3e-4，前2000次更新从1.5e-7线性升至峰值，20/50轮完成后降至3e-5/3e-6，GPU1，warmup计入原71,700次更新。原R/A/B/C/D保持；E相对B同时改变学习率与warmup，不能独立归因。五个同步文件、独立后台命令和新终端tail见[追加E运行说明](docs/CTSEQTRACK_V33_X3_LR_GPU1.md)。本轮未访问或修改服务器，E由用户上传启动。
 
-## 已完成的历史结果
+### v32 已完成的历史结果
 
 v32 nuScenes-mini Car、seed42，全部 scratch60、71,700 次优化；评测 106 条轨迹、2,285 帧：
 
@@ -182,7 +176,7 @@ v32 nuScenes-mini Car、seed42，全部 scratch60、71,700 次优化；评测 10
 
 证据见 [四组报告](artifacts/ct_checks/20260924_v32_four_arm_final/REPORT.md) 和 [训练审查](artifacts/ct_checks/20260924_v32_four_arm_final/training/TRAINING_REVIEW.md)。这些成绩不属于 v33，不能用于宣称本次修改已经有效。
 
-## 入口与评测
+### v35 历史入口与评测
 
 唯一入口为`main.py`；本次唯一新增scratch配方的入口示例：
 
@@ -192,7 +186,7 @@ python main.py --cfg cfgs/ct_seqtrack/35_b0_w_piecewise_lr_mini.yaml --path DATA
 
 原四组须使用各自checkpoint和原log_dir恢复，仅piecewise从头运行，完整命令见[新增第5组说明](docs/CTSEQTRACK_V35_PIECEWISE_LAUNCH.md)。五组完整后用`tools/compare_v35_piecewise_b0.py`比较，保留旧四组工具用于原四组复核。第二seed须等第一阶段通过后再运行，seed42独立SeqTrack参考直接复用。默认每5轮验证，训练结束自动评测58/59/60并保存逐帧记录及`results.json`。比较固定final60和late-3，不挑选最佳轮次。不要传旧`--preloading`参数；当前按需读取原始点云，每worker缓存256MiB。
 
-## 验证与边界
+### v33–v35 历史验证记录
 
 v35原四组版本的本地实现、旧版本兼容、诊断无干预、真实Lightning入口和epoch恢复已验证；该版本完整pytest为515 passed、3 skipped，compileall与diff检查通过，详见[9月28日就绪报告](artifacts/ct_checks/20260928-185917_v35_four_run_readiness/REPORT.md)。两项跳过需要真实CUDA，另一项只测试缺失Lightning的环境；本地已安装Lightning时不适用。新增参数36,608（约0.99%）。第5组仅新增调度，实施与验证证据单列在`artifacts/ct_checks/20260929-131823_v35_piecewise_schedule/`，不把旧测试结果冒充本次验证。此前三组实现过程保留在[历史实施报告](artifacts/ct_checks/20260928-182545_v35_implementation/REPORT.md)。
 
