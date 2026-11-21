@@ -9,7 +9,8 @@ from utils.execution_lab import execution_scope
 from utils.execution_profile import validate_execution_profile
 from utils.time_config import engineering_time_defaults, validate_time_config, hash_time_manifest_paths
 from .cpu_geometry import backend_identity
-from .identity import SCHEMA, EXECUTION_REVISION
+from .identity import (SCHEMA, EXECUTION_REVISION, JOINT_CANDIDATES, JOINT_PRIORITY, JOINT_MEASUREMENTS,
+                       JOINT_SEARCH_POLICY, JOINT_STATE_POLICY, JOINT_SELECTION_POLICY)
 
 
 # 数值和字段名沿用已验证的强 B1；定义由本版本持有，不再适配旧模型。
@@ -66,7 +67,11 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_selection_policy='q0_recovery_prior_fallback_tie_v1',
     v41_state_policy='selected_current_measurement_trusted_v1',
     v41_main_policy='dense_b0_optional_concat_b1_v1',
-    v41_q0_center_weighting='uniform',
+    v41_q0_center_weighting='uniform', v41_joint_search=False, v41_joint_latency=False,
+    v41_q0_lateral=False, v41_q0_lateral_warmup_epochs=10,
+    v41_q0_lateral_replay=False, v41_q0_replay_manifest=None, v41_joint_replay=None,
+    v41_patrol_seconds=1., v41_weak_patrol_seconds=.2,
+    v41_history_training='legacy', v41_history_bank=None, v41_fixed_replay_bank=None,
     v41_activation_policy='active_from_epoch1_v1',
     v41_gain_margin=0., v41_trust_threshold=.5, v41_min_support=3,
     v41_duplicate_xyz_tolerance=1e-4, v41_duplicate_yaw_tolerance=1e-5,
@@ -100,7 +105,7 @@ def recipe_identity(config):
     if not isinstance(name, str) or name not in RECIPES:
         raise ValueError('unknown v41 training recipe: ' + str(name))
     options = list(config.get('v41_engineering_options', ('unique_mask',)))
-    return dict(recipe=name, implementation_id='v41_current_point_recovery_packed_v4',
+    identity = dict(recipe=name, implementation_id='v41_current_point_recovery_packed_v4',
         cpu_geometry=backend_identity(),
         execution_revision=EXECUTION_REVISION,
         projection='concat', options=options, prior_read_applicable=False,
@@ -120,6 +125,31 @@ def recipe_identity(config):
         auxiliary=dict(fraction=.25, loss_weight=.25, main_optimizer_steps_unchanged=True),
         kitti_geometry=config.get('v41_kitti_geometry', 'open3dsot_velodyne_v1'), train_preload_offset=10.,
         duplicate_xyz_tolerance=1e-4, duplicate_yaw_tolerance=1e-5)
+    if config.get('v41_joint_search', False):
+        identity.update(implementation_id='v41_joint_search_v1', candidates=list(JOINT_CANDIDATES),
+            tie_priority=list(JOINT_PRIORITY), measurement_sources=list(JOINT_MEASUREMENTS),
+            search_policy=JOINT_SEARCH_POLICY, state_policy=JOINT_STATE_POLICY, selection_policy=JOINT_SELECTION_POLICY,
+            max_extra_raw_ids=256, coarse_top_k=3, patrol_seconds=config.get('v41_patrol_seconds', 1.),
+            weak_patrol_seconds=config.get('v41_weak_patrol_seconds', .2),
+            remote_confirmation='next_independent_scan', geometry_target='exact_iou_at_least_half',
+            replay='causal_auxiliary_bank_every_fourth_singleton')
+    if config.get('v41_history_training', 'legacy') != 'legacy':
+        identity.update(history_training=config['v41_history_training'],
+            augmentation='cross_scene_density_xyz_segment_locked_last_v1',
+            queue='common_curriculum_physical_batches_v1')
+        if config.get('v41_joint_replay') != 'previous_epoch':
+            identity['replay'] = 'shared_e2_natural_same_endpoint_branch0_v1'
+    if config.get('v41_q0_lateral') or config.get('v41_q0_lateral_replay'):
+        identity['lateral'] = dict(axis='predicted_q0_width',
+            warmup_epochs=config.get('v41_q0_lateral_warmup_epochs', 10), min_unique=3,
+            foreground_threshold=.5, max_widths=1, gate_initial_bias=-3.,
+            point_loss_weight=1., gate_loss_weight=1.)
+        if not config.get('v41_q0_lateral_replay'):
+            identity['implementation_id'] += '_q0_lateral'
+    if config.get('v41_q0_lateral_replay', False):
+        identity.update(implementation_id='v41_q0_lateral_replay_v1',
+            replay=dict(donor_epochs=[10, 60], branch=0, maximum_slot_fraction=.5))
+    return identity
 
 
 def recipe_scope(config):
@@ -162,6 +192,9 @@ def normalize_config(config=None):
         raise ValueError('v41 arm/recipe identity mismatch')
     derived = {key: spec[key] for key in ('enable_b1', 'enable_m', 'enable_b3')}
     derived.update(v41_search_policy=spec['search_policy'], v31_arm='b1' if spec['enable_b1'] else 'b0')
+    if cfg.v41_joint_search:
+        derived.update(v41_search_policy=JOINT_SEARCH_POLICY, v41_state_policy=JOINT_STATE_POLICY,
+                       v41_selection_policy=JOINT_SELECTION_POLICY)
     for key, value in derived.items():
         if key in supplied and (type(supplied[key]) is not type(value) or supplied[key] != value):
             raise ValueError('v41 arm-derived field cannot be overridden: ' + key)
@@ -174,6 +207,51 @@ def normalize_config(config=None):
         raise ValueError('v41 execution revision mismatch; use the original frozen source')
     if cfg.v41_q0_center_weighting not in ('uniform', 'inverse_lwh'):
         raise ValueError('v41_q0_center_weighting must be uniform or inverse_lwh')
+    if type(cfg.v41_joint_search) is not bool:
+        raise ValueError('v41_joint_search must be bool')
+    for key in ('v41_patrol_seconds', 'v41_weak_patrol_seconds'):
+        if type(cfg[key]) not in (float, int) or not math.isfinite(cfg[key]) or cfg[key] <= 0:
+            raise ValueError(key + ' must be a positive finite interval in seconds')
+        cfg[key] = float(cfg[key])
+    if cfg.v41_history_training not in ('legacy', 'window_1448', 'four_candidates'):
+        raise ValueError('unknown v41_history_training')
+    if cfg.v41_history_training != 'legacy':
+        if not cfg.v41_joint_search:
+            raise ValueError('paired history training requires the joint KITTI Full recipe')
+    elif cfg.v41_history_bank is not None or cfg.v41_fixed_replay_bank is not None:
+        raise ValueError('history banks require a paired history training arm')
+    if cfg.v41_joint_search and cfg.v41_joint_replay is None:
+        cfg.v41_joint_replay = 'previous_epoch' if cfg.v41_history_training == 'legacy' else 'fixed_e2'
+    if cfg.v41_joint_replay is not None:
+        if not cfg.v41_joint_search or cfg.v41_joint_replay not in ('previous_epoch', 'fixed_e2'):
+            raise ValueError('joint replay requires joint search and a supported prefix source')
+        if cfg.v41_joint_replay == 'fixed_e2' and cfg.v41_history_training == 'legacy':
+            raise ValueError('fixed E2 replay requires the common history training curriculum')
+        if cfg.v41_joint_replay == 'previous_epoch' and cfg.v41_fixed_replay_bank is not None:
+            raise ValueError('previous-epoch replay is stored in the checkpoint; remove the fixed E2 bank')
+    if type(cfg.v41_q0_lateral) is not bool:
+        raise ValueError('v41_q0_lateral must be bool')
+    if type(cfg.v41_q0_lateral_replay) is not bool:
+        raise ValueError('v41_q0_lateral_replay must be bool')
+    if cfg.v41_q0_lateral_replay:
+        cfg.v41_q0_lateral = True
+    if cfg.v41_q0_lateral and not cfg.enable_b3:
+        raise ValueError('the q0 lateral head uses the Full current-point pool')
+    if type(cfg.v41_q0_lateral_warmup_epochs) is not int or cfg.v41_q0_lateral_warmup_epochs < 0:
+        raise ValueError('q0 lateral warmup must be a nonnegative number of epochs')
+    if cfg.v41_q0_lateral_replay:
+        if (cfg.v41_joint_search or cfg.v41_arm != 'full' or cfg.dataset != 'kitti_mf'
+                or cfg.v41_q0_center_weighting != 'uniform' or cfg.dynamics_time_mode != 'true'):
+            raise ValueError('uniform E10/E60 prefixes require the original KITTI search state; '
+                             'use v41_q0_lateral for a head trained on joint prefixes')
+    elif cfg.v41_q0_replay_manifest is not None:
+        raise ValueError('v41_q0_replay_manifest requires the q0 lateral replay recipe')
+    if type(cfg.v41_joint_latency) is not bool or (cfg.v41_joint_latency and not cfg.test):
+        raise ValueError('v41_joint_latency requires standalone evaluation')
+    if cfg.v41_joint_search and (cfg.v41_arm, cfg.dataset, cfg.v41_q0_center_weighting) != ('full', 'kitti_mf', 'uniform'):
+        raise ValueError('joint search requires KITTI Full with uniform q0 center weighting')
+    if cfg.v41_joint_search and cfg.dynamics_time_mode != 'true':
+        raise ValueError('joint independent motion and scan scheduling require physical timestamps')
     validate_execution_profile(cfg)
     if cfg.execution_profile != 'optimized_fp32':
         raise ValueError('v41 requires FP32 backbone/projections; only attention QKV may use BF16')
@@ -188,7 +266,7 @@ def normalize_config(config=None):
     if cfg.devices is not None and (type(cfg.devices) is not int or cfg.devices < 0):
         raise ValueError('devices selects one nonnegative physical GPU ID')
     for key in POLICY_KEYS + FIXED_B3_KEYS:
-        if key == 'v41_search_policy':
+        if key in derived:
             continue
         if type(cfg[key]) is not type(DEFAULTS[key]) or cfg[key] != DEFAULTS[key]:
             raise ValueError('v41 fixed policy identity mismatch: ' + key)
@@ -343,8 +421,22 @@ def config_identity(config):
         'console_mode', 'progress_refresh_seconds', 'plain_log_interval_seconds',
         'log_every_n_steps', 'diagnostics_level', 'full_diagnostic_epochs', 'tensorboard',
         'v41_diagnostics', 'v35_train_diagnostics', 'v41_memory_logging',
-        'eval_split', 'checkpoint_every_n_epochs', 'report_checkpoint', 'report_last_k'}
+        'eval_split', 'checkpoint_every_n_epochs', 'report_checkpoint', 'report_last_k', 'v41_joint_latency'}
     payload = {key: value for key, value in cfg.items() if key not in excluded}
+    # 离线清单按内容在启动、训练恢复时比对；独立评估不读训练集清单。
+    payload.pop('v41_q0_replay_manifest')
+    payload.pop('v41_history_bank')
+    payload.pop('v41_fixed_replay_bank')
+    # The effective joint replay and lateral settings are already in training_execution_recipe.
+    for key in ('v41_joint_replay', 'v41_q0_lateral', 'v41_q0_lateral_warmup_epochs',
+                'v41_patrol_seconds', 'v41_weak_patrol_seconds'):
+        payload.pop(key)
+    if cfg.v41_history_training == 'legacy':
+        payload.pop('v41_history_training')
+    if not cfg.v41_q0_lateral_replay:
+        payload.pop('v41_q0_lateral_replay')
+    if not cfg.v41_joint_search:
+        payload.pop('v41_joint_search')
     hash_time_manifest_paths(payload)
     payload.update(schema=SCHEMA, evaluation_rng_policy='isolated_split_seed_v2',
                    training_execution_recipe=recipe_identity(cfg))

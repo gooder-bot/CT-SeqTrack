@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+UPSTREAM = ('observation', 'decoder', 'prior', 'multistep', 'q0_lateral')
+
 
 def require(condition, message):
     if not condition:
@@ -53,7 +55,7 @@ def rng_equal(left, right):
 
 
 def upstream_snapshot(tracker):
-    prefixes = ('observation.', 'decoder.', 'prior.', 'multistep.')
+    prefixes = tuple(name + '.' for name in UPSTREAM)
     return dict(modes={name: module.training for name, module in tracker.named_modules()},
         buffers={name: value.detach().clone() for name, value in tracker.named_buffers()
                  if name.startswith(prefixes)})
@@ -71,10 +73,12 @@ def check_upstream_snapshot(tracker, snapshot):
 
 def gradient_summary(named_parameters, gradients):
     import torch
-    groups = {name: dict(parameters=0, connected=0, nonzero=0, squared_norm=0.)
-              for name in ('observation', 'decoder', 'prior', 'multistep', 'verifier', 'recovery_head')}
+    groups = {}
     for (name, parameter), gradient in zip(named_parameters, gradients):
-        group = groups[name.split('.', 1)[0]]
+        key = name.split('.', 1)[0]
+        if key not in groups:
+            groups[key] = dict(parameters=0, connected=0, nonzero=0, squared_norm=0.)
+        group = groups[key]
         group['parameters'] += parameter.numel()
         if gradient is None:
             continue
@@ -116,13 +120,16 @@ class ActualFlashAudit:
         self.module._flash_varlen = self.original
 
 
-def check_output(batch, output):
+def check_output(batch, output, *, joint_search=False):
     import torch
+    from models.ct_v41.identity import JOINT_CANDIDATES, LEGACY_CANDIDATES
     from models.ct_v41.verification import current_candidate_support
     b = len(output.selected_index)
-    require(output.candidates.boxes.shape == (b, 4, 4), 'expected four position candidates')
-    require(output.candidates.valid.shape == (b, 4), 'candidate validity must have four slots')
-    require(output.verification.logits.shape == (b, 4, 3), 'expected four S/P/T candidate outputs')
+    slots = len(JOINT_CANDIDATES if joint_search else LEGACY_CANDIDATES)
+    require((output.joint is not None) == joint_search, 'candidate evidence differs from the selected recipe')
+    require(output.candidates.boxes.shape == (b, slots, 4), 'candidate geometry shape mismatch')
+    require(output.candidates.valid.shape == (b, slots), 'candidate validity shape mismatch')
+    require(output.verification.logits.shape == (b, slots, 3), 'candidate verifier shape mismatch')
     require(output.recovery is not None, 'Full must return recovery output')
     require(bool(torch.isfinite(output.candidates.boxes).all()), 'candidate boxes must be finite')
     measurement = output.candidates.measurement_candidate
@@ -132,10 +139,27 @@ def check_output(batch, output):
     row = torch.arange(b, device=output.selected_index.device)
     selected = output.selected_index
     require(bool(output.candidates.valid[row, selected].all()), 'selected candidate is invalid')
-    support = current_candidate_support(output.observation, batch, output.candidates.boxes)
-    expected_support = support['mask'][row, selected] & measurement[row, selected][:, None]
+    local = current_candidate_support(output.observation, batch, output.candidates.boxes[:, :4])
+    support = local['mask'] & output.candidates.valid[:, :4, None]
+    if joint_search:
+        joint = output.joint
+        width = support.shape[-1]
+        require(torch.equal(support, joint.support_mask[:, :4, :width])
+                and not joint.support_mask[:, :4, width:].any(), 'legacy candidate support geometry mismatch')
+        for slot, evidence in enumerate((joint.observations.local, joint.observations.remote), 4):
+            width = evidence.ids.shape[-1]
+            require(torch.equal(evidence.ids, joint.support_ids[:, slot, :width])
+                    and torch.equal(evidence.support_mask & (evidence.ids >= 0), joint.support_mask[:, slot, :width])
+                    and not joint.support_mask[:, slot, width:].any(), 'joint candidate point source mismatch')
+        support = joint.support_mask
+    expected_support = support[row, selected] & measurement[row, selected][:, None]
     require(torch.equal(expected_support, output.commit_decision.support_mask),
             'commit support differs from final selected geometry')
+    require(torch.equal(output.candidates.boxes[:, 0], output.decoder.q0_box), 'B3 did not receive final q0')
+    if joint_search:
+        eligible = ((expected_support.sum(-1) >= 3) & (output.commit_decision.trusted_score >= .5)
+                    & joint.identity_ok[row, selected] & joint.geometry_ok[row, selected])
+        require(torch.equal(eligible, output.commit_decision.eligible), 'joint write eligibility mismatch')
     require(torch.equal(output.accepted_box, output.candidates.boxes[row, selected]), 'accepted box mismatch')
     expected_quality = torch.where(selected == 0, output.legacy_q0_quality,
                                    torch.zeros_like(output.legacy_q0_quality))
@@ -143,13 +167,17 @@ def check_output(batch, output):
     return dict(rows=b, R_valid=int(output.recovery.valid.sum().item()),
         R_selected=int((selected == 3).sum().item()),
         trusted_eligible=int(output.commit_decision.eligible.sum().item()),
-        candidate_slots=4, R_read_points=int(output.recovery.point_mask.sum().item()))
+        candidate_slots=slots, R_read_points=int(output.recovery.point_mask.sum().item()))
 
 
 def smoke_config(args):
     from models.ct_v41.config import load_config, normalize_config
-    config = load_config(args.cfg, dict(path=args.path, devices=args.devices))
-    require(not config.ct_engineering_check and not config.test and not config.checkpoint,
+    options = {name: getattr(args, name) for name in
+               ('v41_history_bank', 'v41_fixed_replay_bank', 'v41_q0_replay_manifest',
+                'v41_q0_lateral_warmup_epochs') if getattr(args, name, None) is not None}
+    config = load_config(args.cfg, dict(path=args.path, devices=args.devices, **options))
+    require(config.v41_arm == 'full' and config.dataset == 'kitti_mf'
+            and not config.ct_engineering_check and not config.test and not config.checkpoint,
             '--cfg must select a formal scratch V41 KITTI Full training recipe')
     return normalize_config(dict(config, ct_engineering_check=True, workers=0, log_dir=None,
         diagnostics_level=args.diagnostics_level, full_diagnostic_epochs=[], v31_evaluate_late3=False))
@@ -190,6 +218,7 @@ def run_smoke(args, report):
             'main and auxiliary must use the same training trajectories and source metadata')
     host = CTSEQTRACKV41(config, loaders=loaders).cuda().train()
     host._require_lightning()
+    host.on_train_epoch_start()
     tracker = host.tracker
     optimizer = host.configure_optimizers()['optimizer']
     require(sum(p.numel() for p in tracker.recovery_head.parameters()) == 195, 'R must have exactly 195 parameters')
@@ -201,7 +230,7 @@ def run_smoke(args, report):
         physical_gpu=args.devices, logical_cuda_device=0,
         loader_plans={role: loader.batch_sampler.state_dict() for role, loader in loaders.items()},
         steps=[], aux_isolation_checks=[])
-    main_iterator, auxiliary_iterator = iter(loaders['train']), iter(loaders['auxiliary'])
+    main_iterator, auxiliary_iterator = iter(loaders['train']), host._auxiliary_iterator
     named_parameters = list(tracker.named_parameters())
     # 主 M 应执行；辅助流不得执行。hook 记录实际调用，而非推断配置。
     mtp_calls = []
@@ -216,6 +245,9 @@ def run_smoke(args, report):
                 torch.cuda.synchronize()
                 started = time.perf_counter()
                 main_rows = next(main_iterator)
+                for replay in (host.joint_replay, host.q0_replay):
+                    if replay is not None:
+                        main_rows = replay.replace(main_rows, loaders['train'].dataset)
                 main_before = flash.calls
                 main_mtp_before = len(mtp_calls)
                 main_batch, main_output = host._forward_raw(main_rows, host.train_builder, training=True)
@@ -241,20 +273,24 @@ def run_smoke(args, report):
                         [parameter for _, parameter in named_parameters], retain_graph=True, allow_unused=True)
                     isolated_gradients = gradient_summary(named_parameters, auxiliary_grads)
                     require(all(isolated_gradients[name]['connected'] == 0
-                                for name in ('observation', 'decoder', 'prior', 'multistep')),
+                                for name in UPSTREAM if name in isolated_gradients),
                             'auxiliary gradient reached an upstream parameter')
                     require(isolated_gradients['verifier']['connected'] > 0,
                             'auxiliary loss is disconnected from B3')
                     require(isolated_gradients['recovery_head']['connected'] > 0,
                             'auxiliary XYZ loss is disconnected from R')
+                    if config.v41_joint_search:
+                        require(isolated_gradients['joint_search']['connected'] > 0,
+                                'auxiliary loss is disconnected from joint search')
                     del auxiliary_grads
                 require(rng_equal(rng_before, capture_rng_state()), 'auxiliary execution changed main RNG')
                 check_upstream_snapshot(tracker, before)
                 require(len(mtp_calls) == mtp_before, 'M executed in the auxiliary stream')
                 auxiliary_kernel_calls = flash.calls - auxiliary_before
                 require(auxiliary_kernel_calls > 0, 'auxiliary forward did not execute actual FA2')
-                summaries = dict(main=check_output(main_batch, main_output),
-                                 auxiliary=check_output(auxiliary_batch, auxiliary_output))
+                summaries = dict(main=check_output(main_batch, main_output, joint_search=config.v41_joint_search),
+                                 auxiliary=check_output(auxiliary_batch, auxiliary_output,
+                                                        joint_search=config.v41_joint_search))
                 combined = main_losses['loss_total'] + config.v41_aux_loss_weight * auxiliary_losses['loss_total']
                 require(combined.ndim == 0 and bool(torch.isfinite(combined)), 'combined loss is not finite scalar')
                 combined.backward()
@@ -296,6 +332,8 @@ def run_smoke(args, report):
         report.update(status='passed_lifecycle_smoke_only', optimizer_steps=host._epoch_steps,
             main_committed_rows=host._epoch_rows, auxiliary_committed_rows=host._auxiliary_rows,
             main_M_forward_calls=len(mtp_calls), saved_checkpoints=0,
+            history_bank_sha256=host.history_bank_sha256,
+            joint_replay=host.joint_replay.audit() if host.joint_replay is not None else None,
             diagnostics_level=config.diagnostics_level,
             auxiliary_diagnostics=(host.auxiliary_diagnostics.state_dict()
                                    if host._full_epoch_diagnostics else None),
@@ -318,6 +356,10 @@ def parse_args(argv=None):
     parser.add_argument('--path', required=True, help='real KITTI training root')
     parser.add_argument('--devices', required=True, type=int, help='one physical CUDA GPU index')
     parser.add_argument('--steps', type=int, default=2)
+    parser.add_argument('--v41_history_bank', help='与正式配置相同的 E57 增强库')
+    parser.add_argument('--v41_fixed_replay_bank', help='固定 E2 回放配置使用的共享库路径')
+    parser.add_argument('--v41_q0_replay_manifest', help='旧 q0 回放配方使用的前态清单')
+    parser.add_argument('--v41_q0_lateral_warmup_epochs', type=int)
     parser.add_argument('--diagnostics-level', choices=('summary', 'full'), default='summary')
     parser.add_argument('--output-dir', help='new directory under this project artifacts/ct_checks')
     args = parser.parse_args(argv)

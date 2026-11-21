@@ -55,6 +55,7 @@ class SharedHypothesisDecoder(nn.Module):
         self.query_context = bool(query_context)
         self.initial_context = bool(initial_context)
         self.local_observation = bool(local_observation)
+        self.emit_q0_context = False
         self.context_time_scale = float(time_scale)
         if self.query_context and self.context_time_scale <= 0:
             raise ValueError('v34 context time_scale must be positive')
@@ -294,4 +295,5 @@ class SharedHypothesisDecoder(nn.Module):
         # q0 quality 保留空序列监督，不能按 sequence_valid 屏蔽。
         quality = self.quality_head(features[:, 3]).squeeze(-1)
         return DecoderOutput(q0_box=q0, q0_quality_logits=quality,
-            history_boxes=boxes[:, :3], query_context_norm=context_norm, **local_diagnostics)
+            history_boxes=boxes[:, :3], query_context_norm=context_norm,
+            q0_context=features[:, 3] if self.emit_q0_context else None, **local_diagnostics)

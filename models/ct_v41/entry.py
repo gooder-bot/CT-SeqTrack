@@ -26,16 +26,18 @@ def parse_config(argv=None):
     parser = argparse.ArgumentParser(description='CT-SeqTrack v41 protected observation and independent selective update tracking',
                                      allow_abbrev=False)
     parser.add_argument('--cfg', required=True)
-    for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest'):
+    for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest',
+                'v41_q0_replay_manifest', 'v41_history_bank', 'v41_fixed_replay_bank'):
         parser.add_argument('--' + key)
     for key in TIME_MANIFEST_KEYS[1:]:
         parser.add_argument('--' + key, help='engineering-only manifest for its dataset role')
     parser.add_argument('--dynamics_fixed_delta_t', type=float, help='engineering-only fixed interval')
     for key in ('batch_size', 'epoch', 'workers', 'seed', 'check_val_every_n_epoch', 'trainer_devices',
                 'ct_pointcloud_cache_bytes', 'lr_decay_step', 'lr_warmup_steps', 'log_every_n_steps',
-                'checkpoint_every_n_epochs', 'report_last_k'):
+                'checkpoint_every_n_epochs', 'report_last_k', 'v41_q0_lateral_warmup_epochs'):
         parser.add_argument('--' + key, type=int)
-    for key in ('lr', 'wd', 'lr_decay_rate', 'progress_refresh_seconds', 'plain_log_interval_seconds'):
+    for key in ('lr', 'wd', 'lr_decay_rate', 'progress_refresh_seconds', 'plain_log_interval_seconds',
+                'v41_patrol_seconds', 'v41_weak_patrol_seconds'):
         parser.add_argument('--' + key, type=float)
     parser.add_argument('--lr_schedule', choices=('step', 'multistep', 'piecewise'))
     parser.add_argument('--lr_milestones', nargs='*', type=int)
@@ -53,7 +55,7 @@ def parse_config(argv=None):
     parser.add_argument('--execution_profile', choices=EXECUTION_PROFILES)
     parser.add_argument('--v41_attention_backend', choices=('fa2_varlen', 'math'),
                         help='math is engineering-only; formal runs require FA2')
-    for key in ('test', 'ct_engineering_check'):
+    for key in ('test', 'ct_engineering_check', 'v41_joint_latency'):
         parser.add_argument('--' + key, action='store_true', default=None)
     for key in ('limit_train_batches', 'limit_val_batches'):
         parser.add_argument('--' + key, type=batch_limit)
@@ -106,6 +108,17 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
+def replay_manifest_hash(config):
+    path = config.v41_q0_replay_manifest
+    if not path or not Path(path).is_file():
+        raise ValueError('q0 training requires --v41_q0_replay_manifest from build_v41_q0_replay.py')
+    checksum = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            checksum.update(block)
+    return checksum.hexdigest()
+
+
 def validate_run_destination(config, root, *, checkpoint_identity=None):
     """所有运行 metadata 写入前验证目录及 checkpoint；返回是否保留原 metadata。"""
     root = Path(root)
@@ -136,6 +149,10 @@ def validate_run_destination(config, root, *, checkpoint_identity=None):
             raise ValueError('v41 training resume requires its original run directory and run_id')
         if checkpoint_identity is not None:
             checkpoint_identity.update(run_id=payload['run_id'], completed_epoch=payload['completed_epoch'])
+            if config.v41_history_training != 'legacy':
+                checkpoint_identity['history_bank_sha256'] = payload['history_bank_sha256']
+            if config.v41_q0_lateral_replay:
+                checkpoint_identity['q0_replay_manifest_sha256'] = payload['q0_replay_manifest_sha256']
     return existing
 
 
@@ -229,6 +246,24 @@ def _run(config, *, loaders=None, command_line=None):
         raise ValueError('v41 formal entry does not accept injected loaders')
     checkpoint_identity = {}
     preserve_metadata = validate_run_destination(config, root, checkpoint_identity=checkpoint_identity)
+    history_bank = None
+    history_hash = checkpoint_identity.get('history_bank_sha256')
+    if config.v41_history_training != 'legacy' and not config.test:
+        from .history_augmentation import HistoryAugmentation
+        if not config.v41_history_bank:
+            raise ValueError('continuous history augmentation requires --v41_history_bank')
+        if config.v41_joint_replay == 'fixed_e2' and not config.v41_fixed_replay_bank:
+            raise ValueError('fixed E2 replay requires --v41_fixed_replay_bank')
+        history_bank = HistoryAugmentation.load(config.v41_history_bank)
+        if history_hash is not None and history_bank.sha256 != history_hash:
+            raise ValueError('E57 history bank differs from the checkpoint')
+        history_hash = history_bank.sha256
+    replay_hash = None
+    if config.v41_q0_lateral_replay:
+        replay_hash = (checkpoint_identity['q0_replay_manifest_sha256'] if config.test
+                       else replay_manifest_hash(config))
+        if config.checkpoint and replay_hash != checkpoint_identity['q0_replay_manifest_sha256']:
+            raise ValueError('q0 training replay manifest differs from the checkpoint')
     if config.test:
         config.eval_checkpoint_epoch = checkpoint_identity['completed_epoch']
     import torch
@@ -241,6 +276,10 @@ def _run(config, *, loaders=None, command_line=None):
     pl.seed_everything(config.seed, workers=True)
     root.mkdir(parents=True, exist_ok=True)
     model = CTSEQTRACKV41(config, loaders=loaders)
+    if config.v41_history_training != 'legacy':
+        model.train_builder.history_bank = history_bank
+        model.history_bank_sha256 = history_hash
+    model.q0_replay_manifest_sha256 = replay_hash
     try:
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True,
                                            stderr=subprocess.DEVNULL).strip()
@@ -270,6 +309,18 @@ def _run(config, *, loaders=None, command_line=None):
                         tie_break='earliest', last_k=config.report_last_k,
                         checkpoint_every_n_epochs=config.checkpoint_every_n_epochs))
     manifest.update(initialization_identity(model.tracker))
+    if config.v41_joint_search:
+        manifest['actual_recipe']['v41_joint_search'] = True
+        manifest['actual_recipe']['v41_joint_replay'] = config.v41_joint_replay
+    if config.v41_q0_lateral:
+        manifest['actual_recipe']['v41_q0_lateral'] = True
+        manifest['actual_recipe']['v41_q0_lateral_warmup_epochs'] = config.v41_q0_lateral_warmup_epochs
+    if config.v41_history_training != 'legacy':
+        manifest['actual_recipe']['v41_history_training'] = config.v41_history_training
+        manifest['history_bank_sha256'] = history_hash
+    if config.v41_q0_lateral_replay:
+        manifest['actual_recipe']['v41_q0_lateral_replay'] = True
+        manifest['q0_replay_manifest_sha256'] = replay_hash
     if config.dataset == 'kitti_mf' and not config.ct_engineering_check:
         from datasets.kitti_v41 import build_v41_kitti_manifest, kitti_input_metadata_identity
         manifest['dataset_manifest'] = build_v41_kitti_manifest()
@@ -290,6 +341,10 @@ def _run(config, *, loaders=None, command_line=None):
         manifest['checkpoint_completed_epoch'] = checkpoint_identity['completed_epoch']
     if existing_manifest and existing_manifest.get('source') != manifest['source']:
         raise ValueError('v41 resume source differs; use the original run source')
+    if existing_manifest and existing_manifest.get('history_bank_sha256') != history_hash:
+        raise ValueError('E57 history bank differs from the original run')
+    if existing_manifest and existing_manifest.get('q0_replay_manifest_sha256') != replay_hash:
+        raise ValueError('q0 training replay manifest differs from the original run')
     if existing_manifest and any(existing_manifest.get(key) != manifest.get(key)
                                  for key in ('dataset_manifest', 'input_metadata')):
         raise ValueError('v41 resume dataset identity differs')

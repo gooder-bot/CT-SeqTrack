@@ -96,6 +96,11 @@ def frame_endpoint_mean(frame_values, frame_valid):
     return masked_mean(per_endpoint, valid.any(-1))
 
 
+def _base_q0(decoder):
+    lateral = getattr(decoder, 'lateral', None)
+    return decoder.q0_box if lateral is None else lateral.base_box
+
+
 def _current_history_mean(frame_loss, frame_valid):
     """current/history 各半；缺一组则另一组占满，空端点不进入分母。
 
@@ -187,7 +192,7 @@ def observation_loss_statistics(batch, output, *, q0_center_weighting='uniform')
 
     for name, predicted, truth, exists, cw, aw in (
             ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10.),
-            ('main', decoder.q0_box, target, observation.sequence_valid, 2., 10.),
+            ('main', _base_q0(decoder), target, observation.sequence_valid, 2., 10.),
             ('history', decoder.history_boxes, batch['history_target_boxes'], batch['history_valid'], .2, 1.)):
         exists = exists.bool()
         predicted = transform_boxes(torch.where(exists[..., None], predicted.detach(), 0.), yaw_anchor)
@@ -237,7 +242,7 @@ def compute_losses(batch, output, *, enable_b1=True, q0_exact_iou=None, q0_cente
     q0_weights = _q0_axis_weights(batch['box_size'], q0_center_weighting)
     for name, predicted, truth, valid, center_weight, angle_weight, endpoint_mean in (
         ('coarse', observation.coarse_box, target, observation.sequence_valid, 2., 10., False),
-        ('main', decoder.q0_box, target, observation.sequence_valid, 2., 10., False),
+        ('main', _base_q0(decoder), target, observation.sequence_valid, 2., 10., False),
         ('history', decoder.history_boxes, batch['history_target_boxes'],
          batch['history_valid'].bool(), .2, 1., True)):
         center, angle = local_observation_box_terms(predicted, truth, valid, yaw_anchor,

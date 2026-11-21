@@ -15,6 +15,8 @@ from .config import normalize_config, recipe_scope
 from .contracts import CandidateSet, SelectionDecision, CommitDecision, TrackOutput
 from .verification import FinalBoxVerifier, final_candidate_support, build_current_pool
 from .recovery import RecoveryResidualHead
+from .identity import JOINT_PRIORITY
+from .q0_lateral import Q0LateralHead, lateral_losses
 
 
 def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, recovery=None):
@@ -49,7 +51,7 @@ def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, reco
         decoder.q0_quality_logits, measurement)
 
 
-def select_candidates(candidates, verification, observation, batch, *, apply_policy=True):
+def select_candidates(candidates, verification, observation, batch, *, apply_policy=True, joint=None):
     """零 margin，精确同分 q0→R→prior→fallback；传播永不获得可信资格。"""
     valid = candidates.valid
     b, device = len(valid), valid.device
@@ -63,7 +65,8 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
         if not bool(torch.isfinite(verification.logits).all()):
             raise FloatingPointError('nonfinite v41 verifier logits')
         utility = verification.utility
-        priority = torch.tensor([0, 3, 1, 2], device=device, dtype=torch.long)
+        priority = torch.tensor(JOINT_PRIORITY if joint is not None else (0, 3, 1, 2),
+                                device=device, dtype=torch.long)
         ordered = utility.masked_fill(~valid, -torch.inf)[:, priority]
         selected = priority[ordered.argmax(-1)]
         selected_utility = utility[row, selected]
@@ -81,10 +84,17 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
         candidate_trust[:, 0] = torch.where(candidates.raw_valid[:, 0], legacy, 0.)
     selected_real = (selected == 0) & candidates.raw_valid[:, 0]
     selected_measurement = candidates.measurement_candidate[row, selected]
-    support = final_candidate_support(observation, batch, candidates.boxes)
-    support_mask = support['mask'][row, selected] & selected_measurement[:, None]
+    if joint is None:
+        support = final_candidate_support(observation, batch, candidates.boxes)
+        selected_mask, count = support['mask'][row, selected], support['count'][row, selected]
+    else:
+        selected_mask = joint.support_mask[row, selected]
+        count = selected_mask.sum(-1)
+    support_mask = selected_mask & selected_measurement[:, None]
     trusted_score = candidate_trust[row, selected]
-    eligible = selected_measurement & (support['count'][row, selected] >= 3) & (trusted_score >= .5)
+    eligible = selected_measurement & (count >= 3) & (trusted_score >= .5)
+    if joint is not None:
+        eligible &= joint.identity_ok[row, selected] & joint.geometry_ok[row, selected]
     accepted = candidates.boxes[row, selected]
     selection = SelectionDecision(selected.detach(), accepted, selected_utility, selected.detach())
     commit = CommitDecision(trusted_score.detach(), legacy.detach(), support_mask.detach(),
@@ -127,16 +137,27 @@ class JointTracker(nn.Module):
             self.verifier = FinalBoxVerifier(self.config.time_scale) if self.enable_b3 else None
         with torch.random.fork_rng(devices=[]):
             self.recovery_head = RecoveryResidualHead() if self.enable_b3 else None
+        self.joint_search = None
+        if self.config.v41_joint_search:
+            from .joint_observation import JointSearchObservation
+            with torch.random.fork_rng(devices=[]):
+                self.joint_search = JointSearchObservation()
         # 私有、稳定命名的 CPU 初始化 RNG；既不扰动公共参数，也不初始化 CUDA。
         with torch.random.fork_rng(devices=[]):
             seed = int.from_bytes(hashlib.sha256(
                 f'{self.config.seed}:ct_v40:multistep'.encode('utf-8')).digest()[:8], 'little') % (2**63)
             torch.random.default_generator.manual_seed(seed)
             self.multistep = FutureMotionHead(self.config.time_scale) if self.enable_m else None
+        self.q0_epoch = 1  # host 对训练、辅助流和独立评估设置实际的 1-based 轮号
+        self.q0_lateral = None
+        if self.config.v41_q0_lateral:
+            with torch.random.fork_rng(devices=[]):
+                self.q0_lateral = Q0LateralHead()
+            self.decoder.emit_q0_context = True
 
     def plan_prior(self, batch):
         with recipe_scope(self.config):
-            prepared = online_batch(batch)
+            prepared = online_batch(batch, joint_search=self.config.v41_joint_search)
             with torch.autocast(device_type=prepared['points'].device.type, enabled=False):
                 return self.prior(prepared) if self.enable_b1 else empty_prior(prepared)
 
@@ -155,22 +176,35 @@ class JointTracker(nn.Module):
         # 修正后的 R 重新读取最终几何；不把 seed 支持错当成最终框支持。
         verification = (self.verifier(candidates, observation, prepared, prior, pool=pool,
             include_local_diagnostics=include_local_diagnostics) if self.enable_b3 else None)
+        joint = None
+        if self.joint_search is not None:
+            from .joint_candidates import combine_joint_candidates
+            observed = self.joint_search(prepared, observation, decoder, prior, pool,
+                                         candidates.boxes, candidates.raw_valid)
+            candidates, verification, joint = combine_joint_candidates(candidates, verification, observed, pool)
         decision, commit, quality, candidate_trust = select_candidates(
-            candidates, verification, observation, prepared, apply_policy=self.enable_b3)
+            candidates, verification, observation, prepared, apply_policy=self.enable_b3, joint=joint)
         return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
             decoder, candidates, verification, decision, commit,
             candidates.q0_quality_logits.sigmoid(), decision.output_utility,
-            candidate_trust, candidates.q0_is_fallback, recovery, reference_geometry=include_local_diagnostics)
+            candidate_trust, candidates.q0_is_fallback, recovery, reference_geometry=include_local_diagnostics,
+            joint=joint)
 
     def _decode(self, prepared, prior, observation, pool, include_local_diagnostics):
         descriptor = (observation.history_descriptor if self.decoder.initial_context
                       and self.decoder.context_time_scale == self.observation.context_time_scale else None)
-        return self.decoder(observation, prepared, prior, current_pool=pool, shared_descriptor=descriptor,
-                            include_local_diagnostics=include_local_diagnostics)
+        decoder = self.decoder(observation, prepared, prior, current_pool=pool, shared_descriptor=descriptor,
+                               include_local_diagnostics=include_local_diagnostics)
+        if self.q0_lateral is not None:
+            estimate = self.q0_lateral(decoder, observation, pool, prepared['box_size'],
+                                       apply=self.q0_epoch > self.config.v41_q0_lateral_warmup_epochs)
+            decoder.lateral = estimate
+            decoder.q0_box = estimate.box
+        return decoder
 
     def forward(self, batch, prior=None, *, include_local_diagnostics=True):
         with input_check_scope(), recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
-            prepared = online_batch(batch)
+            prepared = online_batch(batch, joint_search=self.config.v41_joint_search)
             if not self.enable_b1:
                 # 外部传入的 learned prior 也不能绕过 B0 消融。
                 prior = empty_prior(prepared)
@@ -182,7 +216,7 @@ class JointTracker(nn.Module):
             return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics)
 
     def forward_aux(self, batch, *, include_local_diagnostics=True):
-        """全轨迹辅助流：上游用推理统计且无图，只有 B3/R 可微。
+        """整轨辅助流隔离 B0/B1/decoder/q0，训练 B3、R 及已启用的联合搜索头。
 
         host 隔离 RNG、管理独立状态事务；此处精确恢复每个子模块原模式，
         不用整树 train() 破坏主训练既有的 BN 局部隔离。
@@ -190,8 +224,8 @@ class JointTracker(nn.Module):
         if not self.enable_b3:
             raise ValueError('v41 recovery auxiliary stream requires Full')
         with input_check_scope(), recipe_scope(self.config), torch.autocast(device_type=batch['points'].device.type, enabled=False):
-            prepared = online_batch(batch)
-            upstream = (self.observation, self.decoder, self.prior)
+            prepared = online_batch(batch, joint_search=self.config.v41_joint_search)
+            upstream = (self.observation, self.decoder, self.prior, self.q0_lateral)
             modes = [(module, module.training) for root in upstream if root is not None for module in root.modules()]
             try:
                 for root in upstream:
@@ -225,6 +259,10 @@ class JointTracker(nn.Module):
                 from .losses import compute_losses
                 losses = compute_losses(prepared, output, enable_b1=self.enable_b1,
                     recovery_weight=float(self.config.get('v41_recovery_weight', .1)), q0_center_weighting=weighting)
+            if output.decoder.lateral is not None:
+                extra = lateral_losses(output.decoder.lateral, prepared)
+                losses.update(extra)
+                losses['loss_total'] = losses['loss_total'] + sum(extra.values())
             # M 只属于训练损失。评测即使主动请求基础 loss，也不读取未来标签。
             if self.enable_m and self.training:
                 motion = compute_multistep_loss(prepared, output.prior, self.multistep,

@@ -20,6 +20,7 @@ from utils.diagnostic_transfer import tensors_to_numpy
 
 LOCAL_FIELDS = ('local_neighbor_count', 'local_selected_count',
                 'local_mean_support', 'local_delta_norm')
+LATERAL_FIELDS = ('base_box', 'box', 'suggestion', 'gate', 'applied', 'support_count')
 
 
 class TrainingDiagnostics:
@@ -39,6 +40,7 @@ class TrainingDiagnostics:
         self.batch_loss_valid_counts = {}
         self.batches = 0
         self.sampled_geometry = []
+        self.q0_replay_rows = []
 
     @staticmethod
     def _bucket():
@@ -65,6 +67,9 @@ class TrainingDiagnostics:
         observation, decoder = output.observation, output.decoder
         target = batch['target_box'].detach()
         boxes = dict(coarse=observation.coarse_box.detach(), fine=decoder.q0_box.detach())
+        lateral = getattr(decoder, 'lateral', None)
+        if lateral is not None:
+            boxes['original_q0'] = lateral.base_box.detach()
         arrays = {key: value for key, value in batch.items()
                   if key.startswith('diagnostic_') and torch.is_tensor(value)}
         if 'diagnostic_target_count' in arrays and 'physical_displacement' in batch:
@@ -113,7 +118,27 @@ class TrainingDiagnostics:
                        for key, value in terms.items()})
         packet.update({('scalar', name): value for name, value in scalar_losses.items()})
         packet.update({('count', name): value for name, value in valid_counts.items()})
+        replay_events = [row.get('q0_replay_event') or row.get('joint_replay_event') for row in rows]
+        if lateral is None and any(row.get('q0_replay_event') for row in rows):
+            raise ValueError('q0 replay diagnostics require the lateral estimate')
+        replay_indices = [i for i, event in enumerate(replay_events) if event and lateral is not None]
+        if replay_indices:
+            replay_ids = torch.as_tensor(replay_indices, device=target.device)
+            for name in LATERAL_FIELDS:
+                packet['q0_replay', name] = getattr(lateral, name).index_select(0, replay_ids)
+            positives = labels[:, -1].index_select(0, replay_ids) > .5
+            packet['q0_replay', 'target_points'] = (positives & lateral.valid.index_select(0, replay_ids)).sum(-1)
+            packet['q0_replay', 'target_votes'] = (positives & lateral.support.index_select(0, replay_ids)).any(-1)
         copied = tensors_to_numpy(packet, optimized=self.optimized)
+        for j, i in enumerate(replay_indices):
+            row = rows[i]
+            estimates = {name: copied['q0_replay', name][j].tolist() for name in LATERAL_FIELDS}
+            gate_supervision = 'none'
+            if estimates['support_count'] >= 3:
+                gate_supervision = 'fit' if copied['q0_replay', 'target_votes'][j] else 'reject'
+            self.q0_replay_rows.append(dict(tracklet=row['tracklet_key'], frame=int(row['request'].frame),
+                event=replay_events[i], vote_supervised_points=int(copied['q0_replay', 'target_points'][j]),
+                gate_supervision=gate_supervision, **estimates))
         arrays = {name: copied['array', name] for name in arrays}
         active, provenance = copied['active',], copied['provenance',].astype(np.int64)
         endpoint_losses = {name: {key: copied['endpoint', name, key] for key in terms}
@@ -173,6 +198,9 @@ class TrainingDiagnostics:
                 sizes=batch['box_size'].index_select(0, indices),
                 target_sizes=batch['target_box_size'].index_select(0, indices))
             sample_values.update({name: value.index_select(0, indices) for name, value in boxes.items()})
+            if lateral is not None:
+                for name in ('suggestion', 'gate', 'applied', 'support_count'):
+                    sample_values[name] = getattr(lateral, name).index_select(0, indices)
             copied = tensors_to_numpy(sample_values, optimized=self.optimized)
             truth, sizes, target_sizes = (copied[name] for name in ('truth', 'sizes', 'target_sizes'))
             predicted = {name: copied[name] for name in boxes}
@@ -180,6 +208,12 @@ class TrainingDiagnostics:
                 request = row['request']
                 record = dict(tracklet=row['tracklet_key'], frame=int(request.frame),
                               branch=int(request.branch), depth=int(request.frame - request.window_start), group=key)
+                if lateral is not None:
+                    record.update(q0_replay_event=replay_events[i],
+                                  original_q0=predicted['original_q0'][j].tolist(),
+                                  final_q0=predicted['fine'][j].tolist(),
+                                  suggestion_m=float(copied['suggestion'][j]), gate=float(copied['gate'][j]),
+                                  applied_m=float(copied['applied'][j]), support_count=int(copied['support_count'][j]))
                 for name, values in predicted.items():
                     if name == 'coarse' and not active[i]:
                         record[name + '_iou'] = None
@@ -215,7 +249,8 @@ class TrainingDiagnostics:
             totals=self._serialize_bucket(self.totals),
             groups={key: self._serialize_bucket(value) for key, value in sorted(self.groups.items())},
             batch_losses=self.batch_losses, batch_loss_valid_counts=self.batch_loss_valid_counts,
-            sampled_geometry=self.sampled_geometry)
+            sampled_geometry=self.sampled_geometry,
+            **({'q0_replay_rows': self.q0_replay_rows} if self.q0_replay_rows else {}))
 
     def write_epoch(self, log_dir, *, completed_epoch=None, complete=True):
         if not log_dir:
@@ -250,7 +285,8 @@ class TrainingDiagnostics:
                       history_box_provenance=batch['history_box_provenance'])
         if output.verification is not None:
             values['v41_utility'] = output.verification.utility
-            values['v41_q0_trusted_score'] = output.verification.logits[:, 0, 2].sigmoid()
+            score_name = 'v41_q0_geometry_score' if getattr(output, 'joint', None) is not None else 'v41_q0_trusted_score'
+            values[score_name] = output.verification.logits[:, 0, 2].sigmoid()
         for name, value in targets.items():
             if torch.is_tensor(value) and value.shape[:1] == output.selected_index.shape:
                 values['v41_target_' + name] = value

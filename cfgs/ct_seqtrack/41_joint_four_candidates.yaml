@@ -1,0 +1,4 @@
+_base_: 41_joint_window_1448.yaml
+experiment_name: ct41_joint_four_candidates
+tag: v41_joint_four_candidates
+v41_history_training: four_candidates

@@ -1,6 +1,10 @@
 """v41 四候选与测量来源；位置效用、旧质量和可信写入不得混用。"""
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .joint_candidates import JointCandidateEvidence
+    from .q0_lateral import LateralEstimate
 
 from torch import Tensor
 
@@ -46,6 +50,8 @@ class DecoderOutput:
     local_selected_count: Optional[Tensor] = None  # [B,8] detached
     local_mean_support: Optional[Tensor] = None  # [B,8] detached
     local_delta_norm: Optional[Tensor] = None  # [B,8] detached
+    q0_context: Optional[Tensor] = None        # [B,64] 当前车实例上下文
+    lateral: Optional['LateralEstimate'] = None
 
 
 @dataclass
@@ -119,3 +125,4 @@ class TrackOutput:
     q0_is_fallback: Tensor
     recovery: Optional[RecoveryOutput] = None
     reference_geometry: bool = True
+    joint: Optional['JointCandidateEvidence'] = None

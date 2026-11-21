@@ -60,10 +60,15 @@ def _supervision_targets(batch, output, *, include_q0=False, reference_geometry=
         if reuse_q0:
             arrays['quality_size'] = sources[1].clamp_min(1e-3).double().numpy()
     # 此后的 CPU 多边形裁剪可与设备侧前景计数重叠；两者只在构造 trusted 时汇合。
-    support = final_candidate_support(output.observation, batch, output.candidates.boxes)
-    labels = batch['segmentation_labels'][:, -1].detach()
-    count = support['count']
-    purity = (support['mask'] & (labels[:, None] > .5)).sum(-1).to(boxes)/count.clamp_min(1)
+    joint = getattr(output, 'joint', None)
+    if joint is None:
+        support = final_candidate_support(output.observation, batch, output.candidates.boxes)
+        mask, count = support['mask'], support['count']
+        labels = batch['segmentation_labels'][:, -1, None].detach() > .5
+    else:
+        mask, labels = joint.support_mask, joint.target_members(batch)
+        count = mask.sum(-1)
+    purity = (mask & labels).sum(-1).to(boxes)/count.clamp_min(1)
     real = output.candidates.measurement_candidate.detach() & output.candidates.raw_valid.detach()
     bxs = arrays['boxes'].reshape(boxes.shape)
     gts, szs, gszs = arrays['target'], arrays['size'], arrays['target_size']
@@ -121,10 +126,17 @@ def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None):
     target = supervision_targets(batch, output) if targets is None else targets
     output.supervision_targets = target
     logits, valid = output.verification.logits, output.candidates.valid
+    joint = getattr(output, 'joint', None)
+    quality_target = target['trusted']
+    if joint is not None:
+        # 首次远端提议也要收到定位和排序监督，否则确认门会切断冷启动学习。
+        valid = torch.cat((valid[:, :4], output.candidates.raw_valid[:, 4:]), 1)
+        quality_target = target['exact_iou'] >= .5
     losses['loss_success'], success = endpoint_bce(logits[..., 0], target['success'], valid)
     losses['loss_precision'], precision = endpoint_bce(logits[..., 1], target['precision'], valid)
     # 对每个端点内的测量候选平均；q0/R 数目变化不把 T 权重翻倍。
-    losses['loss_trusted_write'], trusted = endpoint_bce(logits[..., 2], target['trusted'], target['trusted_valid'])
+    quality_name = 'loss_trusted_write' if joint is None else 'loss_geometry_quality'
+    losses[quality_name], trusted = endpoint_bce(logits[..., 2], quality_target, target['trusted_valid'])
     gap, pairs = pairwise_gap_terms(output.verification.utility, target['utility'], valid)
     losses['loss_ranking'] = frame_endpoint_mean(gap, pairs)
     recovery = recovery_loss_terms(batch, output.recovery)
@@ -133,12 +145,17 @@ def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None):
     sink = getattr(output, 'loss_statistics', None)
     for name, terms, mask, weight in (
             ('loss_success', success, valid, .125), ('loss_precision', precision, valid, .125),
-            ('loss_trusted_write', trusted, target['trusted_valid'], .5), ('loss_ranking', gap, pairs, .1),
+            (quality_name, trusted, target['trusted_valid'], .5), ('loss_ranking', gap, pairs, .1),
             ('loss_recovery_xyz', recovery['terms'], recovery['valid'], recovery_weight)):
         _record(sink, name, terms, mask, weight)
     losses['loss_total'] = .125*losses['loss_success'] + .125*losses['loss_precision'] \
-        + .5*losses['loss_trusted_write'] + .1*losses['loss_ranking'] \
+        + .5*losses[quality_name] + .1*losses['loss_ranking'] \
         + recovery_weight*losses['loss_recovery_xyz']
+    if joint is not None:
+        from .joint_observation import joint_search_losses
+        extra = joint_search_losses(joint.observations, batch)
+        losses.update(extra)
+        losses['loss_total'] = losses['loss_total'] + extra['loss_joint_total']
     return losses
 
 

@@ -1,0 +1,9 @@
+_base_: 41_full_kitti_joint_search.yaml
+experiment_name: ct41_joint_training_kitti_car
+tag: v41_joint_training_kitti_car
+v41_q0_lateral: true
+v41_history_training: window_1448
+v41_joint_replay: previous_epoch
+v41_history_bank: artifacts/ct_checks/v41_history_pair/history_e57.json
+eval_split: test
+report_checkpoint: last

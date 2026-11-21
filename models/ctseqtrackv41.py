@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 import uuid
 
 import torch
@@ -38,6 +39,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             from models.ct_v41.model import JointTracker
             tracker = JointTracker(self.config)
         self.tracker = tracker
+        if self.config.v41_q0_lateral and self.config.test and self.config.eval_checkpoint_epoch is not None:
+            # 冻结权重离线诊断会直接前向，不一定触发 Lightning 的 test hook。
+            self.tracker.q0_epoch = int(self.config.eval_checkpoint_epoch)
         self.run_id = uuid.uuid4().hex
         self._loader_factory = build_loaders
         self._loaders = {} if loaders is None else loaders
@@ -54,6 +58,18 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self._pending_auxiliary = None
         self._pending_auxiliary_diagnostics = None
         self.auxiliary_diagnostics = AuxiliaryDiagnostics()
+        self.joint_replay = None
+        self.history_audit = None
+        self.history_bank_sha256 = None
+        self.q0_replay = None
+        self.q0_replay_manifest_sha256 = None
+        if self.config.v41_joint_search and not self.config.test:
+            if self.config.v41_joint_replay == 'fixed_e2':
+                from models.ct_v41.fixed_replay import FixedReplayBank
+                self.joint_replay = FixedReplayBank(self.config.v41_fixed_replay_bank, self.config.seed)
+            else:
+                from models.ct_v41.joint_replay import JointReplayBank
+                self.joint_replay = JointReplayBank(self.config.seed)
         self._auxiliary_iterator = None
         self._auxiliary_insertions = ()
         self._auxiliary_by_main_step = {}
@@ -70,6 +86,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self._resume_auxiliary = None
         self._memory_stream = None
         self._evaluation_stream = None
+        self._joint_latency = None
         self._evaluation_session = uuid.uuid4().hex
         self.training_diagnostics = None
         if pl is not None:
@@ -125,8 +142,12 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         device = next(self.tracker.parameters()).device
         batch = {}
         try:
-            batch = move_tensors(builder.prepare(rows), device, evaluation=not training,
+            prepared = builder.prepare(rows)
+            if training and self.history_audit is not None:
+                self.history_audit.prepared(rows, prepared, 'main')
+            batch = move_tensors(prepared, device, evaluation=not training,
                                  retain_loss_geometry=training)
+            del prepared
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
             # 预留单步窗口耗尽流水线时，满批也可能集中于 GT seed 分布。
             # 从首次 drain 起与不足额批统一使用之前的 running BN，避免末尾
@@ -151,7 +172,11 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         builder, batch = self.auxiliary_builder, {}
         device = next(self.tracker.parameters()).device
         try:
-            batch = move_tensors(builder.prepare(rows), device, retain_loss_geometry=True)
+            prepared = builder.prepare(rows)
+            if self.history_audit is not None:
+                self.history_audit.prepared(rows, prepared, 'auxiliary')
+            batch = move_tensors(prepared, device, retain_loss_geometry=True)
+            del prepared
             batch = attach_materialization_cache(batch, enabled=optimized_execution(self.config))
             if getattr(self.tracker, 'supports_local_diagnostics', False):
                 output = self.tracker.forward_aux(batch, include_local_diagnostics=builder.detailed_diagnostics)
@@ -261,6 +286,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
 
     def teardown(self, stage):
         self.clear_pending_materialization()
+        if self.config.v41_joint_replay == 'fixed_e2' and self.joint_replay is not None:
+            self.joint_replay.close()
         for name in ('_memory_stream', '_evaluation_stream'):
             stream = getattr(self, name)
             if stream is not None:
@@ -306,6 +333,42 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
 
     def on_train_epoch_start(self):
         epoch = int(self.current_epoch) + 1
+        if self.config.v41_history_training != 'legacy':
+            from models.ct_v41.history_augmentation import HistoryAugmentation
+            from models.ct_v41.history_training import HistoryTrainingAudit
+            dataset = self._loaders['train'].dataset
+            bank = self.train_builder.history_bank
+            if bank is None:
+                bank = HistoryAugmentation.load(self.config.v41_history_bank)
+                self.train_builder.history_bank = bank
+            if self.history_bank_sha256 is not None and self.history_bank_sha256 != bank.sha256:
+                raise ValueError('E57 history bank differs from the checkpoint or run manifest')
+            if bank.source_sha256 != dataset.source_sha256:
+                raise ValueError('E57 history bank training dataset mismatch')
+            if self.history_audit is None:
+                bank.validate_receivers({dataset.source.get_tracklet_key(i): length
+                                         for i, length in enumerate(dataset.lengths)})
+            self.history_bank_sha256 = bank.sha256
+            self.history_audit = HistoryTrainingAudit(epoch)
+        if self.config.v41_joint_replay == 'fixed_e2':
+            dataset = self._loaders['train'].dataset
+            if epoch == 3:
+                self.joint_replay.ensure_catalog(self, dataset)
+            elif epoch > 3:
+                self.joint_replay.bind(dataset)
+        if self.config.v41_q0_lateral:
+            self.tracker.q0_epoch = epoch
+        if self.config.v41_q0_lateral_replay:
+            from models.ct_v41.q0_replay import Q0ReplayBank
+            loader = self._loaders['train']
+            if self.q0_replay is None:
+                self.q0_replay = Q0ReplayBank(self.config.v41_q0_replay_manifest,
+                                              self.config.seed, loader.dataset)
+                if (self.q0_replay_manifest_sha256 is not None and
+                        self.q0_replay_manifest_sha256 != self.q0_replay.manifest_sha256):
+                    raise ValueError('q0 replay bank differs from the training manifest')
+                self.q0_replay_manifest_sha256 = self.q0_replay.manifest_sha256
+            self.q0_replay.begin_epoch(epoch - 1, branch0_slots=loader.batch_sampler.endpoint_count)
         # 配置保留原间隔；Lightning 的本轮执行间隔允许最后一轮也评估。
         trainer = getattr(self, '_trainer', None)
         if trainer is not None:
@@ -322,6 +385,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             self.training_diagnostics = None
         self.train_builder.reset()
         self.auxiliary_builder.reset()
+        if self.joint_replay is not None:
+            self.joint_replay.begin_epoch(self.current_epoch)
         self.auxiliary_diagnostics.reset()
         if self.training_diagnostics is not None:
             self.training_diagnostics.reset(int(self.current_epoch))
@@ -376,6 +441,10 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
     def training_step(self, rows, batch_idx):
         if self._pending_train is not None or self._pending_auxiliary is not None:
             raise RuntimeError('previous training output was not committed')
+        if self.joint_replay is not None:
+            rows = self.joint_replay.replace(rows, self._loaders['train'].dataset)
+        if self.q0_replay is not None:
+            rows = self.q0_replay.replace(rows, self._loaders['train'].dataset)
         batch, output = self._forward_raw(rows, self.train_builder, training=True)
         try:
             if self.training_diagnostics is not None:
@@ -384,6 +453,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 output.loss_statistics = {}
             losses = self.tracker.compute_losses(batch, output)
             total = losses['loss_total']
+            if self.history_audit is not None:
+                self.history_audit.localization(batch, output)
             if total.ndim != 0:
                 raise ValueError('v41 loss_total must be a scalar')
             if self.training_diagnostics is not None:
@@ -416,6 +487,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                                      reduce_fx='sum' if name.endswith('_count') else 'mean')
             if not bool(torch.isfinite(total)):
                 raise FloatingPointError('v41 combined optimization loss must be finite')
+            if self.history_audit is not None:
+                self.history_audit.loss(total)
             self.log('train/optimization_loss', total.detach(), on_step=True, on_epoch=True,
                      batch_size=len(rows))
             for name, value in losses.items():
@@ -440,6 +513,15 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             self.train_builder.commit(output, prepared)
             if auxiliary is not None:
                 auxiliary_output, auxiliary_prepared, auxiliary_count = auxiliary
+                if self.joint_replay is not None:
+                    exact = auxiliary_output.supervision_targets['exact_iou'].detach()
+                    selected = auxiliary_output.selected_index.detach().long()
+                    records = tensors_to_numpy(dict(
+                        iou=exact.gather(1, selected[:, None]).squeeze(1),
+                        sampled=(auxiliary_prepared['segmentation_labels'][:, -1] == 1).sum(-1)),
+                        optimized=True)
+                    self.joint_replay.collect(self.auxiliary_builder._pending,
+                                              records['iou'], records['sampled'])
                 self.auxiliary_builder.commit(auxiliary_output, auxiliary_prepared)
                 if self._pending_auxiliary_diagnostics is not None:
                     self.auxiliary_diagnostics.add(*self._pending_auxiliary_diagnostics)
@@ -485,6 +567,10 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 f'aux_batches={self._auxiliary_batches}/{len(auxiliary)}')
         if self._epoch_complete and self.train_builder.states:
             raise RuntimeError('v41 completed epoch retains unfinished windows')
+        if self._epoch_complete and self.joint_replay is not None:
+            self.joint_replay.finish_epoch()
+        if self._epoch_complete and self.q0_replay is not None:
+            self.q0_replay.finish_epoch()
         self._completed_epoch = int(self.current_epoch) + 1
         self._last_auxiliary_audit = self._auxiliary_audit()
         self._write_epoch_audit(sampler)
@@ -521,6 +607,15 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             epoch_complete=self._epoch_complete, rows=self._epoch_rows,
             optimizer_steps=self._epoch_steps, sampler=sampler.state_dict(),
             auxiliary=self._auxiliary_audit())
+        if self.joint_replay is not None:
+            audit['joint_replay'] = self.joint_replay.audit()
+        if self.history_audit is not None:
+            audit['history_training'] = dict(self.history_audit.report(self.tracker, self.train_builder),
+                mode=self.config.v41_history_training, bank_sha256=self.history_bank_sha256)
+        if self.config.v41_q0_lateral:
+            audit['q0_lateral_epoch'] = self.tracker.q0_epoch
+        if self.q0_replay is not None:
+            audit['q0_replay'] = self.q0_replay.audit()
         directory = Path(self.config.log_dir) / 'training_audits'
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f'epoch={self._completed_epoch:03d}.json'
@@ -536,6 +631,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         epoch = ((self.config.eval_checkpoint_epoch or self._completed_epoch) if self.config.test
                  else int(self.current_epoch) + 1)
         self._evaluation_epoch = int(epoch)
+        if self.config.v41_q0_lateral:
+            self.tracker.q0_epoch = self._evaluation_epoch
+        self._joint_latency = [] if self.config.test and getattr(self.config, 'v41_joint_latency', False) else None
         self._evaluation_full = self._full_diagnostics(epoch)
         self.evaluation_builder.detailed_diagnostics = self._evaluation_full
         self.evaluation_builder.reset()
@@ -567,9 +665,32 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self._evaluation_start(self.config.eval_split)
 
     def _evaluation_step(self, rows):
+        if self._joint_latency is None:
+            self._evaluate_rows(rows)
+        else:
+            for row in rows:
+                self._evaluate_rows([row])
+
+    def _evaluate_rows(self, rows):
+        timing = self._joint_latency is not None
+        if timing:
+            if rows[0]['request'].starts_window:
+                self.evaluation_builder._sparse_scans.clear()
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            started = time.perf_counter()
         batch, output = self._forward_raw(rows, self.evaluation_builder, training=False)
         try:
-            committed = self.evaluation_builder.commit(output, batch, diagnostics=self._evaluation_full)
+            label_support = self.config.v41_joint_search and self._evaluation_full
+            options = dict(defer_joint_diagnostics=True) if label_support else {}
+            committed = self.evaluation_builder.commit(output, batch, diagnostics=self._evaluation_full, **options)
+            if timing:
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize(self.device)
+                self._joint_latency.append(1000. * (time.perf_counter() - started))
+            if label_support:
+                role = 'val' if self.config.eval_split == 'dev' else 'test'
+                self.evaluation_builder.complete_joint_diagnostics(rows, committed, self._loaders[role].dataset)
             self.evaluation.add_batch(rows, batch, output, committed)
             self._memory_record('evaluation_commit', prepared=batch, output=output)
         finally:
@@ -587,6 +708,17 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             self._evaluation_stream = None
         self._memory_record(role + '_end')
         self.evaluation_results = self.evaluation.summary()
+        if self._joint_latency is not None:
+            import numpy as np
+            warmup = min(10, len(self._joint_latency))
+            measured = self._joint_latency[warmup:]
+            self.evaluation_results['joint_latency'] = dict(
+                batch_size=1, warmup_frames=warmup, measured_frames=len(measured),
+                device=str(self.device), full_diagnostics=self._evaluation_full,
+                scan_cache='reset at trajectory boundaries',
+                scope='loaded row through prepare, forward and state commit; excludes loader and benchmark scoring',
+                p50_ms=float(np.percentile(measured, 50)) if measured else None,
+                p95_ms=float(np.percentile(measured, 95)) if measured else None)
         loader_role = 'val' if role == 'dev' else role
         if loader_role in self._loaders:
             expected = self._loaders[loader_role].batch_sampler.endpoint_count
@@ -620,6 +752,12 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             rows=self._epoch_rows, steps=self._epoch_steps,
             sampler=loader.batch_sampler.state_dict() if loader is not None else None,
             run_id=self.run_id, auxiliary=self._auxiliary_audit())
+        if self.joint_replay is not None:
+            checkpoint[runtime_key(self.config)]['joint_replay'] = self.joint_replay.checkpoint()
+        if self.config.v41_history_training != 'legacy':
+            checkpoint[runtime_key(self.config)]['history_bank_sha256'] = self.history_bank_sha256
+        if self.config.v41_q0_lateral_replay:
+            checkpoint[runtime_key(self.config)]['q0_replay_manifest_sha256'] = self.q0_replay_manifest_sha256
 
     def on_load_checkpoint(self, checkpoint):
         payload = validate_resume_payload(checkpoint.get(runtime_key(self.config)), self.config,
@@ -630,8 +768,22 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 raise ValueError('v41 resume requires the original run_id')
         self.run_id = payload['run_id']
         self._completed_epoch = int(payload['completed_epoch'])
+        if self.config.v41_history_training != 'legacy':
+            saved = payload['history_bank_sha256']
+            if self.history_bank_sha256 is not None and self.history_bank_sha256 != saved:
+                raise ValueError('E57 history bank differs from the checkpoint')
+            self.history_bank_sha256 = saved
+        if self.config.v41_q0_lateral_replay:
+            saved = payload['q0_replay_manifest_sha256']
+            if self.q0_replay_manifest_sha256 is not None and self.q0_replay_manifest_sha256 != saved:
+                raise ValueError('q0 checkpoint and training replay manifest differ')
+            self.q0_replay_manifest_sha256 = saved
+        if self.config.v41_q0_lateral:
+            self.tracker.q0_epoch = self._completed_epoch
         self._last_auxiliary_audit = payload['auxiliary']
         if not self.config.test:
+            if self.joint_replay is not None:
+                self.joint_replay.restore(payload.get('joint_replay'), self._completed_epoch)
             self._pending_rng = payload['rng']
             self._resume_sampler = payload['sampler']
             self._resume_auxiliary = payload['auxiliary']

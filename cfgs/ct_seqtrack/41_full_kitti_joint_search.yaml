@@ -1,0 +1,5 @@
+_base_: 41_full_kitti.yaml
+experiment_name: ct41_joint_search_kitti_car_scratch_seed42
+tag: v41_joint_search_kitti_car_seed42
+v41_joint_search: true
+full_diagnostic_epochs: [58, 59, 60]

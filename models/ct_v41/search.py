@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 from .cpu_geometry import compiled_backend
+from .identity import JOINT_SEARCH_POLICY
 
 
 def _unique_mask(raw_ids):
@@ -51,7 +52,7 @@ def make_search_plan(*, anchor, trusted_box, trusted_time, velocity, velocity_va
             and np.isfinite(velocity).all() and np.isfinite(timestamp)
             and np.isfinite(trusted_time) and np.isfinite(max_age) and max_age > 0):
         raise ValueError('search geometry/time must be finite with positive max_age')
-    if policy not in ('accepted_only', 'dual_roi_guard_v1'):
+    if policy not in ('accepted_only', 'dual_roi_guard_v1', JOINT_SEARCH_POLICY):
         raise ValueError('unknown v41 search policy')
     if (type(main_quota) is not int or type(backup_quota) is not int
             or min(main_quota, backup_quota) < 0 or main_quota + backup_quota < 1):

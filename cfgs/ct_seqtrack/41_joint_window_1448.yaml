@@ -1,0 +1,6 @@
+_base_: 41_history_window_1448.yaml
+experiment_name: ct41_joint_window_1448
+tag: v41_joint_window_1448
+v41_q0_lateral: true
+v41_joint_replay: fixed_e2
+v41_fixed_replay_bank: artifacts/ct_checks/v41_joint_pair/natural_e2.sqlite

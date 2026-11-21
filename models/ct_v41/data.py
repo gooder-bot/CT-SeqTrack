@@ -1,7 +1,7 @@
 """v41 原始端点、W 课程与 accepted 状态；worker 不拥有预测状态。"""
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, OrderedDict, deque
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import hashlib
@@ -15,6 +15,7 @@ from utils.diagnostic_transfer import tensors_to_numpy
 from utils.execution_profile import optimized_execution
 from utils.raw_frame_memo import RawFrameMemo, raw_transaction
 from .config import normalize_config, recipe_scope
+from .joint_state import EMPTY_IDS, EMPTY_XYZ, JointSearchState, physical_frame, relative
 from .search import _unique_mask, inside_box, make_search_plan, sample_search_points
 
 
@@ -303,10 +304,15 @@ def future_motion_targets(source, request, frames, track_length):
 
 class RawEndpointDataset(Dataset):
     """按端点交付观测与标签。KITTI 主流可携带 GT10 视图，预测 ROI 由主进程决定。"""
-    def __init__(self, source, *, training=False, enable_m=False, worker_transport=False):
+    def __init__(self, source, *, training=False, enable_m=False, worker_transport=False,
+                 joint_search=False, four_candidates=False):
         self.source = source
         self.training, self.enable_m = bool(training), bool(enable_m)
         self.worker_transport = worker_transport
+        self.joint_search = bool(joint_search)
+        self.four_candidates = bool(four_candidates and training)
+        self._scan_annotations = None
+        self._scan_car_boxes = {}
         self.lengths = tuple(source.get_num_frames_tracklet(i)
                              for i in range(source.get_num_tracklets()))
         self.source_sha256 = self._source_digest()
@@ -335,10 +341,38 @@ class RawEndpointDataset(Dataset):
     def __len__(self):
         return sum(max(n - 1, 0) for n in self.lengths)
 
+    def other_cars_for(self, row):
+        """只由训练标签或 full 评估写账调用。普通在线行不读取邻车标注。"""
+        if self._scan_annotations is None:
+            self._scan_annotations = {}
+            for tracklet, rows in enumerate(getattr(self.source, 'tracklet_anno_list', ())):
+                for step, anno in enumerate(rows):
+                    if 'scene' in anno and 'frame' in anno and anno.get('type', 'Car') == 'Car':
+                        key = str(anno['scene']), int(anno['frame'])
+                        self._scan_annotations.setdefault(key, []).append((tracklet, step))
+        r = row['request']
+        current = row['frames'][r.frame]
+        key = str(current.get('scene_id', '')), physical_frame(current, r.frame)
+        if key not in self._scan_car_boxes:
+            tracks, boxes = [], []
+            for tracklet, step in self._scan_annotations.get(key, ()):
+                geo = metadata(self.source, tracklet, step)
+                tracks.append(tracklet)
+                boxes.append(np.r_[box_array(geo['3d_bbox']), box_size(geo['3d_bbox'], geo)])
+            self._scan_car_boxes[key] = (np.asarray(tracks, dtype=np.int64),
+                                         np.asarray(boxes, dtype=np.float32).reshape(-1, 7))
+        tracks, boxes = self._scan_car_boxes[key]
+        return boxes[tracks != r.tracklet]
+
     def __getitem__(self, request):
         return self.__getitems__([request])[0]
 
     def __getitems__(self, requests):
+        # 调度仍沿用 A 的物理队列。只改变 B 普通行的状态寿命，先于原始帧运输。
+        if self.four_candidates:
+            requests = [replace(r, window_start=r.frame, window_end=r.frame + 1)
+                        if 0 <= r.branch < 4 and not (r.starts_window and r.ends_window)
+                        else r for r in requests]
         # 相同标注帧在一个 IPC 包内共享；不同 tracklet 的框绝不共用。
         frames = {}
         required = None
@@ -365,13 +399,19 @@ class RawEndpointDataset(Dataset):
         key = (self.source.get_tracklet_key(r.tracklet)
                if hasattr(self.source, 'get_tracklet_key') else str(r.tracklet))
         result = dict(request=r, frames=frames, history_ids=history_ids, tracklet_key=str(key))
+        if self.joint_search and r.branch != 4:
+            result['joint_other_cars'] = self.other_cars_for(result)
         if r.starts_window:
             if 0 in frames:
                 result['first_frame'] = frames[0]
             else:
                 first = (r.tracklet, 'first_metadata')
                 if first not in frame_cache:
-                    frame_cache[first] = metadata(self.source, r.tracklet, 0)
+                    if self.joint_search:
+                        frame_cache[first] = (read(r.tracklet, [0]) if required is None else
+                                              read(r.tracklet, [0], worker_required=set()))[0]
+                    else:
+                        frame_cache[first] = metadata(self.source, r.tracklet, 0)
                 result['first_frame'] = frame_cache[first]
         if self.training and self.enable_m and 0 <= r.branch < 4:
             result['future_supervision'] = future_motion_targets(
@@ -478,7 +518,9 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
                         ('dev' if kitti else 'test') if role == 'val' else role)
         source = sources[role] if sources is not None else raw_dataset_factory(config, dataset_role)
         transport = _worker_transport_enabled(config, source)
-        raw = RawEndpointDataset(source, training=role == 'train',
+        joint = bool(option(config, 'v41_joint_search', False))
+        raw = RawEndpointDataset(source, training=role == 'train', joint_search=joint,
+                                 four_candidates=option(config, 'v41_history_training') == 'four_candidates',
                                  enable_m=option(config, 'enable_m', False), worker_transport=transport)
         if role == 'auxiliary':
             from .auxiliary import FullTrackAuxiliarySampler
@@ -486,7 +528,9 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
                 seed=int(option(config, 'seed', 42)), fraction=float(option(config, 'v41_aux_fraction', .25)),
                 source_sha256=raw.source_sha256)
         else:
-            sampler = ReadyQueueBatchSampler(raw.lengths, int(option(config, 'batch_size', 16)),
+            size = 1 if role in ('val', 'test') and option(config, 'v41_joint_latency', False) else int(
+                option(config, 'batch_size', 16))
+            sampler = ReadyQueueBatchSampler(raw.lengths, size,
                 seed=int(option(config, 'seed', 42)), training=role == 'train',
                 short_window=int(option(config, 'v31_short_window', 4)),
                 long_window=int(option(config, 'v31_long_window', 8)),
@@ -497,7 +541,7 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
                 seed_yaw_degrees=float(option(config, 'v32_seed_yaw_degrees', 1.5)),
                 initial_seed_policy=option(config, 'v35_seed_policy', ReadyQueueBatchSampler.INITIAL_SEED_POLICY))
         workers = int(option(config, 'workers', 4))
-        prepare_starts = transport and role == 'train' and source.v41_data_role == 'train'
+        prepare_starts = transport and role == 'train' and source.v41_data_role == 'train' and not joint
         collate = _WindowStartCollator(config) if prepare_starts else raw_collate
         kwargs = dict(num_workers=workers, collate_fn=collate, pin_memory=False,
                       generator=torch.Generator().manual_seed(stable_seed(option(config, 'seed', 42), role)))
@@ -537,6 +581,7 @@ class V41AcceptedState:
     last_supported_quality: float = 1.
     last_velocity_update_time: float | None = None
     previous_measurement_eligible: bool | None = None
+    joint: JointSearchState | None = None
 
 
 # GT 仅用于合法初框、监督与被动诊断。
@@ -555,6 +600,9 @@ class BatchBuilder:
     """唯一状态所有者；prepare -> commit 是一次事务。"""
     def __init__(self, config):
         self.config = self.v41_config = normalize_config(config)
+        self.joint_search = bool(option(self.config, 'v41_joint_search', False))
+        self.history_bank = None
+        self.history_counts = Counter()
         self._preparation_id = hashlib.sha256(repr(sorted(self.config.items())).encode()).digest()
         self.train_diagnostics = bool(option(self.config, 'v35_train_diagnostics', True))
         # host 按轮选择 summary/full；默认保留独立工具的历史详细行为。
@@ -565,18 +613,21 @@ class BatchBuilder:
         self._raw_memo = None
         self._history_pools = {}
         self._next_history_pools = {}
+        self._sparse_scans = OrderedDict()
 
     def __getstate__(self):
         # 原始世界坐标点池只在本进程中复用，既不是跟踪状态也不是恢复数据。
         state = vars(self).copy()
         state.pop('_history_pools', None)
         state.pop('_next_history_pools', None)
+        state.pop('_sparse_scans', None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._history_pools = {}
         self._next_history_pools = {}
+        self._sparse_scans = OrderedDict()
 
     def _start_materialization_cache(self):
         self._next_history_pools.clear()
@@ -591,6 +642,21 @@ class BatchBuilder:
 
     def _points(self, frame):
         return self._raw_memo.points(frame) if self._raw_memo is not None else point_arrays(frame)
+
+    def _joint_scan(self, frame):
+        from .joint_grid import make_sparse_scan
+        ref = frame.get('_v41_raw_ref')
+        key = (ref, frame.get('input_metadata_sha256'), frame.get('v41_data_role'))
+        if ref is not None and key in self._sparse_scans:
+            self._sparse_scans.move_to_end(key)
+            return self._sparse_scans[key]
+        xyz, ids = self._points(frame)
+        scan = make_sparse_scan(xyz, ids)
+        if ref is not None:
+            self._sparse_scans[key] = scan
+            if len(self._sparse_scans) > 4:
+                self._sparse_scans.popitem(last=False)
+        return scan
 
     def _view(self, frame, rois, size, *, scale, offset, normal_train):
         if normal_train and option(self.config, 'dataset', '') == 'kitti_mf':
@@ -645,8 +711,10 @@ class BatchBuilder:
         return self._coverage_cache[key][1:]
 
     def reset(self):
+        self.history_counts.clear()
         self.states.clear()
         self._history_pools.clear()
+        self._sparse_scans.clear()
         self._pending = None
         self.clear_materialization_cache()
 
@@ -662,8 +730,19 @@ class BatchBuilder:
         seed_offset = np.zeros(4, dtype=np.float64)
         provenance = KNOWN_GT_BOX
         if r.branch in (1, 2, 3) and not (r.frame == 1):
-            rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
-                row['tracklet_key'], r.state_key, 'window_seed'))
+            seed = option(self.config, 'seed', 42)
+            if self.config.v41_history_training == 'legacy':
+                rng = np.random.default_rng(stable_seed(seed, row['tracklet_key'], r.state_key, 'window_seed'))
+            else:
+                if self.history_bank is None:
+                    raise ValueError('paired history training needs its validated E57 history bank')
+                key = (seed, r.epoch, row['tracklet_key'], r.frame, r.branch)
+                rng = np.random.default_rng(stable_seed(*key, 'last_seed'))
+                donor_rng = np.random.default_rng(stable_seed(*key, 'history_donor'))
+                deltas, match = self.history_bank.sample(row['tracklet_key'], seed_ids, times, boxes, donor_rng)
+                self.history_counts[match] += 1
+                for index, delta in zip(seed_ids, deltas):
+                    boxes[index][:3] += delta
             local_xy = rng.uniform(-float(option(self.config, 'v32_seed_translation', .3)),
                                    float(option(self.config, 'v32_seed_translation', .3)), 2)
             yaw = boxes[r.frame - 1][3]
@@ -685,13 +764,20 @@ class BatchBuilder:
             velocity = (trusted[-1][0][:3] - trusted[-2][0][:3]) / gap
         last_time = times[r.frame - 1]
         last_strong_time = None
+        supported_seeds = {}
         for i in sorted(seed_ids, key=times.__getitem__, reverse=True):
-            xyz, _, _ = self._view(frames[i], [boxes[i]], size, scale=1., offset=0.,
-                                   normal_train=0 <= r.branch < 4)
-            if np.count_nonzero(inside_box(xyz, boxes[i], size)) >= 3:
+            xyz, ids, _ = self._view(frames[i], [boxes[i]], size, scale=1., offset=0.,
+                                     normal_train=0 <= r.branch < 4)
+            members = inside_box(xyz, boxes[i], size)
+            count = (np.count_nonzero(_unique_mask(ids[members])) if self.joint_search else
+                     np.count_nonzero(members))
+            if self.joint_search:
+                supported_seeds[i] = count >= 3
+            if count >= 3 and last_strong_time is None:
                 last_strong_time = times[i]
-                break
-        return V41AcceptedState(boxes=boxes, times=times, next_frame=r.frame, size=size,
+                if not self.joint_search:
+                    break
+        state = V41AcceptedState(boxes=boxes, times=times, next_frame=r.frame, size=size,
             trusted=trusted, transitions={i: True for i in seed_ids},
             trusted_velocity=velocity, trusted_velocity_valid=len(trusted) == 2,
             last_strong_time=last_strong_time,
@@ -699,6 +785,16 @@ class BatchBuilder:
             box_provenance={i: provenance for i in seed_ids},
             seed_offset=seed_offset,
             last_velocity_update_time=last_time if len(trusted) == 2 else None)
+        if self.joint_search:
+            first = row['first_frame']
+            first_box = box_array(first['3d_bbox'])
+            xyz, ids, _ = self._view(first, [first_box], size, scale=1., offset=0.,
+                                     normal_train=0 <= r.branch < 4)
+            members = inside_box(xyz, first_box, size)
+            unique_first_points = xyz[members][_unique_mask(ids[members])]
+            state.joint = JointSearchState.from_seed(state, frames, first, unique_first_points, first_box,
+                supported_seeds, patrol_seconds=self.config.v41_patrol_seconds)
+        return state
 
     @staticmethod
     def _strong_age(state, timestamp):
@@ -732,7 +828,20 @@ class BatchBuilder:
             if (packet is not None and (packet[0] != self._preparation_id or packet[1] != r
                                         or self.detailed_diagnostics or not r.starts_window)):
                 packet = None
-            if r.starts_window:
+            replay = row.get('_joint_replay_state')
+            q0_replay = row.get('_q0_replay_state')
+            if q0_replay is not None:
+                if not (option(self.config, 'v41_q0_lateral_replay', False) and not self.joint_search
+                        and replay is None and q0_replay.joint is None and r.branch == 0
+                        and r.starts_window and r.ends_window and r.state_key not in self.states):
+                    raise ValueError('invalid q0 replay prefix for one-step training slot')
+                packet, state = None, deepcopy(q0_replay)
+            elif replay is not None:
+                if not (self.joint_search and r.branch == 0 and r.starts_window and r.ends_window
+                        and r.state_key not in self.states and replay.joint is not None):
+                    raise ValueError('invalid joint replay prefix for one-step training slot')
+                packet, state = None, deepcopy(replay)
+            elif r.starts_window:
                 if r.state_key in self.states:
                     raise RuntimeError('duplicate window initialization')
                 state = self._new_state(row) if packet is None else deepcopy(packet[3]['state'])
@@ -756,6 +865,9 @@ class BatchBuilder:
         batch = {}
         for key in prepared[0]:
             arrays = [row[key] for row in prepared]
+            if key in ('joint_rows', 'joint_other_cars'):
+                batch[key] = tuple(arrays)
+                continue
             if compact and key in _POINT_PADDING:
                 # 直接写最终批，混排的续行、稠密首行与零点首行都保留同一输入形状。
                 sample = arrays[0]
@@ -775,16 +887,22 @@ class BatchBuilder:
         now = float(current['timestamp'])
         effective_now = float(current.get('_ct_effective_timestamp', now))
         anchor = state.boxes[r.frame - 1].copy()
+        joint = state.joint
+        if joint is not None:
+            anchor = joint.crop_center(state, now)
         history_valid = np.asarray([r.frame - 3 + i >= 0 for i in range(3)], dtype=bool)
-        history = np.stack([state.boxes[i] for i in row['history_ids']])
+        if joint is not None:
+            history_valid &= np.asarray(row['history_ids']) >= joint.history_start
+        history = np.stack([joint.weak_history_boxes.get(i, state.boxes[i])
+                            if joint is not None else state.boxes[i] for i in row['history_ids']])
         history_provenance = np.asarray([state.box_provenance[i] if valid else MISSING_BOX
             for i, valid in zip(row['history_ids'], history_valid)], dtype=np.int64)
         history_local = history.copy()
         history_local[:, :3] -= anchor[:3]
         physical_times = np.asarray([float(frames[i]['timestamp']) - now for i in row['history_ids']])
-        effective_times = np.asarray([float(frames[i].get('_ct_effective_timestamp',
-                                                frames[i]['timestamp'])) - effective_now
-                                      for i in row['history_ids']])
+        effective_times = (physical_times if joint is not None else
+            np.asarray([float(frames[i].get('_ct_effective_timestamp', frames[i]['timestamp'])) - effective_now
+                        for i in row['history_ids']]))
         if not (physical_times < 0).all() or not (effective_times < 0).all():
             raise ValueError('B1 history must be strictly in the past')
         n = int(option(self.config, 'point_sample_size', 1024))
@@ -858,6 +976,8 @@ class BatchBuilder:
             point[:count, :3] = sampled_xyz - anchor[:3]
             point[:count, 3] = float(frame['timestamp']) - now
             if is_current:
+                point[:count, 4] = .5
+            elif count and joint is not None and frame_id in joint.weak_history_boxes:
                 point[:count, 4] = .5
             elif count:
                 hint = inside_box(sampled_xyz, crop_box, state.size).astype(np.float32)
@@ -989,6 +1109,27 @@ class BatchBuilder:
                           diagnostic_history_crop_target_count=np.asarray(history_crop_counts, dtype=np.int64))
         context = dict(row=row, state=state, anchor=anchor, timestamp=now, search_plan=search_plan,
                        sampled_xyz=sampled_xyz, sampled_ids=sampled_ids)
+        if joint is not None:
+            scan = physical_frame(current, r.frame)
+            scheduled = joint.search_due(state, now, scan, patrol_seconds=self.config.v41_patrol_seconds,
+                                         weak_patrol_seconds=self.config.v41_weak_patrol_seconds)
+            sparse_scan = self._joint_scan(current) if scheduled else None
+            scan_xyz, scan_ids = (sparse_scan.xyz, sparse_scan.ids) if sparse_scan is not None else (EMPTY_XYZ, EMPTY_IDS)
+            pending = joint.pending_at(scan)
+            backup = search_plan.backup_box
+            result.update(joint.motion_fields(anchor, now), joint_track_id=np.int64(r.tracklet),
+                          joint_other_cars=row.get('joint_other_cars', np.empty((0, 7), dtype=np.float32)))
+            result['joint_rows'] = dict(template_xyz=joint.template_xyz, scan_xyz=scan_xyz, scan_ids=scan_ids,
+                sparse_scan=sparse_scan,
+                pending_valid=pending, pending_box=relative(joint.pending_box if pending else anchor, anchor),
+                main_box=relative(search_plan.main_box, anchor), backup_valid=backup is not None,
+                backup_box=relative(backup if backup is not None else anchor, anchor))
+            context.update(joint_scheduled=scheduled, joint_scan=scan)
+            if r.branch == 5 and not (seg[-1] > 0).any():
+                _, gt_mask, gt_view = self._target_coverage(current, box_array(current['3d_bbox']), target_size)
+                in_view = gt_mask if gt_view == used else inside_box(xyz, box_array(current['3d_bbox']), target_size)
+                context.update(joint_raw_target_count=int(gt_mask.sum()),
+                               joint_union_target_count=int(in_view[search_sample.union_indices].sum()))
         if next_pools:
             self._next_history_pools[r.state_key] = next_pools
         result.update(previous_is_propagation=np.bool_(state.previous_is_propagation),
@@ -998,11 +1139,26 @@ class BatchBuilder:
         return result, context
 
     @raw_transaction
-    def commit(self, output, batch, *, diagnostics=False):
+    def commit(self, output, batch, *, diagnostics=False, defer_joint_diagnostics=False):
         with recipe_scope(self.v41_config):
-            return self._commit(output, batch, diagnostics=diagnostics)
+            return self._commit(output, batch, diagnostics=diagnostics, defer_joint_diagnostics=defer_joint_diagnostics)
 
-    def _commit(self, output, batch, *, diagnostics=False):
+    @staticmethod
+    def _support_attribution(row, observed, other_cars):
+        own = row['frames'][row['request'].frame]
+        return dict(joint_target_support_count=int(inside_box(observed, box_array(own['3d_bbox']),
+                                                              box_size(own['3d_bbox'], own)).sum()),
+                    joint_max_other_support_count=max((int(inside_box(observed, car[:4], car[4:]).sum())
+                                                       for car in other_cars), default=0))
+
+    def complete_joint_diagnostics(self, rows, committed, raw_dataset):
+        """真实提交已结束；只在 full 日志中归因这些独立物理点。"""
+        for row, record in zip(rows, committed):
+            observed = record.pop('_joint_support_xyz')
+            other_cars = raw_dataset.other_cars_for(row) if len(observed) else ()
+            record.update(self._support_attribution(row, observed, other_cars))
+
+    def _commit(self, output, batch, *, diagnostics=False, defer_joint_diagnostics=False):
         if self._pending is None:
             raise RuntimeError('no pending v41 transaction (duplicate commit)')
         full = self.v41_config.v41_arm == 'full'
@@ -1019,8 +1175,9 @@ class BatchBuilder:
             raise ValueError('v41 foreground probability/point IDs/validity must align as [B,T,N]')
         if selected.shape != (b,) or quality.shape != (b,):
             raise ValueError('v41 selection/quality must match pending rows')
+        slots = 6 if self.joint_search else 4
         invalid_selection = ((selected != 0) & (selected != 2) if b0_only
-                             else (selected < 0) | (selected > (3 if full else 1)))
+                             else (selected < 0) | (selected >= (slots if full else 2)))
         checks = {'v41 selection must index q0/prior/trusted fallback/recovery': ~invalid_selection.any(),
                   'v41 selected quality must be finite': torch.isfinite(quality).all()}
         fallback = getattr(output, 'q0_is_fallback', None)
@@ -1035,13 +1192,13 @@ class BatchBuilder:
         if full:
             candidates = output.candidates
             row = torch.arange(b, device=selected.device)
-            if candidates.boxes.shape != (b, 4, 4) or candidates.valid.shape != (b, 4):
-                raise ValueError('v41 Full requires exactly four candidate slots')
+            if candidates.boxes.shape != (b, slots, 4) or candidates.valid.shape != (b, slots):
+                raise ValueError('v41 Full candidate slots differ from its configured observation path')
             measurement = candidates.measurement_candidate.detach().bool()
-            if measurement.shape != (b, 4):
-                raise ValueError('v41 measurement candidates must have four slots')
+            if measurement.shape != (b, slots):
+                raise ValueError('v41 measurement candidates do not align with the configured slots')
             # 越界选择也会被拒绝；clamp 仅让异步检查完成前的 gather 安全。
-            safe_selected = selected.clamp(0, 3)
+            safe_selected = selected.clamp(0, slots - 1)
             propagation = ~measurement[row, safe_selected]
             checks['only real q0/recovery may be measurement candidates'] = ~measurement[:, 1:3].any()
             checks['propagation-alias q0 cannot be a measurement candidate'] = ~(measurement[:, 0] & fallback).any()
@@ -1060,19 +1217,34 @@ class BatchBuilder:
                 raise ValueError('v41 commit decision must match pending rows')
             checks['propagation cannot carry trusted quality'] = (
                 ((trusted_score >= 0) & (trusted_score <= 1) & ((trusted_score == 0) | ~propagation)).all())
-            from .verification import selected_commit_support
-            canonical_support = selected_commit_support(output, batch, safe_selected) & ~propagation[:, None]
+            if self.joint_search:
+                evidence = output.joint
+                canonical_support = evidence.support_mask[row, safe_selected] & ~propagation[:, None]
+                identity_ok = evidence.identity_ok[row, safe_selected]
+                geometry_ok = evidence.geometry_ok[row, safe_selected]
+                checks['unconfirmed remote candidate selected'] = ((selected != 5) | evidence.remote_valid).all()
+            else:
+                from .verification import selected_commit_support
+                canonical_support = selected_commit_support(output, batch, safe_selected) & ~propagation[:, None]
             support = output.commit_decision.support_mask.detach().bool()
             source = output.commit_decision.source.detach().long()
             if support.shape != canonical_support.shape or source.shape != selected.shape:
                 raise ValueError('v41 commit source/support has invalid shape')
             checks['v41 commit support differs from actual unique current-B0 set'] = (support == canonical_support).all()
             checks['v41 commit source differs from selected candidate'] = (source == selected).all()
-        need_raw_support = not full or diagnostics
+        need_raw_support = not self.joint_search and (not full or diagnostics)
         transfer = dict(boxes=output.accepted_box, checks=torch.stack(tuple(checks.values())),
             trusted_score=trusted_score, propagation=propagation, prior_boxes=output.prior.box)
-        if diagnostics:
+        if diagnostics or self.joint_search:
             transfer['selected'] = selected
+        if self.joint_search:
+            transfer.update(identity_ok=identity_ok, geometry_ok=geometry_ok,
+                joint_mask=canonical_support, joint_ids=evidence.support_ids[row, safe_selected],
+                joint_xyz=evidence.support_xyz[row, safe_selected], remote_box=evidence.remote_box,
+                remote_proposed=evidence.remote_proposed)
+            if diagnostics:
+                remote = evidence.observations.remote
+                transfer['joint_fine_ids'] = torch.where(remote.point_valid, remote.ids, -1)
         if full:
             transfer.update(eligible=expected_eligible, support_count=canonical_support.sum(-1))
         if need_raw_support:
@@ -1084,6 +1256,8 @@ class BatchBuilder:
                 raise ValueError(message)
         if not np.isfinite(transferred['prior_boxes']).all():
             raise FloatingPointError('non-finite v41 prior box')
+        if self.joint_search and not np.isfinite(transferred['remote_box']).all():
+            raise FloatingPointError('non-finite joint remote box')
         staged = []
         # 先独立复算全部授权支持与提交资格，任何不一致都不留下半个 batch 的状态。
         for i, context in enumerate(self._pending):
@@ -1113,6 +1287,37 @@ class BatchBuilder:
             strong = count >= self.v41_config.v41_min_support and (not prop if full else True)
             score = float(transferred['trusted_score'][i])
             supported = strong and bool(np.isfinite(score) and score >= self.v41_config.v41_trust_threshold)
+            if self.joint_search:
+                supported = bool(strong and transferred['identity_ok'][i] and transferred['geometry_ok'][i])
+                source = int(transferred['selected'][i])
+                if source == 5 and not (supported and state.joint.pending_at(context['joint_scan'])
+                                        and len(state.joint.template_xyz) >= 3):
+                    raise ValueError('joint remote takeover requires a confirmed pending scan and identity template')
+                mask = transferred['joint_mask'][i]
+                ids = transferred['joint_ids'][i, mask]
+                if len(np.unique(ids)) != count or (ids < 0).any():
+                    raise ValueError('joint support must contain distinct physical point IDs')
+                observed = transferred['joint_xyz'][i, mask].astype(np.float64) + context['anchor'][:3]
+                if not np.isfinite(observed).all():
+                    raise ValueError('nonfinite joint support')
+                # 各候选自身的支持几何与标签共享同一扫描。独立模板只需要在建锚时复制。
+                if source == 5 or not len(state.joint.template_xyz) or diagnostics:
+                    if source == 5:
+                        raw = batch['joint_rows'][i]
+                        source_ids, cloud = raw['scan_ids'], raw['scan_xyz']
+                    else:
+                        source_ids, cloud = context['sampled_ids'], context['sampled_xyz']
+                    if len(ids):
+                        indices = np.argsort(source_ids) if not np.all(source_ids[:-1] <= source_ids[1:]) else None
+                        offsets = np.searchsorted(source_ids, ids, sorter=indices)
+                        if (offsets >= len(source_ids)).any():
+                            raise ValueError('joint support ID outside candidate scan')
+                        indices = offsets if indices is None else indices[offsets]
+                        if not np.array_equal(source_ids[indices], ids) or not np.allclose(
+                                cloud[indices], observed, rtol=0., atol=1e-4):
+                            raise ValueError('joint support coordinates differ from the candidate scan IDs')
+                context['joint_support_xyz'] = observed
+                raw_count = count
             if full and bool(transferred['eligible'][i]) != supported:
                 raise ValueError('v41 commit eligibility disagrees with unique current-B0 support')
             innovation = float(np.linalg.norm(transferred['boxes'][i, :2] - transferred['prior_boxes'][i, :2]))
@@ -1127,11 +1332,27 @@ class BatchBuilder:
             state.next_frame += 1
             pair_valid = innovation <= max(.5 * np.hypot(*state.size[:2]), 1e-3)
             state.transitions[r.frame] = pair_valid
-            if strong:
+            observation_refresh = supported if self.joint_search else strong
+            if observation_refresh:
                 state.last_strong_time = now
             velocity_updated = False
             velocity_reason = 'unsupported_retained'
-            if supported:
+            if self.joint_search:
+                source = int(transferred['selected'][i])
+                prior = transferred['prior_boxes'][i].astype(np.float64, copy=True)
+                prior[:3] += context['anchor'][:3]
+                proposal = None
+                if transferred['remote_proposed'][i]:
+                    proposal = transferred['remote_box'][i].astype(np.float64, copy=True)
+                    proposal[:3] += context['anchor'][:3]
+                velocity_updated = state.joint.advance(state, frame=r.frame, scan=context['joint_scan'],
+                    now=now, box=box, prior=prior, source=source, supported=supported,
+                    support_xyz=context['joint_support_xyz'], searched=context['joint_scheduled'], proposal=proposal)
+                state.transitions[r.frame] = velocity_updated
+                if supported:
+                    state.last_supported_quality = score
+                    velocity_reason = 'supported_adjacent' if velocity_updated else 'measurement_reanchored'
+            elif supported:
                 previous, previous_time = state.trusted[-1]
                 if pair_valid and previous_time == state.times.get(r.frame - 1):
                     gap = now - previous_time
@@ -1154,7 +1375,8 @@ class BatchBuilder:
             state.consecutive_propagations = state.consecutive_propagations + 1 if prop else 0
             state.consecutive_untrusted_outputs = 0 if supported else state.consecutive_untrusted_outputs + 1
             if diagnostics:
-                source = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')[int(transferred['selected'][i])]
+                source = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement',
+                          'local_vote', 'remote_vote')[int(transferred['selected'][i])]
                 if prop and source == 'q0':
                     source = 'prior'
                 records.append(dict(strong=bool(strong), supported=bool(supported),
@@ -1172,7 +1394,24 @@ class BatchBuilder:
                     last_velocity_update_time=state.last_velocity_update_time,
                     consecutive_propagations=state.consecutive_propagations,
                     consecutive_untrusted_outputs=state.consecutive_untrusted_outputs,
-                    support_policy='none' if prop else 'current_b0_only'))
+                    support_policy='none' if prop else ('candidate_point_ids' if self.joint_search else 'current_b0_only')))
+                if self.joint_search:
+                    observed = context['joint_support_xyz']
+                    fine_ids = transferred['joint_fine_ids'][i]
+                    fine_ids = np.unique(fine_ids[fine_ids >= 0])
+                    scheduled = bool(context['joint_scheduled'])
+                    pending = state.joint.pending_scan == context['joint_scan']
+                    records[-1].update(joint_coarse_scan=scheduled, joint_scan_called=scheduled,
+                        joint_scan_points=len(batch['joint_rows'][i]['scan_ids']),
+                        joint_extra_points=int((~np.isin(fine_ids, context['sampled_ids'])).sum()),
+                        joint_fine_points=len(fine_ids),
+                        joint_template_points=len(state.joint.template_xyz),
+                        joint_pending=pending, joint_pending_started=pending, joint_remote_takeover=source == 'remote_vote',
+                        joint_identity_ok=bool(transferred['identity_ok'][i]), joint_geometry_ok=bool(transferred['geometry_ok'][i]))
+                    if defer_joint_diagnostics:
+                        records[-1]['_joint_support_xyz'] = observed
+                    else:
+                        records[-1].update(self._support_attribution(row, observed, row.get('joint_other_cars', ())))
             for old in list(state.boxes):
                 if old < r.frame - 2:
                     state.boxes.pop(old)

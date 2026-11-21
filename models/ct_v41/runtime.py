@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from .config import config_identity, normalize_config
-from .identity import SCHEMA, runtime_schema
+from .identity import SCHEMA, runtime_schema, LEGACY_CANDIDATES, JOINT_CANDIDATES, JOINT_MEASUREMENTS
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 from utils.execution_profile import optimized_execution
 
@@ -124,6 +124,19 @@ def validate_resume_payload(payload, config, *, training=True):
         raise ValueError('v41 checkpoint runtime schema mismatch')
     if payload.get('model_schema') != SCHEMA or payload.get('config_sha256') != config_identity(config):
         raise ValueError('v41 checkpoint model/config/arm/precision identity mismatch')
+    if config.get('v41_history_training', 'legacy') != 'legacy':
+        fingerprint = payload.get('history_bank_sha256')
+        if (not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in '0123456789abcdef' for char in fingerprint)):
+            raise ValueError('missing or invalid E57 history bank identity')
+    if config.get('v41_joint_replay') == 'fixed_e2':
+        from .fixed_replay import validate_fixed_replay_receipt
+        validate_fixed_replay_receipt(payload.get('joint_replay'), payload.get('completed_epoch'))
+    if config.get('v41_q0_lateral_replay', False):
+        fingerprint = payload.get('q0_replay_manifest_sha256')
+        if (not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in '0123456789abcdef' for char in fingerprint)):
+            raise ValueError('q0 checkpoint requires its training replay manifest fingerprint')
     source = source_identity()
     validate_execution_identity(payload.get('execution_identity'), config, source)
     if payload.get('source') != source:
@@ -285,6 +298,13 @@ class TrackingEvaluation:
             qualities=output.selected_quality, indices=output.selected_index,
             fine=decoder.q0_box, anchors=batch['anchor_box'])
         packet.update((k, v) for k, v in batch.items() if k.startswith('diagnostic_') and torch.is_tensor(v))
+        lateral = getattr(decoder, 'lateral', None)
+        if lateral is not None:
+            packet.update(original_q0=lateral.base_box,
+                          diagnostic_q0_lateral_suggestion_m=lateral.suggestion,
+                          diagnostic_q0_lateral_gate=lateral.gate,
+                          diagnostic_q0_lateral_applied_m=lateral.applied,
+                          diagnostic_q0_lateral_unique_points=lateral.support_count)
         if 'physical_displacement' in batch:
             packet['diagnostic_gt_xy_displacement'] = batch['physical_displacement'].detach().norm(dim=-1)
         for name, field in (('coarse', 'coarse_box'), ('coarse_valid', 'sequence_valid')):
@@ -316,7 +336,7 @@ class TrackingEvaluation:
         # 记录有符号世界坐标与尺寸，允许离线分解 XYZ/yaw/IoU。
         # 只作 detach 后的导出，不把 GT 几何送回 forward 或 commit。
         anchors = arrays['anchors'].astype(np.float64, copy=False)
-        for name, value in (('coarse', coarse), ('fine', fine),
+        for name, value in (('coarse', coarse), ('fine', fine), ('original_q0', arrays.get('original_q0')),
                             ('accepted', predictions), ('target', targets)):
             if value is not None:
                 world = value.astype(np.float64, copy=True)
@@ -461,7 +481,7 @@ class TrackingEvaluation:
         count = len(rows)
         result['selection'] = {name: dict(count=sum(r['selected_source'] == name for r in rows),
             rate=sum(r['selected_source'] == name for r in rows) / count if count else None)
-            for name in ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')}
+            for name in (JOINT_CANDIDATES if self.v41_config.v41_joint_search else LEGACY_CANDIDATES)}
         writes = [row for row in rows if row.get('supported')]
         wrong = sum(not row['diagnostic_candidates']['selected_trusted_target'] for row in writes)
         result['trusted'] = dict(writes=len(writes), coverage=len(writes) / count if count else None,
@@ -472,11 +492,21 @@ class TrackingEvaluation:
             longest_propagation_streak=max((r.get('consecutive_propagations', 0) for r in rows), default=0),
             max_supported_age_seconds=max((r.get('supported_age', 0.) for r in rows), default=0.),
             max_velocity_age_seconds=max((r.get('trusted_velocity_age', 0.) for r in rows), default=0.))
-        result['trusted_reliability'] = reliability_summary(records)
-        for index, name in ((0, 'q0'), (3, 'recovery')):
-            measurements = [dict(item, trusted_valid=item['valid']) for record in records
-                            for item in record['measurement_trust_records'] if item['index'] == index]
-            result[name + '_trusted_reliability'] = reliability_summary(measurements)
+        if self.v41_config.v41_joint_search:
+            result['geometry_reliability'] = {}
+            for index in JOINT_MEASUREMENTS:
+                measurements = [dict(item, trusted_valid=item['valid'],
+                    trusted_target=record['geometry'][index]['exact_iou'] >= .5) for record in records
+                    for item in record['measurement_trust_records'] if item['index'] == index]
+                summary = reliability_summary(measurements)
+                summary['definition'] = 'exact_iou_ge_0.5'
+                result['geometry_reliability'][JOINT_CANDIDATES[index]] = summary
+        else:
+            result['trusted_reliability'] = reliability_summary(records)
+            for index, name in ((0, 'q0'), (3, 'recovery')):
+                measurements = [dict(item, trusted_valid=item['valid']) for record in records
+                                for item in record['measurement_trust_records'] if item['index'] == index]
+                result[name + '_trusted_reliability'] = reliability_summary(measurements)
         old_good = [any(v and g['exact_iou'] >= .5 for v, g in zip(record['valid'][:3], record['geometry'][:3]))
                     for record in records]
         recovery_good = [record['valid'][3] and record['geometry'][3]['exact_iou'] >= .5 for record in records]
@@ -516,13 +546,24 @@ class TrackingEvaluation:
             success=100 * (initial + sum(r['oracle']['success'] for r in records)) / max(count + initial, 1),
             precision=100 * (initial + sum(r['oracle']['precision'] for r in records)) / max(count + initial, 1))
         result['detail_level'] = 'full'
-        result['stages'] = _full_stage_summary(rows)
+        result['stages'] = _full_stage_summary(rows, JOINT_CANDIDATES if self.v41_config.v41_joint_search
+                                               else LEGACY_CANDIDATES)
+        if self.v41_config.v41_joint_search:
+            result['joint_candidates'] = dict(new_good_frames=sum(
+                not any(v and g['exact_iou'] >= .5 for v, g in zip(r['raw_valid'][:4], r['geometry'][:4]))
+                and any(v and g['exact_iou'] >= .5 for v, g in zip(r['raw_valid'][4:], r['geometry'][4:]))
+                for r in records), pending_proposals=sum(r['remote_proposed'] for r in records),
+                remote_selectable=sum(r['remote_selectable'] for r in records),
+                coarse_proposal_frames=sum(bool(r['coarse_hits_target_bev']) for r in records),
+                coarse_hit_frames=sum(any(r['coarse_hits_target_bev']) for r in records),
+                remote_sampled_target_frames={f'at_least_{n}': sum(r['remote_sampled_target_count'] >= n
+                    for r in records) for n in (1, 3, 10)})
         return result
 
 
-def _full_stage_summary(rows):
+def _full_stage_summary(rows, candidates=LEGACY_CANDIDATES):
     """只复用 full 已算几何；各来源用 raw_valid，不把去重误当缺失。"""
-    names = ('coarse', 'q0', 'prior', 'trusted_propagation', 'recovery_measurement', 'final')
+    names = ('coarse', *candidates, 'final')
     accumulators = {name: dict(valid_frames=0, selectable_frames=0, selected_frames=0,
         success_sum=0., precision_sum=0., center_sum=0., axis_yaw_sum=0.) for name in names}
 
@@ -544,7 +585,7 @@ def _full_stage_summary(rows):
             add('coarse', row['coarse_geometry'], selectable=False)
         record = row['diagnostic_candidates']
         motion_valid += bool(record['prior_motion_valid'])
-        for index, name in enumerate(names[1:5]):
+        for index, name in enumerate(candidates):
             if record['raw_valid'][index]:
                 add(name, record['geometry'][index], selectable=record['valid'][index],
                     selected=record['selected_index'] == index)
@@ -567,11 +608,13 @@ def _full_stage_summary(rows):
 
 class CompactTrackingEvaluation:
     """summary 只算最终框；逐帧写 sink，内存不保留 rows/候选/点集合。"""
-    NAMES = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')
+    NAMES = LEGACY_CANDIDATES
     add_singleton_tracks = TrackingEvaluation.add_singleton_tracks
 
     def __init__(self, config, *, row_sink=None):
         self.v41_config = normalize_config(config)
+        if self.v41_config.v41_joint_search:
+            self.NAMES = JOINT_CANDIDATES
         self.optimized = optimized_execution(self.v41_config)
         self.schema = SCHEMA
         self._row_sink = row_sink

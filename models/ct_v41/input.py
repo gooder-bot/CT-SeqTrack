@@ -15,6 +15,8 @@ ONLINE_FIELDS = frozenset((
     'trusted_velocity', 'trusted_velocity_valid', 'trusted_velocity_age',
     'weak_age', 'supported_age',
     'previous_is_propagation', 'consecutive_propagations',
+    'joint_rows', 'joint_motion_boxes', 'joint_motion_times', 'joint_motion_valid',
+    'joint_motion_pairs', 'joint_motion_origin',
     'consecutive_untrusted_outputs', '_ct_materialization_cache',
 ))
 HOST_GEOMETRY = '_ct_loss_geometry_host'
@@ -23,6 +25,7 @@ LOSS_FIELDS = frozenset((
     'target_box', 'target_box_size', 'history_target_boxes',
     'segmentation_labels', 'bc_targets', 'physical_displacement', 'physical_valid',
     'future_displacement', 'future_dt', 'future_valid', HOST_GEOMETRY,
+    'joint_other_cars', 'joint_track_id',
 ))
 
 
@@ -48,8 +51,22 @@ def retained_geometry_sources(batch, boxes):
     return None
 
 
-def online_batch(batch):
-    return canonicalize_batch({key: value for key, value in batch.items() if key in ONLINE_FIELDS})
+JOINT_ROW_FIELDS = ('scan_xyz', 'scan_ids', 'template_xyz', 'pending_valid', 'pending_box',
+                    'main_box', 'backup_valid', 'backup_box')
+
+
+def online_batch(batch, *, joint_search=None):
+    prepared = {key: value for key, value in batch.items() if key in ONLINE_FIELDS
+                and (joint_search is not False or not key.startswith('joint_'))}
+    if joint_search and not all(key in prepared for key in ONLINE_FIELDS if key.startswith('joint_')):
+        raise ValueError('joint search requires scan rows and independent motion history')
+    if 'joint_rows' in prepared:
+        prepared['joint_rows'] = tuple({**{key: row[key] for key in JOINT_ROW_FIELDS},
+                                       **({'sparse_scan': row['sparse_scan']} if 'sparse_scan' in row else {})}
+                                       for row in prepared['joint_rows'])
+        if len(prepared['joint_rows']) != len(prepared['points']):
+            raise ValueError('joint scan rows must align with the batch')
+    return canonicalize_batch(prepared)
 
 
 def loss_batch(batch):

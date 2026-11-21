@@ -51,9 +51,10 @@ class PhysicalTimePrior(nn.Module):
         nn.init.constant_(self.sigma_head.bias, math.log(math.expm1(.5 - .1)))
 
     def forward(self, batch):
-        boxes = batch['history_boxes']
-        times = batch['history_times'].to(boxes)
-        exists = batch['history_valid'].bool()
+        joint = 'joint_motion_origin' in batch
+        boxes = batch['joint_motion_boxes' if joint else 'history_boxes']
+        times = batch['joint_motion_times' if joint else 'history_times'].to(boxes)
+        exists = batch['joint_motion_valid' if joint else 'history_valid'].bool()
         if boxes.ndim != 3 or boxes.shape[1:] != (3, 4) or times.shape != boxes.shape[:2]:
             raise ValueError('v31 B1 requires oldest-first history_boxes[B,3,4] and history_times[B,3]')
         raw_dt = batch['current_dt'].to(boxes).reshape(-1)
@@ -62,10 +63,11 @@ class PhysicalTimePrior(nn.Module):
             raise ValueError('v31 physical history and positive dt must be finite')
         gap = times[:, 1:] - times[:, :-1]
         pair_valid = exists[:, :-1] & exists[:, 1:] & (gap > 0)
-        if 'history_pair_valid' in batch:
-            if batch['history_pair_valid'].shape != pair_valid.shape:
+        pair_key = 'joint_motion_pairs' if joint else 'history_pair_valid'
+        if pair_key in batch:
+            if batch[pair_key].shape != pair_valid.shape:
                 raise ValueError('history_pair_valid must be [B,2]')
-            pair_valid = pair_valid & batch['history_pair_valid'].bool()
+            pair_valid = pair_valid & batch[pair_key].bool()
         gap = gap.clamp_min(1e-3)
         dt = raw_dt.clamp_min(1e-3)
         displacement = boxes[:, 1:, :2] - boxes[:, :-1, :2]
@@ -97,6 +99,10 @@ class PhysicalTimePrior(nn.Module):
         accel_gap = .5 * (gap[:, 0] + gap[:, 1])
         acceleration = (velocity[:, 1] - velocity[:, 0]) / accel_gap[:, None]
         acceleration = acceleration * both[:, None]
+        if joint:
+            # 同一组已老化的测量不重复施加加速度或学习残差。
+            fresh = torch.isclose(-times[:, -1], raw_dt, rtol=1e-5, atol=1e-6)
+            acceleration = acceleration * fresh[:, None]
         acceleration = acceleration * (8. / acceleration.norm(dim=1, keepdim=True).clamp_min(1e-6)).clamp_max(1)
         kinematic = base_velocity * dt[:, None] + .25 * acceleration * dt[:, None].square()
         kinematic = kinematic * (12. / kinematic.norm(dim=1, keepdim=True).clamp_min(1e-6)).clamp_max(1)
@@ -105,12 +111,22 @@ class PhysicalTimePrior(nn.Module):
                                 (.20 + .15 * dt + .25 * spread * dt).clamp_max(3)), -1)
         direction, perpendicular, speed = motion_aligned_axes(base_velocity)
         unit = torch.tanh(self.mean_head(context)) * valid[:, None]
+        if joint:
+            unit = unit * fresh[:, None]
         mean = kinematic + direction * unit[:, :1] * envelope[:, :1] + perpendicular * unit[:, 1:] * envelope[:, 1:]
         sigma = (.1 + F.softplus(self.sigma_head(context.detach()))).clamp_max(math.exp(2.5))
         log_sigma = motion_frame_log_sigma(sigma.log(), speed)
         fallback = batch['fallback_box'].to(boxes).detach()
-        endpoint = torch.cat((mean.detach(), fallback[:, 2:]), -1)
-        endpoint = torch.where(valid[:, None], endpoint, fallback)
+        if joint:
+            origin = batch['joint_motion_origin'].detach().to(boxes)
+            # mean 保持一步 GT 位移监督。只在发布候选时加回独立运动基准。
+            endpoint = torch.cat((origin[:, :2] + mean.detach(),
+                                  origin[:, 2:3] + batch['trusted_velocity'][:, 2:3].to(boxes) * dt[:, None],
+                                  origin[:, 3:]), -1)
+            endpoint = torch.where(valid[:, None], endpoint, origin)
+        else:
+            endpoint = torch.cat((mean.detach(), fallback[:, 2:]), -1)
+            endpoint = torch.where(valid[:, None], endpoint, fallback)
         return PriorContext(context, mean, log_sigma, valid,
                             direction, kinematic, envelope, unit, endpoint,
                             context_valid=torch.ones_like(valid))

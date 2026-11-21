@@ -1,5 +1,21 @@
 # CT-SeqTrack 当前工具范围：V41
 
+本轮用 `tools/train_v41_joint_pair.sh` 准备两组各自的运行目录，共用 E57 增强库和固定 E2 前缀库，再通过 `main.py` 顺序训练。结束后 `tools/compare_v41_training_arms.py --require-q0-lateral` 核验两组的联合配置并配对比较 dev 固定轮次。[两组命令](V41_JOINT_PAIR.md)
+
+逐轮更新前缀库的独立配方仍用 `tools/train_v41_joint.sh`；`tools/compare_v41_joint_search.py` 用于与历史 uniform 的固定 test 结果比较。[单组运行说明](V41_JOINT_TRAINING.md)
+
+## 2026-11-21 训练历史对照
+
+用 `tools/build_v41_history_augmentation.py` 建 E57 库，`main.py` 从头训练两臂并生成公共 E2 库。`tools/audit_v41_training_gt.py` 做训练集 GT 分叉，`tools/compare_v41_training_arms.py` 核验两组预算和固定轮次。可用 `tools/build_v41_fixed_replay.py` 提前从已保存的 E2 构建同一库。[完整命令](V41_HISTORY_TRAINING.md)
+
+## 2026-11-21 q0 横向中心单次训练
+
+用 `tools/build_v41_q0_replay.py` 离线生成 train 前态，`main.py` 开训，`tools/compare_v41_q0_lateral.py` 对照固定三轮历史 uniform test。[q0 单训命令与口径](V41_Q0_LATERAL_REPLAY.md)
+
+## 2026-11-21 联合搜索
+
+`tools/compare_v41_joint_search.py --joint-run RUN_DIR` 逐帧配对联合组与历史 uniform 的固定三轮 test。可附加同一运行 E60 的单轨延迟记录。[命令与口径](V41_JOINT_SEARCH.md)
+
 ## 2026-11-18 当前工具
 
 | 要核查的内容 | 入口及产物 |
