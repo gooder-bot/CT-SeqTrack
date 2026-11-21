@@ -1,6 +1,6 @@
 # CT-SeqTrack 当前工具范围：V41
 
-本轮用 `tools/train_v41_joint_pair.sh` 准备两组各自的运行目录，共用 E57 增强库和固定 E2 前缀库，再通过 `main.py` 顺序训练。结束后 `tools/compare_v41_training_arms.py --require-q0-lateral` 核验两组的联合配置并配对比较 dev 固定轮次。[两组命令](V41_JOINT_PAIR.md)
+本轮用 `tools/train_v41_joint_pair.sh` 准备两组各自的运行目录，共用 E57 增强库和固定 E2 前态，再通过 `main.py` 顺序训练。每轮在 KITTI test 上完整递推。结束后 `tools/compare_v41_training_arms.py --require-q0-lateral --require-epoch-test` 核验两组配置与各 60 轮的 test 记录，逐帧比较固定 E58–60 和 E60。[两组命令](V41_JOINT_PAIR.md)
 
 逐轮更新前缀库的独立配方仍用 `tools/train_v41_joint.sh`；`tools/compare_v41_joint_search.py` 用于与历史 uniform 的固定 test 结果比较。[单组运行说明](V41_JOINT_TRAINING.md)
 

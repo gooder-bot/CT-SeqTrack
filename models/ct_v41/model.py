@@ -84,17 +84,18 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
         candidate_trust[:, 0] = torch.where(candidates.raw_valid[:, 0], legacy, 0.)
     selected_real = (selected == 0) & candidates.raw_valid[:, 0]
     selected_measurement = candidates.measurement_candidate[row, selected]
+    trusted_score = candidate_trust[row, selected]
     if joint is None:
         support = final_candidate_support(observation, batch, candidates.boxes)
         selected_mask, count = support['mask'][row, selected], support['count'][row, selected]
+        quality_ok = trusted_score >= .5
     else:
         selected_mask = joint.support_mask[row, selected]
         count = selected_mask.sum(-1)
+        # geometry_ok 已由原始 T logit >= 0 得出；概率只供连续质量与诊断使用。
+        quality_ok = joint.geometry_ok[row, selected] & joint.identity_ok[row, selected]
     support_mask = selected_mask & selected_measurement[:, None]
-    trusted_score = candidate_trust[row, selected]
-    eligible = selected_measurement & (count >= 3) & (trusted_score >= .5)
-    if joint is not None:
-        eligible &= joint.identity_ok[row, selected] & joint.geometry_ok[row, selected]
+    eligible = selected_measurement & (count >= 3) & quality_ok
     accepted = candidates.boxes[row, selected]
     selection = SelectionDecision(selected.detach(), accepted, selected_utility, selected.detach())
     commit = CommitDecision(trusted_score.detach(), legacy.detach(), support_mask.detach(),
@@ -161,9 +162,10 @@ class JointTracker(nn.Module):
             with torch.autocast(device_type=prepared['points'].device.type, enabled=False):
                 return self.prior(prepared) if self.enable_b1 else empty_prior(prepared)
 
-    def _finish_forward(self, prepared, prior, observation, decoder, pool, include_local_diagnostics):
+    def _finish_forward(self, prepared, prior, observation, decoder, pool, include_local_diagnostics,
+                        *, use_recovery):
         recovery = None
-        if self.enable_b3:
+        if self.enable_b3 and use_recovery:
             seed = prepared['recovery_seed_box']
             seed_valid = prepared['recovery_seed_valid']
             options = {} if include_local_diagnostics else dict(diagnostics=False)
@@ -181,7 +183,8 @@ class JointTracker(nn.Module):
             from .joint_candidates import combine_joint_candidates
             observed = self.joint_search(prepared, observation, decoder, prior, pool,
                                          candidates.boxes, candidates.raw_valid)
-            candidates, verification, joint = combine_joint_candidates(candidates, verification, observed, pool)
+            candidates, verification, joint = combine_joint_candidates(
+                candidates, verification, observed, pool, remote_position_valid=observed.remote_position_valid)
         decision, commit, quality, candidate_trust = select_candidates(
             candidates, verification, observation, prepared, apply_policy=self.enable_b3, joint=joint)
         return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
@@ -213,7 +216,10 @@ class JointTracker(nn.Module):
             observation = self.observation(prepared)
             pool = build_current_pool(observation, prepared, live_features=True) if self.enable_b3 else None
             decoder = self._decode(prepared, prior, observation, pool, include_local_diagnostics)
-            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics)
+            # 四槽推理保留稳定的槽位与权重布局，R 缺席时没有候选或测量资格。
+            # 六槽的 R 还参与身份竞争。两种配方的训练都保留恢复头和对应监督。
+            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics,
+                                        use_recovery=self.training or self.joint_search is not None)
 
     def forward_aux(self, batch, *, include_local_diagnostics=True):
         """整轨辅助流隔离 B0/B1/decoder/q0，训练 B3、R 及已启用的联合搜索头。
@@ -239,7 +245,8 @@ class JointTracker(nn.Module):
             finally:
                 for module, training in modes:
                     module.training = training
-            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics)
+            return self._finish_forward(prepared, prior, observation, decoder, pool, include_local_diagnostics,
+                                        use_recovery=True)
 
     def compute_aux_losses(self, batch, output):
         if not self.enable_b3:
@@ -258,7 +265,8 @@ class JointTracker(nn.Module):
             else:
                 from .losses import compute_losses
                 losses = compute_losses(prepared, output, enable_b1=self.enable_b1,
-                    recovery_weight=float(self.config.get('v41_recovery_weight', .1)), q0_center_weighting=weighting)
+                    recovery_weight=float(self.config.get('v41_recovery_weight', .1)), q0_center_weighting=weighting,
+                    require_recovery=self.training or self.joint_search is not None)
             if output.decoder.lateral is not None:
                 extra = lateral_losses(output.decoder.lateral, prepared)
                 losses.update(extra)

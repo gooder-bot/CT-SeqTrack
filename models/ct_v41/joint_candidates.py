@@ -53,7 +53,7 @@ def remote_takeover_ready(remote, template_valid):
             & (remote.logits[:, 2].detach() >= 0) & (support >= 3))
 
 
-def combine_joint_candidates(candidates, verification, observations, pool):
+def combine_joint_candidates(candidates, verification, observations, pool, *, remote_position_valid=None):
     local, remote = observations.local, observations.remote
     ids = _pack(pool['ids'][:, None].expand(-1, 4, -1), local.ids[:, None],
                 remote.ids[:, None], fill=-1)
@@ -73,10 +73,12 @@ def combine_joint_candidates(candidates, verification, observations, pool):
     identified = remote.valid & observations.template_valid & remote.match_wins
     # 首框稀疏时，框内一个实际前景点即可暂存到下一次扫描复查。
     proposed = identified | (remote.valid & ~observations.template_valid & (remote_support > 0))
-    confirmed = remote_takeover_ready(remote, observations.template_valid)
+    # 原生前向传入本次身份竞争使用的资格；独立重组时按调用者当前证据复算。
+    if remote_position_valid is None:
+        remote_position_valid = remote_takeover_ready(remote, observations.template_valid)
     evidence = JointCandidateEvidence(observations, ids, xyz, support, identity, geometry,
-                                      proposed.detach(), confirmed.detach())
-    valid = torch.stack((local.valid & observations.local_position_valid, confirmed), 1).detach()
+                                      proposed.detach(), remote_position_valid.detach())
+    valid = torch.stack((local.valid & observations.local_position_valid, remote_position_valid), 1).detach()
     boxes = torch.stack((local.box.detach(), remote.box.detach()), 1)
     combined = replace(candidates, boxes=torch.cat((candidates.boxes, boxes), 1),
         valid=torch.cat((candidates.valid, valid), 1), raw_valid=torch.cat((candidates.raw_valid, raw), 1),

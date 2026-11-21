@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .cpu_geometry import compiled_backend
+
 
 CELL = 1.0
 GRID_FEATURES = 18
@@ -10,13 +12,32 @@ FINE_POINTS = 256
 
 
 def _groups(xy):
-    # 逐轴平移再打包，负传感器坐标仍精确且不需要分配整幅 BEV。
+    backend = compiled_backend()
+    if backend is not None:
+        x, y = xy.T
+        xmin, ymin = int(x.min()), int(y.min())
+        stride = int(y.max()) - ymin + 1
+        capacity = (int(x.max()) - xmin + 1) * stride
+        # 两张 int64 桶表合计最多 16 MB；稀疏大跨度时直接排序真实格键。
+        if capacity <= min(1_000_000, max(4096, 16 * len(xy))):
+            return backend.bounded_xy_groups(xy, xmin, ymin, stride, capacity)
     cells = xy - xy.min(axis=0)
     stride = int(cells[:, 1].max()) + 1
     keys = cells[:, 0] * stride + cells[:, 1]
     _, first, inverse, count = np.unique(keys, return_index=True, return_inverse=True,
                                         return_counts=True)
     return first, inverse, count
+
+
+def _extrema(inverse, lows, highs, groups):
+    backend = compiled_backend()
+    if backend is not None:
+        return backend.sequential_extrema(inverse, lows, highs, groups)
+    lower = np.full(groups, np.inf, dtype=np.float32)
+    upper = np.full(groups, -np.inf, dtype=np.float32)
+    np.minimum.at(lower, inverse, lows)
+    np.maximum.at(upper, inverse, highs)
+    return lower, upper
 
 
 @dataclass
@@ -47,10 +68,7 @@ def make_sparse_scan(xyz, ids):
         return (np.bincount(inv, weights=values) / count).astype(np.float32)
     centers = np.stack([means(axis) for axis in points.T], axis=-1)
     z = points[:, 2]
-    low = np.full(len(count), np.inf, dtype=np.float32)
-    high = np.full(len(count), -np.inf, dtype=np.float32)
-    np.minimum.at(low, inv, z)
-    np.maximum.at(high, inv, z)
+    low, high = _extrema(inv, z, z, len(count))
     xy_cell = xy[first]
     _, wide_inv, _ = _groups(np.floor_divide(xy_cell, 4))
     wide_count = np.bincount(wide_inv, weights=count)
@@ -58,10 +76,7 @@ def make_sparse_scan(xyz, ids):
                         for axis in centers[:, :2].T], axis=-1)
     wide_var = np.stack([np.bincount(wide_inv, weights=count * axis**2) / wide_count
                          for axis in centers[:, :2].T], axis=-1) - wide_xy**2
-    wide_low = np.full(len(wide_count), np.inf, dtype=np.float32)
-    wide_high = np.full(len(wide_count), -np.inf, dtype=np.float32)
-    np.minimum.at(wide_low, wide_inv, low)
-    np.maximum.at(wide_high, wide_inv, high)
+    wide_low, wide_high = _extrema(wide_inv, low, high, len(wide_count))
     dxy = centers[:, :2] / CELL - (xy_cell + .5)
     radius = np.linalg.norm(centers[:, :2], axis=-1)
     bearing = centers[:, :2] / np.maximum(radius[:, None], 1e-6)

@@ -1286,7 +1286,6 @@ class BatchBuilder:
             # B1 原状态数学不读新 T；Full 的传播输出没有当前测量资格。
             strong = count >= self.v41_config.v41_min_support and (not prop if full else True)
             score = float(transferred['trusted_score'][i])
-            supported = strong and bool(np.isfinite(score) and score >= self.v41_config.v41_trust_threshold)
             if self.joint_search:
                 supported = bool(strong and transferred['identity_ok'][i] and transferred['geometry_ok'][i])
                 source = int(transferred['selected'][i])
@@ -1318,20 +1317,23 @@ class BatchBuilder:
                             raise ValueError('joint support coordinates differ from the candidate scan IDs')
                 context['joint_support_xyz'] = observed
                 raw_count = count
+            else:
+                supported = strong and bool(np.isfinite(score) and score >= self.v41_config.v41_trust_threshold)
             if full and bool(transferred['eligible'][i]) != supported:
                 raise ValueError('v41 commit eligibility disagrees with unique current-B0 support')
-            innovation = float(np.linalg.norm(transferred['boxes'][i, :2] - transferred['prior_boxes'][i, :2]))
-            staged.append((context, box, count, raw_count, strong, supported, prop, score, innovation))
+            staged.append((context, box, count, raw_count, strong, supported, prop, score))
         records = []
-        for i, (context, box, count, raw_count, strong, supported, prop, score, innovation) in enumerate(staged):
+        for i, (context, box, count, raw_count, strong, supported, prop, score) in enumerate(staged):
             row, state, now = context['row'], context['state'], context['timestamp']
             r = row['request']
             state.boxes[r.frame] = box
             state.box_provenance[r.frame] = PREDICTED_BOX
             state.times[r.frame] = now
             state.next_frame += 1
-            pair_valid = innovation <= max(.5 * np.hypot(*state.size[:2]), 1e-3)
-            state.transitions[r.frame] = pair_valid
+            if not self.joint_search:
+                innovation = float(np.linalg.norm(transferred['boxes'][i, :2] - transferred['prior_boxes'][i, :2]))
+                pair_valid = innovation <= max(.5 * np.hypot(*state.size[:2]), 1e-3)
+                state.transitions[r.frame] = pair_valid
             observation_refresh = supported if self.joint_search else strong
             if observation_refresh:
                 state.last_strong_time = now

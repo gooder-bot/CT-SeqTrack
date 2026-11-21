@@ -192,9 +192,11 @@ def comparison(root, receipts):
         for key in sorted(tables[0])}
     return dict(schema='ct_seqtrack.q0_lateral.paired_test.v1', fixed_epochs=list(EPOCHS), split='test',
         history=dict(run_id=history['arms']['A']['run_id'], execution=history['execution_revision'],
+                     inference_recovery_enabled=True,
                      source_sha256=history['source_sha256'], test_receipts=str(receipts),
                      training_budget_receipt=str(receipts.parent / 'dev_fixed_comparison.json')),
         lateral_run=dict(run_id=manifest['run_id'], execution=cfg['v41_execution_revision'],
+                         inference_recovery_enabled=execution['recovery'].get('inference_enabled', True),
                          source_sha256=manifest['source']['sha256'], config_sha256=manifest['config_sha256'],
                          replay_manifest_sha256=manifest['q0_replay_manifest_sha256']), budget=totals,
         convention='Each epoch uses both real q0 and >=10 sampled target points for common visibility. '

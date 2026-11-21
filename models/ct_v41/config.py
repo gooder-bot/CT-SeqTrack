@@ -121,7 +121,9 @@ def recipe_identity(config):
         search_quota=[768, 256], search_max_age_seconds=1.5,
         active_from_epoch=1, candidates=['q0', 'prior', 'trusted_propagation', 'recovery_measurement'],
         tie_priority=[0, 3, 1, 2], measurement_sources=[0, 3],
-        recovery=dict(type='current_local_xyz_residual_v1', bound='one_box_size', weight=.1),
+        recovery=dict(type='current_local_xyz_residual_v1', bound='one_box_size', weight=.1,
+                      training_enabled=RECIPES[name]['enable_b3'],
+                      inference_enabled=bool(config.get('v41_joint_search', False))),
         auxiliary=dict(fraction=.25, loss_weight=.25, main_optimizer_steps_unchanged=True),
         kitti_geometry=config.get('v41_kitti_geometry', 'open3dsot_velodyne_v1'), train_preload_offset=10.,
         duplicate_xyz_tolerance=1e-4, duplicate_yaw_tolerance=1e-5)

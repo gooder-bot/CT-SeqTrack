@@ -112,6 +112,8 @@ def test_comparison_uses_historical_budget_and_requires_shared_replay_identity(t
     receipt_path = fixed/'test_verification.json'
     write_json(receipt_path,dict(receipts=receipts))
     report = comparison(root,receipt_path)
+    assert report['history']['inference_recovery_enabled'] is True
+    assert report['lateral_run']['inference_recovery_enabled'] is False
     assert report['late3']['meets_adoption_criteria']
     assert report['late3']['metrics']['lateral']['difficult_lateral_mae_cm'] == 10.
     assert report['late3']['tracks']['0019/1']['uniform']['success'] == 100.

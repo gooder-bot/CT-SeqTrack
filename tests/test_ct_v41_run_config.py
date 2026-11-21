@@ -57,6 +57,16 @@ def test_inverse_lwh_recipe_changes_only_q0_center_weighting():
     assert config_identity(uniform) != config_identity(inverse)
 
 
+def test_recovery_execution_record_distinguishes_training_and_inference():
+    for recipe, joint, train_r, infer_r in (
+        ('b0', False, False, False), ('full', False, True, False), ('full', True, True, True),
+    ):
+        cfg = normalize_config(dict(v41_training_recipe=recipe, v41_joint_search=joint,
+                                    ct_engineering_check=recipe == 'b0'))
+        recovery = recipe_identity(cfg)['recovery']
+        assert (recovery['training_enabled'], recovery['inference_enabled']) == (train_r, infer_r)
+
+
 def test_resume_records_current_numeric_environment_and_preserves_initial_manifest(tmp_path):
     from models.ct_v41.entry import write_resume_event, write_run_metadata
 

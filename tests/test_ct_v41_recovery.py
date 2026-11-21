@@ -129,7 +129,7 @@ def test_nonzero_recovery_reenters_reader_and_uses_refined_support(monkeypatch):
     monkeypatch.setattr(model.verifier, 'read_local', record_read)
     with torch.no_grad():
         model.recovery_head.xyz.bias.copy_(torch.atanh(torch.tensor([0., 0., .9])))
-        output = model(data)
+        output = model.forward_aux(data)
     assert len(reads) == 2
     assert torch.equal(reads[0][:, 0], data['recovery_seed_box'])
     assert torch.equal(reads[1], output.candidates.boxes)
@@ -148,6 +148,38 @@ def test_nonzero_recovery_reenters_reader_and_uses_refined_support(monkeypatch):
     assert decision.selected_index.item() == 3
     assert not commit.eligible.item() and not commit.support_mask.any()
     assert quality.item() == 0.
+
+
+@pytest.mark.parametrize('detailed', [False, True])
+def test_four_slot_inference_omits_recovery_and_scores_other_candidates(monkeypatch, detailed):
+    from models.ct_v41.candidate_records import candidate_records
+    model, data = JointTracker(config()).eval(), values()
+    data['points'][..., :3].zero_()
+    reads = []
+    read_local = model.verifier.read_local
+
+    def trace(pool, boxes, valid, size, **kwargs):
+        reads.append(valid.detach().clone())
+        return read_local(pool, boxes, valid, size, **kwargs)
+
+    def unexpected_head(*args, **kwargs):
+        pytest.fail('four-slot inference ran the recovery head')
+
+    monkeypatch.setattr(model.verifier, 'read_local', trace)
+    monkeypatch.setattr(model.recovery_head, 'forward', unexpected_head)
+    with torch.no_grad():
+        output = model(data, include_local_diagnostics=detailed)
+        losses = model.compute_losses(data, output)
+        record, = candidate_records(data, output)
+
+    assert len(reads) == 1 and torch.equal(reads[0], output.candidates.valid)
+    assert output.recovery is None and not output.candidates.raw_valid[:, 3].any()
+    assert not output.candidates.measurement_candidate[:, 3].any()
+    assert not output.verification.support_mask[:, 3].any() and (output.selected_index != 3).all()
+    assert record['recovery_geometry'] is None and record['recovery_read_point_count'] == 0
+    assert not record['recovery_trusted_valid'] and record['oracle']['index'] != 3
+    assert losses['loss_recovery_xyz'].item() == losses['recovery_supervised_count'].item() == 0
+    assert torch.isfinite(losses['loss_total'])
 
 
 def test_verifier_losses_cannot_train_recovery_pose_through_candidate_geometry():
@@ -174,7 +206,7 @@ def test_duplicate_raw_ids_do_not_create_three_supporting_measurements():
     assert support['count'].max().item() <= 1
     _, commit, _, _ = select_candidates(out.candidates, out.verification, out.observation, data)
     assert not commit.eligible.any()
-    output = JointTracker(config()).eval()(data)
+    output = JointTracker(config()).eval().forward_aux(data)
     assert output.recovery.point_mask.sum().item() <= 1
     assert not recovery_loss_terms(data, output.recovery)['valid'].any()
 
@@ -210,7 +242,7 @@ def test_no_current_points_cannot_create_R_even_with_valid_history():
     data = values()
     data['point_valid'][:, -1] = False
     model = JointTracker(config()).eval()
-    output = model(data)
+    output = model.forward_aux(data)
     assert output.observation.sequence_valid.item()
     assert not output.recovery.valid.item()
     assert not output.candidates.raw_valid[0, 3].item()
@@ -219,12 +251,12 @@ def test_no_current_points_cannot_create_R_even_with_valid_history():
 
 def test_online_recovery_is_independent_of_current_and_future_GT():
     model, data = JointTracker(config()).eval(), values()
-    first = model(data)
+    first = model.forward_aux(data)
     poisoned = deepcopy(data)
     poisoned['target_box'].fill_(float('nan'))
     poisoned['segmentation_labels'].zero_()
     poisoned['future_displacement'] = torch.full((9, 7, 2), float('nan'))
-    second = model(poisoned)
+    second = model.forward_aux(poisoned)
     assert torch.equal(first.candidates.boxes, second.candidates.boxes)
     assert torch.equal(first.selected_index, second.selected_index)
     assert torch.equal(first.commit_decision.eligible, second.commit_decision.eligible)

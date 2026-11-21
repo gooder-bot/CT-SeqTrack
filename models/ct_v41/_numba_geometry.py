@@ -95,3 +95,45 @@ def candidate_metrics(boxes, targets, sizes, target_sizes, skip):
             dx, dy, dz = pose[:3] - target[:3]
             result[row, slot, 2] = math.sqrt(dx * dx + dy * dy + dz * dz)
     return result
+
+
+@njit(cache=True, fastmath=False, nogil=True)
+def bounded_xy_groups(xy, xmin, ymin, stride, capacity):
+    first_at = np.full(capacity, -1, dtype=np.int64)
+    counts_at = np.zeros(capacity, dtype=np.int64)
+    inverse = np.empty(len(xy), dtype=np.int64)
+    groups = 0
+    for i in range(len(xy)):
+        key = (xy[i, 0] - xmin) * stride + (xy[i, 1] - ymin)
+        inverse[i] = key
+        if first_at[key] < 0:
+            first_at[key] = i
+            groups += 1
+        counts_at[key] += 1
+    first = np.empty(groups, dtype=np.int64)
+    counts = np.empty(groups, dtype=np.int64)
+    # 与 np.unique 一样按格键升序编号，保留首个输入点和每点的反向索引。
+    group = 0
+    for key in range(capacity):
+        if first_at[key] >= 0:
+            first[group] = first_at[key]
+            counts[group] = counts_at[key]
+            first_at[key] = group
+            group += 1
+    for i in range(len(inverse)):
+        inverse[i] = first_at[inverse[i]]
+    return first, inverse, counts
+
+
+@njit(cache=True, fastmath=False, nogil=True)
+def sequential_extrema(inverse, lows, highs, groups):
+    lower = np.full(groups, np.inf, dtype=np.float32)
+    upper = np.full(groups, -np.inf, dtype=np.float32)
+    for i in range(len(inverse)):
+        key = inverse[i]
+        # 与 numpy.minimum/maximum.at 同序，平局取后值，保留 ±0 的符号。
+        if lows[i] <= lower[key]:
+            lower[key] = lows[i]
+        if highs[i] >= upper[key]:
+            upper[key] = highs[i]
+    return lower, upper

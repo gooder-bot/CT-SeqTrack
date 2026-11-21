@@ -43,6 +43,8 @@ RUN=$(mktemp -d output/v41-q0-lateral-XXXXXXXX)
 
 ## 复核固定轮次
 
+当前四槽推理停用旧 R，历史 v3 uniform 的推理启用 R。比较器在两侧分别记录 `inference_recovery_enabled`。与历史记录的分差包含推理策略差异，衡量横向头的独立贡献时，两边须采用相同的 R 策略。
+
 ```bash
 "$PY" tools/compare_v41_q0_lateral.py "$RUN" > "$CHECK/comparison.json"
 ```

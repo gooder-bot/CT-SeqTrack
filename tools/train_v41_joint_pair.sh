@@ -9,22 +9,20 @@ if [[ ${1:-} == --help || ${1:-} == -h ]]; then
     exit 0
 fi
 common_args=("$@")
-if (( $# )); then
-    # 其余具名参数统一传给两组，例如巡查间隔、横向预热、worker 数或 GPU。
-    "${PYTHON:-python}" -c '
+# 其余具名参数统一传给两组，例如巡查间隔、横向预热、worker 数或 GPU。
+"${PYTHON:-python}" -c '
 import sys
 from models.ct_v41.entry import parse_config
 owned = {"--cfg", "--log_dir", "--checkpoint", "--v41_fixed_replay_bank"}
 if any(arg.split("=", 1)[0] in owned for arg in sys.argv[1:]):
     sys.exit("本脚本按组分配配置、输出和断点，共享库位于 PAIR_DIR。")
 cfg = parse_config(["--cfg", "cfgs/ct_seqtrack/41_joint_window_1448.yaml", *sys.argv[1:]])
-if (cfg.test or cfg.ct_engineering_check or cfg.eval_split != "dev" or
+if (cfg.test or cfg.ct_engineering_check or cfg.eval_split != "test" or
     (cfg.seed, cfg.batch_size, cfg.epoch) != (42, 16, 60) or
-    not all(e % cfg.check_val_every_n_epoch == 0 for e in (58, 59)) or
+    cfg.check_val_every_n_epoch != 1 or cfg.report_checkpoint != "last" or
     (cfg.diagnostics_level != "full" and not {58, 59, 60}.issubset(cfg.full_diagnostic_epochs))):
-    sys.exit("这份正式对照使用 seed42、batch16、60 轮及 dev E58–60 完整记录。")
+    sys.exit("这份正式对照使用 seed42、batch16、60 轮，每轮完整评估 test，固定比较 E58–60 和 E60。")
 ' "$@"
-fi
 if [[ -z ${PAIR_DIR:-} ]]; then
     mkdir -p output
     PAIR_DIR=$(mktemp -d "$PWD/output/v41-joint-pair-XXXXXXXX")
@@ -63,9 +61,9 @@ run_arm() {
 }
 run_arm window_1448
 run_arm four_candidates
-report=$(mktemp "$PAIR_DIR/.dev-comparison-XXXXXXXX")
+report=$(mktemp "$PAIR_DIR/.test-comparison-XXXXXXXX")
 trap 'rm -f -- "$report"' EXIT
-"${PYTHON:-python}" tools/compare_v41_training_arms.py --require-q0-lateral \
+"${PYTHON:-python}" tools/compare_v41_training_arms.py --require-q0-lateral --require-epoch-test \
     --window-run "$PAIR_DIR/window_1448" --candidate-run "$PAIR_DIR/four_candidates" > "$report"
-mv -- "$report" "$PAIR_DIR/dev_comparison.json"
-echo "固定轮次对照结果：$PAIR_DIR/dev_comparison.json"
+mv -- "$report" "$PAIR_DIR/test_comparison.json"
+echo "固定轮次对照结果：$PAIR_DIR/test_comparison.json"

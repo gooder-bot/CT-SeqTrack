@@ -36,6 +36,8 @@ def test_remote_point_set_and_two_scan_selection_are_independent_of_local_suppor
     observed = SimpleNamespace(local=measurement(0., [0, 1, 2, 3], -2.), remote=remote,
         local_position_valid=torch.tensor([True]),
         legacy_match_wins=torch.tensor([[False, False]]), template_valid=torch.tensor([True]))
+    # 工程干预可修改同一帧的证据后独立重组，不得复用上次确认结果。
+    observed.remote_position_valid = torch.tensor([False])
     for confirmed, winner, eligible in ((False, 0, False), (True, 5, True)):
         remote.confirmed.fill_(confirmed)
         six, scores, joint = combine_joint_candidates(candidates, verification, observed, pool)
@@ -57,7 +59,8 @@ def test_remote_point_set_and_two_scan_selection_are_independent_of_local_suppor
 
 
 @pytest.mark.parametrize('winner', range(len(JOINT_CANDIDATES)), ids=JOINT_CANDIDATES)
-def test_each_joint_slot_can_win_but_only_measurements_can_write(winner):
+@pytest.mark.parametrize('geometry_logit', [-1e-8, 0.])
+def test_joint_geometry_threshold_controls_write_and_remote_takeover(winner, geometry_logit):
     boxes = torch.zeros(1, 4, 4)
     boxes[0, :, 0] = torch.arange(4)
     valid = torch.ones(1, 4, dtype=torch.bool)
@@ -68,6 +71,8 @@ def test_each_joint_slot_can_win_but_only_measurements_can_write(winner):
                                   torch.zeros(1, 4, 46))
     local = measurement(4., [0, 1, 2], 0.)
     remote = measurement(5., [100, 101, 102], 0.)
+    for logits in (evidence.logits, local.logits, remote.logits):
+        logits[..., 2] = geometry_logit
     remote.confirmed.fill_(True)
     observed = SimpleNamespace(local=local, remote=remote, local_position_valid=local.valid,
         legacy_match_wins=torch.ones(1, 2, dtype=torch.bool), template_valid=torch.tensor([True]))
@@ -75,9 +80,15 @@ def test_each_joint_slot_can_win_but_only_measurements_can_write(winner):
     six, scores, joint = combine_joint_candidates(candidates, evidence, observed, pool)
     scores.logits[0, winner, :2] = 5.
     decision, commit, _, _ = select_candidates(six, scores, None, {}, joint=joint)
-    assert six.valid.all() and decision.selected_index.item() == winner
-    assert commit.eligible.item() == (winner in (0, 3, 4, 5))
-    assert commit.support_mask.sum().item() == (3 if commit.eligible.item() else 0)
+    assert six.valid[0, :5].all() and six.valid[0, 5].item() == (geometry_logit >= 0.)
+    # 远端几何不合格时不能接管。其余候选仍能报告位置，即使当帧不够可信。
+    selected = 0 if winner == 5 and geometry_logit < 0. else winner
+    measured = selected in (0, 3, 4, 5)
+    assert decision.selected_index.item() == selected
+    assert commit.support_mask.sum().item() == (3 if measured else 0)
+    # 两个 logit 的 float32 sigmoid 都舍入到 0.5，几何资格仍须区分其符号。
+    assert commit.trusted_score.item() == (.5 if measured else 0.)
+    assert commit.eligible.item() == (measured and geometry_logit >= 0.)
 
 
 def test_joint_public_forward_and_auxiliary_loss():

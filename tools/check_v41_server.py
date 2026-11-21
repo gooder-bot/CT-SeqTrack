@@ -157,8 +157,10 @@ def check_output(batch, output, *, joint_search=False):
             'commit support differs from final selected geometry')
     require(torch.equal(output.candidates.boxes[:, 0], output.decoder.q0_box), 'B3 did not receive final q0')
     if joint_search:
-        eligible = ((expected_support.sum(-1) >= 3) & (output.commit_decision.trusted_score >= .5)
-                    & joint.identity_ok[row, selected] & joint.geometry_ok[row, selected])
+        geometry = (output.verification.logits[..., 2] >= 0) & measurement
+        require(torch.equal(geometry, joint.geometry_ok), 'joint geometry gate differs from raw logits')
+        eligible = ((expected_support.sum(-1) >= 3) & joint.identity_ok[row, selected]
+                    & geometry[row, selected])
         require(torch.equal(eligible, output.commit_decision.eligible), 'joint write eligibility mismatch')
     require(torch.equal(output.accepted_box, output.candidates.boxes[row, selected]), 'accepted box mismatch')
     expected_quality = torch.where(selected == 0, output.legacy_q0_quality,

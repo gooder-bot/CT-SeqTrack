@@ -2,8 +2,39 @@
 import numpy as np
 import pytest
 
-from models.ct_v41 import cpu_geometry, search
+from models.ct_v41 import cpu_geometry, joint_grid, search
 from utils.tracking_metrics import metric_contributions
+
+
+def test_compiled_sparse_grid_matches_numpy_through_labels_and_fine_crop(monkeypatch):
+    if joint_grid.compiled_backend() is None:
+        pytest.skip('requires compiled geometry backend')
+    points = np.array([[8.1, 2.5, .7], [-.8, -1.2, 0.], [.2, 0., .5],
+                       [-.7, -1.1, -0.], [.8, 0., .5], [11., 9., 3.],
+                       [1.5, 3., 4.]], np.float32)
+    ids = np.array([30, 9, 4, 12, 50, 9, 37])
+    compiled = joint_grid.make_sparse_scan(points, ids)
+    monkeypatch.setattr(joint_grid, 'compiled_backend', lambda: None)
+    reference = joint_grid.make_sparse_scan(points, ids)
+    for field in ('xyz', 'ids', 'cell_index', 'centers', 'features'):
+        lhs, rhs = getattr(compiled, field), getattr(reference, field)
+        assert lhs.shape == rhs.shape and lhs.dtype == rhs.dtype and lhs.tobytes() == rhs.tobytes()
+    target, other = np.array([.2, 0., .5, 0.]), np.array([.8, 0., .5, 0.])
+    size = np.array([.4, .4, 1.])
+    for readout, args in ((joint_grid.grid_labels, (target, size, [np.r_[other, size]])),
+                          (joint_grid.fine_crop, (target, size))):
+        for actual, expected in zip(readout(compiled, *args), readout(reference, *args)):
+            np.testing.assert_array_equal(actual, expected)
+
+
+def test_sparse_wide_span_uses_sorted_occupied_keys(monkeypatch):
+    # 即使 Numba 可用，这两个极远格子也不得申请其间的空桶。
+    monkeypatch.setattr(joint_grid, 'compiled_backend', lambda: object())
+    xy = np.array([[40000, 40000], [-40000, -40000], [40000, 40000]], np.int64)
+    first, inverse, count = joint_grid._groups(xy)
+    assert first.tolist() == [1, 0]
+    assert inverse.tolist() == [1, 0, 1]
+    assert count.tolist() == [1, 2]
 
 
 @pytest.mark.parametrize('dtype', [np.float32, np.float64])

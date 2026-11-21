@@ -35,7 +35,7 @@ def sha(value):
     return isinstance(value, str) and len(value) == 64 and all(x in '0123456789abcdef' for x in value)
 
 
-def training_pair(roots, *, require_q0_lateral=False):
+def training_pair(roots, *, require_q0_lateral=False, require_epoch_test=False):
     from models.ct_v41.auxiliary import insertion_identity, insertion_indices
     from models.ct_v41.config import config_identity, normalize_config, recipe_identity
     from models.ct_v41.history_augmentation import TRAIN_DATA
@@ -50,15 +50,30 @@ def training_pair(roots, *, require_q0_lateral=False):
                 (recipe['seed'], recipe['batch_size'], recipe['epoch']) == (42, 16, 60),
                 f'incorrect formal arm: {mode}')
         cfg = normalize_config(yaml.safe_load((root/'resolved_config.yaml').read_text(encoding='utf-8-sig')))
+        policy = m.get('evaluation_protocol', {})
+        if require_epoch_test or policy:
+            require((policy.get('split'), policy.get('every_n_epochs'), policy.get('selection')) ==
+                    (cfg.eval_split, cfg.check_val_every_n_epoch, cfg.report_checkpoint),
+                    f'{mode} evaluation protocol differs from resolved configuration')
+        if require_epoch_test:
+            require((cfg.eval_split, cfg.check_val_every_n_epoch, cfg.report_checkpoint) == ('test', 1, 'last'),
+                    f'{mode} requires test evaluation every epoch and a fixed final checkpoint')
         require(cfg.v41_joint_replay == 'fixed_e2' and not cfg.v41_q0_lateral_replay,
                 f'{mode} requires fixed E2 joint replay')
         require(not require_q0_lateral or cfg.v41_q0_lateral,
                 f'{mode} requires the independent q0 lateral head')
         if cfg.v41_q0_lateral:
+            expected = recipe_identity(cfg)
+            recorded = m.get('training_execution_recipe', {})
+            # 两组历史六槽均执行 R。早期回执尚无按训练/推理拆分的标记。
+            if (cfg.eval_split == 'dev' and
+                    not {'training_enabled', 'inference_enabled'}.intersection(recorded.get('recovery', {}))):
+                expected['recovery'].pop('training_enabled')
+                expected['recovery'].pop('inference_enabled')
             require(recipe.get('v41_q0_lateral') is True
                     and recipe.get('v41_q0_lateral_warmup_epochs') == cfg.v41_q0_lateral_warmup_epochs
                     and recipe.get('v41_joint_replay') == 'fixed_e2'
-                    and m.get('training_execution_recipe') == recipe_identity(cfg),
+                    and recorded == expected,
                     f'{mode} lateral/replay execution recipe disagrees with resolved configuration')
         require(cfg.test is False and not cfg.ct_engineering_check and config_identity(cfg) == m['config_sha256']
                 and all(cfg.get(k) == v for k, v in recipe.items()),
@@ -66,6 +81,9 @@ def training_pair(roots, *, require_q0_lateral=False):
         configs.append(cfg)
     a, b = manifests
     cfg = configs[0]
+    require(all((c.eval_split, c.check_val_every_n_epoch, c.report_checkpoint) ==
+                (cfg.eval_split, cfg.check_val_every_n_epoch, cfg.report_checkpoint) for c in configs),
+            'arms have different training evaluation protocols')
     require(cfg.v41_q0_lateral == configs[1].v41_q0_lateral, 'arms differ in q0 lateral activation')
     swapped = dict(configs[0], v41_history_training=configs[1].v41_history_training,
                    experiment_name=configs[1].experiment_name)
@@ -85,7 +103,9 @@ def training_pair(roots, *, require_q0_lateral=False):
     for epoch in range(1, 61):
         rows = [read(root / 'training_audits' / f'epoch={epoch:03d}.json') for root in roots]
         left, right = rows
-        for m, mode, row in zip(manifests, MODES, rows):
+        for root, m, mode, row in zip(roots, manifests, MODES, rows):
+            if require_epoch_test:
+                epoch_evaluation(root, 'test', epoch)
             require(row['run_id'] == m['run_id'] and row['config_sha256'] == m['config_sha256']
                     and row['epoch_complete'] and row['completed_epoch'] == epoch
                     and (row['rows'], row['optimizer_steps']) == (76324, 4771),
@@ -152,7 +172,8 @@ def training_pair(roots, *, require_q0_lateral=False):
     shared = {k: v for k, v in a['actual_recipe'].items() if k != 'v41_history_training'}
     shared.update(v41_joint_replay=cfg.v41_joint_replay, v41_q0_lateral=cfg.v41_q0_lateral,
                   v41_q0_lateral_warmup_epochs=cfg.v41_q0_lateral_warmup_epochs if cfg.v41_q0_lateral else None)
-    return dict(runs=[m['run_id'] for m in manifests], history_bank_sha256=a['history_bank_sha256'],
+    return dict(runs=[m['run_id'] for m in manifests], training_eval_split=cfg.eval_split,
+                history_bank_sha256=a['history_bank_sha256'],
                 shared_recipe=shared, source_sha256=source, initial_parameter_hash=a['initial_parameter_hash'],
                 train_dataset_sha256=TRAIN_DATA, auxiliary_endpoints_per_arm=aux_endpoints,
                 common_warmup=prefixes, replay_manifest_sha256=catalog, donor_weights_sha256=donor,
@@ -180,10 +201,22 @@ def q0_measurement(row, *, feedback):
                 corrected_width_mae_cm=q0_errors(row)[1], mean_abs_applied_cm=100*abs(applied))
 
 
+def epoch_evaluation(root, split, epoch):
+    report = read(root / 'epochs' / f'epoch={epoch:03d}.json')
+    result = report['evaluation'].get(split, {})
+    require(report['epoch'] == result.get('epoch') == result.get('checkpoint_epoch') == epoch
+            and result.get('split') == split and result.get('complete_coverage') is True,
+            f'expected a complete E{epoch} {split} evaluation in the training run')
+    return result
+
+
 def read_split(root, split, epoch, *, run=None):
     recipe = run['actual_recipe'] if run else {}
-    if split == 'test':
-        # 对每组的固定 checkpoint 各做一次独立 --test，不参与 dev 的窗口选择。
+    epoch_split = (run or {}).get('evaluation_protocol', {}).get('split', 'dev')
+    if split == epoch_split:
+        result = epoch_evaluation(root, split, epoch)
+    elif split == 'test':
+        # 旧 dev 训练另外保存的固定 checkpoint 独立 test。
         root = root / 'heldout_test' / f'epoch={epoch:03d}'
         evaluated = read(root / 'run_manifest.json')
         require(run is not None and evaluated['source_run_id'] == run['run_id'] and
@@ -196,9 +229,7 @@ def read_split(root, split, epoch, *, run=None):
                 f'E{epoch} test ledger belongs to another checkpoint/run')
         result = read(root / 'results.json')
     else:
-        report = read(root / 'epochs' / f'epoch={epoch:03d}.json')
-        require(report['epoch'] == epoch, 'invalid dev epoch report')
-        result = report['evaluation'][split]
+        raise ValueError(f'{split} was not evaluated by the {epoch_split} training protocol')
     require(result['epoch'] == result['checkpoint_epoch'] == epoch
             and result['split'] == split and result['complete_coverage'] is True
             and result['diagnostics_level'] == 'full', f'expected a complete E{epoch} {split} run')
@@ -323,8 +354,10 @@ def assess_pair(a, b, *, q0_lateral=False):
     return result
 
 
-def compare(roots, split='dev', *, require_q0_lateral=False):
-    audit = training_pair(roots, require_q0_lateral=require_q0_lateral)
+def compare(roots, split=None, *, require_q0_lateral=False, require_epoch_test=False):
+    audit = training_pair(roots, require_q0_lateral=require_q0_lateral, require_epoch_test=require_epoch_test)
+    split = split or audit['training_eval_split']
+    require(not require_epoch_test or split == 'test', 'per-epoch test comparison requires the test split')
     runs = [read(root / 'run_manifest.json') for root in roots]
     epochs = {e:assess_pair(*(read_split(root, split, e, run=run)
                               for root,run in zip(roots, runs)),
@@ -350,8 +383,10 @@ def compare(roots, split='dev', *, require_q0_lateral=False):
     diffs = list(delta.values()) + list(epochs[60]['window_minus_four_pp'].values())
     choice = (MODES[0] if min(diffs) > 0 else MODES[1] if max(diffs) < 0 else 'inconclusive')
     return dict(schema='ct_seqtrack.v41.window_ab.v1', split=split, training=audit, epochs=epochs,
+                evaluation_source='training_epochs' if split == audit['training_eval_split'] else 'standalone_test',
                 late3=late, late3_window_minus_four_pp=delta, late3_tracks=track_deltas,
                 physical_return_events=len(epochs[60]['return_events']),
+                fixed_epoch_preference=choice if split == audit['training_eval_split'] else None,
                 single_seed_dev_choice=choice if split == 'dev' else None)
 
 
@@ -359,8 +394,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--window-run', type=Path, required=True)
     parser.add_argument('--candidate-run', type=Path, required=True)
-    parser.add_argument('--split', choices=('dev', 'test'), default='dev')
+    parser.add_argument('--split', choices=('dev', 'test'), help='默认读取该运行训练期间使用的 split')
+    parser.add_argument('--require-epoch-test', action='store_true', help='核验两组 60 轮训练均完整评估 test')
     parser.add_argument('--require-q0-lateral', action='store_true', help='要求两组正式训练均启用 q0 横向头')
     args = parser.parse_args()
     print(json.dumps(compare((args.window_run, args.candidate_run), args.split,
-                             require_q0_lateral=args.require_q0_lateral), indent=2, allow_nan=False))
+                             require_q0_lateral=args.require_q0_lateral,
+                             require_epoch_test=args.require_epoch_test), indent=2, allow_nan=False))

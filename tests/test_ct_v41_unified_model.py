@@ -1,7 +1,10 @@
 """联合搜索、横向 q0 与窗口课程共用同一模型的前向和梯度合同。"""
+from unittest.mock import patch
+
 import numpy as np
 import torch
 
+from models.ct_v41 import joint_candidates
 from models.ct_v41.data import BatchBuilder, EndpointRequest, RawEndpointDataset
 from models.ct_v41.config import load_config
 from models.ct_v41.model import JointTracker
@@ -116,6 +119,20 @@ def test_joint_and_lateral_main_and_auxiliary_gradients():
         assert all(p.grad is None for p in module.parameters()), type(module).__name__
     for module in (tracker.verifier, tracker.recovery_head, tracker.joint_search):
         assert has_gradient(module), type(module).__name__
+
+
+def test_native_forward_shares_remote_takeover_between_identity_and_selection():
+    tracker, _, batch = model_and_training_batch()
+    tracker.eval()
+    with torch.no_grad(), patch.object(joint_candidates, 'remote_takeover_ready',
+                                       wraps=joint_candidates.remote_takeover_ready) as check:
+        result = tracker(batch)
+    check.assert_called_once()
+    observed = result.joint.observations
+    expected = joint_candidates.remote_takeover_ready(observed.remote, observed.template_valid)
+    assert torch.equal(observed.remote_position_valid, expected)
+    assert torch.equal(result.candidates.valid[:, 5], expected)
+    assert torch.equal(result.joint.remote_valid, expected)
 
 
 def test_server_smoke_accepts_the_formal_joint_recipe_and_bank(tmp_path):

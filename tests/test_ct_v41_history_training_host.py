@@ -14,7 +14,9 @@ from tests.test_ct_v41_worker_transport import WorkerKITTI
 
 
 class FourTrainingCars(WorkerKITTI):
-    v41_source_role = 'train'
+    @property
+    def v41_source_role(self):
+        return 'train' if self.v41_data_role == 'auxiliary' else self.v41_data_role
 
     def get_num_tracklets(self):
         return 4
@@ -23,7 +25,7 @@ class FourTrainingCars(WorkerKITTI):
         return 4
 
     def get_tracklet_key(self, track):
-        return f'kitti_v41/kitti_tracking/train/{track:04}/{track}/Car/test_fixture'
+        return f'kitti_v41/kitti_tracking/{self.v41_source_role}/{track:04}/{track}/Car/test_fixture'
 
     def endpoint_metadata(self, track, index):
         return dict(super().endpoint_metadata(track, index), scene_id=f'{track:04}', raw_frame_id=index)
@@ -192,8 +194,8 @@ def test_joint_pair_entry_same_e2_weights_replay_and_standalone_test(tmp_path, t
     from models.ct_v41 import entry
 
     train_sources, history = history_inputs
-    train_sources = dict(train_sources, val=FourTrainingCars(tmp_path, 'dev'))
     test_sources = dict(test=FourTrainingCars(tmp_path, 'test'))
+    fit_sources = {**train_sources, **test_sources}
     shared = tmp_path / 'joint-e2.sqlite'
 
     def read(path):
@@ -208,11 +210,24 @@ def test_joint_pair_entry_same_e2_weights_replay_and_standalone_test(tmp_path, t
             full_diagnostic_epochs=[3], log_dir=str(run_dir)))
         assert cfg.v41_history_training == mode and cfg.v41_joint_replay == 'fixed_e2'
         assert cfg.v41_joint_search and cfg.v41_q0_lateral and not cfg.v41_q0_lateral_replay
-        assert cfg.eval_split == 'dev' and cfg.v41_q0_lateral_warmup_epochs == 10
-        loaders = build_loaders(cfg, roles=tuple(train_sources), sources=train_sources)
+        assert cfg.eval_split == 'test' and cfg.check_val_every_n_epoch == 1
+        assert cfg.report_checkpoint == 'last' and cfg.v41_q0_lateral_warmup_epochs == 10
+        loaders = build_loaders(cfg, roles=tuple(fit_sources), sources=fit_sources)
         entry.run(cfg, loaders=loaders)
 
         manifest = read(run_dir / 'run_manifest.json')
+        policy = manifest['evaluation_protocol']
+        assert (policy['split'], policy['every_n_epochs'], policy['selection']) == ('test', 1, 'last')
+        results = read(run_dir / 'results.json')
+        assert results['evaluated_epochs'] == [1, 2, 3] and not results['selected_on_test']
+        assert results['main']['epoch'] == 3
+        for epoch in results['evaluated_epochs']:
+            summaries = read(run_dir / 'epochs' / f'epoch={epoch:03}.json')['evaluation']
+            assert set(summaries) == {'test'}
+            summary = summaries['test']
+            assert summary['complete_coverage'] and summary['prediction_frames'] == 12
+            rows = [json.loads(line) for line in Path(summary['frame_file']).read_text('utf-8').splitlines()]
+            assert all(row['tracklet'].startswith('kitti_v41/kitti_tracking/test/') for row in rows)
         audits = [read(run_dir / 'training_audits' / f'epoch={e:03}.json') for e in (1, 2, 3)]
         first = torch.load(run_dir / 'formal_checkpoints/epoch=001.ckpt', map_location='cpu',
                            weights_only=False)['state_dict']
@@ -232,12 +247,14 @@ def test_joint_pair_entry_same_e2_weights_replay_and_standalone_test(tmp_path, t
         # 仅给 E3 checkpoint 和测试数据，训练侧的历史清单与 SQLite 均无须路径。
         evaluated = normalize_config(dict(cfg, test=True, checkpoint=str(checkpoint),
             eval_split='test', v41_history_bank=None, v41_fixed_replay_bank=None,
-            log_dir=str(run_dir / 'heldout')))
+            log_dir=str(run_dir / 'standalone_test')))
         loaders = build_loaders(evaluated, roles=('test',), sources=test_sources)
         eval_dir = entry.run(evaluated, loaders=loaders)
         result = read(eval_dir / 'results.json')
         assert result['split'] == 'test' and result['epoch'] == result['checkpoint_epoch'] == 3
         assert result['complete_coverage'] and result['prediction_frames'] == 12
+        final_frame_file = results['main']['evaluation']['frame_file']
+        assert Path(result['frame_file']).read_bytes() == Path(final_frame_file).read_bytes()
         eval_rows = [json.loads(line) for line in Path(result['frame_file']).read_text('utf-8').splitlines()]
         assert all(row['diagnostic_q0_lateral_applied_m'] == 0 for row in eval_rows if not row['initialization'])
         events = [(r['event']['tracklet_key'], r['event']['frame'], r['event']['kind']) for r in rows]

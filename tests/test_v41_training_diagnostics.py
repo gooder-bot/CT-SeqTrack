@@ -10,7 +10,7 @@ import yaml
 from models.ct_v41.config import config_identity, load_config, recipe_identity
 from models.ct_v41.joint_state import JointSearchState, Measurement
 from tools.audit_v41_training_gt import collect_track, repair_past, sampled_coverage, summarize
-from tools.compare_v41_training_arms import MODES, ROOT, assess_pair, outcome, q0_measurement, read_split, training_pair
+from tools.compare_v41_training_arms import MODES, ROOT, assess_pair, compare, outcome, q0_measurement, read_split, training_pair
 
 
 def pose(x):
@@ -114,8 +114,9 @@ def test_frozen_joint_forward_calibrates_clone_on_a_real_data_path():
     assert first['corrected'][0]['anchor'] != first['natural'][0]['anchor']
 
 
-@pytest.mark.parametrize('lateral', [False, True], ids=('history_pair', 'joint_pair'))
-def test_warmup_audit_requires_two_matching_training_runs(tmp_path, lateral):
+@pytest.mark.parametrize('lateral,old_joint', [(False, False), (True, True), (True, False)],
+                         ids=('history_pair', 'historical_joint_dev', 'joint_epoch_test'))
+def test_warmup_audit_requires_two_matching_training_runs(tmp_path, lateral, old_joint):
     from models.ct_v41.auxiliary import insertion_identity, insertion_indices
     from models.ct_v41.history_augmentation import TRAIN_DATA
     from models.ct_v41.joint_replay import CATEGORIES
@@ -127,17 +128,27 @@ def test_warmup_audit_requires_two_matching_training_runs(tmp_path, lateral):
         (root/'training_audits').mkdir(parents=True)
         family = 'joint' if lateral else 'history'
         config = load_config(ROOT/'cfgs/ct_seqtrack'/f'41_{family}_{mode}.yaml')
+        if old_joint:
+            config.eval_split = 'dev'
         config_hash = config_identity(config)
         (root/'resolved_config.yaml').write_text(yaml.safe_dump(dict(config)))
         recipe = dict(v41_history_training=mode, v41_joint_search=True, dataset='kitti_mf', seed=42,
                       epoch=60, batch_size=16)
         manifest = dict(actual_recipe=recipe, run_type='formal', run_id=mode, source=digest,
                         history_bank_sha256=digest, initial_parameter_hash=digest, config_sha256=config_hash,
-                        dataset_manifest={'train': '0000-0016'}, input_metadata={'content_sha256': digest})
+                        dataset_manifest={'train': '0000-0016'}, input_metadata={'content_sha256': digest},
+                        evaluation_protocol=dict(split=config.eval_split, selection=config.report_checkpoint,
+                                                 every_n_epochs=config.check_val_every_n_epoch))
         if lateral:
             recipe.update(v41_q0_lateral=True, v41_q0_lateral_warmup_epochs=config.v41_q0_lateral_warmup_epochs,
                           v41_joint_replay=config.v41_joint_replay)
             manifest['training_execution_recipe'] = recipe_identity(config)
+            if old_joint:
+                for field in ('training_enabled', 'inference_enabled'):
+                    del manifest['training_execution_recipe']['recovery'][field]
+            else:
+                (root/'epochs').mkdir()
+                (root/'frame_streams/test/session').mkdir(parents=True)
         (root/'run_manifest.json').write_text(json.dumps(manifest))
         for e in range(1, 61):
             audit = dict(completed_epoch=e, epoch_complete=True, rows=76324, optimizer_steps=4771,
@@ -153,6 +164,15 @@ def test_warmup_audit_requires_two_matching_training_runs(tmp_path, lateral):
                          manifest_sha256=None if e < 3 else digest, donor_weights_sha256=None if e < 3 else digest))
             if lateral:
                 audit['q0_lateral_epoch'] = e
+            if lateral and not old_joint:
+                part = f'frame_streams/test/session/epoch={e:03}.jsonl'
+                result = dict(epoch=e, checkpoint_epoch=e, split='test', complete_coverage=True,
+                              diagnostics_level='full' if e >= 58 else 'summary', frame_file=part,
+                              frames=1, success=100., precision=100.)
+                (root/'epochs'/f'epoch={e:03}.json').write_text(json.dumps(dict(epoch=e, evaluation={'test':result})))
+                if e >= 58:
+                    (root/part).write_text(json.dumps(dict(scene_id='0019', track_id=1, frame=0, raw_frame_id=1,
+                        timestamp=.1, iou=1., distance=0., initialization=True, success=1., precision=1.)))
             (root/'training_audits'/f'epoch={e:03}.json').write_text(json.dumps(audit))
         (root/'training_budget.json').write_text(json.dumps(dict(completed_epoch=60, epoch_complete=True,
             last_epoch_rows=audit['rows'], last_epoch_steps=audit['optimizer_steps'], optimizer_steps=60*4771,
@@ -163,6 +183,21 @@ def test_warmup_audit_requires_two_matching_training_runs(tmp_path, lateral):
     if not lateral:
         with pytest.raises(ValueError, match='requires the independent q0 lateral head'):
             training_pair(roots, require_q0_lateral=True)
+    if not lateral or old_joint:
+        with pytest.raises(ValueError, match='test evaluation every epoch'):
+            training_pair(roots, require_epoch_test=True)
+    else:
+        paired = compare(roots, require_q0_lateral=True, require_epoch_test=True)
+        assert paired['split'] == 'test' and paired['evaluation_source'] == 'training_epochs'
+        assert paired['fixed_epoch_preference'] == 'inconclusive' and set(paired['epochs']) == {58, 59, 60}
+        mid = roots[0]/'epochs/epoch=027.json'
+        saved = mid.read_text()
+        result = json.loads(saved)
+        result['evaluation']['dev'] = result['evaluation'].pop('test')
+        mid.write_text(json.dumps(result))
+        with pytest.raises(ValueError, match='complete E27 test'):
+            training_pair(roots, require_epoch_test=True)
+        mid.write_text(saved)
     path = roots[1]/'training_audits/epoch=002.json'
     changed = json.loads(path.read_text())
     changed['history_training']['loss_sha256'] = 'c'*64

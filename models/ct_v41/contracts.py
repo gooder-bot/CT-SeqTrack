@@ -100,10 +100,10 @@ class SelectionDecision:
 
 @dataclass
 class CommitDecision:
-    trusted_score: Tensor            # 选中 q0/R 的 T；传播恒为 0
+    trusted_score: Tensor            # 选中测量候选的 T 概率，传播恒为 0
     legacy_q0_quality: Tensor         # 原 q0 quality，未改目标/梯度
     support_mask: Tensor             # [B,N] 选中测量候选最终框内的拟提交集合
-    eligible: Tensor                # 选中 q0/R & T>=.5 & unique support>=3
+    eligible: Tensor                # 选中测量且至少三个唯一支持点，联合版另须几何和同车身份合格
     source: Tensor
 
 

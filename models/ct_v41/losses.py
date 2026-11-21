@@ -116,9 +116,9 @@ def _record(sink, name, values, valid, coefficient):
         batch_contribution=numerator/denominator.sum().clamp_min(1))
 
 
-def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None):
+def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None, require_recovery=True):
     """辅助流只调用此函数；不计算主路/B1/M损失，不反传其参数。"""
-    if output.verification is None or output.recovery is None:
+    if output.verification is None or (require_recovery and output.recovery is None):
         raise ValueError('v41 recovery losses require verification and recovery output')
     if not np.isfinite(recovery_weight) or recovery_weight < 0:
         raise ValueError('v41 recovery loss weight must be finite and nonnegative')
@@ -139,7 +139,12 @@ def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None):
     losses[quality_name], trusted = endpoint_bce(logits[..., 2], quality_target, target['trusted_valid'])
     gap, pairs = pairwise_gap_terms(output.verification.utility, target['utility'], valid)
     losses['loss_ranking'] = frame_endpoint_mean(gap, pairs)
-    recovery = recovery_loss_terms(batch, output.recovery)
+    if output.recovery is None:
+        # 四槽 eval 可单独请求损失诊断。未生成 R 的端点对该项分子与分母均无贡献。
+        recovery = dict(loss=logits.new_zeros(()), terms=logits.new_zeros(len(logits)),
+                        valid=valid.new_zeros(len(logits)))
+    else:
+        recovery = recovery_loss_terms(batch, output.recovery)
     losses['loss_recovery_xyz'] = recovery['loss']
     losses['recovery_supervised_count'] = recovery['valid'].to(logits).sum().detach()
     sink = getattr(output, 'loss_statistics', None)
@@ -159,12 +164,14 @@ def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None):
     return losses
 
 
-def compute_losses(batch, output, *, enable_b1=True, recovery_weight=.1, q0_center_weighting='uniform'):
+def compute_losses(batch, output, *, enable_b1=True, recovery_weight=.1, q0_center_weighting='uniform',
+                   require_recovery=True):
     targets, q0_exact_iou = _supervision_targets(batch, output, include_q0=True)
     losses = base_losses(batch, output, enable_b1=enable_b1, q0_exact_iou=q0_exact_iou,
                          q0_center_weighting=q0_center_weighting)
     original = losses['loss_total']
-    recovery = compute_recovery_losses(batch, output, recovery_weight=recovery_weight, targets=targets)
+    recovery = compute_recovery_losses(batch, output, recovery_weight=recovery_weight, targets=targets,
+                                       require_recovery=require_recovery)
     losses.update(recovery)
     losses['loss_total'] = original + recovery['loss_total']
     return losses

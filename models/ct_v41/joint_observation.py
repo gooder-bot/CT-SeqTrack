@@ -1,5 +1,6 @@
 """V41 联合观测。候选自己的当前点同时用于定位、身份、几何和提交。"""
 from dataclasses import dataclass, fields
+from typing import Optional
 
 import numpy as np
 import torch
@@ -7,7 +8,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .geometry import inside_final_boxes, rotate_xyz
-from .joint_candidates import remote_takeover_ready
+from . import joint_candidates
 from .joint_grid import FINE_POINTS, GRID_FEATURES, fine_crop, grid_labels, inside, make_sparse_scan
 
 
@@ -126,6 +127,7 @@ class JointSearchResult:
     coarse: list
     legacy_members: torch.Tensor
     swapped_logits: object
+    remote_position_valid: Optional[torch.Tensor] = None
 
 
 class JointSearchObservation(nn.Module):
@@ -365,7 +367,8 @@ class JointSearchObservation(nn.Module):
         # 首扫即可竞争下一扫描的复核名额。只有通过接管复核的外区框才能反过来否决本帧局部位置。
         remote.match_wins = (region[:, 3] & (remote.match_logit > rivals[:, 3, :3].amax(-1).clamp_min(0))
                              & (remote.match_logit > coarse_rival))
-        remote_rival = rivals[:, :3, 3].masked_fill(~remote_takeover_ready(remote, ready)[:, None], -torch.inf)
+        remote_position_valid = joint_candidates.remote_takeover_ready(remote, ready)
+        remote_rival = rivals[:, :3, 3].masked_fill(~remote_position_valid[:, None], -torch.inf)
         competition = torch.maximum(rivals[:, :3, :3].amax(-1), remote_rival)
         wins = region[:, :3] & (scores[:, :3] > competition.clamp_min(0))
         cold_rows = [i for i, row in enumerate(rows) if len(row['template_xyz']) < 3]
@@ -381,7 +384,8 @@ class JointSearchObservation(nn.Module):
             own = torch.stack((*descriptors, local.descriptor, remote.descriptor), 1)
             swap = self.shape(own[:, :, None], template[None, None], ready[None, None])
         return JointSearchResult(local, remote, local_position_valid, local_wins[:, :2],
-                                 scores[:, :2], ready, coarse, torch.stack(members, 1), swap)
+                                 scores[:, :2], ready, coarse, torch.stack(members, 1), swap,
+                                 remote_position_valid=remote_position_valid)
 
 
 def _identity_label(members, target_points):
