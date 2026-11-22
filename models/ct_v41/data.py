@@ -65,10 +65,13 @@ class ReadyQueueBatchSampler(Sampler):
     def __init__(self, lengths, batch_size=16, *, seed=42, training=True,
                  short_window=3, long_window=8, curriculum_epochs=10, source_sha256='',
                  reserve_windows=112, seed_translation=.3, seed_yaw_degrees=1.5,
-                 initial_seed_policy=None):
+                 initial_seed_policy=None, single_view_cgp=False):
         self.lengths = tuple(int(n) for n in lengths)
         self.batch_size = int(batch_size)
         self.seed, self.training, self.epoch = int(seed), bool(training), 0
+        self.single_view_cgp = bool(self.training and single_view_cgp)
+        training_views = 1 if self.single_view_cgp else 4
+        self.branches = range(training_views) if self.training else (4,)
         self.short_window, self.long_window = int(short_window), int(long_window)
         self.curriculum_epochs = int(curriculum_epochs)
         self.source_sha256 = str(source_sha256)
@@ -93,7 +96,7 @@ class ReadyQueueBatchSampler(Sampler):
 
     @property
     def row_count(self):
-        return self.endpoint_count * (4 if self.training else 1)
+        return self.endpoint_count * len(self.branches)
 
     def set_epoch(self, epoch):
         epoch = int(epoch)
@@ -114,7 +117,7 @@ class ReadyQueueBatchSampler(Sampler):
         for tracklet, length in enumerate(self.lengths):
             if length < 2:
                 continue
-            for branch in (range(4) if self.training else (4,)):
+            for branch in self.branches:
                 maximum = (1 if branch == 0 else self.short_window if branch in (1, 2)
                            else self.long_window)
                 width = self.window_length(maximum) if self.training else length
@@ -133,11 +136,11 @@ class ReadyQueueBatchSampler(Sampler):
         windows = self._windows()
         if not self.training or not self.reserve_windows:
             return deque(windows), deque()
-        # 优先各 branch 28 个真正独立的单步窗口；小数据不足时从其他
-        # branch 补齐。只重排窗口，不截断递归、不重复端点、不重放前缀。
-        quotas = [self.reserve_windows // 4 + (branch < self.reserve_windows % 4)
-                  for branch in range(4)]
-        selected, counts = set(), [0] * 4
+        # 默认四分支各预留 28 个单步，单视角全部从主分支预留；不足再由其他单步补齐。
+        branch_count = len(self.branches)
+        quotas = [self.reserve_windows // branch_count + (branch < self.reserve_windows % branch_count)
+                  for branch in self.branches]
+        selected, counts = set(), [0] * branch_count
         for index, (_, branch, start, end) in enumerate(windows):
             if end - start == 1 and counts[branch] < quotas[branch]:
                 selected.add(index)
@@ -198,6 +201,8 @@ class ReadyQueueBatchSampler(Sampler):
         # 旧版本不增加键，保持已有 manifest SHA；v35 只增加首测语义身份。
         if self.initial_seed_policy is not None:
             payload['initial_seed_policy'] = self.initial_seed_policy
+        if self.single_view_cgp:
+            payload['history_training'] = 'single_view_cgp'
         payload['manifest_sha256'] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         return payload
@@ -532,6 +537,7 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
                 option(config, 'batch_size', 16))
             sampler = ReadyQueueBatchSampler(raw.lengths, size,
                 seed=int(option(config, 'seed', 42)), training=role == 'train',
+                single_view_cgp=option(config, 'v41_history_training') == 'single_view_cgp',
                 short_window=int(option(config, 'v31_short_window', 4)),
                 long_window=int(option(config, 'v31_long_window', 8)),
                 curriculum_epochs=int(option(config, 'v31_curriculum_epochs', 10)),
@@ -718,6 +724,14 @@ class BatchBuilder:
         self._pending = None
         self.clear_materialization_cache()
 
+    def _sampling_branch(self, row):
+        r = row['request']
+        if (self.config.v41_history_training == 'single_view_cgp' and r.branch == 0
+                and '_joint_replay_state' not in row):
+            # 普通端点抽 B 的一个视角；首个预测只改变点采样，初始化仍使用精确首框。
+            return stable_seed(self.config.seed, r.epoch, row['tracklet_key'], r.frame, 'single_view') % 4
+        return r.branch
+
     def _new_state(self, row):
         # 与 v35 相同的合法 seed 几何和局部 RNG；仅删除身份点记忆初始化。
         r, frames = row['request'], row['frames']
@@ -729,14 +743,15 @@ class BatchBuilder:
         times = {i: float(frames[i]['timestamp']) for i in seed_ids}
         seed_offset = np.zeros(4, dtype=np.float64)
         provenance = KNOWN_GT_BOX
-        if r.branch in (1, 2, 3) and not (r.frame == 1):
+        sampling_branch = self._sampling_branch(row)
+        if sampling_branch in (1, 2, 3) and r.frame != 1:
             seed = option(self.config, 'seed', 42)
             if self.config.v41_history_training == 'legacy':
                 rng = np.random.default_rng(stable_seed(seed, row['tracklet_key'], r.state_key, 'window_seed'))
             else:
                 if self.history_bank is None:
                     raise ValueError('paired history training needs its validated E57 history bank')
-                key = (seed, r.epoch, row['tracklet_key'], r.frame, r.branch)
+                key = (seed, r.epoch, row['tracklet_key'], r.frame, sampling_branch)
                 rng = np.random.default_rng(stable_seed(*key, 'last_seed'))
                 donor_rng = np.random.default_rng(stable_seed(*key, 'history_donor'))
                 deltas, match = self.history_bank.sample(row['tracklet_key'], seed_ids, times, boxes, donor_rng)
@@ -883,6 +898,7 @@ class BatchBuilder:
 
     def _prepare_row(self, row, state):
         r, frames = row['request'], row['frames']
+        sampling_branch = self._sampling_branch(row)
         current = frames[r.frame]
         now = float(current['timestamp'])
         effective_now = float(current.get('_ct_effective_timestamp', now))
@@ -943,7 +959,7 @@ class BatchBuilder:
                 search_sample = sample_search_points(xyz, ids, search_plan, state.size,
                     count=n, main_quota=search_plan.main_quota, backup_quota=search_plan.backup_quota,
                     seed=stable_seed(option(self.config, 'seed', 42), r.epoch,
-                                     row['tracklet_key'], r.branch, r.frame, slot),
+                                     row['tracklet_key'], sampling_branch, r.frame, slot),
                     scale=scale, offset=offset, known_unique_ids='_v41_raw_ref' in frame)
                 selected = search_sample.indices
             elif exists:
@@ -955,7 +971,7 @@ class BatchBuilder:
                 pool_size = len(ids) if crop_indices is None else len(crop_indices)
                 if pool_size > n:
                     rng = np.random.default_rng(stable_seed(option(self.config, 'seed', 42),
-                        r.epoch, row['tracklet_key'], r.branch, r.frame, slot))
+                        r.epoch, row['tracklet_key'], sampling_branch, r.frame, slot))
                     selected = np.sort(rng.choice(pool_size if crop_indices is None else crop_indices,
                                                   n, replace=False))
             else:

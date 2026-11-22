@@ -1,4 +1,4 @@
-"""E2 冻结自然前缀。训练清单按物理端点就地装入，两臂共用同一份只读文件。"""
+"""E2 冻结自然前缀。训练按物理端点装入，只有前两轮相同的 A/B 共用文件。"""
 from collections import Counter
 from dataclasses import fields, is_dataclass, replace
 import hashlib
@@ -219,10 +219,10 @@ def _publish(path, host, train_dataset, origin, seed):
 
 
 class FixedReplayBank:
-    """E1/E2 自然公共阶段。E3 起每类每轮最多 128 个原物理帧，每前缀最多一次。"""
+    """E3 起每类每轮最多使用 128 个原物理帧，每前缀最多一次。"""
     def __init__(self, path, seed):
         if not path:
-            raise ValueError('fixed replay requires a shared catalog path')
+            raise ValueError('fixed replay requires a catalog path')
         self.path, self.seed = Path(path).resolve(), int(seed)
         self.epoch = -1
         self.conn = None
@@ -232,10 +232,13 @@ class FixedReplayBank:
     def ensure_catalog(self, host, dataset):
         _training_keys(dataset, 'train')
         if getattr(host, '_completed_epoch', None) != 2:
-            raise ValueError('fixed replay must be generated from the completed common E2')
-        # 两臂名称和普通主流模式不同。其余会改变供体自然前向的配置必须相符。
-        recipe_sha256 = config_identity(dict(host.config, experiment_name='paired_e2_reference',
-                                            v41_history_training='window_1448'))
+            raise ValueError('fixed replay must be generated from the completed E2')
+        # 只有原 A/B 的前两轮完全相同，能共享供体。单视角使用自己的 E2 身份和权重。
+        donor_recipe = host.config
+        if donor_recipe.v41_history_training in ('window_1448', 'four_candidates'):
+            donor_recipe = dict(donor_recipe, experiment_name='paired_e2_reference',
+                                v41_history_training='window_1448')
+        recipe_sha256 = config_identity(donor_recipe)
         origin = dict(schema=SCHEMA, split='train', epoch=2, seed=self.seed,
                       weights_sha256=weights_sha256(host.tracker), source_sha256=source_identity()['sha256'],
                       dataset_sha256=dataset.source_sha256, common_recipe_sha256=recipe_sha256)
@@ -286,7 +289,7 @@ class FixedReplayBank:
     def begin_epoch(self, epoch):
         self.epoch = int(epoch)
         if self.epoch >= 2 and self.conn is None:
-            raise ValueError('fixed replay requires the common E2 catalog from E3 onward')
+            raise ValueError('fixed replay requires the matching E2 catalog from E3 onward')
         self.selected, self.previous = {}, {}
         self.slots = 0
         self.seen, self.used = Counter(), Counter()

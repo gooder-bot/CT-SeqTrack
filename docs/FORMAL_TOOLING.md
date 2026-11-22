@@ -2,6 +2,8 @@
 
 本轮用 `tools/train_v41_joint_pair.sh` 准备两组各自的运行目录，共用 E57 增强库和固定 E2 前态，再通过 `main.py` 顺序训练。每轮在 KITTI test 上完整递推。结束后 `tools/compare_v41_training_arms.py --require-q0-lateral --require-epoch-test` 核验两组配置与各 60 轮的 test 记录，逐帧比较固定 E58–60 和 E60。[两组命令](V41_JOINT_PAIR.md)
 
+单视角 CGP 通过 `tools/train_v41_joint.sh` 选择新配置。离线工具 `tools/compare_v41_single_view.py` 读取它和 B 组已完成的共同轮次，对比主训练步数、训练耗时与 test 得分。[单视角命令](V41_SINGLE_VIEW_CGP.md)
+
 逐轮更新前缀库的独立配方仍用 `tools/train_v41_joint.sh`；`tools/compare_v41_joint_search.py` 用于与历史 uniform 的固定 test 结果比较。[单组运行说明](V41_JOINT_TRAINING.md)
 
 ## 2026-11-21 训练历史对照

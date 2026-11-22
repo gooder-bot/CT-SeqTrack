@@ -156,6 +156,11 @@ def validate_resume_payload(payload, config, *, training=True):
         raise ValueError('v41 sampler checksum mismatch')
     if sampler.get('initial_seed_policy') != config['v35_seed_policy']:
         raise ValueError('v41 initial seed policy mismatch')
+    single = config.get('v41_history_training') == 'single_view_cgp'
+    if sampler.get('history_training') != ('single_view_cgp' if single else None):
+        raise ValueError('v41 sampler view count does not match the training recipe')
+    if single and sampler['rows'] != sum(max(n - 1, 0) for n in sampler['lengths']):
+        raise ValueError('single-view training must cover each physical endpoint once per epoch')
     if (payload['completed_epoch'] != sampler['epoch'] + 1
             or payload['rows'] != sampler['rows']
             or payload['optimizer_steps'] != sampler['batches']):
@@ -167,7 +172,7 @@ def validate_resume_payload(payload, config, *, training=True):
 
 
 def validate_auxiliary_payload(auxiliary, config, main_sampler):
-    """主4N与辅助全轨迹必须同时提交完毕；不能把半个辅助epoch当作可恢复。"""
+    """主队列与辅助全轨迹必须同时提交完毕；不能把半个辅助epoch当作可恢复。"""
     if not isinstance(auxiliary, dict) or auxiliary.get('schema') != 'ct_seqtrack.v41.auxiliary_audit.v1':
         raise ValueError('v41 requires auxiliary training audit')
     saved = auxiliary.get('sampler')

@@ -6,6 +6,7 @@ import numpy as np
 import torch
 
 from .base_losses import _base_q0
+from .data import PERTURBED_BOX
 from .geometry import rotate_xyz
 from .input import JOINT_ROW_FIELDS, LOSS_FIELDS, ONLINE_FIELDS
 
@@ -26,6 +27,7 @@ class HistoryTrainingAudit:
         self.batches = hashlib.sha256()
         self.losses = hashlib.sha256()
         self.rows = Counter()
+        self.reset_seeds = Counter()
         self.gradient_sums = None
         self.motion_counts = Counter()
         self.motion_by_source = {}
@@ -34,13 +36,15 @@ class HistoryTrainingAudit:
         main = stream == 'main'
         if main:
             sources = []
-            for row in rows:
+            latest_seed = batch['history_box_provenance'][:, -1].tolist()
+            for row, provenance in zip(rows, latest_seed):
                 r = row['request']
                 kind = ('natural_replay' if '_joint_replay_state' in row else
                         'reset' if r.starts_window else 'continuation')
                 self.rows[kind] += 1
                 if kind == 'reset':
-                    kind = 'perturbed_seed' if r.branch in (1, 2, 3) and r.frame > 1 else 'clean_seed'
+                    kind = 'perturbed_seed' if provenance == PERTURBED_BOX else 'clean_seed'
+                    self.reset_seeds['first_prediction_gt' if r.frame == 1 else kind] += 1
                 sources.append(kind)
             # 只对 B1 实际可读的两条新鲜运动边计算 8 m/s² 裁剪分母。
             boxes = batch['joint_motion_boxes'].numpy()[:, :, :2]
@@ -111,7 +115,8 @@ class HistoryTrainingAudit:
             n = counts['eligible']
             return dict(eligible=n, clipped=counts['clipped'], fraction=counts['clipped'] / n if n else None)
 
-        result = dict(endpoints=dict(self.rows), augmentation=dict(builder.history_counts),
+        result = dict(endpoints=dict(self.rows), ordinary_reset_seeds=dict(self.reset_seeds),
+                      augmentation=dict(builder.history_counts),
                       acceleration=clip_rate(self.motion_counts),
                       acceleration_by_source={k: clip_rate(v) for k, v in self.motion_by_source.items()},
                       localization=gradients)

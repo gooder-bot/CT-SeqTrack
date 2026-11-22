@@ -135,12 +135,18 @@ def recipe_identity(config):
             weak_patrol_seconds=config.get('v41_weak_patrol_seconds', .2),
             remote_confirmation='next_independent_scan', geometry_target='exact_iou_at_least_half',
             replay='causal_auxiliary_bank_every_fourth_singleton')
-    if config.get('v41_history_training', 'legacy') != 'legacy':
-        identity.update(history_training=config['v41_history_training'],
+    history_mode = config.get('v41_history_training', 'legacy')
+    if history_mode != 'legacy':
+        single = history_mode == 'single_view_cgp'
+        identity.update(history_training=history_mode,
             augmentation='cross_scene_density_xyz_segment_locked_last_v1',
-            queue='common_curriculum_physical_batches_v1')
+            queue='single_view_physical_endpoints_v1' if single else 'common_curriculum_physical_batches_v1')
+        if single:
+            identity['ordinary_sampling'] = dict(views_per_endpoint=1, window_length=1,
+                eligible_clean_probability=.25, eligible_perturbed_probability=.75)
         if config.get('v41_joint_replay') != 'previous_epoch':
-            identity['replay'] = 'shared_e2_natural_same_endpoint_branch0_v1'
+            identity['replay'] = ('own_e2_natural_same_endpoint_branch0_v1' if single
+                                  else 'shared_e2_natural_same_endpoint_branch0_v1')
     if config.get('v41_q0_lateral') or config.get('v41_q0_lateral_replay'):
         identity['lateral'] = dict(axis='predicted_q0_width',
             warmup_epochs=config.get('v41_q0_lateral_warmup_epochs', 10), min_unique=3,
@@ -215,20 +221,20 @@ def normalize_config(config=None):
         if type(cfg[key]) not in (float, int) or not math.isfinite(cfg[key]) or cfg[key] <= 0:
             raise ValueError(key + ' must be a positive finite interval in seconds')
         cfg[key] = float(cfg[key])
-    if cfg.v41_history_training not in ('legacy', 'window_1448', 'four_candidates'):
+    if cfg.v41_history_training not in ('legacy', 'window_1448', 'four_candidates', 'single_view_cgp'):
         raise ValueError('unknown v41_history_training')
     if cfg.v41_history_training != 'legacy':
         if not cfg.v41_joint_search:
-            raise ValueError('paired history training requires the joint KITTI Full recipe')
+            raise ValueError('E57 history training requires the joint KITTI Full recipe')
     elif cfg.v41_history_bank is not None or cfg.v41_fixed_replay_bank is not None:
-        raise ValueError('history banks require a paired history training arm')
+        raise ValueError('history banks require an E57 history training arm')
     if cfg.v41_joint_search and cfg.v41_joint_replay is None:
         cfg.v41_joint_replay = 'previous_epoch' if cfg.v41_history_training == 'legacy' else 'fixed_e2'
     if cfg.v41_joint_replay is not None:
         if not cfg.v41_joint_search or cfg.v41_joint_replay not in ('previous_epoch', 'fixed_e2'):
             raise ValueError('joint replay requires joint search and a supported prefix source')
         if cfg.v41_joint_replay == 'fixed_e2' and cfg.v41_history_training == 'legacy':
-            raise ValueError('fixed E2 replay requires the common history training curriculum')
+            raise ValueError('fixed E2 replay requires an E57 history training arm')
         if cfg.v41_joint_replay == 'previous_epoch' and cfg.v41_fixed_replay_bank is not None:
             raise ValueError('previous-epoch replay is stored in the checkpoint; remove the fixed E2 bank')
     if type(cfg.v41_q0_lateral) is not bool:
