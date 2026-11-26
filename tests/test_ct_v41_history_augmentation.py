@@ -64,6 +64,17 @@ def test_sparse_fallback_uses_only_other_scenes_and_matching_time():
     assert not result.any()
 
 
+def test_common_height_restores_signed_donor_z_without_changing_adjacent_differences():
+    bank = HistoryAugmentation(payload())
+    boxes = {i: np.array([3., 4., 5., 0.]) for i in range(3)}
+    args = RECEIVER, range(3), {0: 0., 1: .1, 2: .2}, boxes
+    original, _ = bank.sample(*args, np.random.default_rng(71))
+    shifted, _ = bank.sample(*args, np.random.default_rng(71), common_z=True)
+    np.testing.assert_allclose(np.diff(shifted, axis=0), np.diff(original, axis=0))
+    np.testing.assert_allclose(shifted[:, :2], original[:, :2])
+    np.testing.assert_allclose(shifted[:, 2], [1., 2., 3.])
+
+
 def test_rejects_foreign_split_and_invalid_history():
     spec = payload()
     spec['receivers'][track('0017', 4)] = [0, 1, 2]

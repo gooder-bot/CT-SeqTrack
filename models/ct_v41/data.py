@@ -15,7 +15,8 @@ from utils.diagnostic_transfer import tensors_to_numpy
 from utils.execution_profile import optimized_execution
 from utils.raw_frame_memo import RawFrameMemo, raw_transaction
 from .config import normalize_config, recipe_scope
-from .joint_state import EMPTY_IDS, EMPTY_XYZ, JointSearchState, physical_frame, relative
+from .identity import candidate_names
+from .joint_state import EMPTY_IDS, EMPTY_XYZ, JointSearchState, physical_frame, relative, template_points
 from .search import _unique_mask, inside_box, make_search_plan, sample_search_points
 
 
@@ -307,14 +308,25 @@ def future_motion_targets(source, request, frames, track_length):
     return dict(future_displacement=future, future_dt=elapsed, future_valid=valid)
 
 
+def _packed_local_template(xyz, box):
+    body = template_points(xyz, box)
+    if len(body) > 128:
+        body = body[np.linspace(0, len(body) - 1, 128, dtype=np.int64)]
+    coordinates = np.zeros((128, 3), dtype=np.float32)
+    coordinates[:len(body)] = body
+    return coordinates, np.arange(128) < len(body)
+
+
 class RawEndpointDataset(Dataset):
     """按端点交付观测与标签。KITTI 主流可携带 GT10 视图，预测 ROI 由主进程决定。"""
     def __init__(self, source, *, training=False, enable_m=False, worker_transport=False,
-                 joint_search=False, four_candidates=False):
+                 joint_search=False, four_candidates=False, local_vote=False):
         self.source = source
         self.training, self.enable_m = bool(training), bool(enable_m)
         self.worker_transport = worker_transport
         self.joint_search = bool(joint_search)
+        self.local_vote = bool(local_vote)
+        self._local_templates = {}
         self.four_candidates = bool(four_candidates and training)
         self._scan_annotations = None
         self._scan_car_boxes = {}
@@ -372,6 +384,19 @@ class RawEndpointDataset(Dataset):
     def __getitem__(self, request):
         return self.__getitems__([request])[0]
 
+    def _local_template(self, tracklet, first):
+        """只从合法首框构造；每个 worker 每轨一次，续步直接复用小模板。"""
+        if tracklet not in self._local_templates:
+            if first is None:
+                read = getattr(self.source, 'endpoint_frames', None) or self.source.get_frames
+                first = read(tracklet, [0])[0]
+            box = box_array(first['3d_bbox'])
+            size = box_size(first['3d_bbox'], first)
+            xyz, ids = point_arrays(first)
+            members = inside_box(xyz, box, size)
+            self._local_templates[tracklet] = _packed_local_template(xyz[members][_unique_mask(ids[members])], box)
+        return self._local_templates[tracklet]
+
     def __getitems__(self, requests):
         # 调度仍沿用 A 的物理队列。只改变 B 普通行的状态寿命，先于原始帧运输。
         if self.four_candidates:
@@ -404,6 +429,8 @@ class RawEndpointDataset(Dataset):
         key = (self.source.get_tracklet_key(r.tracklet)
                if hasattr(self.source, 'get_tracklet_key') else str(r.tracklet))
         result = dict(request=r, frames=frames, history_ids=history_ids, tracklet_key=str(key))
+        if self.local_vote:
+            result['local_template'] = self._local_template(r.tracklet, frames.get(0))
         if self.joint_search and r.branch != 4:
             result['joint_other_cars'] = self.other_cars_for(result)
         if r.starts_window:
@@ -461,6 +488,11 @@ class _WindowStartCollator:
         if self.builder is None:
             self.builder = BatchBuilder(self.config)
             self.builder.detailed_diagnostics = False
+            if self.builder.local_vote:
+                from .history_augmentation import HistoryAugmentation
+                from .local_prefix import LocalPrefixBank
+                self.builder.history_bank = HistoryAugmentation.load(self.config.v41_history_bank)
+                self.builder.local_prefix_bank = LocalPrefixBank(self.config.v41_local_prefix_bank)
         builder = self.builder
         packets = {}
         # 保留轻量帧定位信息。独立工具切换诊断、重排采样 ID 时可原样回读。
@@ -470,6 +502,8 @@ class _WindowStartCollator:
             with recipe_scope(builder.v41_config):
                 for row in starts:
                     r = row['request']
+                    if builder.local_vote:
+                        builder.history_counts.clear()
                     fields, context = builder._prepare_row(row, builder._new_state(row))
                     valid = fields['point_valid']
                     width = int(valid.sum(axis=1).max())
@@ -488,6 +522,9 @@ class _WindowStartCollator:
                               builder._next_history_pools.pop(r.state_key, None))
                     first = frame_map[0] if 0 in frame_map else row['first_frame']
                     packets[id(row)] = dict(row, frames=frame_map, first_frame=first, _prepared_start=packet)
+                    if builder.local_vote:
+                        packets[id(row)]['_local_history_receipt'] = (builder.history_bank.sha256,
+                            builder.local_prefix_bank.sha256, dict(builder.history_counts))
             # 已经由首行消费、且仅作为其他行较老历史的 GT10 也不必随队列搬运。
             current = {id(frame) for row in rows if id(row) not in packets
                        for i, frame in row['frames'].items()
@@ -525,6 +562,7 @@ def _build_loaders(config, roles=('train', 'val'), sources=None):
         transport = _worker_transport_enabled(config, source)
         joint = bool(option(config, 'v41_joint_search', False))
         raw = RawEndpointDataset(source, training=role == 'train', joint_search=joint,
+                                 local_vote=option(config, 'v41_local_vote', False),
                                  four_candidates=option(config, 'v41_history_training') == 'four_candidates',
                                  enable_m=option(config, 'enable_m', False), worker_transport=transport)
         if role == 'auxiliary':
@@ -590,6 +628,12 @@ class V41AcceptedState:
     joint: JointSearchState | None = None
 
 
+@dataclass
+class _ColdLocalVoteState(V41AcceptedState):
+    """仅给合法首框点不足的递推分支存放补建模板；旧四槽前态未保存支持点。"""
+    local_vote_template: tuple | None = None
+
+
 # GT 仅用于合法初框、监督与被动诊断。
 MISSING_BOX, KNOWN_GT_BOX, PERTURBED_BOX, PREDICTED_BOX = range(4)
 
@@ -607,7 +651,9 @@ class BatchBuilder:
     def __init__(self, config):
         self.config = self.v41_config = normalize_config(config)
         self.joint_search = bool(option(self.config, 'v41_joint_search', False))
+        self.local_vote = bool(option(self.config, 'v41_local_vote', False))
         self.history_bank = None
+        self.local_prefix_bank = None
         self.history_counts = Counter()
         self._preparation_id = hashlib.sha256(repr(sorted(self.config.items())).encode()).digest()
         self.train_diagnostics = bool(option(self.config, 'v35_train_diagnostics', True))
@@ -754,7 +800,11 @@ class BatchBuilder:
                 key = (seed, r.epoch, row['tracklet_key'], r.frame, sampling_branch)
                 rng = np.random.default_rng(stable_seed(*key, 'last_seed'))
                 donor_rng = np.random.default_rng(stable_seed(*key, 'history_donor'))
-                deltas, match = self.history_bank.sample(row['tracklet_key'], seed_ids, times, boxes, donor_rng)
+                if self.local_vote:
+                    deltas, match = self.history_bank.sample(row['tracklet_key'], seed_ids, times, boxes,
+                                                              donor_rng, common_z=True)
+                else:
+                    deltas, match = self.history_bank.sample(row['tracklet_key'], seed_ids, times, boxes, donor_rng)
                 self.history_counts[match] += 1
                 for index, delta in zip(seed_ids, deltas):
                     boxes[index][:3] += delta
@@ -770,6 +820,29 @@ class BatchBuilder:
                 box[3] = np.arctan2(np.sin(box[3] + seed_offset[3]),
                                     np.cos(box[3] + seed_offset[3]))
             provenance = PERTURBED_BOX
+        if self.local_vote and 0 <= r.branch < 4 and r.frame > 1:
+            # 首框来自合法初始化。干净或受扰的中途观测均不能生成一笔真实测速。
+            if 0 in boxes:
+                boxes[0] = box_array(frames[0]['3d_bbox'])
+            first_seed = max(1, seed_ids.start)
+            if self.local_prefix_bank is None:
+                raise ValueError('local vote training requires the uniform E60 prefix bank')
+            state = self.local_prefix_bank.before(row['tracklet_key'], first_seed)
+            if (not np.array_equal(state.size, size) or state.times[first_seed-1] >= times[first_seed]
+                    or state.initialization_time != float(row['first_frame']['timestamp'])):
+                raise ValueError('uniform ledger does not precede the perturbed physical segment')
+            state.boxes, state.times, state.next_frame = boxes, times, r.frame
+            state.box_provenance = {i: provenance if i else KNOWN_GT_BOX for i in seed_ids}
+            # 段内连续输出差分仍可作为 B1 观测上下文，跨入合成段的跳变不成边。
+            # trusted_velocity 只读真实入段前的测量账本，二者不共用有效位。
+            state.transitions = {i: i > first_seed for i in seed_ids}
+            state.seed_offset = seed_offset
+            state.seed_offset[2] = boxes[r.frame - 1][2] - box_array(frames[r.frame - 1]['3d_bbox'])[2]
+            state.previous_measurement_eligible = False
+            state.previous_is_propagation = False
+            state.consecutive_propagations = 0
+            state.consecutive_untrusted_outputs += r.frame - first_seed
+            return state
         trusted = [(boxes[i].copy(), times[i]) for i in seed_ids][-2:]
         velocity = np.zeros(3, dtype=np.float64)
         if len(trusted) == 2:
@@ -846,7 +919,7 @@ class BatchBuilder:
             replay = row.get('_joint_replay_state')
             q0_replay = row.get('_q0_replay_state')
             if q0_replay is not None:
-                if not (option(self.config, 'v41_q0_lateral_replay', False) and not self.joint_search
+                if not ((option(self.config, 'v41_q0_lateral_replay', False) or self.local_vote) and not self.joint_search
                         and replay is None and q0_replay.joint is None and r.branch == 0
                         and r.starts_window and r.ends_window and r.state_key not in self.states):
                     raise ValueError('invalid q0 replay prefix for one-step training slot')
@@ -870,6 +943,11 @@ class BatchBuilder:
                 data, context = self._prepare_row(row, state)
             else:
                 _, _, data, seed_context, pools = packet
+                if self.local_vote:
+                    history_hash, ledger_hash, counts = row['_local_history_receipt']
+                    if (history_hash != self.history_bank.sha256 or ledger_hash != self.local_prefix_bank.sha256):
+                        raise ValueError('worker prepared a reset with different local voting history data')
+                    self.history_counts.update(counts)
                 context = dict(seed_context, row=row, state=state)
                 if pools:
                     self._next_history_pools[r.state_key] = pools
@@ -931,13 +1009,6 @@ class BatchBuilder:
             max_age=float(option(self.config, 'v41_search_max_age', 1.5)),
             main_quota=int(option(self.config, 'v41_search_main_quota', 768)),
             backup_quota=int(option(self.config, 'v41_search_backup_quota', 256)))
-        # R 的公开seed始终存在；搜索是否触发不影响该几何，也不读取GT。
-        recovery_seed = state.trusted[-1][0].copy()
-        recovery_seed_elapsed = (min(now - state.trusted[-1][1],
-            float(option(self.config, 'v41_search_max_age', 1.5))) if state.trusted_velocity_valid else 0.)
-        recovery_seed[:3] += state.trusted_velocity * recovery_seed_elapsed
-        recovery_seed_local = recovery_seed.copy()
-        recovery_seed_local[:3] -= anchor[:3]
         points, valid, raw_ids, seg, bc, truth_boxes = [], [], [], [], [], []
         cache_used = []
         main_training = 0 <= r.branch < 4
@@ -1070,8 +1141,6 @@ class BatchBuilder:
             frame_times=np.r_[physical_times, 0.].astype(np.float32),
             box_size=state.size.astype(np.float32), anchor_box=anchor.astype(np.float32),
             fallback_box=fallback.astype(np.float32),
-            recovery_seed_box=recovery_seed_local.astype(np.float32),
-            recovery_seed_valid=np.bool_(True),
             target_box=np.asarray(truth_boxes[-1], dtype=np.float32),
             target_box_size=target_size.astype(np.float32),
             branch_id=np.int64(r.branch),
@@ -1081,6 +1150,25 @@ class BatchBuilder:
             supported_age=np.float32(max(0., now - state.last_supported_time)))
         if seg:
             result['segmentation_labels'] = np.stack(seg)
+        if self.local_vote:
+            template = row['local_template']
+            if not template[1][0]:
+                if not isinstance(state, _ColdLocalVoteState):
+                    state = _ColdLocalVoteState(**vars(state))
+                if state.local_vote_template is not None:
+                    template = state.local_vote_template
+            result['local_template_xyz'], result['local_template_valid'] = template
+        else:
+            recovery_seed = state.trusted[-1][0].copy()
+            recovery_seed_elapsed = (min(now - state.trusted[-1][1],
+                float(option(self.config, 'v41_search_max_age', 1.5))) if state.trusted_velocity_valid else 0.)
+            recovery_seed[:3] += state.trusted_velocity * recovery_seed_elapsed
+            recovery_seed_local = recovery_seed.copy()
+            recovery_seed_local[:3] -= anchor[:3]
+            result.update(recovery_seed_box=recovery_seed_local.astype(np.float32), recovery_seed_valid=np.bool_(True))
+            if self.detailed_diagnostics:
+                result.update(diagnostic_recovery_seed_box_world=recovery_seed.astype(np.float32),
+                              diagnostic_recovery_seed_elapsed=np.float32(recovery_seed_elapsed))
         if main_training:
             result.update(history_target_boxes=np.asarray(truth_boxes[:3], dtype=np.float32),
                           bc_targets=np.stack(bc), physical_valid=np.bool_(True))
@@ -1101,8 +1189,6 @@ class BatchBuilder:
         if self.detailed_diagnostics:
             result.update(diagnostic_search_triggered=np.bool_(search_plan.triggered),
                 diagnostic_train_cache_used=np.asarray(cache_used, dtype=bool),
-                diagnostic_recovery_seed_box_world=recovery_seed.astype(np.float32),
-                diagnostic_recovery_seed_elapsed=np.float32(recovery_seed_elapsed),
                 diagnostic_search_reason_id=np.int64({'policy_disabled': 0, 'initialization': 1,
                     'accepted_eligible': 2, 'accepted_untrusted': 3}[search_plan.reason]),
                 diagnostic_search_main_box_world=search_plan.main_box.astype(np.float32),
@@ -1263,6 +1349,16 @@ class BatchBuilder:
                 transfer['joint_fine_ids'] = torch.where(remote.point_valid, remote.ids, -1)
         if full:
             transfer.update(eligible=expected_eligible, support_count=canonical_support.sum(-1))
+        cold_rows = {}
+        if self.local_vote:
+            for i, context in enumerate(self._pending):
+                state = context['state']
+                if (isinstance(state, _ColdLocalVoteState) and state.local_vote_template is None
+                        and state.previous_measurement_eligible):
+                    cold_rows[i] = len(cold_rows)
+            if cold_rows:
+                indices = list(cold_rows)
+                transfer.update(cold_support=canonical_support[indices], cold_xyz=batch['points'][indices, -1, :, :3])
         if need_raw_support:
             transfer.update(probabilities=output.observation.foreground_probability[:, -1],
                 point_ids=batch['point_ids'][:, -1], point_valid=batch['point_valid'][:, -1])
@@ -1387,14 +1483,19 @@ class BatchBuilder:
                 state.trusted[:] = state.trusted[-2:]
                 state.last_supported_time = now
                 state.last_supported_quality = score
+                if velocity_updated and i in cold_rows:
+                    # 旧桥在第二次相邻可信写入后，用本次最终框的实际 B0 支持一次性建模。
+                    # 用此次测量公开的浮点坐标，避免重新裁剪、排序或读后续帧。
+                    index = cold_rows[i]
+                    measured = transferred['cold_xyz'][index, transferred['cold_support'][index]] + context['anchor'][:3]
+                    state.local_vote_template = _packed_local_template(measured, box)
             state.previous_is_propagation = prop
             # 记录真实提交资格，不由 T 分数或搜索位置推断；初始化仍为 None。
             state.previous_measurement_eligible = bool(supported and not prop)
             state.consecutive_propagations = state.consecutive_propagations + 1 if prop else 0
             state.consecutive_untrusted_outputs = 0 if supported else state.consecutive_untrusted_outputs + 1
             if diagnostics:
-                source = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement',
-                          'local_vote', 'remote_vote')[int(transferred['selected'][i])]
+                source = candidate_names(self.config)[int(transferred['selected'][i])]
                 if prop and source == 'q0':
                     source = 'prior'
                 records.append(dict(strong=bool(strong), supported=bool(supported),

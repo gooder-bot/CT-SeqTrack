@@ -5,7 +5,8 @@ import torch
 from utils.diagnostic_transfer import tensors_to_numpy
 from utils.tracking_metrics import BoxMetricsTarget, LocalYawBox, metric_contributions
 from .identity import (CANDIDATE_SCHEMA, JOINT_CANDIDATE_SCHEMA, JOINT_CANDIDATES,
-                       JOINT_MEASUREMENTS, JOINT_PRIORITY, LEGACY_CANDIDATES)
+                       JOINT_MEASUREMENTS, JOINT_PRIORITY, LEGACY_CANDIDATES,
+                       LOCAL_VOTE_CANDIDATES, LOCAL_VOTE_SCHEMA)
 
 CANDIDATE_RECORD_SCHEMA = CANDIDATE_SCHEMA
 NAMES = LEGACY_CANDIDATES
@@ -37,7 +38,14 @@ def candidate_records(batch, output, *, optimized=True):
     candidates, verification, commit = output.candidates, output.verification, output.commit_decision
     from .verification import final_candidate_support
     joint = getattr(output, 'joint', None)
-    names = JOINT_CANDIDATES if joint is not None else NAMES
+    local = getattr(output, 'local_vote', None)
+    names = (LOCAL_VOTE_CANDIDATES if local is not None else
+             JOINT_CANDIDATES if joint is not None else NAMES)
+    # 同前态 oracle 使用真效用；局部票与旧槽平分时沿用前三槽赢家。
+    if local is not None:
+        oracle_order = (0, 1, 2, 3)
+    else:
+        oracle_order = JOINT_PRIORITY if joint is not None else (0, 3, 1, 2)
     all_support = (joint.support_mask if joint is not None else
                    final_candidate_support(output.observation, batch, candidates.boxes)['mask'])
     all_support = all_support & candidates.measurement_candidate[..., None]
@@ -57,6 +65,8 @@ def candidate_records(batch, output, *, optimized=True):
                       template_valid=obs.template_valid, anchor=batch['anchor_box'],
                       identity_logits=torch.cat((obs.legacy_match_logits,
                           obs.local.match_logit[:, None], obs.remote.match_logit[:, None]), 1))
+    if local is not None:
+        values.update(rival=local.rival_index, relative_gain=local.relative_gain)
     if output.recovery is not None:
         values.update(recovery_seed=output.recovery.seed_box,
                       recovery_delta=output.recovery.normalized_delta,
@@ -83,8 +93,7 @@ def candidate_records(batch, output, *, optimized=True):
         trusted_score = (float(arrays['trust'][i, 0])
                          if verification is not None and real_q0 else None)
         true_utility = [(item['success'] + item['precision']) / 2 for item in geometry]
-        priority = JOINT_PRIORITY if joint is not None else (0, 3, 1, 2)
-        oracle = max((k for k in priority if valid[k]), key=lambda k: true_utility[k])
+        oracle = max((k for k in oracle_order if valid[k]), key=lambda k: true_utility[k])
         measurement_records = []
         for k in (JOINT_MEASUREMENTS if joint is not None else (0, 3)):
             evidence_index = k if joint is not None else 0
@@ -112,7 +121,7 @@ def candidate_records(batch, output, *, optimized=True):
             raw_valid=arrays['raw_valid'][i].astype(bool).tolist(), alias_of=arrays['alias_of'][i].tolist(),
             measurement_candidate=arrays['measurement'][i].astype(bool).tolist(),
             geometry=geometry, q0_geometry=geometry[0], prior_geometry=geometry[1],
-            trusted_propagation_geometry=geometry[2], recovery_geometry=geometry[3] if output.recovery is not None else None,
+            trusted_propagation_geometry=geometry[2],
             selected_geometry=geometry[selected],
             selected_index=selected, selected_source=names[selected],
             selected_utility=utility[selected] if utility is not None else None, utility=utility,
@@ -124,15 +133,6 @@ def candidate_records(batch, output, *, optimized=True):
             selected_trusted_score=(None if selected_record is None else selected_record['trusted_score']),
             selected_is_measurement=selected_measurement, propagation_only=not selected_measurement,
             measurement_trust_records=measurement_records,
-            recovery_trusted_valid=measurement_records[1]['valid'],
-            recovery_trusted_target=measurement_records[1]['trusted_target'],
-            recovery_trusted_score=measurement_records[1]['trusted_score'],
-            recovery_seed_box_anchor_relative=(arrays['recovery_seed'][i].tolist()
-                                               if 'recovery_seed' in arrays else None),
-            recovery_normalized_delta=(arrays['recovery_delta'][i].tolist()
-                                       if 'recovery_delta' in arrays else None),
-            recovery_read_point_count=(int(arrays['recovery_read_mask'][i].sum())
-                                       if 'recovery_read_mask' in arrays else 0),
             support=dict(raw_ids=arrays['ids'][i, 0, support].astype(int).tolist(), count=support_count,
                          target_count=target_count, target_purity=purity),
             q0_is_fallback=not real_q0, prior_motion_valid=bool(arrays['prior_valid'][i]),
@@ -143,6 +143,22 @@ def candidate_records(batch, output, *, optimized=True):
                 beneficial_takeover=bool(real_q0 and selected != 0 and true_utility[selected] > true_utility[0]),
                 recovered_bad_q0=bool(real_q0 and geometry[0]['exact_iou'] < .1
                                      and geometry[selected]['exact_iou'] >= .5))))
+        record = result[-1]
+        fourth_name = 'local_vote' if local is not None else 'recovery'
+        for field in ('valid', 'target', 'score'):
+            item_key = 'valid' if field == 'valid' else 'trusted_' + field
+            record[f'{fourth_name}_trusted_{field}'] = measurement_records[1][item_key]
+        if local is not None:
+            rival = int(arrays['rival'][i])
+            record.update(schema=LOCAL_VOTE_SCHEMA, local_vote_geometry=geometry[3],
+                rival_index=rival, rival_source=names[rival],
+                local_predicted_gain=float(arrays['relative_gain'][i]),
+                local_true_gain=(true_utility[3] - true_utility[rival]) if valid[3] else None)
+        else:
+            record.update(recovery_geometry=geometry[3] if output.recovery is not None else None,
+                recovery_seed_box_anchor_relative=arrays['recovery_seed'][i].tolist() if 'recovery_seed' in arrays else None,
+                recovery_normalized_delta=arrays['recovery_delta'][i].tolist() if 'recovery_delta' in arrays else None,
+                recovery_read_point_count=int(arrays['recovery_read_mask'][i].sum()) if 'recovery_read_mask' in arrays else 0)
         if joint is not None:
             from .joint_grid import inside
             centers = proposals.get(i, np.empty((0, 3), np.float32))

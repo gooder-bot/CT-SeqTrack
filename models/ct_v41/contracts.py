@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .joint_candidates import JointCandidateEvidence
     from .q0_lateral import LateralEstimate
+    from .local_vote import LocalVoteOutput
 
 from torch import Tensor
 
@@ -126,3 +127,4 @@ class TrackOutput:
     recovery: Optional[RecoveryOutput] = None
     reference_geometry: bool = True
     joint: Optional['JointCandidateEvidence'] = None
+    local_vote: Optional['LocalVoteOutput'] = None

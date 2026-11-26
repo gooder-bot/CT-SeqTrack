@@ -19,9 +19,12 @@ from .identity import JOINT_PRIORITY
 from .q0_lateral import Q0LateralHead, lateral_losses
 
 
-def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, recovery=None):
+def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, recovery=None, local_vote=None):
     """仅旧三框内部去重；R 即使同几何也保留当前测量资格。"""
-    recovery_box = batch['fallback_box'].detach() if recovery is None else recovery.box.detach()
+    if recovery is not None and local_vote is not None:
+        raise ValueError('slot 3 requires one measurement source')
+    fourth = local_vote if local_vote is not None else recovery
+    recovery_box = batch['fallback_box'].detach() if fourth is None else fourth.box.detach()
     boxes = torch.stack((decoder.q0_box, prior.box.to(decoder.q0_box),
                          batch['fallback_box'].detach().to(decoder.q0_box),
                          recovery_box.to(decoder.q0_box)), 1)
@@ -29,7 +32,7 @@ def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, reco
         raise FloatingPointError('v41 position candidates must be finite')
     real = observation.sequence_valid.detach().bool()
     prior_available = torch.full_like(real, bool(enable_b1))
-    recovery_valid = torch.zeros_like(real) if recovery is None else recovery.valid.detach().bool()
+    recovery_valid = torch.zeros_like(real) if fourth is None else fourth.valid.detach().bool()
     raw_valid = torch.stack((real, prior_available, torch.ones_like(real), recovery_valid), -1)
     measurement = torch.stack((real, torch.zeros_like(real), torch.zeros_like(real), recovery_valid), -1)
     valid = raw_valid.clone()
@@ -51,7 +54,7 @@ def build_candidates(decoder, observation, batch, prior, *, enable_b1=True, reco
         decoder.q0_quality_logits, measurement)
 
 
-def select_candidates(candidates, verification, observation, batch, *, apply_policy=True, joint=None):
+def select_candidates(candidates, verification, observation, batch, *, apply_policy=True, joint=None, local_vote=None):
     """零 margin，精确同分 q0→R→prior→fallback；传播永不获得可信资格。"""
     valid = candidates.valid
     b, device = len(valid), valid.device
@@ -65,10 +68,14 @@ def select_candidates(candidates, verification, observation, batch, *, apply_pol
         if not bool(torch.isfinite(verification.logits).all()):
             raise FloatingPointError('nonfinite v41 verifier logits')
         utility = verification.utility
-        priority = torch.tensor(JOINT_PRIORITY if joint is not None else (0, 3, 1, 2),
-                                device=device, dtype=torch.long)
-        ordered = utility.masked_fill(~valid, -torch.inf)[:, priority]
-        selected = priority[ordered.argmax(-1)]
+        if local_vote is not None:
+            choose = valid[:, 3] & (local_vote.relative_gain > 0.)
+            selected = torch.where(choose, 3, local_vote.rival_index)
+        else:
+            priority = torch.tensor(JOINT_PRIORITY if joint is not None else (0, 3, 1, 2),
+                                    device=device, dtype=torch.long)
+            ordered = utility.masked_fill(~valid, -torch.inf)[:, priority]
+            selected = priority[ordered.argmax(-1)]
         selected_utility = utility[row, selected]
         candidate_trust = torch.where(candidates.measurement_candidate,
             verification.logits[..., 2].sigmoid(), 0.)
@@ -136,8 +143,16 @@ class JointTracker(nn.Module):
         configure_attention_modules(self.decoder, backend=self.config.v41_attention_backend)
         with torch.random.fork_rng(devices=[]):
             self.verifier = FinalBoxVerifier(self.config.time_scale) if self.enable_b3 else None
+        use_local = bool(self.config.get('v41_local_vote', False))
+        if use_local and (not self.enable_b3 or self.config.v41_joint_search or self.config.v41_q0_lateral):
+            raise ValueError('four-slot local vote requires Full with joint search and lateral head disabled')
+        self.local_vote_head = self.local_gate = None
         with torch.random.fork_rng(devices=[]):
-            self.recovery_head = RecoveryResidualHead() if self.enable_b3 else None
+            self.recovery_head = RecoveryResidualHead() if self.enable_b3 and not use_local else None
+            if use_local:
+                from .local_vote import LocalVoteHead, LocalGainGate
+                self.local_vote_head = LocalVoteHead()
+                self.local_gate = LocalGainGate()
         self.joint_search = None
         if self.config.v41_joint_search:
             from .joint_observation import JointSearchObservation
@@ -165,7 +180,7 @@ class JointTracker(nn.Module):
     def _finish_forward(self, prepared, prior, observation, decoder, pool, include_local_diagnostics,
                         *, use_recovery):
         recovery = None
-        if self.enable_b3 and use_recovery:
+        if self.recovery_head is not None and use_recovery:
             seed = prepared['recovery_seed_box']
             seed_valid = prepared['recovery_seed_valid']
             options = {} if include_local_diagnostics else dict(diagnostics=False)
@@ -173,8 +188,10 @@ class JointTracker(nn.Module):
                 pool, seed[:, None], seed_valid[:, None], prepared['box_size'], **options)
             recovery = self.recovery_head(feature[:, 0], seed, prepared['box_size'],
                 statistics['local_point_mask'][:, 0], seed_valid)
+        local = (self.local_vote_head(pool, prepared, decoder.q0_box)
+                 if self.local_vote_head is not None else None)
         candidates = build_candidates(decoder, observation, prepared, prior,
-            enable_b1=self.enable_b1, recovery=recovery)
+            enable_b1=self.enable_b1, recovery=recovery, local_vote=local)
         # 修正后的 R 重新读取最终几何；不把 seed 支持错当成最终框支持。
         verification = (self.verifier(candidates, observation, prepared, prior, pool=pool,
             include_local_diagnostics=include_local_diagnostics) if self.enable_b3 else None)
@@ -185,13 +202,16 @@ class JointTracker(nn.Module):
                                          candidates.boxes, candidates.raw_valid)
             candidates, verification, joint = combine_joint_candidates(
                 candidates, verification, observed, pool, remote_position_valid=observed.remote_position_valid)
+        if local is not None:
+            features = self.local_vote_head.gate_features(local, candidates, verification, pool, prepared['box_size'])
+            local.relative_gain = self.local_gate(features)
         decision, commit, quality, candidate_trust = select_candidates(
-            candidates, verification, observation, prepared, apply_policy=self.enable_b3, joint=joint)
+            candidates, verification, observation, prepared, apply_policy=self.enable_b3, joint=joint, local_vote=local)
         return TrackOutput(decision.accepted_box, decision.selected_index, quality, prior, observation,
             decoder, candidates, verification, decision, commit,
             candidates.q0_quality_logits.sigmoid(), decision.output_utility,
             candidate_trust, candidates.q0_is_fallback, recovery, reference_geometry=include_local_diagnostics,
-            joint=joint)
+            joint=joint, local_vote=local)
 
     def _decode(self, prepared, prior, observation, pool, include_local_diagnostics):
         descriptor = (observation.history_descriptor if self.decoder.initial_context
@@ -253,8 +273,19 @@ class JointTracker(nn.Module):
             raise ValueError('v41 recovery auxiliary losses require Full')
         with recipe_scope(self.config):
             from .losses import compute_recovery_losses
-            return compute_recovery_losses(loss_batch(batch), output,
-                recovery_weight=float(self.config.get('v41_recovery_weight', .1)))
+            losses = compute_recovery_losses(loss_batch(batch), output,
+                recovery_weight=float(self.config.get('v41_recovery_weight', .1)),
+                require_recovery=self.local_vote_head is None)
+            if self.training and self.local_gate is not None:
+                self.local_gate.observe(output.local_vote, output.supervision_targets)
+            return losses
+
+    def reset_local_gate_statistics(self):
+        if self.local_gate is not None:
+            self.local_gate.reset()
+
+    def fit_local_gate(self):
+        return None if self.local_gate is None else self.local_gate.fit()
 
     def compute_losses(self, batch, output):
         with recipe_scope(self.config):
@@ -266,7 +297,7 @@ class JointTracker(nn.Module):
                 from .losses import compute_losses
                 losses = compute_losses(prepared, output, enable_b1=self.enable_b1,
                     recovery_weight=float(self.config.get('v41_recovery_weight', .1)), q0_center_weighting=weighting,
-                    require_recovery=self.training or self.joint_search is not None)
+                    require_recovery=self.recovery_head is not None and (self.training or self.joint_search is not None))
             if output.decoder.lateral is not None:
                 extra = lateral_losses(output.decoder.lateral, prepared)
                 losses.update(extra)

@@ -137,25 +137,35 @@ def compute_recovery_losses(batch, output, *, recovery_weight=.1, targets=None, 
     # 对每个端点内的测量候选平均；q0/R 数目变化不把 T 权重翻倍。
     quality_name = 'loss_trusted_write' if joint is None else 'loss_geometry_quality'
     losses[quality_name], trusted = endpoint_bce(logits[..., 2], quality_target, target['trusted_valid'])
-    gap, pairs = pairwise_gap_terms(output.verification.utility, target['utility'], valid)
+    local = getattr(output, 'local_vote', None)
+    # 第四槽由相对收益门决定。共享 S/P/T 仍监督四槽，旧排序只学前三槽。
+    n_ranked = 3 if local is not None else valid.shape[1]
+    gap, pairs = pairwise_gap_terms(output.verification.utility[:, :n_ranked],
+                                    target['utility'][:, :n_ranked], valid[:, :n_ranked])
     losses['loss_ranking'] = frame_endpoint_mean(gap, pairs)
-    if output.recovery is None:
-        # 四槽 eval 可单独请求损失诊断。未生成 R 的端点对该项分子与分母均无贡献。
-        recovery = dict(loss=logits.new_zeros(()), terms=logits.new_zeros(len(logits)),
-                        valid=valid.new_zeros(len(logits)))
-    else:
-        recovery = recovery_loss_terms(batch, output.recovery)
-    losses['loss_recovery_xyz'] = recovery['loss']
-    losses['recovery_supervised_count'] = recovery['valid'].to(logits).sum().detach()
     sink = getattr(output, 'loss_statistics', None)
     for name, terms, mask, weight in (
             ('loss_success', success, valid, .125), ('loss_precision', precision, valid, .125),
-            (quality_name, trusted, target['trusted_valid'], .5), ('loss_ranking', gap, pairs, .1),
-            ('loss_recovery_xyz', recovery['terms'], recovery['valid'], recovery_weight)):
+            (quality_name, trusted, target['trusted_valid'], .5), ('loss_ranking', gap, pairs, .1)):
         _record(sink, name, terms, mask, weight)
-    losses['loss_total'] = .125*losses['loss_success'] + .125*losses['loss_precision'] \
-        + .5*losses[quality_name] + .1*losses['loss_ranking'] \
-        + recovery_weight*losses['loss_recovery_xyz']
+    losses['loss_total'] = (.125*losses['loss_success'] + .125*losses['loss_precision']
+                            + .5*losses[quality_name] + .1*losses['loss_ranking'])
+    if local is None:
+        if output.recovery is None:
+            # 四槽 eval 可单独请求损失诊断。未生成 R 不计入监督端点。
+            recovery = dict(loss=logits.new_zeros(()), terms=logits.new_zeros(len(logits)),
+                            valid=valid.new_zeros(len(logits)))
+        else:
+            recovery = recovery_loss_terms(batch, output.recovery)
+        losses['loss_recovery_xyz'] = recovery['loss']
+        losses['recovery_supervised_count'] = recovery['valid'].to(logits).sum().detach()
+        _record(sink, 'loss_recovery_xyz', recovery['terms'], recovery['valid'], recovery_weight)
+        losses['loss_total'] = losses['loss_total'] + recovery_weight*recovery['loss']
+    if local is not None:
+        from .local_vote import local_vote_losses
+        extra = local_vote_losses(local, batch)
+        losses.update(extra)
+        losses['loss_total'] = losses['loss_total'] + extra['loss_local_total']
     if joint is not None:
         from .joint_observation import joint_search_losses
         extra = joint_search_losses(joint.observations, batch)

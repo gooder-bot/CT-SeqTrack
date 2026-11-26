@@ -119,7 +119,8 @@ class TrainingDiagnostics:
         packet.update({('scalar', name): value for name, value in scalar_losses.items()})
         packet.update({('count', name): value for name, value in valid_counts.items()})
         replay_events = [row.get('q0_replay_event') or row.get('joint_replay_event') for row in rows]
-        if lateral is None and any(row.get('q0_replay_event') for row in rows):
+        local_vote = getattr(output, 'local_vote', None)
+        if lateral is None and local_vote is None and any(row.get('q0_replay_event') for row in rows):
             raise ValueError('q0 replay diagnostics require the lateral estimate')
         replay_indices = [i for i, event in enumerate(replay_events) if event and lateral is not None]
         if replay_indices:
@@ -130,6 +131,11 @@ class TrainingDiagnostics:
             packet['q0_replay', 'target_points'] = (positives & lateral.valid.index_select(0, replay_ids)).sum(-1)
             packet['q0_replay', 'target_votes'] = (positives & lateral.support.index_select(0, replay_ids)).any(-1)
         copied = tensors_to_numpy(packet, optimized=self.optimized)
+        if local_vote is not None:
+            for row, event in zip(rows, replay_events):
+                if event:
+                    self.q0_replay_rows.append(dict(tracklet=row['tracklet_key'],
+                        frame=int(row['request'].frame), event=event))
         for j, i in enumerate(replay_indices):
             row = rows[i]
             estimates = {name: copied['q0_replay', name][j].tolist() for name in LATERAL_FIELDS}

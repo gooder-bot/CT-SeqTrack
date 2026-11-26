@@ -8,6 +8,9 @@ TRAINING_AUDIT_SCHEMA = 'ct_seqtrack.v41.training_audit.v1'
 RESUME_SCHEMA = 'ct_seqtrack.v41.resume.v1'
 CANDIDATE_SCHEMA = 'ct_seqtrack.v41.candidate_records.v1'
 LEGACY_CANDIDATES = ('q0', 'prior', 'trusted_propagation', 'recovery_measurement')
+LOCAL_VOTE_CANDIDATES = LEGACY_CANDIDATES[:3] + ('local_vote',)
+LOCAL_VOTE_SELECTION = 'original_three_then_local_relative_gain_v1'
+LOCAL_VOTE_SCHEMA = 'ct_seqtrack.v41.local_vote_candidates.v1'
 JOINT_CANDIDATES = LEGACY_CANDIDATES + ('local_vote', 'remote_vote')
 JOINT_PRIORITY = (0, 3, 4, 5, 1, 2)
 JOINT_MEASUREMENTS = (0, 3, 4, 5)
@@ -28,6 +31,12 @@ ALLOCATOR = 'backend:native,roundup_power2_divisions:2'
 SOURCE_INVENTORY_POLICY = 'v41_active_python_explicit_retired_v1'
 RETIRED_SOURCE_DIRECTORIES = ('models/ct_v31', 'models/ct_v36', 'models/ct_v37')
 RETIRED_SOURCE_FILES = ('models/ctseqtrackv31.py', 'models/ctseqtrackv36.py', 'models/ctseqtrackv37.py')
+
+
+def candidate_names(config):
+    if config.get('v41_local_vote'):
+        return LOCAL_VOTE_CANDIDATES
+    return JOINT_CANDIDATES if config.get('v41_joint_search') else LEGACY_CANDIDATES
 
 
 def retired_source_path(relative):

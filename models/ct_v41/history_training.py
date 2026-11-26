@@ -22,8 +22,8 @@ def _hash_array(digest, key, value):
 class HistoryTrainingAudit:
     GROUPS = ('current_target', 'history_target_only', 'background_only', 'empty')
 
-    def __init__(self, epoch):
-        self.common = epoch <= 2
+    def __init__(self, epoch, *, paired=True):
+        self.common = paired and epoch <= 2
         self.batches = hashlib.sha256()
         self.losses = hashlib.sha256()
         self.rows = Counter()
@@ -39,7 +39,7 @@ class HistoryTrainingAudit:
             latest_seed = batch['history_box_provenance'][:, -1].tolist()
             for row, provenance in zip(rows, latest_seed):
                 r = row['request']
-                kind = ('natural_replay' if '_joint_replay_state' in row else
+                kind = ('natural_replay' if '_joint_replay_state' in row or '_q0_replay_state' in row else
                         'reset' if r.starts_window else 'continuation')
                 self.rows[kind] += 1
                 if kind == 'reset':
@@ -47,12 +47,15 @@ class HistoryTrainingAudit:
                     self.reset_seeds['first_prediction_gt' if r.frame == 1 else kind] += 1
                 sources.append(kind)
             # 只对 B1 实际可读的两条新鲜运动边计算 8 m/s² 裁剪分母。
-            boxes = batch['joint_motion_boxes'].numpy()[:, :, :2]
-            times = batch['joint_motion_times'].numpy()
+            joint = 'joint_motion_boxes' in batch
+            boxes = batch['joint_motion_boxes' if joint else 'history_boxes'].numpy()[:, :, :2]
+            times = batch['joint_motion_times' if joint else 'history_times'].numpy()
             gap = np.diff(times, axis=1)
-            eligible = (batch['joint_motion_pairs'].numpy().all(1)
-                        & batch['joint_motion_valid'].numpy().all(1) & (gap > 0).all(1)
-                        & np.isclose(-times[:, -1], batch['current_dt'].numpy(), rtol=1e-5, atol=1e-6))
+            eligible = (batch['joint_motion_pairs' if joint else 'history_pair_valid'].numpy().all(1)
+                        & batch['joint_motion_valid' if joint else 'history_valid'].numpy().all(1)
+                        & (gap > 0).all(1))
+            if joint:
+                eligible &= np.isclose(-times[:, -1], batch['current_dt'].numpy(), rtol=1e-5, atol=1e-6)
             gap = gap[eligible].clip(min=.001)
             velocity = np.diff(boxes[eligible], axis=1) / gap[:, :, None]
             acceleration = np.linalg.norm(velocity[:, 1] - velocity[:, 0], axis=1) / gap.mean(axis=1)

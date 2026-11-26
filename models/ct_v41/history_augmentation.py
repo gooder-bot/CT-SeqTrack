@@ -108,7 +108,7 @@ class HistoryAugmentation:
             self._pools[key] = indices, reason
         return self._pools[key]
 
-    def sample(self, track, seed_ids, times, boxes, rng):
+    def sample(self, track, seed_ids, times, boxes, rng, *, common_z=False):
         """返回逐槽 XYZ 增量和匹配级别。boxes 为尚未加偏移/航向扰动的实际过去框。"""
         ids = tuple(seed_ids)
         if not 1 <= len(ids) <= 3 or ids != tuple(range(ids[0], ids[0] + len(ids))) or ids[0] < 0:
@@ -126,4 +126,8 @@ class HistoryAugmentation:
             return zeros, reason
         donor = pool[rng.integers(len(pool))]
         residuals = sensor_xyz(self.errors[donor, -len(ids):], np.array([boxes[i][3] for i in ids]))
-        return residuals - residuals[-1], reason
+        deltas = residuals - residuals[-1]
+        if common_z:
+            # 同一供体末框的有符号高度平移整个历史，不制造虚假的垂向速度。
+            deltas[:, 2] += residuals[-1, 2]
+        return deltas, reason

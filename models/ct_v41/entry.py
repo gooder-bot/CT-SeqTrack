@@ -27,7 +27,7 @@ def parse_config(argv=None):
                                      allow_abbrev=False)
     parser.add_argument('--cfg', required=True)
     for key in ('path', 'tag', 'log_dir', 'checkpoint', 'init_checkpoint', 'dynamics_time_manifest',
-                'v41_q0_replay_manifest', 'v41_history_bank', 'v41_fixed_replay_bank'):
+                'v41_q0_replay_manifest', 'v41_history_bank', 'v41_fixed_replay_bank', 'v41_local_prefix_bank'):
         parser.add_argument('--' + key)
     for key in TIME_MANIFEST_KEYS[1:]:
         parser.add_argument('--' + key, help='engineering-only manifest for its dataset role')
@@ -151,8 +151,10 @@ def validate_run_destination(config, root, *, checkpoint_identity=None):
             checkpoint_identity.update(run_id=payload['run_id'], completed_epoch=payload['completed_epoch'])
             if config.v41_history_training != 'legacy':
                 checkpoint_identity['history_bank_sha256'] = payload['history_bank_sha256']
-            if config.v41_q0_lateral_replay:
+            if config.v41_q0_lateral_replay or config.v41_local_vote:
                 checkpoint_identity['q0_replay_manifest_sha256'] = payload['q0_replay_manifest_sha256']
+            if config.v41_local_vote:
+                checkpoint_identity['local_prefix_sha256'] = payload['local_prefix_sha256']
     return existing
 
 
@@ -259,11 +261,21 @@ def _run(config, *, loaders=None, command_line=None):
             raise ValueError('E57 history bank differs from the checkpoint')
         history_hash = history_bank.sha256
     replay_hash = None
-    if config.v41_q0_lateral_replay:
+    if config.v41_q0_lateral_replay or config.v41_local_vote:
         replay_hash = (checkpoint_identity['q0_replay_manifest_sha256'] if config.test
                        else replay_manifest_hash(config))
         if config.checkpoint and replay_hash != checkpoint_identity['q0_replay_manifest_sha256']:
             raise ValueError('q0 training replay manifest differs from the checkpoint')
+    prefix_bank = None
+    prefix_hash = checkpoint_identity.get('local_prefix_sha256')
+    if config.v41_local_vote and not config.test:
+        from .local_prefix import LocalPrefixBank
+        if not config.v41_local_prefix_bank:
+            raise ValueError('local vote training requires --v41_local_prefix_bank')
+        prefix_bank = LocalPrefixBank(config.v41_local_prefix_bank)
+        if prefix_hash is not None and prefix_bank.sha256 != prefix_hash:
+            raise ValueError('uniform causal prefix bank differs from the checkpoint')
+        prefix_hash = prefix_bank.sha256
     if config.test:
         config.eval_checkpoint_epoch = checkpoint_identity['completed_epoch']
     import torch
@@ -280,6 +292,9 @@ def _run(config, *, loaders=None, command_line=None):
         model.train_builder.history_bank = history_bank
         model.history_bank_sha256 = history_hash
     model.q0_replay_manifest_sha256 = replay_hash
+    if config.v41_local_vote:
+        model.train_builder.local_prefix_bank = prefix_bank
+        model.local_prefix_sha256 = prefix_hash
     try:
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True,
                                            stderr=subprocess.DEVNULL).strip()
@@ -320,6 +335,10 @@ def _run(config, *, loaders=None, command_line=None):
         manifest['history_bank_sha256'] = history_hash
     if config.v41_q0_lateral_replay:
         manifest['actual_recipe']['v41_q0_lateral_replay'] = True
+    if config.v41_local_vote:
+        manifest['actual_recipe']['v41_local_vote'] = True
+        manifest['local_prefix_sha256'] = prefix_hash
+    if config.v41_local_vote or config.v41_q0_lateral_replay:
         manifest['q0_replay_manifest_sha256'] = replay_hash
     if config.dataset == 'kitti_mf' and not config.ct_engineering_check:
         from datasets.kitti_v41 import build_v41_kitti_manifest, kitti_input_metadata_identity
@@ -345,6 +364,8 @@ def _run(config, *, loaders=None, command_line=None):
         raise ValueError('E57 history bank differs from the original run')
     if existing_manifest and existing_manifest.get('q0_replay_manifest_sha256') != replay_hash:
         raise ValueError('q0 training replay manifest differs from the original run')
+    if existing_manifest and existing_manifest.get('local_prefix_sha256') != prefix_hash:
+        raise ValueError('uniform causal prefix bank differs from the original run')
     if existing_manifest and any(existing_manifest.get(key) != manifest.get(key)
                                  for key in ('dataset_manifest', 'input_metadata')):
         raise ValueError('v41 resume dataset identity differs')

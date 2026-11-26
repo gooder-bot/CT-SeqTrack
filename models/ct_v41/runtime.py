@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from .config import config_identity, normalize_config
-from .identity import SCHEMA, runtime_schema, LEGACY_CANDIDATES, JOINT_CANDIDATES, JOINT_MEASUREMENTS
+from .identity import SCHEMA, runtime_schema, LEGACY_CANDIDATES, JOINT_CANDIDATES, JOINT_MEASUREMENTS, candidate_names
 from utils.tracking_metrics import LocalYawBox, box_metrics, metric_contributions
 from utils.execution_profile import optimized_execution
 
@@ -132,7 +132,12 @@ def validate_resume_payload(payload, config, *, training=True):
     if config.get('v41_joint_replay') == 'fixed_e2':
         from .fixed_replay import validate_fixed_replay_receipt
         validate_fixed_replay_receipt(payload.get('joint_replay'), payload.get('completed_epoch'))
-    if config.get('v41_q0_lateral_replay', False):
+    if config.get('v41_local_vote'):
+        fingerprint = payload.get('local_prefix_sha256')
+        if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(
+                char not in '0123456789abcdef' for char in fingerprint):
+            raise ValueError('local vote checkpoint requires its causal prefix bank fingerprint')
+    if config.get('v41_q0_lateral_replay') or config.get('v41_local_vote'):
         fingerprint = payload.get('q0_replay_manifest_sha256')
         if (not isinstance(fingerprint, str) or len(fingerprint) != 64
                 or any(char not in '0123456789abcdef' for char in fingerprint)):
@@ -486,7 +491,7 @@ class TrackingEvaluation:
         count = len(rows)
         result['selection'] = {name: dict(count=sum(r['selected_source'] == name for r in rows),
             rate=sum(r['selected_source'] == name for r in rows) / count if count else None)
-            for name in (JOINT_CANDIDATES if self.v41_config.v41_joint_search else LEGACY_CANDIDATES)}
+            for name in candidate_names(self.v41_config)}
         writes = [row for row in rows if row.get('supported')]
         wrong = sum(not row['diagnostic_candidates']['selected_trusted_target'] for row in writes)
         result['trusted'] = dict(writes=len(writes), coverage=len(writes) / count if count else None,
@@ -508,7 +513,7 @@ class TrackingEvaluation:
                 result['geometry_reliability'][JOINT_CANDIDATES[index]] = summary
         else:
             result['trusted_reliability'] = reliability_summary(records)
-            for index, name in ((0, 'q0'), (3, 'recovery')):
+            for index, name in ((0, 'q0'), (3, 'local_vote' if self.v41_config.v41_local_vote else 'recovery')):
                 measurements = [dict(item, trusted_valid=item['valid']) for record in records
                                 for item in record['measurement_trust_records'] if item['index'] == index]
                 result[name + '_trusted_reliability'] = reliability_summary(measurements)
@@ -551,8 +556,11 @@ class TrackingEvaluation:
             success=100 * (initial + sum(r['oracle']['success'] for r in records)) / max(count + initial, 1),
             precision=100 * (initial + sum(r['oracle']['precision'] for r in records)) / max(count + initial, 1))
         result['detail_level'] = 'full'
-        result['stages'] = _full_stage_summary(rows, JOINT_CANDIDATES if self.v41_config.v41_joint_search
-                                               else LEGACY_CANDIDATES)
+        result['stages'] = _full_stage_summary(rows, candidate_names(self.v41_config))
+        if self.v41_config.v41_local_vote:
+            chain = result.pop('recovery_chain')
+            result['local_vote_chain'] = {key.replace('recovery', 'local_vote'): value
+                                          for key, value in chain.items()}
         if self.v41_config.v41_joint_search:
             result['joint_candidates'] = dict(new_good_frames=sum(
                 not any(v and g['exact_iou'] >= .5 for v, g in zip(r['raw_valid'][:4], r['geometry'][:4]))
@@ -618,8 +626,7 @@ class CompactTrackingEvaluation:
 
     def __init__(self, config, *, row_sink=None):
         self.v41_config = normalize_config(config)
-        if self.v41_config.v41_joint_search:
-            self.NAMES = JOINT_CANDIDATES
+        self.NAMES = candidate_names(self.v41_config)
         self.optimized = optimized_execution(self.v41_config)
         self.schema = SCHEMA
         self._row_sink = row_sink

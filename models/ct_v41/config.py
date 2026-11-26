@@ -10,7 +10,8 @@ from utils.execution_profile import validate_execution_profile
 from utils.time_config import engineering_time_defaults, validate_time_config, hash_time_manifest_paths
 from .cpu_geometry import backend_identity
 from .identity import (SCHEMA, EXECUTION_REVISION, JOINT_CANDIDATES, JOINT_PRIORITY, JOINT_MEASUREMENTS,
-                       JOINT_SEARCH_POLICY, JOINT_STATE_POLICY, JOINT_SELECTION_POLICY)
+                       JOINT_SEARCH_POLICY, JOINT_STATE_POLICY, JOINT_SELECTION_POLICY,
+                       LOCAL_VOTE_CANDIDATES, LOCAL_VOTE_SELECTION)
 
 
 # 数值和字段名沿用已验证的强 B1；定义由本版本持有，不再适配旧模型。
@@ -72,6 +73,7 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_q0_lateral_replay=False, v41_q0_replay_manifest=None, v41_joint_replay=None,
     v41_patrol_seconds=1., v41_weak_patrol_seconds=.2,
     v41_history_training='legacy', v41_history_bank=None, v41_fixed_replay_bank=None,
+    v41_local_vote=False, v41_local_prefix_bank=None,
     v41_activation_policy='active_from_epoch1_v1',
     v41_gain_margin=0., v41_trust_threshold=.5, v41_min_support=3,
     v41_duplicate_xyz_tolerance=1e-4, v41_duplicate_yaw_tolerance=1e-5,
@@ -157,6 +159,13 @@ def recipe_identity(config):
     if config.get('v41_q0_lateral_replay', False):
         identity.update(implementation_id='v41_q0_lateral_replay_v1',
             replay=dict(donor_epochs=[10, 60], branch=0, maximum_slot_fraction=.5))
+    if config.get('v41_local_vote'):
+        identity.update(implementation_id='v41_uniform_local_vote_v1', candidates=list(LOCAL_VOTE_CANDIDATES),
+            selection_policy=LOCAL_VOTE_SELECTION, tie_priority=[0, 1, 2], recovery=None,
+            augmentation='continuous_relative_xy_absolute_z_v1', replay='uniform_train_prefix_pairs_v1',
+            reset_state='causal_uniform_ledger_before_window_v1',
+            template_initialization='first_box_or_two_adjacent_supported_local_writes_v1',
+            gate='standardized_ridge_auxiliary_natural_frequency_v1')
     return identity
 
 
@@ -203,6 +212,8 @@ def normalize_config(config=None):
     if cfg.v41_joint_search:
         derived.update(v41_search_policy=JOINT_SEARCH_POLICY, v41_state_policy=JOINT_STATE_POLICY,
                        v41_selection_policy=JOINT_SELECTION_POLICY)
+    if cfg.v41_local_vote:
+        derived['v41_selection_policy'] = LOCAL_VOTE_SELECTION
     for key, value in derived.items():
         if key in supplied and (type(supplied[key]) is not type(value) or supplied[key] != value):
             raise ValueError('v41 arm-derived field cannot be overridden: ' + key)
@@ -217,6 +228,16 @@ def normalize_config(config=None):
         raise ValueError('v41_q0_center_weighting must be uniform or inverse_lwh')
     if type(cfg.v41_joint_search) is not bool:
         raise ValueError('v41_joint_search must be bool')
+    if type(cfg.v41_local_vote) is not bool:
+        raise ValueError('v41_local_vote must be bool')
+    if cfg.v41_local_vote:
+        if (cfg.v41_joint_search or cfg.v41_q0_lateral or cfg.v41_q0_lateral_replay
+                or cfg.v41_fixed_replay_bank is not None
+                or (cfg.v41_arm, cfg.dataset, cfg.v41_q0_center_weighting, cfg.v41_history_training)
+                != ('full', 'kitti_mf', 'uniform', 'window_1448')):
+            raise ValueError('local vote requires four-slot KITTI uniform with the 1/4/4/8 history recipe')
+    elif cfg.v41_local_prefix_bank is not None:
+        raise ValueError('v41_local_prefix_bank requires the local vote recipe')
     for key in ('v41_patrol_seconds', 'v41_weak_patrol_seconds'):
         if type(cfg[key]) not in (float, int) or not math.isfinite(cfg[key]) or cfg[key] <= 0:
             raise ValueError(key + ' must be a positive finite interval in seconds')
@@ -224,7 +245,7 @@ def normalize_config(config=None):
     if cfg.v41_history_training not in ('legacy', 'window_1448', 'four_candidates', 'single_view_cgp'):
         raise ValueError('unknown v41_history_training')
     if cfg.v41_history_training != 'legacy':
-        if not cfg.v41_joint_search:
+        if not cfg.v41_joint_search and not cfg.v41_local_vote:
             raise ValueError('E57 history training requires the joint KITTI Full recipe')
     elif cfg.v41_history_bank is not None or cfg.v41_fixed_replay_bank is not None:
         raise ValueError('history banks require an E57 history training arm')
@@ -252,7 +273,7 @@ def normalize_config(config=None):
                 or cfg.v41_q0_center_weighting != 'uniform' or cfg.dynamics_time_mode != 'true'):
             raise ValueError('uniform E10/E60 prefixes require the original KITTI search state; '
                              'use v41_q0_lateral for a head trained on joint prefixes')
-    elif cfg.v41_q0_replay_manifest is not None:
+    elif cfg.v41_q0_replay_manifest is not None and not cfg.v41_local_vote:
         raise ValueError('v41_q0_replay_manifest requires the q0 lateral replay recipe')
     if type(cfg.v41_joint_latency) is not bool or (cfg.v41_joint_latency and not cfg.test):
         raise ValueError('v41_joint_latency requires standalone evaluation')
@@ -435,6 +456,9 @@ def config_identity(config):
     payload.pop('v41_q0_replay_manifest')
     payload.pop('v41_history_bank')
     payload.pop('v41_fixed_replay_bank')
+    payload.pop('v41_local_prefix_bank')
+    if not cfg.v41_local_vote:
+        payload.pop('v41_local_vote')
     # The effective joint replay and lateral settings are already in training_execution_recipe.
     for key in ('v41_joint_replay', 'v41_q0_lateral', 'v41_q0_lateral_warmup_epochs',
                 'v41_patrol_seconds', 'v41_weak_patrol_seconds'):

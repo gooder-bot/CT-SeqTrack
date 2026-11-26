@@ -130,7 +130,70 @@ class JointSearchResult:
     remote_position_valid: Optional[torch.Tensor] = None
 
 
-class JointSearchObservation(nn.Module):
+def vote_neighborhood(votes, logits, valid, size, yaw):
+    index = logits.masked_fill(~valid, -torch.inf).argmax(-1)
+    row = torch.arange(len(index), device=index.device)
+    seed = votes[row, index].detach()
+    distance = rotate_xyz(votes.detach()-seed[:, None], yaw) / size[:, None]
+    return index, valid & (distance.abs() <= .75).all(-1)
+
+
+@dataclass
+class PointVotes:
+    box: torch.Tensor
+    valid: torch.Tensor
+    votes: torch.Tensor
+    foreground_logit: torch.Tensor
+    center: torch.Tensor
+    refine_input: torch.Tensor
+    summary: torch.Tensor
+    peak: torch.Tensor
+    cluster: torch.Tensor
+
+
+class PointVoteGeometry(nn.Module):
+    """局部与远区共用的逐点前景、中心投票和中心精修。"""
+    def _shape_at(self, xyz, point_valid, box, size, template, has_template):
+        relative = rotate_xyz(xyz-box[:, None, :3], box[:, 3]) / size[:, None]
+        members = point_valid & (relative.abs() <= .5).all(-1)
+        descriptor = self.shape.describe(relative, members)
+        score = self.shape(descriptor, template, has_template)
+        return descriptor, members, score
+
+    def _point_votes(self, xyz, valid, size, seed, anchor, template, has_template,
+                 local_features=None):
+        yaw = seed[:, 3]
+        relative = rotate_xyz(xyz-seed[:, None, :3], yaw) / size[:, None]
+        sensor = xyz + anchor[:, None, :3]
+        ray = F.normalize(rotate_xyz(sensor, yaw), dim=-1)
+        point = self.point(torch.cat((relative.clamp(-3., 3.), ray,
+                                      sensor[..., 2:3].clamp(-5., 5.)), -1))
+        if local_features is not None:
+            # 借用 B0 的点特征，搜索辅助监督不改写 q0 及其共享编码器梯度。
+            point = point + self.local_features(local_features.detach())
+        query = template[:, None].expand_as(point)
+        available = has_template[:, None, None].expand(*point.shape[:-1], 1).to(point)
+        feature = self.condition(torch.cat((point, query, point*query, available), -1))
+        logit = self.foreground(feature).squeeze(-1)
+        offset = rotate_xyz(self.offset(feature).tanh() * size[:, None], yaw, to_world=True)
+        votes = xyz + offset
+        admissible = valid.any(-1)
+        peak, cluster = vote_neighborhood(votes, logit, valid, size, yaw)
+        cluster_weight = torch.softmax(logit.masked_fill(~cluster, -1e4), dim=-1) * cluster
+        center = (cluster_weight[..., None] * votes).sum(1)
+        center = torch.where(admissible[:, None], center, seed[:, :3])
+        delta = rotate_xyz(xyz-center[:, None], yaw) / size[:, None]
+        near = valid & (delta.abs() <= .75).all(-1)
+        weight = torch.softmax(logit.masked_fill(~near, -1e4), -1) * near
+        summary = (weight[..., None]*feature).sum(1)
+        mean_position = (delta * weight[..., None]).sum(1)
+        refine = self.refine(torch.cat((summary, template, mean_position), -1)).tanh() * size * .5
+        corrected = center + rotate_xyz(refine, yaw, to_world=True)
+        box = torch.cat((torch.where(admissible[:, None], corrected, seed[:, :3]), yaw[:, None]), -1)
+        return PointVotes(box, admissible, votes, logit, center, near, summary, peak, cluster)
+
+
+class JointSearchObservation(PointVoteGeometry):
     def __init__(self):
         super().__init__()
         self.shape = ShapeMatcher()
@@ -166,63 +229,22 @@ class JointSearchObservation(nn.Module):
         template = self.shape.describe(_tensor(pts, size) / size[:, None], mask)
         return torch.where(ready[:, None], template, 0.), ready
 
-    @staticmethod
-    def _vote_mode(votes, logits, valid, size, yaw):
-        """先找投票峰，再聚合邻票，避免把两车平均成一个不存在的中心。"""
-        index = logits.masked_fill(~valid, -torch.inf).argmax(-1)
-        batch_index = torch.arange(len(index), device=index.device)
-        seed = votes[batch_index, index].detach()
-        distance = rotate_xyz(votes.detach()-seed[:, None], yaw) / size[:, None]
-        near = valid & (distance.abs() <= .75).all(-1)
-        weight = torch.softmax(logits.masked_fill(~near, -1e4), dim=-1) * near
-        return (weight[..., None]*votes).sum(1)
-
-    def _shape_at(self, xyz, point_valid, box, size, template, has_template):
-        relative = rotate_xyz(xyz-box[:, None, :3], box[:, 3]) / size[:, None]
-        members = point_valid & (relative.abs() <= .5).all(-1)
-        descriptor = self.shape.describe(relative, members)
-        score = self.shape(descriptor, template, has_template)
-        return descriptor, members, score
-
     def _measure(self, xyz, ids, valid, size, seed, anchor, template, has_template,
                  local_features=None):
-        yaw = seed[:, 3]
-        relative = rotate_xyz(xyz-seed[:, None, :3], yaw) / size[:, None]
-        sensor = xyz + anchor[:, None, :3]
-        ray = F.normalize(rotate_xyz(sensor, yaw), dim=-1)
-        point = self.point(torch.cat((relative.clamp(-3., 3.), ray,
-                                      sensor[..., 2:3].clamp(-5., 5.)), -1))
-        if local_features is not None:
-            # 借用 B0 的点特征，搜索辅助监督不改写 q0 及其共享编码器梯度。
-            point = point + self.local_features(local_features.detach())
-        query = template[:, None].expand_as(point)
-        available = has_template[:, None, None].expand(*point.shape[:-1], 1).to(point)
-        feature = self.condition(torch.cat((point, query, point*query, available), -1))
-        logit = self.foreground(feature).squeeze(-1)
-        offset = rotate_xyz(self.offset(feature).tanh() * size[:, None], yaw, to_world=True)
-        votes = xyz + offset
-        admissible = valid.any(-1)
-        center = self._vote_mode(votes, logit, valid, size, yaw)
-        center = torch.where(admissible[:, None], center, seed[:, :3])
-        delta = rotate_xyz(xyz-center[:, None], yaw) / size[:, None]
-        near = valid & (delta.abs() <= .75).all(-1)
-        weight = torch.softmax(logit.masked_fill(~near, -1e4), -1) * near
-        summary = (weight[..., None]*feature).sum(1)
-        mean_position = (delta * weight[..., None]).sum(1)
-        refine = self.refine(torch.cat((summary, template, mean_position), -1)).tanh() * size * .5
-        corrected = center + rotate_xyz(refine, yaw, to_world=True)
-        box = torch.cat((torch.where(admissible[:, None], corrected, seed[:, :3]), yaw[:, None]), -1)
+        vote = self._point_votes(
+            xyz, valid, size, seed, anchor, template, has_template, local_features)
+        box, logit = vote.box, vote.foreground_logit
         descriptor, members, identity = self._shape_at(xyz, valid, box.detach(), size, template, has_template)
         probability = torch.where(valid, logit.sigmoid(), 0.)
         support = members & (probability >= .5)
         stats = torch.stack((torch.log1p(members.sum(-1).to(size)), torch.log1p(support.sum(-1).to(size)),
                              (probability*members).sum(-1)/members.sum(-1).clamp_min(1),
                              identity.detach().sigmoid()), -1)
-        quality = self.quality(torch.cat((summary.detach(), descriptor.detach(), stats.detach()), -1))
-        return JointMeasurement(box, admissible, quality, identity,
+        quality = self.quality(torch.cat((vote.summary.detach(), descriptor.detach(), stats.detach()), -1))
+        return JointMeasurement(box, vote.valid, quality, identity,
                                 members.any(-1) & (identity > 0.), xyz, ids,
-                                probability, valid, support, torch.zeros_like(admissible),
-                                votes, logit, descriptor, members)
+                                probability, valid, support, torch.zeros_like(vote.valid),
+                                vote.votes, logit, descriptor, members)
 
     def _coarse(self, row_index, scan, query, has_query, anchor, size, prior):
         f = self.cell(_tensor(scan.features, query))

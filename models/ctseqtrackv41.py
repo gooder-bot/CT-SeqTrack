@@ -61,6 +61,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self.joint_replay = None
         self.history_audit = None
         self.history_bank_sha256 = None
+        self.local_prefix_sha256 = None
+        self.local_gate_audit = None
         self.q0_replay = None
         self.q0_replay_manifest_sha256 = None
         if self.config.v41_joint_search and not self.config.test:
@@ -197,7 +199,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         sampled = (batch['segmentation_labels'][:, -1] == 1).sum(-1)
         values = tensors_to_numpy(dict(iou=selected_iou, points=sampled,
             trusted_age=batch['diagnostic_search_trusted_age'], supported_age=batch['supported_age'],
-            supervised=losses['recovery_supervised_count']), optimized=True)
+            supervised=(losses['local_refine_supervised_count'] if getattr(output, 'local_vote', None) is not None
+                        else losses['recovery_supervised_count'])), optimized=True)
         records = []
         for i, row in enumerate(rows):
             request = row['request']
@@ -333,6 +336,18 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
 
     def on_train_epoch_start(self):
         epoch = int(self.current_epoch) + 1
+        if self.config.v41_local_vote:
+            from models.ct_v41.local_prefix import LocalPrefixBank
+            if self.train_builder.local_prefix_bank is None:
+                self.train_builder.local_prefix_bank = LocalPrefixBank(self.config.v41_local_prefix_bank)
+            prefixes = self.train_builder.local_prefix_bank
+            if self.history_audit is None:
+                prefixes.validate_dataset(self._loaders['train'].dataset)
+            if self.local_prefix_sha256 is not None and self.local_prefix_sha256 != prefixes.sha256:
+                raise ValueError('uniform causal prefix bank differs from the checkpoint')
+            self.local_prefix_sha256 = prefixes.sha256
+            self.tracker.reset_local_gate_statistics()
+            self.local_gate_audit = None
         if self.config.v41_history_training != 'legacy':
             from models.ct_v41.history_augmentation import HistoryAugmentation
             from models.ct_v41.history_training import HistoryTrainingAudit
@@ -349,7 +364,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 bank.validate_receivers({dataset.source.get_tracklet_key(i): length
                                          for i, length in enumerate(dataset.lengths)})
             self.history_bank_sha256 = bank.sha256
-            self.history_audit = HistoryTrainingAudit(epoch)
+            self.history_audit = HistoryTrainingAudit(epoch, paired=not self.config.v41_local_vote)
         if self.config.v41_joint_replay == 'fixed_e2':
             dataset = self._loaders['train'].dataset
             if epoch == 3:
@@ -358,7 +373,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
                 self.joint_replay.bind(dataset)
         if self.config.v41_q0_lateral:
             self.tracker.q0_epoch = epoch
-        if self.config.v41_q0_lateral_replay:
+        if self.config.v41_q0_lateral_replay or self.config.v41_local_vote:
             from models.ct_v41.q0_replay import Q0ReplayBank
             loader = self._loaders['train']
             if self.q0_replay is None:
@@ -547,6 +562,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self._memory_record('train_cleanup', batch_idx=batch_idx)
         self._epoch_rows += count
         self._epoch_steps += 1
+        # Lightning 的验证先于 on_train_epoch_end；评估与保存使用同一套刚拟合的系数。
+        if self.config.v41_local_vote and self._epoch_steps == self._main_batches:
+            self.local_gate_audit = self.tracker.fit_local_gate()
 
     def on_train_epoch_end(self):
         self._memory_record('train_epoch_end')
@@ -616,6 +634,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             audit['q0_lateral_epoch'] = self.tracker.q0_epoch
         if self.q0_replay is not None:
             audit['q0_replay'] = self.q0_replay.audit()
+        if self.config.v41_local_vote:
+            audit['local_gain_gate'] = self.local_gate_audit
+            audit['local_prefix_sha256'] = self.local_prefix_sha256
         directory = Path(self.config.log_dir) / 'training_audits'
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f'epoch={self._completed_epoch:03d}.json'
@@ -756,7 +777,9 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             checkpoint[runtime_key(self.config)]['joint_replay'] = self.joint_replay.checkpoint()
         if self.config.v41_history_training != 'legacy':
             checkpoint[runtime_key(self.config)]['history_bank_sha256'] = self.history_bank_sha256
-        if self.config.v41_q0_lateral_replay:
+        if self.config.v41_local_vote:
+            checkpoint[runtime_key(self.config)]['local_prefix_sha256'] = self.local_prefix_sha256
+        if self.config.v41_q0_lateral_replay or self.config.v41_local_vote:
             checkpoint[runtime_key(self.config)]['q0_replay_manifest_sha256'] = self.q0_replay_manifest_sha256
 
     def on_load_checkpoint(self, checkpoint):
@@ -773,7 +796,12 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             if self.history_bank_sha256 is not None and self.history_bank_sha256 != saved:
                 raise ValueError('E57 history bank differs from the checkpoint')
             self.history_bank_sha256 = saved
-        if self.config.v41_q0_lateral_replay:
+        if self.config.v41_local_vote:
+            saved_prefix = payload['local_prefix_sha256']
+            if self.local_prefix_sha256 is not None and self.local_prefix_sha256 != saved_prefix:
+                raise ValueError('local vote checkpoint and causal prefix bank differ')
+            self.local_prefix_sha256 = saved_prefix
+        if self.config.v41_q0_lateral_replay or self.config.v41_local_vote:
             saved = payload['q0_replay_manifest_sha256']
             if self.q0_replay_manifest_sha256 is not None and self.q0_replay_manifest_sha256 != saved:
                 raise ValueError('q0 checkpoint and training replay manifest differ')

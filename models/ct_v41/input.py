@@ -13,6 +13,7 @@ ONLINE_FIELDS = frozenset((
     'recovery_seed_box', 'recovery_seed_valid',
     'history_is_initial', 'window_seed_offset', 'branch_id',
     'trusted_velocity', 'trusted_velocity_valid', 'trusted_velocity_age',
+    'local_template_xyz', 'local_template_valid',
     'weak_age', 'supported_age',
     'previous_is_propagation', 'consecutive_propagations',
     'joint_rows', 'joint_motion_boxes', 'joint_motion_times', 'joint_motion_valid',
