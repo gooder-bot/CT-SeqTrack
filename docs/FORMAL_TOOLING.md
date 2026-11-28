@@ -1,5 +1,9 @@
 # CT-SeqTrack 当前工具范围：V41
 
+当前单臂通过 `main.py` 启动，固定轮次对账使用 `tools/compare_v41_support_center.py`。冻结 E42 的复核和配对测速使用 `tools/check_v41_support_center.py`。[配方、运行与验收命令](V41_SUPPORT_CENTER.md)
+
+## 历史联合训练工具
+
 本轮用 `tools/train_v41_joint_pair.sh` 准备两组各自的运行目录，共用 E57 增强库和固定 E2 前态，再通过 `main.py` 顺序训练。每轮在 KITTI test 上完整递推。结束后 `tools/compare_v41_training_arms.py --require-q0-lateral --require-epoch-test` 核验两组配置与各 60 轮的 test 记录，逐帧比较固定 E58–60 和 E60。[两组命令](V41_JOINT_PAIR.md)
 
 单视角 CGP 通过 `tools/train_v41_joint.sh` 选择新配置。离线工具 `tools/compare_v41_single_view.py` 读取它和 B 组已完成的共同轮次，对比主训练步数、训练耗时与 test 得分。[单视角命令](V41_SINGLE_VIEW_CGP.md)

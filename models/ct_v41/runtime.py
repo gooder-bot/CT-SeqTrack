@@ -261,6 +261,30 @@ def motion_slices(rows):
         low_motion_endpoints=metrics([r for r in predictions if r.get('diagnostic_moving') is False]),
         start_boundary=metrics(starts), stop_boundary=metrics(stops))
 
+def _support_center_packet(output):
+    center = getattr(getattr(output, 'decoder', None), 'support_center', None)
+    if center is None:
+        return {}
+    return dict(center_raw=center.raw_box[:, :3], center_final=center.box[:, :3],
+                center_count=center.count, center_high_count=center.high_count,
+                center_branch=center.branch, center_distance=center.local_distance,
+                center_vote_valid=output.candidates.raw_valid[:, 3])
+
+
+def _support_center_record(arrays, index):
+    if 'center_branch' not in arrays:
+        return {}
+    names = ('original', 'dense_residual', 'sparse_consensus')
+    return dict(support_center=dict(
+        route=names[int(arrays['center_branch'][index])],
+        foreground_points=int(arrays['center_count'][index]),
+        high_confidence_points=int(arrays['center_high_count'][index]),
+        raw_xyz_anchor_relative_m=arrays['center_raw'][index].tolist(),
+        final_xyz_anchor_relative_m=arrays['center_final'][index].tolist(),
+        vote_distance_m=(float(arrays['center_distance'][index])
+                         if arrays['center_vote_valid'][index] else None)))
+
+
 class TrackingEvaluation:
     """benchmark_compat 逐帧积分含合法首帧；GT 几何只用于被动审计。"""
     def __init__(self, config, *, row_sink=None):
@@ -308,6 +332,7 @@ class TrackingEvaluation:
             qualities=output.selected_quality, indices=output.selected_index,
             fine=decoder.q0_box, anchors=batch['anchor_box'])
         packet.update((k, v) for k, v in batch.items() if k.startswith('diagnostic_') and torch.is_tensor(v))
+        packet.update(_support_center_packet(output))
         lateral = getattr(decoder, 'lateral', None)
         if lateral is not None:
             packet.update(original_q0=lateral.base_box,
@@ -391,6 +416,7 @@ class TrackingEvaluation:
                 self._recoveries.append(recovered)
             diagnostic = {name: value[index].item() if np.ndim(value[index]) == 0
                           else value[index].tolist() for name, value in diagnostics.items()}
+            diagnostic.update(_support_center_record(arrays, index))
             diagnostic['coarse_geometry'] = (_box_diagnostics(coarse[index], targets[index],
                 sizes[index], target_sizes[index]) if coarse is not None else None)
             # 全序列无点时 coarse 清零只是占位，不能作为真实预测参与精修统计。
@@ -682,9 +708,12 @@ class CompactTrackingEvaluation:
         # commit_results/候选/分割纯度不参与 summary；真实状态更新已由 builder 完成。
         del commit_results
         from utils.diagnostic_transfer import tensors_to_numpy
-        arrays = tensors_to_numpy(dict(predictions=output.accepted_box, targets=batch['target_box'],
+        packet = dict(predictions=output.accepted_box, targets=batch['target_box'],
             sizes=batch['box_size'], target_sizes=batch['target_box_size'],
-            selected=output.selected_index), optimized=self.optimized)
+            selected=output.selected_index)
+        if self._row_sink is not None:
+            packet.update(_support_center_packet(output))
+        arrays = tensors_to_numpy(packet, optimized=self.optimized)
         for index, raw in enumerate(raw_rows):
             request, key = raw['request'], raw['tracklet_key']
             if request.branch != 4:
@@ -735,7 +764,8 @@ class CompactTrackingEvaluation:
                 precision=float(precision), iou=float(overlap), distance=float(distance),
                 initialization=False, timestamp=now, selected_source=source, selected_index=selected,
                 raw_frame_id=frame.get('raw_frame_id', frame.get('frame_id')),
-                track_id=frame.get('meta', {}).get('track_id'), scene_id=str(frame.get('scene_id', 'unknown'))))
+                track_id=frame.get('meta', {}).get('track_id'), scene_id=str(frame.get('scene_id', 'unknown')),
+                **_support_center_record(arrays, index)))
             if request.ends_window:
                 if state['lost'] is not None:
                     self._finish_episode(state, recovered=False, now=now)

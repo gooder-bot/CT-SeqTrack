@@ -338,6 +338,8 @@ def _run(config, *, loaders=None, command_line=None):
     if config.v41_local_vote:
         manifest['actual_recipe']['v41_local_vote'] = True
         manifest['local_prefix_sha256'] = prefix_hash
+    if config.v41_support_center:
+        manifest['actual_recipe']['v41_support_center'] = True
     if config.v41_local_vote or config.v41_q0_lateral_replay:
         manifest['q0_replay_manifest_sha256'] = replay_hash
     if config.dataset == 'kitti_mf' and not config.ct_engineering_check:

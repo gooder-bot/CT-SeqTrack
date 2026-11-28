@@ -97,6 +97,9 @@ def frame_endpoint_mean(frame_values, frame_valid):
 
 
 def _base_q0(decoder):
+    center = getattr(decoder, 'support_center', None)
+    if center is not None:
+        return center.raw_box
     lateral = getattr(decoder, 'lateral', None)
     return decoder.q0_box if lateral is None else lateral.base_box
 

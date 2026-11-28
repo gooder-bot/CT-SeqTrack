@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from .joint_candidates import JointCandidateEvidence
     from .q0_lateral import LateralEstimate
     from .local_vote import LocalVoteOutput
+    from .support_center import SupportCenterEstimate
 
 from torch import Tensor
 
@@ -53,6 +54,7 @@ class DecoderOutput:
     local_delta_norm: Optional[Tensor] = None  # [B,8] detached
     q0_context: Optional[Tensor] = None        # [B,64] 当前车实例上下文
     lateral: Optional['LateralEstimate'] = None
+    support_center: Optional['SupportCenterEstimate'] = None
 
 
 @dataclass

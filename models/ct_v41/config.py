@@ -73,7 +73,7 @@ DEFAULTS = dict(SHARED_DEFAULTS, **V35_DEFAULTS,
     v41_q0_lateral_replay=False, v41_q0_replay_manifest=None, v41_joint_replay=None,
     v41_patrol_seconds=1., v41_weak_patrol_seconds=.2,
     v41_history_training='legacy', v41_history_bank=None, v41_fixed_replay_bank=None,
-    v41_local_vote=False, v41_local_prefix_bank=None,
+    v41_local_vote=False, v41_local_prefix_bank=None, v41_support_center=False,
     v41_activation_policy='active_from_epoch1_v1',
     v41_gain_margin=0., v41_trust_threshold=.5, v41_min_support=3,
     v41_duplicate_xyz_tolerance=1e-4, v41_duplicate_yaw_tolerance=1e-5,
@@ -166,6 +166,11 @@ def recipe_identity(config):
             reset_state='causal_uniform_ledger_before_window_v1',
             template_initialization='first_box_or_two_adjacent_supported_local_writes_v1',
             gate='standardized_ridge_auxiliary_natural_frequency_v1')
+    if config.get('v41_support_center'):
+        identity.update(implementation_id='v41_uniform_local_vote_support_center_v1',
+            q0_center='train_auxiliary_42d_robust_ridge_next_epoch_v1',
+            center_routing='high10_at_085_else_consensus_1m_030_v1',
+            eval_shape_matching='paired_local_and_rival_v1')
     return identity
 
 
@@ -230,6 +235,8 @@ def normalize_config(config=None):
         raise ValueError('v41_joint_search must be bool')
     if type(cfg.v41_local_vote) is not bool:
         raise ValueError('v41_local_vote must be bool')
+    if type(cfg.v41_support_center) is not bool or (cfg.v41_support_center and not cfg.v41_local_vote):
+        raise ValueError('v41_support_center must be bool and requires the four-slot local vote recipe')
     if cfg.v41_local_vote:
         if (cfg.v41_joint_search or cfg.v41_q0_lateral or cfg.v41_q0_lateral_replay
                 or cfg.v41_fixed_replay_bank is not None
@@ -459,6 +466,8 @@ def config_identity(config):
     payload.pop('v41_local_prefix_bank')
     if not cfg.v41_local_vote:
         payload.pop('v41_local_vote')
+    if not cfg.v41_support_center:
+        payload.pop('v41_support_center')
     # The effective joint replay and lateral settings are already in training_execution_recipe.
     for key in ('v41_joint_replay', 'v41_q0_lateral', 'v41_q0_lateral_warmup_epochs',
                 'v41_patrol_seconds', 'v41_weak_patrol_seconds'):

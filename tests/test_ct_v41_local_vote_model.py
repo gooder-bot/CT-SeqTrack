@@ -82,6 +82,49 @@ def test_transplanted_head_matches_original_geometry_and_retains_actual_refineme
     assert feature.grad is None and seed.grad is None
 
 
+def test_paired_shapes_share_one_eval_call_and_preserve_four_slot_decision():
+    torch.manual_seed(41)
+    writer = JointTracker(dict(v41_local_vote=True, v41_history_training='window_1448',
+                               v41_attention_backend='math', ct_engineering_check=True,
+                               workers=0, point_sample_size=16, batch_size=3)).eval()
+    head = writer.local_vote_head
+    assert head.paired_eval_shapes is False
+    weights = tuple(head.state_dict())
+    batch = synthetic_batch(3, 16)
+    batch.update(local_template_xyz=torch.randn(3, 128, 3),
+                 local_template_valid=torch.ones(3, 128, dtype=torch.bool))
+    batch['local_template_valid'][1] = False
+    batch['point_valid'][2, -1] = False
+    batch['point_ids'][0, -1, 1] = batch['point_ids'][0, -1, 0]
+    sizes = []
+    hook = head.shape.compare.register_forward_pre_hook(lambda mod, args: sizes.append(len(args[0])))
+    try:
+        with torch.no_grad():
+            writer.local_gate.w.normal_(std=.03)
+            original = writer(batch)
+            head.paired_eval_shapes = True
+            paired = writer(batch)
+        assert sizes == [3, 3, 6]
+        assert tuple(head.state_dict()) == weights
+        for field in ('rival_index', 'shape_members'):
+            assert torch.equal(getattr(original.local_vote, field), getattr(paired.local_vote, field))
+        for field in ('shape_logits', 'features', 'relative_gain'):
+            torch.testing.assert_close(getattr(original.local_vote, field), getattr(paired.local_vote, field),
+                                       atol=1e-5, rtol=1e-5)
+        assert torch.equal(original.selected_index, paired.selected_index)
+        assert torch.equal(original.accepted_box, paired.accepted_box)
+        assert torch.equal(original.commit_decision.support_mask, paired.commit_decision.support_mask)
+        # 可求导的 eval 探针和训练/辅助流继续沿用原来的两个形状图。
+        writer(batch).local_vote.shape_logits.sum().backward()
+        assert sizes[-2:] == [3, 3] and head.shape.compare[-1].weight.grad is not None
+        writer.train()
+        with torch.no_grad():
+            writer(batch)
+        assert sizes[-2:] == [3, 3]
+    finally:
+        hook.remove()
+
+
 def test_refinement_loss_uses_pre_refinement_mask_with_one_observed_target_point():
     result = SimpleNamespace(point_valid=torch.tensor([[True, True]]), foreground_logit=torch.zeros(1, 2),
         vote=torch.zeros(1, 2, 3), shape_logits=torch.zeros(1, 2),

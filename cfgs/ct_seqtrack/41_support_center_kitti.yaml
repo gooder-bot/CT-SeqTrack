@@ -1,0 +1,10 @@
+_base_: 41_uniform_local_vote_kitti.yaml
+experiment_name: ct41_support_center_kitti_car_scratch_seed42
+tag: v41_support_center
+v41_support_center: true
+# 与 11/27 四候选实际运行配对，按已完成轮数每 20 轮衰减。
+lr: 0.0001
+lr_schedule: step
+lr_milestones: []
+lr_decay_step: 20
+lr_decay_rate: 0.1

@@ -43,6 +43,7 @@ class LocalVoteHead(PointVoteGeometry):
     """只实例化局部几何和模板比较参数，最终 S/P/T 由四槽共享核验器给出。"""
     def __init__(self):
         super().__init__()
+        self.paired_eval_shapes = False
         self.shape = ShapeMatcher()
         self.point = _mlp(7, FEATURES)
         self.local_features = nn.Linear(64, FEATURES, bias=False)
@@ -78,17 +79,29 @@ class LocalVoteHead(PointVoteGeometry):
 
     def gate_features(self, result, candidates, verifier, pool, size):
         # 先固定前三槽原赢家。第四槽的加入不能改变其余位置的核验或平局顺序。
-        rival = verifier.utility[:, :3].detach().masked_fill(~candidates.valid[:, :3], -torch.inf).argmax(-1)
+        paired = self.paired_eval_shapes and not self.training and not torch.is_grad_enabled()
+        probabilities = verifier.logits.sigmoid() if paired else None
+        utility = (probabilities[:, :3, :2].mean(-1) if paired else verifier.utility[:, :3].detach())
+        rival = utility.masked_fill(~candidates.valid[:, :3], -torch.inf).argmax(-1)
         row = torch.arange(len(rival), device=rival.device)
         rival_box = candidates.boxes[row, rival].detach()
-        shape_scores, shape_members = [], []
-        for box in (result.box.detach(), rival_box):
-            _, members, score = self._shape_at(pool['xyz'], pool['valid'], box, size,
-                                               result.template, result.template_ready)
-            shape_scores.append(score)
-            shape_members.append(members)
-        result.shape_logits = torch.stack(shape_scores, 1)
-        result.shape_members = torch.stack(shape_members, 1)
+        boxes = (result.box.detach(), rival_box)
+        if paired:
+            # 每行按 [局部票, 前三槽胜者] 排列；两框的坐标系和成员掩码各自计算。
+            def pair_rows(values):
+                return values[:, None].expand(-1, 2, *values.shape[1:]).flatten(0, 1)
+
+            paired_boxes = torch.stack(boxes, 1).flatten(0, 1)
+            _, members, scores = self._shape_at(
+                pair_rows(pool['xyz']), pair_rows(pool['valid']), paired_boxes, pair_rows(size),
+                pair_rows(result.template), pair_rows(result.template_ready))
+            result.shape_logits = scores.reshape(len(rival), 2)
+            result.shape_members = members.reshape(len(rival), 2, -1)
+        else:
+            measured = [self._shape_at(pool['xyz'], pool['valid'], box, size, result.template,
+                                       result.template_ready) for box in boxes]
+            result.shape_logits = torch.stack([score for _, _, score in measured], 1)
+            result.shape_members = torch.stack([members for _, members, _ in measured], 1)
         result.rival_index = rival
         with torch.no_grad():
             logits = result.foreground_logit
@@ -96,7 +109,7 @@ class LocalVoteHead(PointVoteGeometry):
             count = cluster.sum(-1)
             distance = (result.vote - result.pre_center[:, None]).norm(dim=-1)
             probability = logits.sigmoid()
-            p = verifier.logits.sigmoid()
+            p = probabilities if paired else verifier.logits.sigmoid()
             support = verifier.support_mask.sum(-1).to(p).log1p()
             result.features = torch.stack((
                 (rival == 0).to(p), p[row, rival, 0], p[row, rival, 1], p[:, 3, 0], p[:, 3, 1],
@@ -105,7 +118,7 @@ class LocalVoteHead(PointVoteGeometry):
                 (cluster & (probability >= .5)).sum(-1).to(p).log1p(),
                 (result.box[:, :3] - rival_box[:, :3]).norm(dim=-1),
                 (result.pre_center - result.box[:, :3]).norm(dim=-1),
-                *shape_scores, result.template_ready.to(p),
+                result.shape_logits[:, 0], result.shape_logits[:, 1], result.template_ready.to(p),
                 distance.masked_fill(~cluster, 0.).sum(-1) / count.clamp_min(1)), -1)
             result.features = torch.where(result.valid[:, None], result.features, 0.)
         return result.features

@@ -67,6 +67,23 @@ def test_recovery_execution_record_distinguishes_training_and_inference():
         assert (recovery['training_enabled'], recovery['inference_enabled']) == (train_r, infer_r)
 
 
+def test_support_center_has_one_four_slot_recipe_with_the_november_27_schedule():
+    directory = Path(__file__).resolve().parents[1] / 'cfgs' / 'ct_seqtrack'
+    cfg = load_config(directory / '41_support_center_kitti.yaml')
+    assert cfg.v41_support_center and cfg.v41_local_vote
+    assert (cfg.seed, cfg.batch_size, cfg.epoch) == (42, 16, 60)
+    assert (cfg.lr, cfg.lr_schedule, cfg.lr_decay_step, cfg.lr_decay_rate, cfg.lr_milestones) == (
+        .0001, 'step', 20, .1, [])
+    legacy = normalize_config(dict(cfg, v41_support_center=False))
+    assert config_identity(cfg) != config_identity(legacy)
+    assert 'q0_center' not in recipe_identity(legacy)
+    assert recipe_identity(cfg)['candidates'] == recipe_identity(legacy)['candidates']
+    with pytest.raises(ValueError, match='v41_support_center'):
+        normalize_config(dict(v41_support_center=True))
+    with pytest.raises(ValueError, match='v41_support_center'):
+        normalize_config(dict(cfg, v41_support_center='false'))
+
+
 def test_resume_records_current_numeric_environment_and_preserves_initial_manifest(tmp_path):
     from models.ct_v41.entry import write_resume_event, write_run_metadata
 

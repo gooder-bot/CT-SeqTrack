@@ -63,6 +63,7 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         self.history_bank_sha256 = None
         self.local_prefix_sha256 = None
         self.local_gate_audit = None
+        self.support_center_audit = None
         self.q0_replay = None
         self.q0_replay_manifest_sha256 = None
         if self.config.v41_joint_search and not self.config.test:
@@ -348,6 +349,10 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
             self.local_prefix_sha256 = prefixes.sha256
             self.tracker.reset_local_gate_statistics()
             self.local_gate_audit = None
+        if self.config.v41_support_center:
+            # 独立评测载入 active；只有开始新训练轮才提升上一轮的 pending。
+            self.tracker.start_support_center_epoch()
+            self.support_center_audit = None
         if self.config.v41_history_training != 'legacy':
             from models.ct_v41.history_augmentation import HistoryAugmentation
             from models.ct_v41.history_training import HistoryTrainingAudit
@@ -565,6 +570,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         # Lightning 的验证先于 on_train_epoch_end；评估与保存使用同一套刚拟合的系数。
         if self.config.v41_local_vote and self._epoch_steps == self._main_batches:
             self.local_gate_audit = self.tracker.fit_local_gate()
+            if self.config.v41_support_center:
+                self.support_center_audit = self.tracker.fit_support_center()
 
     def on_train_epoch_end(self):
         self._memory_record('train_epoch_end')
@@ -637,6 +644,8 @@ class CTSEQTRACKV41(pl.LightningModule if pl is not None else nn.Module):
         if self.config.v41_local_vote:
             audit['local_gain_gate'] = self.local_gate_audit
             audit['local_prefix_sha256'] = self.local_prefix_sha256
+        if self.config.v41_support_center:
+            audit['support_center'] = self.support_center_audit
         directory = Path(self.config.log_dir) / 'training_audits'
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f'epoch={self._completed_epoch:03d}.json'

@@ -106,6 +106,25 @@ def test_compact_partial_summary_is_idempotent_and_later_recovery_is_not_double_
         evaluator.add_batch(rows, batch, output)
 
 
+@pytest.mark.parametrize('branch, vote_valid, distance, route', [
+    (0, False, None, 'original'), (1, True, .5, 'dense_residual'), (2, True, .5, 'sparse_consensus')])
+def test_support_center_summary_and_full_emit_matching_online_decisions(branch, vote_valid, distance, route):
+    rows, batch, _, output = metric_batch('a', 1, x=1., last=True)
+    output.decoder.support_center = SimpleNamespace(
+        raw_box=torch.zeros(1, 4), box=output.decoder.q0_box, count=torch.tensor([12]),
+        high_count=torch.tensor([10]), branch=torch.tensor([branch]), local_distance=torch.tensor([.5]))
+    output.candidates = SimpleNamespace(raw_valid=torch.tensor([[True, True, True, vote_valid]]))
+    emitted = []
+    CompactTrackingEvaluation(cfg(), row_sink=emitted.append).add_batch(rows, batch, output)
+    full = TrackingEvaluation(cfg())
+    full._add_batch_metrics(rows, batch, output)
+    record = emitted[-1]['support_center']
+    assert full.rows[-1]['support_center'] == record
+    assert record == dict(route=route, foreground_points=12, high_confidence_points=10,
+        raw_xyz_anchor_relative_m=[0., 0., 0.], final_xyz_anchor_relative_m=[1., 0., 0.],
+        vote_distance_m=distance)
+
+
 def test_full_stage_denominators_use_source_validity_not_deduplication():
     good = dict(iou=1., center_error_m=0., axis_yaw_error_rad=0.)
     bad = dict(iou=0., center_error_m=8., axis_yaw_error_rad=.2)

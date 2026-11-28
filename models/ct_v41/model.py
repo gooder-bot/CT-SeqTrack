@@ -153,6 +153,13 @@ class JointTracker(nn.Module):
                 from .local_vote import LocalVoteHead, LocalGainGate
                 self.local_vote_head = LocalVoteHead()
                 self.local_gate = LocalGainGate()
+        self.support_center = None
+        if self.config.get('v41_support_center', False):
+            from .support_center import SupportCenter
+            if not use_local:
+                raise ValueError('support-center correction requires four-slot local voting')
+            self.support_center = SupportCenter()
+            self.local_vote_head.paired_eval_shapes = True
         self.joint_search = None
         if self.config.v41_joint_search:
             from .joint_observation import JointSearchObservation
@@ -188,8 +195,14 @@ class JointTracker(nn.Module):
                 pool, seed[:, None], seed_valid[:, None], prepared['box_size'], **options)
             recovery = self.recovery_head(feature[:, 0], seed, prepared['box_size'],
                 statistics['local_point_mask'][:, 0], seed_valid)
+        if self.support_center is not None:
+            decoder.support_center = self.support_center.before_vote(prepared, prior, observation, decoder.q0_box)
+            decoder.q0_box = decoder.support_center.box
         local = (self.local_vote_head(pool, prepared, decoder.q0_box)
                  if self.local_vote_head is not None else None)
+        if self.support_center is not None:
+            self.support_center.after_vote(decoder.support_center, observation, local)
+            decoder.q0_box = decoder.support_center.box
         candidates = build_candidates(decoder, observation, prepared, prior,
             enable_b1=self.enable_b1, recovery=recovery, local_vote=local)
         # 修正后的 R 重新读取最终几何；不把 seed 支持错当成最终框支持。
@@ -273,12 +286,22 @@ class JointTracker(nn.Module):
             raise ValueError('v41 recovery auxiliary losses require Full')
         with recipe_scope(self.config):
             from .losses import compute_recovery_losses
-            losses = compute_recovery_losses(loss_batch(batch), output,
+            prepared = loss_batch(batch)
+            losses = compute_recovery_losses(prepared, output,
                 recovery_weight=float(self.config.get('v41_recovery_weight', .1)),
                 require_recovery=self.local_vote_head is None)
             if self.training and self.local_gate is not None:
                 self.local_gate.observe(output.local_vote, output.supervision_targets)
+                if self.support_center is not None:
+                    self.support_center.observe(output.decoder.support_center, prepared)
             return losses
+
+    def start_support_center_epoch(self):
+        if self.support_center is not None:
+            self.support_center.start_epoch()
+
+    def fit_support_center(self):
+        return None if self.support_center is None else self.support_center.fit_pending()
 
     def reset_local_gate_statistics(self):
         if self.local_gate is not None:
